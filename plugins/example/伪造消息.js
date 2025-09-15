@@ -67,7 +67,7 @@ export class MessageFabricator extends plugin {
       return null;
     }
     
-    const [qq, nickname, content, timeStr, ...extraParams] = parts;
+    const [qq, nickname, content, timeStr] = parts;
     
     const user_id = this.parseQQ(qq, e);
     if (!user_id) {
@@ -120,15 +120,15 @@ export class MessageFabricator extends plugin {
     const processedContent = [];
     
     const patterns = [
-      { regex: /$$图片?:([^$$]+)\]/g, type: 'image' },
-      { regex: /$$表情:([^$$]+)\]/g, type: 'face' },
-      { regex: /$$语音:([^$$]+)\]/g, type: 'record' },
-      { regex: /$$视频:([^$$]+)\]/g, type: 'video' },
-      { regex: /$$文件:([^$$]+)\]/g, type: 'file' },
-      { regex: /$$@(\d+)$$/g, type: 'at' },
-      { regex: /$$骰子:(\d+)$$/g, type: 'dice' },
-      { regex: /$$猜拳:([123])$$/g, type: 'rps' },
-      { regex: /$$戳一戳$$/g, type: 'poke' }
+      { regex: /\[图片?:([^\]]+)\]/g, type: 'image' },
+      { regex: /\[表情:([^\]]+)\]/g, type: 'face' },
+      { regex: /\[语音:([^\]]+)\]/g, type: 'record' },
+      { regex: /\[视频:([^\]]+)\]/g, type: 'video' },
+      { regex: /\[文件:([^\]]+)\]/g, type: 'file' },
+      { regex: /\[@(\d+)\]/g, type: 'at' },
+      { regex: /\[骰子:(\d+)\]/g, type: 'dice' },
+      { regex: /\[猜拳:([123])\]/g, type: 'rps' },
+      { regex: /\[戳一戳\]/g, type: 'poke' }
     ];
     
     const segments = [];
@@ -169,7 +169,7 @@ export class MessageFabricator extends plugin {
       if (text) processedContent.push(text);
     }
     
-    return processedContent.length > 0 ? processedContent : [content];
+    return processedContent.length > 0 ? processedContent : content;
   }
   
   createSegment(type, value) {
@@ -258,43 +258,49 @@ export class MessageFabricator extends plugin {
       const msgs = [];
       
       for (const msg of msgList) {
+        // 确保content是正确的格式
         let content = msg.message;
-        if (!Array.isArray(content)) {
-          content = [content];
+        if (typeof content === 'string') {
+          content = content;
+        } else if (!Array.isArray(content)) {
+          content = String(content);
         }
         
         msgs.push({
-          type: "node",
-          data: {
-            name: msg.nickname || "匿名消息",
-            uin: String(Number(msg.user_id) || 80000000),
-            content: content,
-            time: msg.time || Math.floor(Date.now() / 1000)
-          }
+          message: content,
+          nickname: msg.nickname || "匿名消息",
+          user_id: String(msg.user_id || 80000000),
         });
       }
       
-      if (e.bot?.adapter?.makeForwardMsg) {
-        return await e.bot.adapter.makeForwardMsg(msgs);
-      } else if (e.group?.makeForwardMsg) {
-        return await e.group.makeForwardMsg(msgs);
+      // 使用正确的方法创建转发消息
+      let forwardMsg;
+      if (e.group?.makeForwardMsg) {
+        forwardMsg = await e.group.makeForwardMsg(msgs);
       } else if (e.friend?.makeForwardMsg) {
-        return await e.friend.makeForwardMsg(msgs);
+        forwardMsg = await e.friend.makeForwardMsg(msgs);
       } else {
+        // 如果无法创建转发消息，返回普通文本
         const textMsg = msgList.map(msg => {
           const time = new Date(msg.time * 1000).toLocaleTimeString('zh-CN', { 
             hour: '2-digit', 
             minute: '2-digit' 
           });
-          const content = Array.isArray(msg.message) ? 
-            msg.message.map(m => typeof m === 'string' ? m : '[多媒体]').join('') : 
-            msg.message;
+          let content = msg.message;
+          if (Array.isArray(content)) {
+            content = content.map(m => typeof m === 'string' ? m : '[多媒体]').join('');
+          } else if (typeof content !== 'string') {
+            content = '[多媒体]';
+          }
           return `[${time}] ${msg.nickname}: ${content}`;
         }).join('\n');
         
         await e.reply(`📋 聊天记录\n${'─'.repeat(20)}\n${textMsg}`);
         return null;
       }
+      
+      return forwardMsg;
+      
     } catch (error) {
       logger.error(`[MessageFabricator] 制作转发消息失败: ${error}`);
       return null;
