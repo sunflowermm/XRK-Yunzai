@@ -4,6 +4,9 @@ import { spawnSync } from 'child_process';
 import inquirer from 'inquirer';
 import chalk from 'chalk';
 
+// 设置更高的监听器上限
+process.setMaxListeners(20);
+
 // 统一路径配置
 const PATHS = {
   LOGS: './logs',
@@ -314,19 +317,27 @@ class ServerManager extends BaseManager {
   }
 }
 
-// 信号处理器类
+// 信号处理器类 - 修复监听器累加问题
 class SignalHandler {
   constructor(logger) {
     this.logger = logger;
     this.lastSignal = null;
     this.lastSignalTime = 0;
+    this.isSetup = false;
+    this.boundHandlers = new Map();
   }
 
   setup() {
+    // 防止重复设置
+    if (this.isSetup) {
+      return;
+    }
+    
     const handleExitSignal = async (signal) => {
       const currentTime = Date.now();
       if (this.shouldExit(signal, currentTime)) {
         await this.logger.log(`检测到连续两次${signal}信号，程序将退出`);
+        this.cleanup();
         process.exit(1);
       }
       this.lastSignal = signal;
@@ -334,9 +345,30 @@ class SignalHandler {
       await this.logger.log(`收到${signal}信号，继续运行，再次发送同一信号强制退出`);
     };
 
+    // 为每个信号创建独立的处理函数并保存引用
     ['SIGINT', 'SIGTERM', 'SIGHUP'].forEach(signal => {
-      process.on(signal, () => handleExitSignal(signal));
+      const handler = () => handleExitSignal(signal);
+      this.boundHandlers.set(signal, handler);
+      
+      // 先移除可能存在的旧监听器
+      process.removeAllListeners(signal);
+      // 添加新监听器
+      process.on(signal, handler);
     });
+
+    // 设置退出时的清理
+    process.once('exit', () => this.cleanup());
+    
+    this.isSetup = true;
+  }
+
+  cleanup() {
+    // 清理所有监听器
+    this.boundHandlers.forEach((handler, signal) => {
+      process.removeListener(signal, handler);
+    });
+    this.boundHandlers.clear();
+    this.isSetup = false;
   }
 
   shouldExit(signal, currentTime) {
