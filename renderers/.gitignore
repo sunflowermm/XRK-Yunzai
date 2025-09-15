@@ -1,0 +1,7 @@
+*
+!.gitignore
+
+!截图失败.jpg
+!puppeteer
+!puppeteer/**
+puppeteer/config.yaml

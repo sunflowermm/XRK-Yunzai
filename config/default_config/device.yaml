@@ -1,0 +1,32 @@
+# 注册配置
+allow_auto_register: true             # 是否允许设备自动注册
+allowed_devices:                      # 允许注册的设备ID列表（当 allow_auto_register 为 false 时生效）
+  - "device_001"
+  - "device_002"
+  - "smart_sensor_01"
+max_devices: 100                      # 最大设备数量限制
+  
+# 心跳和超时配置
+heartbeat_interval: 30                # 心跳间隔（秒）
+heartbeat_timeout: 300                # 心跳超时时间（秒），超过此时间设备将被标记为离线
+  
+# 数据上报配置
+report_interval: 60                   # 数据上报间隔（秒）
+batch_size: 10                        # 批量上报的最大事件数量
+  
+# 事件日志配置
+log_events:                           # 各类型事件的日志级别
+  sensor_data: "debug"                # 传感器数据事件
+  alarm: "warn"                       # 报警事件
+  status_change: "info"               # 状态变更事件
+  heartbeat: "none"                   # 心跳事件（不记录日志）
+  error: "error"                      # 错误事件
+  default: "debug"                    # 默认日志级别
+  
+# 功能特性配置
+features:
+  enable_command_queue: true          # 启用命令队列
+  enable_batch_upload: true           # 启用批量上传
+  enable_real_time_monitoring: true   # 启用实时监控
+  max_event_history: 100              # 最大事件历史记录数
+  command_timeout: 300                # 命令超时时间（秒）

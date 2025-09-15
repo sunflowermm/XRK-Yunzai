@@ -1,0 +1,25 @@
+# HTTP服务器配置
+# HTTPS配置
+https:
+  # 是否启用HTTPS
+  # 设置为true时启用HTTPS服务器，需提供有效的key和cert文件路径
+  # 默认值为true
+  enabled: false
+  # SSL证书key文件路径
+  # 指向私钥文件的路径，必须是有效的文件路径
+  # 示例: "/path/to/key.pem"
+  key: ""
+  # SSL证书cert文件路径
+  # 指向证书文件的路径，必须是有效的文件路径
+  # 示例: "/path/to/cert.pem"
+  cert: ""
+
+# 服务器URL
+# 指定服务器的URL地址，如果配置了该项，则使用此URL；否则根据监听地址自动生成
+# 示例: "http://localhost:8080" 或 "https://example.com"
+url: http://127.0.0.1
+
+# 服务器监听地址名称
+address: 'www'
+# www名称
+name: "帅哥 Webserver"
