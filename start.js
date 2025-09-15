@@ -4,8 +4,9 @@ import { spawnSync } from 'child_process';
 import inquirer from 'inquirer';
 import chalk from 'chalk';
 
-// 设置更高的监听器上限
-process.setMaxListeners(20);
+process.setMaxListeners(30);
+
+let globalSignalHandler = null;
 
 // 统一路径配置
 const PATHS = {
@@ -50,6 +51,8 @@ class BaseManager {
 class Logger {
   constructor() {
     this.logFile = path.join(PATHS.LOGS, 'restart.log');
+    this.isWriting = false;
+    this.queue = [];
   }
 
   async ensureLogDir() {
@@ -60,10 +63,31 @@ class Logger {
     const timestamp = new Date().toISOString();
     const logMessage = `[${timestamp}] [${level}] ${message}\n`;
     
+    // 使用队列避免并发写入问题
+    this.queue.push(logMessage);
+    
+    if (!this.isWriting) {
+      await this.flushQueue();
+    }
+  }
+
+  async flushQueue() {
+    if (this.queue.length === 0 || this.isWriting) return;
+    
+    this.isWriting = true;
+    const messages = this.queue.splice(0, this.queue.length);
+    
     try {
-      await fs.appendFile(this.logFile, logMessage);
+      await fs.appendFile(this.logFile, messages.join(''));
     } catch (error) {
       console.error('日志写入失败:', error);
+    } finally {
+      this.isWriting = false;
+      
+      // 如果还有新消息，继续写入
+      if (this.queue.length > 0) {
+        await this.flushQueue();
+      }
     }
   }
 
@@ -92,7 +116,11 @@ class PM2Manager extends BaseManager {
 
   async executePM2Command(command, args = [], processName = '') {
     const pm2Path = this.getPM2Path();
-    const spawnOptions = { stdio: 'inherit', windowsHide: true };
+    const spawnOptions = { 
+      stdio: 'inherit', 
+      windowsHide: true,
+      detached: false
+    };
     
     let cmdCommand = pm2Path;
     let cmdArgs = [command, ...args];
@@ -194,7 +222,11 @@ class ServerManager extends BaseManager {
   constructor(logger, pm2Manager) {
     super(logger);
     this.pm2Manager = pm2Manager;
-    this.signalHandler = new SignalHandler(logger);
+    // 使用全局单例信号处理器
+    if (!globalSignalHandler) {
+      globalSignalHandler = new SignalHandler(logger);
+    }
+    this.signalHandler = globalSignalHandler;
   }
 
   async getAvailablePorts() {
@@ -248,10 +280,19 @@ class ServerManager extends BaseManager {
     global.selectedMode = 'server';
     
     try {
-      process.argv = [process.argv[0], process.argv[1], 'server', port.toString()];
+      const originalArgv = [...process.argv];
+      process.argv = [originalArgv[0], originalArgv[1], 'server', port.toString()];
+      
       const { default: BotClass } = await import('./lib/bot.js');
+      
+      if (global.Bot) {
+        delete global.Bot;
+      }
+      
       global.Bot = new BotClass();
       await global.Bot.run({ port });
+      
+      process.argv = originalArgv;
     } catch (error) {
       await this.logger.error(`服务器模式启动失败: ${error.message}`);
       throw error;
@@ -260,7 +301,10 @@ class ServerManager extends BaseManager {
 
   async startWithFrontendRestart(port) {
     global.selectedMode = 'server';
-    this.signalHandler.setup();
+    
+    if (!this.signalHandler.isSetup) {
+      this.signalHandler.setup();
+    }
 
     let restartCount = 0;
     const startTime = Date.now();
@@ -271,14 +315,15 @@ class ServerManager extends BaseManager {
       
       await this.logger.log(`启动新进程 (${restartCount + 1}/${CONFIG.MAX_RESTARTS})`);
 
+      const cleanEnv = Object.assign({}, process.env);
+      cleanEnv.XRK_SELECTED_MODE = 'server';
+      cleanEnv.XRK_SERVER_PORT = port.toString();
+      
       const result = spawnSync(process.argv[0], startArgs, {
         stdio: 'inherit',
         windowsHide: true,
-        env: { 
-          ...process.env, 
-          XRK_SELECTED_MODE: 'server',
-          XRK_SERVER_PORT: port.toString()
-        },
+        env: cleanEnv,
+        detached: false
       });
 
       const exitCode = result.status || 0;
@@ -317,14 +362,14 @@ class ServerManager extends BaseManager {
   }
 }
 
-// 信号处理器类 - 修复监听器累加问题
+// 信号处理器类（单例模式）
 class SignalHandler {
   constructor(logger) {
     this.logger = logger;
     this.lastSignal = null;
     this.lastSignalTime = 0;
     this.isSetup = false;
-    this.boundHandlers = new Map();
+    this.handlers = {};
   }
 
   setup() {
@@ -333,41 +378,46 @@ class SignalHandler {
       return;
     }
     
-    const handleExitSignal = async (signal) => {
-      const currentTime = Date.now();
-      if (this.shouldExit(signal, currentTime)) {
-        await this.logger.log(`检测到连续两次${signal}信号，程序将退出`);
-        this.cleanup();
-        process.exit(1);
-      }
-      this.lastSignal = signal;
-      this.lastSignalTime = currentTime;
-      await this.logger.log(`收到${signal}信号，继续运行，再次发送同一信号强制退出`);
+    const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+    
+    // 创建单一的处理函数
+    const createHandler = (signal) => {
+      return async () => {
+        const currentTime = Date.now();
+        if (this.shouldExit(signal, currentTime)) {
+          await this.logger.log(`检测到连续两次${signal}信号，程序将退出`);
+          await this.cleanup();
+          process.exit(1);
+        }
+        this.lastSignal = signal;
+        this.lastSignalTime = currentTime;
+        await this.logger.log(`收到${signal}信号，继续运行，再次发送同一信号强制退出`);
+      };
     };
 
-    // 为每个信号创建独立的处理函数并保存引用
-    ['SIGINT', 'SIGTERM', 'SIGHUP'].forEach(signal => {
-      const handler = () => handleExitSignal(signal);
-      this.boundHandlers.set(signal, handler);
+    signals.forEach(signal => {
+      if (this.handlers[signal]) {
+        process.removeListener(signal, this.handlers[signal]);
+      }
       
-      // 先移除可能存在的旧监听器
-      process.removeAllListeners(signal);
-      // 添加新监听器
-      process.on(signal, handler);
+      this.handlers[signal] = createHandler(signal);
+      
+      process.on(signal, this.handlers[signal]);
     });
-
-    // 设置退出时的清理
-    process.once('exit', () => this.cleanup());
     
     this.isSetup = true;
   }
 
-  cleanup() {
-    // 清理所有监听器
-    this.boundHandlers.forEach((handler, signal) => {
-      process.removeListener(signal, handler);
+  async cleanup() {
+    if (!this.isSetup) return;
+    
+    Object.keys(this.handlers).forEach(signal => {
+      if (this.handlers[signal]) {
+        process.removeListener(signal, this.handlers[signal]);
+        delete this.handlers[signal];
+      }
     });
-    this.boundHandlers.clear();
+    
     this.isSetup = false;
   }
 
@@ -388,8 +438,12 @@ class MenuManager {
     let shouldExit = false;
     
     while (!shouldExit) {
-      const selected = await this.selectMainMenuOption();
-      shouldExit = await this.handleMenuAction(selected);
+      try {
+        const selected = await this.selectMainMenuOption();
+        shouldExit = await this.handleMenuAction(selected);
+      } catch (error) {
+        console.error(chalk.red('菜单操作出错:'), error);
+      }
     }
   }
 
@@ -429,6 +483,9 @@ class MenuManager {
         await this.pm2Menu();
         break;
       case 'exit':
+        if (globalSignalHandler) {
+          await globalSignalHandler.cleanup();
+        }
         return true;
     }
     return false;
@@ -520,6 +577,26 @@ function getNodeArgs() {
   return nodeArgs;
 }
 
+// 全局异常处理
+process.on('uncaughtException', async (error) => {
+  console.error(chalk.red('未捕获的异常:'), error);
+  const logger = new Logger();
+  await logger.error(`未捕获的异常: ${error.message}\n${error.stack}`);
+  
+  // 清理信号处理器
+  if (globalSignalHandler) {
+    await globalSignalHandler.cleanup();
+  }
+  
+  process.exit(1);
+});
+
+process.on('unhandledRejection', async (reason, promise) => {
+  console.error(chalk.red('未处理的Promise拒绝:'), reason);
+  const logger = new Logger();
+  await logger.error(`未处理的Promise拒绝: ${reason}`);
+});
+
 // 主函数
 async function main() {
   const logger = new Logger();
@@ -550,13 +627,31 @@ async function main() {
 
   // 交互式菜单模式
   await menuManager.run();
+  
+  // 程序退出前清理
+  if (globalSignalHandler) {
+    await globalSignalHandler.cleanup();
+  }
 }
 
 export default main;
+
+// 确保清理资源
+process.on('exit', async () => {
+  if (globalSignalHandler) {
+    await globalSignalHandler.cleanup();
+  }
+});
 
 main().catch(async (error) => {
   const logger = new Logger();
   await logger.ensureLogDir();
   await logger.error(`启动出错: ${error.message}`);
+  
+  // 清理资源
+  if (globalSignalHandler) {
+    await globalSignalHandler.cleanup();
+  }
+  
   process.exit(1);
 });
