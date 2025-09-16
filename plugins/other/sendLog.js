@@ -20,13 +20,13 @@ export class sendLog extends plugin {
       ],
     })
 
-    // 配置参数
+    // 配置参数 - 优化为50条
     this.config = {
-      defaultLines: 100,      // 默认行数
-      maxLines: 100,          // 最大行数限制（优化为100）
-      maxSearchResults: 100,  // 搜索结果最大数量（优化为100）
+      defaultLines: 50,       // 默认行数改为50
+      maxLines: 50,           // 最大行数限制改为50
+      maxSearchResults: 50,   // 搜索结果最大数量改为50
       logsDir: "logs",        // 日志目录
-      maxChunkSize: 5000     // 每个转发消息块的最大字符长度（用于限制输出长度）
+      maxChunkSize: 3000     // 每个转发消息块的最大字符长度（减小以避免太长）
     }
   }
 
@@ -70,10 +70,10 @@ export class sendLog extends plugin {
       // 构建回复消息
       const header = this.buildLogHeader(type, logs.length, keyword)
       
-      // 分割日志内容为多个块（学习update插件的makeForwardMsg处理方式，限制每个块的字符长度）
+      // 分割日志内容为多个块
       const chunks = this.splitLogsIntoChunks(logs)
       
-      // 使用common.makeForwardMsg构建转发消息（学习update插件的聊天记录制作方式）
+      // 使用common.makeForwardMsg构建转发消息
       const forwardMsg = await common.makeForwardMsg(this.e, [header, ...chunks], `${type}日志，共${logs.length}条`)
       
       // 发送日志
@@ -95,7 +95,10 @@ export class sendLog extends plugin {
     
     // 提取行数（如果有）
     const lineMatch = message.match(/\d+/)
-    const lineNum = lineMatch ? parseInt(lineMatch[0]) : this.config.defaultLines
+    let lineNum = lineMatch ? parseInt(lineMatch[0]) : this.config.defaultLines
+    
+    // 限制最大行数
+    lineNum = Math.min(lineNum, this.config.maxLines)
     
     // 提取关键词（移除命令部分）
     const keyword = message
@@ -124,8 +127,8 @@ export class sendLog extends plugin {
         lines = this.getRecentLogs(lines, lineNum)
       }
       
-      // 清理每一行
-      return lines.map(line => this.cleanLogLine(line))
+      // 清理每一行，并限制每行长度
+      return lines.map(line => this.cleanAndTruncateLogLine(line))
     } catch (error) {
       logger.error(`读取日志文件失败 ${logFile}:`, error)
       throw new Error("无法读取日志文件")
@@ -163,31 +166,39 @@ export class sendLog extends plugin {
   }
 
   /**
-   * 清理日志行（移除所有ANSI转义序列和控制字符）
+   * 清理日志行并限制长度
    */
-  cleanLogLine(line) {
+  cleanAndTruncateLogLine(line) {
     if (!line) return ""
     
-    return line
-      // 移除所有ANSI转义序列（包括颜色、光标移动等）
+    // 清理ANSI转义序列和控制字符
+    let cleaned = line
+      // 移除所有ANSI转义序列
       .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")
       // 移除其他ANSI转义字符
       .replace(/\x1b[()][0-9;]*[a-zA-Z]/g, "")
       // 移除单独的转义字符
       .replace(/\x1b/g, "")
-      // 移除其他控制字符（保留换行符除外）
+      // 移除其他控制字符
       .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
       // 移除回车符
       .replace(/\r/g, "")
-      // 移除可能的Unicode控制字符
-      .replace(/[-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "")
+      // 移除Unicode控制字符
+      .replace(/[\u0080-\u009F]/g, "")
       // 清理多余的空格
       .replace(/\s+/g, " ")
       .trim()
+    
+    // 限制每行最大长度为200字符
+    if (cleaned.length > 200) {
+      cleaned = cleaned.substring(0, 197) + "..."
+    }
+    
+    return cleaned
   }
 
   /**
-   * 分割日志为多个块（限制每个块的字符长度）
+   * 分割日志为多个块
    */
   splitLogsIntoChunks(logs) {
     const chunks = []
@@ -196,17 +207,29 @@ export class sendLog extends plugin {
     
     for (const line of logs) {
       const lineLength = line.length + 1 // +1 for newline
+      
+      // 如果当前块会超过最大长度，先保存当前块
       if (currentLength + lineLength > this.config.maxChunkSize && currentChunk.length > 0) {
         chunks.push(currentChunk.join("\n"))
         currentChunk = []
         currentLength = 0
       }
+      
       currentChunk.push(line)
       currentLength += lineLength
     }
     
+    // 保存最后一个块
     if (currentChunk.length > 0) {
       chunks.push(currentChunk.join("\n"))
+    }
+    
+    // 限制总块数不超过3个（避免消息太长）
+    if (chunks.length > 3) {
+      const firstChunk = chunks[0]
+      const lastChunk = chunks[chunks.length - 1]
+      const middleInfo = `\n...\n(省略了${chunks.length - 2}个日志块)\n...\n`
+      return [firstChunk, middleInfo, lastChunk]
     }
     
     return chunks
@@ -216,23 +239,25 @@ export class sendLog extends plugin {
    * 构建日志消息头
    */
   buildLogHeader(type, count, keyword) {
-    const parts = []
+    const parts = [`【${type}日志】`]
     
     if (keyword) {
-      parts.push(`搜索"${keyword}"的结果`)
+      parts.push(`搜索"${keyword}"`)
     }
     
-    parts.push(`最近${count}条${type}日志`)
+    parts.push(`共${count}条`)
     
-    if (count >= this.config.maxSearchResults && keyword) {
-      parts.push(`(已达到最大显示数量)`)
+    if (count >= this.config.maxLines) {
+      parts.push(`(已达上限)`)
     }
     
-    return parts.join(" - ")
+    parts.push(`\n时间：${moment().format("MM-DD HH:mm:ss")}`)
+    
+    return parts.join(" ")
   }
 
   /**
-   * 获取日志统计信息（可选功能）
+   * 获取日志统计信息
    */
   async getLogStats() {
     try {
@@ -271,7 +296,7 @@ export class sendLog extends plugin {
   }
 
   /**
-   * 清理过期日志（可选功能）
+   * 清理过期日志（修复路径问题）
    */
   async cleanOldLogs(daysToKeep = 15) {
     try {
@@ -280,13 +305,14 @@ export class sendLog extends plugin {
       let cleaned = 0
       
       for (const file of files) {
-        if (file.startsWith("command.") && file.endsWith(".log")) {
-          const dateStr = file.replace("command.", "").replace(".log", "")
+        if (file.match(/^\d{4}-\d{2}-\d{2}\.log$/)) {
+          const dateStr = file.replace(".log", "")
           const fileDate = moment(dateStr, "YYYY-MM-DD")
           
           if (fileDate.isValid() && now.diff(fileDate, "days") > daysToKeep) {
             await fs.unlink(path.join(this.config.logsDir, file))
             cleaned++
+            logger.info(`清理过期日志: ${file}`)
           }
         }
       }
@@ -295,6 +321,33 @@ export class sendLog extends plugin {
     } catch (error) {
       logger.error("清理过期日志失败:", error)
       return 0
+    }
+  }
+
+  /**
+   * 获取日志文件列表
+   */
+  async getLogFileList() {
+    try {
+      const files = await fs.readdir(this.config.logsDir)
+      const logFiles = []
+      
+      for (const file of files) {
+        const filePath = path.join(this.config.logsDir, file)
+        if (file.endsWith(".log") && existsSync(filePath)) {
+          const stat = await fs.stat(filePath)
+          logFiles.push({
+            name: file,
+            size: this.formatFileSize(stat.size),
+            modified: moment(stat.mtime).format("YYYY-MM-DD HH:mm:ss")
+          })
+        }
+      }
+      
+      return logFiles.sort((a, b) => b.modified.localeCompare(a.modified))
+    } catch (error) {
+      logger.error("获取日志文件列表失败:", error)
+      return []
     }
   }
 }
