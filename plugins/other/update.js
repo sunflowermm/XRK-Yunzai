@@ -35,6 +35,10 @@ export class update extends plugin {
 
     this.typeName = 'XRK-Yunzai'
     this.messages = []
+    this.xrkRepos = [
+      { name: 'XRK', requiredFiles: ['apps', 'package.json'] },
+      { name: 'XRK-Core', requiredFiles: ['index.js'] }
+    ]
   }
 
   async update() {
@@ -49,15 +53,61 @@ export class update extends plugin {
 
     /** 执行更新 */
     if (plugin === '') {
+      // 更新主程序
       await this.runUpdate('')
       await common.sleep(1000)
+      
+      // 自动检测并更新XRK相关插件
+      await this.autoUpdateXRK()
     } else {
+      // 更新指定插件
       await this.runUpdate(plugin)
     }
 
     /** 是否需要重启 */
     if (this.isUp) {
       setTimeout(() => this.restart(), 2000)
+    }
+  }
+
+  async autoUpdateXRK() {
+    const xrkUpdateResults = []
+    
+    for (const repo of this.xrkRepos) {
+      const repoPath = `plugins/${repo.name}`
+      
+      // 检查插件是否存在
+      if (!fs.existsSync(repoPath)) continue
+      
+      // 检查是否为git仓库
+      if (!fs.existsSync(`${repoPath}/.git`)) continue
+      
+      // 检查仓库完整性
+      const isComplete = repo.requiredFiles.every(file => 
+        fs.existsSync(`${repoPath}/${file}`)
+      )
+      
+      if (!isComplete) {
+        logger.mark(`[更新] ${repo.name} 目录不完整，跳过更新`)
+        continue
+      }
+      
+      logger.mark(`[更新] 检测到 ${repo.name} 插件，自动更新中...`)
+      await this.reply(`检测到 ${repo.name} 插件，正在自动更新...`)
+      
+      await common.sleep(1500)
+      const oldCommitId = await this.getcommitId(repo.name)
+      await this.runUpdate(repo.name)
+      
+      // 如果有更新，记录结果
+      const newCommitId = await this.getcommitId(repo.name)
+      if (oldCommitId !== newCommitId) {
+        xrkUpdateResults.push(`${repo.name} 已更新`)
+      }
+    }
+    
+    if (xrkUpdateResults.length > 0) {
+      await this.reply(`XRK插件更新完成：\n${xrkUpdateResults.join('\n')}`)
     }
   }
 
@@ -115,7 +165,12 @@ export class update extends plugin {
     } else {
       await this.reply(`${this.typeName} 更新成功\n更新时间：${time}`)
       this.isUp = true
-      await this.reply(await this.getLog(plugin))
+      
+      // 获取并发送更新日志
+      const updateLog = await this.getLog(plugin)
+      if (updateLog) {
+        await this.reply(updateLog)
+      }
     }
 
     logger.mark(`${this.e.logFnc} 最后更新时间：${time}`)
@@ -199,7 +254,6 @@ export class update extends plugin {
     }
 
     if (this.isUp) {
-      // await this.reply('即将执行重启，以应用更新')
       setTimeout(() => this.restart(), 2000)
     }
 
@@ -220,6 +274,7 @@ export class update extends plugin {
     } catch (error) {
       logger.error(error.toString())
       await this.reply(error.toString())
+      return false
     }
 
     if (!logAll) return false
