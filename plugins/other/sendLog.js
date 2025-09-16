@@ -26,7 +26,7 @@ export class sendLog extends plugin {
       maxLines: 100,          // 最大行数限制（优化为100）
       maxSearchResults: 100,  // 搜索结果最大数量（优化为100）
       logsDir: "logs",        // 日志目录
-      maxChunkSize: 20000     // 每个转发消息块的最大字符长度（用于限制输出长度）
+      maxChunkSize: 5000     // 每个转发消息块的最大字符长度（用于限制输出长度）
     }
   }
 
