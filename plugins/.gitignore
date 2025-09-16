@@ -13,9 +13,7 @@ other/**
 !other/restart.js
 !other/sendLog.js
 !other/update.js
-!other/version.js
-!other/stdin.js
-!other/bot.js
+!other/add.js
 
 !example
 example/**
@@ -23,7 +21,7 @@ example/**
 !example/进群退群通知.js
 !example/模拟定时输入.js
 !example/伪造消息.js
-!example/功能插件.js
+!example/葵崽插件.js
 
 !XRK
 !XRK/**

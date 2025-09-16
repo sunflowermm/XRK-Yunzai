@@ -3,14 +3,14 @@ import PluginsLoader from '../../lib/plugins/loader.js';
 export class DailySignIn extends plugin {
     constructor() {
         super({
-            name: '每日签到模拟',
-            dsc: '每天12点模拟发送签到消息',
+            name: '每日定时消息模拟',
+            dsc: '每天12点模拟发送消息',
             event: 'message',
             priority: 5,
             rule: []
         });
         this.task = {
-            name: '每日12点签到任务',
+            name: '每日12点模拟消息发送',
             cron: '0 0 12 * * *',
             fnc: () => {
                 this.sendDailyMessages();
@@ -21,7 +21,7 @@ export class DailySignIn extends plugin {
 
     // 发送每日签到消息
     async sendDailyMessages() {
-        const messages = ['#阴天签到', '#米游社全部签到'];
+        const messages = ['#你是谁' ];
         for (const msg of messages) {
             const fakeMsgEvent = this.createMessageEvent(msg);
             await PluginsLoader.deal(fakeMsgEvent); // 处理模拟消息
@@ -41,7 +41,7 @@ export class DailySignIn extends plugin {
             message_type: "private", // 模拟私聊消息
             post_type: "message",
             sub_type: "friend",
-            self_id, // 机器人自身的QQ号
+            self_id,
             seq: 888,
             time,
             uin: self_id,

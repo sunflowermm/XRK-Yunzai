@@ -2,10 +2,12 @@ import fs from 'fs'
 import path from 'path'
 import { spawn } from 'child_process'
 import { promisify } from 'util'
-import { exec } from 'child_process'
+import { exec, execSync } from 'child_process'
+import common from '../../lib/common/common.js'
 
 const execAsync = promisify(exec)
 
+let updateLogs = []
 export class example2 extends plugin {
   constructor() {
     super({
@@ -41,6 +43,7 @@ export class example2 extends plugin {
     await this.reply('🌻 开始处理XRK仓库...', false, { at: true })
     
     const results = []
+    updateLogs = []
     
     for (const repo of repos) {
       try {
@@ -52,9 +55,13 @@ export class example2 extends plugin {
       }
     }
 
-    // 汇总结果一次性发送
     const summary = results.join('\n')
     await this.reply(`处理完成！\n${summary}`, false, { at: true })
+    
+    if (updateLogs.length > 0) {
+      const forwardMsg = await common.makeForwardMsg(this.e, updateLogs, 'XRK仓库更新日志')
+      await this.reply(forwardMsg)
+    }
   }
 
   async processRepo(pluginsPath, repo) {
@@ -68,7 +75,7 @@ export class example2 extends plugin {
         await this.removeDirectory(repoPath)
         return await this.cloneRepo(pluginsPath, repo)
       } else {
-        return await this.updateRepo(repoPath, repo.name)
+        return await this.updateRepo(repoPath, repo)
       }
     } else {
       return await this.cloneRepo(pluginsPath, repo)
@@ -81,6 +88,61 @@ export class example2 extends plugin {
     )
   }
 
+  async getCommitId(repoPath) {
+    try {
+      const commitId = execSync('git rev-parse --short HEAD', {
+        cwd: repoPath,
+        encoding: 'utf-8'
+      })
+      return commitId.trim()
+    } catch (error) {
+      return null
+    }
+  }
+
+  async getUpdateLog(repoPath, oldCommitId, repoName) {
+    try {
+      const logCmd = 'git log -100 --pretty="%h||[%cd] %s" --date=format:"%F %T"'
+      const logAll = execSync(logCmd, {
+        cwd: repoPath,
+        encoding: 'utf-8'
+      })
+
+      if (!logAll) return null
+
+      const logs = logAll.trim().split('\n')
+      const updateLogs = []
+      
+      for (let str of logs) {
+        const [commitId, message] = str.split('||')
+        if (commitId === oldCommitId) break
+        if (message && !message.includes('Merge branch')) {
+          updateLogs.push(message)
+        }
+      }
+
+      if (updateLogs.length === 0) return null
+
+      const logMessage = `${repoName} 更新内容（共${updateLogs.length}条）：\n\n${updateLogs.join('\n\n')}`
+      return logMessage
+    } catch (error) {
+      logger.error(`[XRK] 获取更新日志失败:`, error)
+      return null
+    }
+  }
+
+  async getUpdateTime(repoPath) {
+    try {
+      const time = execSync('git log -1 --pretty=%cd --date=format:"%F %T"', {
+        cwd: repoPath,
+        encoding: 'utf-8'
+      })
+      return time.trim()
+    } catch (error) {
+      return '获取时间失败'
+    }
+  }
+
   async cloneRepo(pluginsPath, repo) {
     return new Promise((resolve, reject) => {
       const args = ['clone', '--progress', repo.url, repo.name]
@@ -91,10 +153,9 @@ export class example2 extends plugin {
 
       let progressData = ''
       
-      // 监听进度输出
       git.stderr.on('data', (data) => {
         const output = data.toString()
-        process.stderr.write(output) // 在终端显示进度
+        process.stderr.write(output)
         progressData += output
       })
 
@@ -102,10 +163,14 @@ export class example2 extends plugin {
         process.stdout.write(data.toString())
       })
 
-      git.on('close', (code) => {
+      git.on('close', async (code) => {
         if (code === 0) {
           logger.info(`[XRK] 成功克隆 ${repo.name}`)
-          resolve(`✅ ${repo.name}: 克隆成功`)
+          const repoPath = path.join(pluginsPath, repo.name)
+          const time = await this.getUpdateTime(repoPath)
+          const logMsg = `✅ ${repo.name}: 克隆成功\n更新时间：${time}`
+          
+          resolve(logMsg)
         } else {
           reject(new Error(`克隆失败，退出码: ${code}`))
         }
@@ -117,7 +182,9 @@ export class example2 extends plugin {
     })
   }
 
-  async updateRepo(repoPath, repoName) {
+  async updateRepo(repoPath, repo) {
+    const oldCommitId = await this.getCommitId(repoPath)
+    
     return new Promise((resolve, reject) => {
       const git = spawn('git', ['pull', '--progress'], {
         cwd: repoPath,
@@ -139,12 +206,23 @@ export class example2 extends plugin {
         process.stderr.write(str)
       })
 
-      git.on('close', (code) => {
+      git.on('close', async (code) => {
         if (code === 0) {
+          const time = await this.getUpdateTime(repoPath)
+          
           if (output.includes('Already up to date') || errorOutput.includes('Already up to date')) {
-            resolve(`📌 ${repoName}: 已是最新版本`)
+            resolve(`📌 ${repo.name}: 已是最新版本\n最后更新时间：${time}`)
           } else {
-            resolve(`✅ ${repoName}: 更新成功`)
+            const newCommitId = await this.getCommitId(repoPath)
+            
+            if (oldCommitId && newCommitId && oldCommitId !== newCommitId) {
+              const updateLog = await this.getUpdateLog(repoPath, oldCommitId, repo.name)
+              if (updateLog) {
+                updateLogs.push(updateLog)
+              }
+            }
+            
+            resolve(`✅ ${repo.name}: 更新成功\n更新时间：${time}`)
           }
         } else {
           reject(new Error(`更新失败，退出码: ${code}`))
@@ -160,11 +238,9 @@ export class example2 extends plugin {
   async removeDirectory(dirPath) {
     try {
       if (fs.existsSync(dirPath)) {
-        // 优先使用 Node.js 内置方法
         await fs.promises.rm(dirPath, { recursive: true, force: true })
       }
     } catch (error) {
-      // 备用方案：使用系统命令
       try {
         const isWindows = process.platform === 'win32'
         const command = isWindows 
