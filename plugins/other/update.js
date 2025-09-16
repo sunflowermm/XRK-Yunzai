@@ -100,7 +100,6 @@ export class update extends plugin {
       if (!await this.checkPluginIntegrity(plugin)) continue
       
       logger.mark(`[更新] 检测到 ${plugin.name} 插件，自动更新中...`)
-      await this.reply(`检测到 ${plugin.name} 插件，正在自动更新...`)
       
       await common.sleep(1500)
       
