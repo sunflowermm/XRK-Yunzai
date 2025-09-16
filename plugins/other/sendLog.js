@@ -2,6 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { existsSync } from "node:fs"
 import moment from "moment"
+import common from '../../lib/common/common.js'
 
 export class sendLog extends plugin {
   constructor() {
@@ -22,9 +23,10 @@ export class sendLog extends plugin {
     // 配置参数
     this.config = {
       defaultLines: 100,      // 默认行数
-      maxLines: 1000,         // 最大行数限制
-      maxSearchResults: 1000, // 搜索结果最大数量
-      logsDir: "logs"        // 日志目录
+      maxLines: 100,          // 最大行数限制（优化为100）
+      maxSearchResults: 100,  // 搜索结果最大数量（优化为100）
+      logsDir: "logs",        // 日志目录
+      maxChunkSize: 20000     // 每个转发消息块的最大字符长度（用于限制输出长度）
     }
   }
 
@@ -67,12 +69,15 @@ export class sendLog extends plugin {
 
       // 构建回复消息
       const header = this.buildLogHeader(type, logs.length, keyword)
-      const content = logs.join("\n")
+      
+      // 分割日志内容为多个块（学习update插件的makeForwardMsg处理方式，限制每个块的字符长度）
+      const chunks = this.splitLogsIntoChunks(logs)
+      
+      // 使用common.makeForwardMsg构建转发消息（学习update插件的聊天记录制作方式）
+      const forwardMsg = await common.makeForwardMsg(this.e, [header, ...chunks], `${type}日志，共${logs.length}条`)
       
       // 发送日志
-      return this.reply(
-        await Bot.makeForwardArray([header, content])
-      )
+      return this.reply(forwardMsg)
     } catch (error) {
       logger.error("发送日志失败:", error)
       return this.reply(`获取日志失败：${error.message}`)
@@ -175,10 +180,36 @@ export class sendLog extends plugin {
       // 移除回车符
       .replace(/\r/g, "")
       // 移除可能的Unicode控制字符
-      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "")
+      .replace(/[-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "")
       // 清理多余的空格
       .replace(/\s+/g, " ")
       .trim()
+  }
+
+  /**
+   * 分割日志为多个块（限制每个块的字符长度）
+   */
+  splitLogsIntoChunks(logs) {
+    const chunks = []
+    let currentChunk = []
+    let currentLength = 0
+    
+    for (const line of logs) {
+      const lineLength = line.length + 1 // +1 for newline
+      if (currentLength + lineLength > this.config.maxChunkSize && currentChunk.length > 0) {
+        chunks.push(currentChunk.join("\n"))
+        currentChunk = []
+        currentLength = 0
+      }
+      currentChunk.push(line)
+      currentLength += lineLength
+    }
+    
+    if (currentChunk.length > 0) {
+      chunks.push(currentChunk.join("\n"))
+    }
+    
+    return chunks
   }
 
   /**
