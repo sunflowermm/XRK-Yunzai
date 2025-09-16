@@ -34,7 +34,7 @@ export class sendLog extends plugin {
   getLogPaths() {
     const today = moment().format("YYYY-MM-DD")
     return {
-      command: path.join(this.config.logsDir, `command.${today}.log`),
+      command: path.join(this.config.logsDir, `${today}.log`),
       error: path.join(this.config.logsDir, "error.log")
     }
   }
