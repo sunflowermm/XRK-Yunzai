@@ -111,7 +111,7 @@ class PM2Manager extends BaseManager {
   }
 
   getProcessName(port) {
-    return `XRK-Yunzai-Server-${port}`;
+    return `XRK-MultiBot-Server-${port}`;
   }
 
   async executePM2Command(command, args = [], processName = '') {
