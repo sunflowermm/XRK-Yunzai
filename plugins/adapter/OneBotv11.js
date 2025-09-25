@@ -14,13 +14,12 @@ Bot.adapter.push(
       return Bot.String(msg).replace(/base64:\/\/.*?(,|]|")/g, "base64://...$1")
     }
 
-    async sendApi(data, ws, action, params = {}) {
+    sendApi(data, ws, action, params = {}) {
       const echo = ulid()
       const request = { action, params, echo }
       ws.sendMsg(request)
       const cache = Promise.withResolvers()
       this.echo.set(echo, cache)
-      
       const timeout = setTimeout(() => {
         cache.reject(Bot.makeError("请求超时", request, { timeout: this.timeout }))
         Bot.makeLog("error", ["请求超时", request], data.self_id)
@@ -29,9 +28,8 @@ Bot.adapter.push(
 
       return cache.promise
         .then(data => {
-          if (data.retcode !== 0 && data.retcode !== 1) {
+          if (data.retcode !== 0 && data.retcode !== 1)
             throw Bot.makeError(data.msg || data.wording, request, { error: data })
-          }
           return data.data
             ? new Proxy(data, {
                 get: (target, prop) => target.data[prop] ?? target[prop],
@@ -58,13 +56,9 @@ Bot.adapter.push(
       if (!Array.isArray(msg)) msg = [msg]
       const msgs = []
       const forward = []
-      
       for (let i of msg) {
-        if (typeof i !== "object") {
-          i = { type: "text", data: { text: String(i) } }
-        } else if (!i.data) {
-          i = { type: i.type, data: { ...i, type: undefined } }
-        }
+        if (typeof i !== "object") i = { type: "text", data: { text: i } }
+        else if (!i.data) i = { type: i.type, data: { ...i, type: undefined } }
 
         switch (i.type) {
           case "at":
@@ -76,16 +70,14 @@ Bot.adapter.push(
           case "button":
             continue
           case "node":
-            forward.push(...(Array.isArray(i.data) ? i.data : [i.data]))
+            forward.push(...i.data)
             continue
           case "raw":
             i = i.data
             break
         }
 
-        if (i.data?.file) {
-          i.data.file = await this.makeFile(i.data.file)
-        }
+        if (i.data.file) i.data.file = await this.makeFile(i.data.file)
 
         msgs.push(i)
       }
@@ -97,29 +89,16 @@ Bot.adapter.push(
       const ret = []
 
       if (forward.length) {
-        try {
-          const data = await sendForwardMsg(forward)
-          if (Array.isArray(data)) ret.push(...data)
-          else ret.push(data)
-        } catch (err) {
-          Bot.makeLog("error", ["发送转发消息失败", err])
-        }
+        const data = await sendForwardMsg(forward)
+        if (Array.isArray(data)) ret.push(...data)
+        else ret.push(data)
       }
 
-      if (message.length) {
-        try {
-          ret.push(await send(message))
-        } catch (err) {
-          Bot.makeLog("error", ["发送消息失败", err])
-        }
-      }
-      
+      if (message.length) ret.push(await send(message))
       if (ret.length === 1) return ret[0]
 
       const message_id = []
-      for (const i of ret) {
-        if (i?.message_id) message_id.push(i.message_id)
-      }
+      for (const i of ret) if (i?.message_id) message_id.push(i.message_id)
       return { data: ret, message_id }
     }
 
@@ -131,14 +110,14 @@ Bot.adapter.push(
             "info",
             `发送好友消息：${this.makeLog(message)}`,
             `${data.self_id} => ${data.user_id}`,
-            true
+            true,
           )
           return data.bot.sendApi("send_msg", {
             user_id: data.user_id,
             message,
           })
         },
-        msg => this.sendFriendForwardMsg(data, msg)
+        msg => this.sendFriendForwardMsg(data, msg),
       )
     }
 
@@ -150,14 +129,14 @@ Bot.adapter.push(
             "info",
             `发送群消息：${this.makeLog(message)}`,
             `${data.self_id} => ${data.group_id}`,
-            true
+            true,
           )
           return data.bot.sendApi("send_msg", {
             group_id: data.group_id,
             message,
           })
         },
-        msg => this.sendGroupForwardMsg(data, msg)
+        msg => this.sendGroupForwardMsg(data, msg),
       )
     }
 
@@ -168,8 +147,8 @@ Bot.adapter.push(
           Bot.makeLog(
             "info",
             `发送频道消息：${this.makeLog(message)}`,
-            `${data.self_id} => ${data.guild_id}-${data.channel_id}`,
-            true
+            `${data.self_id}] => ${data.guild_id}-${data.channel_id}`,
+            true,
           )
           return data.bot.sendApi("send_guild_channel_msg", {
             guild_id: data.guild_id,
@@ -177,110 +156,81 @@ Bot.adapter.push(
             message,
           })
         },
-        msg => Bot.sendForwardMsg(msg => this.sendGuildMsg(data, msg), msg)
+        msg => Bot.sendForwardMsg(msg => this.sendGuildMsg(data, msg), msg),
       )
     }
 
     async recallMsg(data, message_id) {
       Bot.makeLog("info", `撤回消息：${message_id}`, data.self_id)
       if (!Array.isArray(message_id)) message_id = [message_id]
-      
       const msgs = []
-      for (const i of message_id) {
-        try {
-          msgs.push(await data.bot.sendApi("delete_msg", { message_id: i }))
-        } catch (err) {
-          msgs.push(err)
-        }
-      }
+      for (const i of message_id)
+        msgs.push(await data.bot.sendApi("delete_msg", { message_id: i }).catch(i => i))
       return msgs
     }
 
     parseMsg(msg) {
       const array = []
-      for (const i of Array.isArray(msg) ? msg : [msg]) {
-        if (typeof i === "object") {
-          array.push({ ...i.data, type: i.type })
-        } else {
-          array.push({ type: "text", text: String(i) })
-        }
-      }
+      for (const i of Array.isArray(msg) ? msg : [msg])
+        if (typeof i === "object") array.push({ ...i.data, type: i.type })
+        else array.push({ type: "text", text: String(i) })
       return array
     }
 
     async getMsg(data, message_id) {
-      const msg = await data.bot.sendApi("get_msg", { message_id })
-      if (msg?.message) {
-        msg.message = this.parseMsg(msg.message)
-      }
+      const msg = (await data.bot.sendApi("get_msg", { message_id })).data
+      if (msg?.message) msg.message = this.parseMsg(msg.message)
       return msg
     }
 
-    async getFriendMsgHistory(data, message_seq, count = 20, reverseOrder = true) {
-      try {
-        const result = await data.bot.sendApi("get_friend_msg_history", {
+    async getFriendMsgHistory(data, message_seq, count, reverseOrder = true) {
+      const msgs = (
+        await data.bot.sendApi("get_friend_msg_history", {
           user_id: data.user_id,
           message_seq,
           count,
           reverseOrder,
         })
-        const msgs = result?.messages || []
-        
-        for (const i of Array.isArray(msgs) ? msgs : [msgs]) {
-          if (i?.message) i.message = this.parseMsg(i.message)
-        }
-        return msgs
-      } catch (err) {
-        Bot.makeLog("error", ["获取好友消息历史失败", err])
-        return []
-      }
+      ).data?.messages
+
+      for (const i of Array.isArray(msgs) ? msgs : [msgs])
+        if (i?.message) i.message = this.parseMsg(i.message)
+      return msgs
     }
 
-    async getGroupMsgHistory(data, message_seq, count = 20, reverseOrder = true) {
-      try {
-        const result = await data.bot.sendApi("get_group_msg_history", {
+    async getGroupMsgHistory(data, message_seq, count, reverseOrder = true) {
+      const msgs = (
+        await data.bot.sendApi("get_group_msg_history", {
           group_id: data.group_id,
           message_seq,
           count,
           reverseOrder,
         })
-        const msgs = result?.messages || []
-        
-        for (const i of Array.isArray(msgs) ? msgs : [msgs]) {
-          if (i?.message) i.message = this.parseMsg(i.message)
-        }
-        return msgs
-      } catch (err) {
-        Bot.makeLog("error", ["获取群消息历史失败", err])
-        return []
-      }
+      ).data?.messages
+
+      for (const i of Array.isArray(msgs) ? msgs : [msgs])
+        if (i?.message) i.message = this.parseMsg(i.message)
+      return msgs
     }
 
     async getForwardMsg(data, message_id) {
-      try {
-        const result = await data.bot.sendApi("get_forward_msg", { message_id })
-        const msgs = result?.messages || []
-        
-        for (const i of Array.isArray(msgs) ? msgs : [msgs]) {
-          if (i?.message) i.message = this.parseMsg(i.message || i.content)
-        }
-        return msgs
-      } catch (err) {
-        Bot.makeLog("error", ["获取转发消息失败", err])
-        return []
-      }
+      const msgs = (
+        await data.bot.sendApi("get_forward_msg", {
+          message_id,
+        })
+      ).data?.messages
+
+      for (const i of Array.isArray(msgs) ? msgs : [msgs])
+        if (i?.message) i.message = this.parseMsg(i.message || i.content)
+      return msgs
     }
 
     async makeForwardMsg(msg) {
       const msgs = []
       for (const i of msg) {
         const [content, forward] = await this.makeMsg(i.message)
-        
-        if (forward.length) {
-          msgs.push(...(await this.makeForwardMsg(forward)))
-        }
-        
-        if (content.length) {
+        if (forward.length) msgs.push(...(await this.makeForwardMsg(forward)))
+        if (content.length)
           msgs.push({
             type: "node",
             data: {
@@ -290,7 +240,6 @@ Bot.adapter.push(
               time: i.time,
             },
           })
-        }
       }
       return msgs
     }
@@ -300,7 +249,7 @@ Bot.adapter.push(
         "info",
         `发送好友转发消息：${this.makeLog(msg)}`,
         `${data.self_id} => ${data.user_id}`,
-        true
+        true,
       )
       return data.bot.sendApi("send_private_forward_msg", {
         user_id: data.user_id,
@@ -313,7 +262,7 @@ Bot.adapter.push(
         "info",
         `发送群转发消息：${this.makeLog(msg)}`,
         `${data.self_id} => ${data.group_id}`,
-        true
+        true,
       )
       return data.bot.sendApi("send_group_forward_msg", {
         group_id: data.group_id,
@@ -322,137 +271,100 @@ Bot.adapter.push(
     }
 
     async getFriendArray(data) {
-      try {
-        const result = await data.bot.sendApi("get_friend_list")
-        return result || []
-      } catch (err) {
-        Bot.makeLog("error", ["获取好友列表失败", err])
-        return []
-      }
+      return (await data.bot.sendApi("get_friend_list")).data || []
     }
 
     async getFriendList(data) {
       const array = []
-      for (const { user_id } of await this.getFriendArray(data)) {
-        array.push(user_id)
-      }
+      for (const { user_id } of await this.getFriendArray(data)) array.push(user_id)
       return array
     }
 
     async getFriendMap(data) {
       const map = new Map()
-      for (const i of await this.getFriendArray(data)) {
-        map.set(i.user_id, i)
-      }
+      for (const i of await this.getFriendArray(data)) map.set(i.user_id, i)
       data.bot.fl = map
       return map
     }
 
     async getFriendInfo(data) {
-      try {
-        const info = await data.bot.sendApi("get_stranger_info", {
+      const info = (
+        await data.bot.sendApi("get_stranger_info", {
           user_id: data.user_id,
         })
-        data.bot.fl.set(data.user_id, info)
-        return info
-      } catch (err) {
-        Bot.makeLog("error", ["获取好友信息失败", err])
-        return {}
-      }
+      ).data
+      data.bot.fl.set(data.user_id, info)
+      return info
     }
 
     async getGroupArray(data) {
+      const array = (await data.bot.sendApi("get_group_list")).data
       try {
-        const array = await data.bot.sendApi("get_group_list") || []
-        
-        // 尝试获取频道列表
-        try {
-          for (const guild of await this.getGuildArray(data)) {
-            for (const channel of await this.getGuildChannelArray({
-              ...data,
-              guild_id: guild.guild_id,
-            })) {
-              array.push({
-                guild,
-                channel,
-                group_id: `${guild.guild_id}-${channel.channel_id}`,
-                group_name: `${guild.guild_name}-${channel.channel_name}`,
-              })
-            }
-          }
-        } catch (err) {
-          // 静默处理频道列表获取失败
-        }
-        
-        return array
+        for (const guild of await this.getGuildArray(data))
+          for (const channel of await this.getGuildChannelArray({
+            ...data,
+            guild_id: guild.guild_id,
+          }))
+            array.push({
+              guild,
+              channel,
+              group_id: `${guild.guild_id}-${channel.channel_id}`,
+              group_name: `${guild.guild_name}-${channel.channel_name}`,
+            })
       } catch (err) {
-        Bot.makeLog("error", ["获取群列表失败", err])
-        return []
+        //Bot.makeLog("error", ["获取频道列表错误", err])
       }
+      return array
     }
 
     async getGroupList(data) {
       const array = []
-      for (const { group_id } of await this.getGroupArray(data)) {
-        array.push(group_id)
-      }
+      for (const { group_id } of await this.getGroupArray(data)) array.push(group_id)
       return array
     }
 
     async getGroupMap(data) {
       const map = new Map()
-      for (const i of await this.getGroupArray(data)) {
-        map.set(i.group_id, i)
-      }
+      for (const i of await this.getGroupArray(data)) map.set(i.group_id, i)
       data.bot.gl = map
       return map
     }
 
     async getGroupInfo(data) {
-      try {
-        const info = await data.bot.sendApi("get_group_info", {
+      const info = (
+        await data.bot.sendApi("get_group_info", {
           group_id: data.group_id,
         })
-        data.bot.gl.set(data.group_id, info)
-        return info
-      } catch (err) {
-        Bot.makeLog("error", ["获取群信息失败", err])
-        return {}
-      }
+      ).data
+      data.bot.gl.set(data.group_id, info)
+      return info
     }
 
     async getMemberArray(data) {
-      try {
-        const result = await data.bot.sendApi("get_group_member_list", {
-          group_id: data.group_id,
-        })
-        return result || []
-      } catch (err) {
-        Bot.makeLog("error", ["获取群成员列表失败", err])
-        return []
-      }
+      return (
+        (
+          await data.bot.sendApi("get_group_member_list", {
+            group_id: data.group_id,
+          })
+        ).data || []
+      )
     }
 
     async getMemberList(data) {
       const array = []
-      for (const { user_id } of await this.getMemberArray(data)) {
-        array.push(user_id)
-      }
+      for (const { user_id } of await this.getMemberArray(data)) array.push(user_id)
       return array
     }
 
     async getMemberMap(data) {
       const map = new Map()
-      for (const i of await this.getMemberArray(data)) {
-        map.set(i.user_id, i)
-      }
+      for (const i of await this.getMemberArray(data)) map.set(i.user_id, i)
       data.bot.gml.set(data.group_id, map)
       return map
     }
 
     async getGroupMemberMap(data) {
       if (!cfg.bot.cache_group_member) return this.getGroupMap(data)
-      
       for (const [group_id, group] of await this.getGroupMap(data)) {
         if (group.guild) continue
         await this.getMemberMap({ ...data, group_id })
@@ -460,119 +372,88 @@ Bot.adapter.push(
     }
 
     async getMemberInfo(data) {
-      try {
-        const info = await data.bot.sendApi("get_group_member_info", {
+      const info = (
+        await data.bot.sendApi("get_group_member_info", {
           group_id: data.group_id,
           user_id: data.user_id,
         })
-        
-        let gml = data.bot.gml.get(data.group_id)
-        if (!gml) {
-          gml = new Map()
-          data.bot.gml.set(data.group_id, gml)
-        }
-        gml.set(data.user_id, info)
-        return info
-      } catch (err) {
-        Bot.makeLog("error", ["获取群成员信息失败", err])
-        return {}
+      ).data
+      let gml = data.bot.gml.get(data.group_id)
+      if (!gml) {
+        gml = new Map()
+        data.bot.gml.set(data.group_id, gml)
       }
+      gml.set(data.user_id, info)
+      return info
     }
 
     async getGuildArray(data) {
-      try {
-        const result = await data.bot.sendApi("get_guild_list")
-        return result || []
-      } catch (err) {
-        return []
-      }
+      return (await data.bot.sendApi("get_guild_list")).data || []
     }
 
-    async getGuildInfo(data) {
-      try {
-        return await data.bot.sendApi("get_guild_meta_by_guest", {
-          guild_id: data.guild_id,
-        })
-      } catch (err) {
-        return {}
-      }
+    getGuildInfo(data) {
+      return data.bot.sendApi("get_guild_meta_by_guest", {
+        guild_id: data.guild_id,
+      })
     }
 
     async getGuildChannelArray(data) {
-      try {
-        const result = await data.bot.sendApi("get_guild_channel_list", {
-          guild_id: data.guild_id,
-        })
-        return result || []
-      } catch (err) {
-        return []
-      }
+      return (
+        (
+          await data.bot.sendApi("get_guild_channel_list", {
+            guild_id: data.guild_id,
+          })
+        ).data || []
+      )
     }
 
     async getGuildChannelMap(data) {
       const map = new Map()
-      for (const i of await this.getGuildChannelArray(data)) {
-        map.set(i.channel_id, i)
-      }
+      for (const i of await this.getGuildChannelArray(data)) map.set(i.channel_id, i)
       return map
     }
 
     async getGuildMemberArray(data) {
       const array = []
       let next_token = ""
-      
       while (true) {
-        try {
-          const list = await data.bot.sendApi("get_guild_member_list", {
+        const list = (
+          await data.bot.sendApi("get_guild_member_list", {
             guild_id: data.guild_id,
             next_token,
           })
-          
-          if (!list) break
-          
-          for (const i of list.members || []) {
-            array.push({
-              ...i,
-              user_id: i.tiny_id,
-            })
-          }
-          
-          if (list.finished) break
-          next_token = list.next_token
-        } catch (err) {
-          break
-        }
+        ).data
+        if (!list) break
+
+        for (const i of list.members)
+          array.push({
+            ...i,
+            user_id: i.tiny_id,
+          })
+        if (list.finished) break
+        next_token = list.next_token
       }
-      
       return array
     }
 
     async getGuildMemberList(data) {
       const array = []
-      for (const { user_id } of await this.getGuildMemberArray(data)) {
-        array.push(user_id)
-      }
-      return array
+      for (const { user_id } of await this.getGuildMemberArray(data)) array.push(user_id)
+      return array.push
     }
 
     async getGuildMemberMap(data) {
       const map = new Map()
-      for (const i of await this.getGuildMemberArray(data)) {
-        map.set(i.user_id, i)
-      }
+      for (const i of await this.getGuildMemberArray(data)) map.set(i.user_id, i)
       data.bot.gml.set(data.group_id, map)
       return map
     }
 
-    async getGuildMemberInfo(data) {
-      try {
-        return await data.bot.sendApi("get_guild_member_profile", {
-          guild_id: data.guild_id,
-          user_id: data.user_id,
-        })
-      } catch (err) {
-        return {}
-      }
+    getGuildMemberInfo(data) {
+      return data.bot.sendApi("get_guild_member_profile", {
+        guild_id: data.guild_id,
+        user_id: data.user_id,
+      })
     }
 
     setProfile(data, profile) {
@@ -616,7 +497,7 @@ Bot.adapter.push(
         "info",
         `${enable ? "设置" : "取消"}群管理员：${user_id}`,
         `${data.self_id} => ${data.group_id}`,
-        true
+        true,
       )
       return data.bot.sendApi("set_group_admin", {
         group_id: data.group_id,
@@ -630,7 +511,7 @@ Bot.adapter.push(
         "info",
         `设置群名片：${card}`,
         `${data.self_id} => ${data.group_id}, ${user_id}`,
-        true
+        true,
       )
       return data.bot.sendApi("set_group_card", {
         group_id: data.group_id,
@@ -639,12 +520,12 @@ Bot.adapter.push(
       })
     }
 
-    setGroupTitle(data, user_id, special_title, duration = -1) {
+    setGroupTitle(data, user_id, special_title, duration) {
       Bot.makeLog(
         "info",
         `设置群头衔：${special_title} ${duration}`,
         `${data.self_id} => ${data.group_id}, ${user_id}`,
-        true
+        true,
       )
       return data.bot.sendApi("set_group_special_title", {
         group_id: data.group_id,
@@ -661,12 +542,12 @@ Bot.adapter.push(
       })
     }
 
-    setGroupBan(data, user_id, duration = 600) {
+    setGroupBan(data, user_id, duration) {
       Bot.makeLog(
         "info",
         `禁言群成员：${duration}秒`,
         `${data.self_id} => ${data.group_id}, ${user_id}`,
-        true
+        true,
       )
       return data.bot.sendApi("set_group_ban", {
         group_id: data.group_id,
@@ -680,7 +561,7 @@ Bot.adapter.push(
         "info",
         `${enable ? "开启" : "关闭"}全员禁言`,
         `${data.self_id} => ${data.group_id}`,
-        true
+        true,
       )
       return data.bot.sendApi("set_group_whole_ban", {
         group_id: data.group_id,
@@ -688,12 +569,12 @@ Bot.adapter.push(
       })
     }
 
-    setGroupKick(data, user_id, reject_add_request = false) {
+    setGroupKick(data, user_id, reject_add_request) {
       Bot.makeLog(
         "info",
         `踢出群成员${reject_add_request ? "拒绝再次加群" : ""}`,
         `${data.self_id} => ${data.group_id}, ${user_id}`,
-        true
+        true,
       )
       return data.bot.sendApi("set_group_kick", {
         group_id: data.group_id,
@@ -702,7 +583,7 @@ Bot.adapter.push(
       })
     }
 
-    setGroupLeave(data, is_dismiss = false) {
+    setGroupLeave(data, is_dismiss) {
       Bot.makeLog("info", is_dismiss ? "解散" : "退群", `${data.self_id} => ${data.group_id}`, true)
       return data.bot.sendApi("set_group_leave", {
         group_id: data.group_id,
@@ -710,7 +591,7 @@ Bot.adapter.push(
       })
     }
 
-    downloadFile(data, url, thread_count = 1, headers = "") {
+    downloadFile(data, url, thread_count, headers) {
       return data.bot.sendApi("download_file", {
         url,
         thread_count,
@@ -723,7 +604,7 @@ Bot.adapter.push(
         "info",
         `发送好友文件：${name}(${file})`,
         `${data.self_id} => ${data.user_id}`,
-        true
+        true,
       )
       return data.bot.sendApi("upload_private_file", {
         user_id: data.user_id,
@@ -732,12 +613,12 @@ Bot.adapter.push(
       })
     }
 
-    async sendGroupFile(data, file, folder = "", name = path.basename(file)) {
+    async sendGroupFile(data, file, folder, name = path.basename(file)) {
       Bot.makeLog(
         "info",
         `发送群文件：${folder || ""}/${name}(${file})`,
         `${data.self_id} => ${data.group_id}`,
-        true
+        true,
       )
       return data.bot.sendApi("upload_group_file", {
         group_id: data.group_id,
@@ -752,7 +633,7 @@ Bot.adapter.push(
         "info",
         `删除群文件：${file_id}(${busid})`,
         `${data.self_id} => ${data.group_id}`,
-        true
+        true,
       )
       return data.bot.sendApi("delete_group_file", {
         group_id: data.group_id,
@@ -776,12 +657,11 @@ Bot.adapter.push(
     }
 
     getGroupFiles(data, folder_id) {
-      if (folder_id) {
+      if (folder_id)
         return data.bot.sendApi("get_group_files_by_folder", {
           group_id: data.group_id,
           folder_id,
         })
-      }
       return data.bot.sendApi("get_group_root_files", {
         group_id: data.group_id,
       })
@@ -810,10 +690,10 @@ Bot.adapter.push(
       Bot.makeLog("info", "删除好友", `${data.self_id} => ${data.user_id}`, true)
       return data.bot
         .sendApi("delete_friend", { user_id: data.user_id })
-        .finally(() => this.getFriendMap(data))
+        .finally(this.getFriendMap.bind(this, data))
     }
 
-    setFriendAddRequest(data, flag, approve = true, remark = "") {
+    setFriendAddRequest(data, flag, approve, remark) {
       return data.bot.sendApi("set_friend_add_request", {
         flag,
         approve,
@@ -821,7 +701,7 @@ Bot.adapter.push(
       })
     }
 
-    setGroupAddRequest(data, flag, approve = true, reason = "", sub_type = "add") {
+    setGroupAddRequest(data, flag, approve, reason, sub_type = "add") {
       return data.bot.sendApi("set_group_add_request", {
         flag,
         sub_type,
@@ -871,22 +751,19 @@ Bot.adapter.push(
     }
 
     pickMember(data, group_id, user_id) {
-      if (typeof group_id === "string" && group_id.includes("-")) {
-        const [guild_id, channel_id] = group_id.split("-")
+      if (typeof group_id === "string" && group_id.match("-")) {
+        const guild_id = group_id.split("-")
         const i = {
           ...data,
-          guild_id,
-          channel_id,
+          guild_id: guild_id[0],
+          channel_id: guild_id[1],
           user_id,
         }
         return {
           ...this.pickGroup(i, group_id),
           ...i,
           getInfo: this.getGuildMemberInfo.bind(this, i),
-          getAvatarUrl: async () => {
-            const info = await this.getGuildMemberInfo(i)
-            return info.avatar_url
-          },
+          getAvatarUrl: async () => (await this.getGuildMemberInfo(i)).avatar_url,
         }
       }
 
@@ -903,9 +780,9 @@ Bot.adapter.push(
         getAvatarUrl() {
           return this.avatar || `https://q.qlogo.cn/g?b=qq&s=0&nk=${user_id}`
         },
-        poke: () => this.sendGroupMsg(i, { type: "poke", data: { qq: user_id } }),
-        mute: (duration = 600) => this.setGroupBan(i, user_id, duration),
-        kick: (reject = false) => this.setGroupKick(i, user_id, reject),
+        poke: this.sendGroupMsg.bind(this, i, { type: "poke", qq: user_id }),
+        mute: this.setGroupBan.bind(this, i, user_id),
+        kick: this.setGroupKick.bind(this, i, user_id),
         get is_friend() {
           return data.bot.fl.has(user_id)
         },
@@ -919,13 +796,13 @@ Bot.adapter.push(
     }
 
     pickGroup(data, group_id) {
-      if (typeof group_id === "string" && group_id.includes("-")) {
-        const [guild_id, channel_id] = group_id.split("-")
+      if (typeof group_id === "string" && group_id.match("-")) {
+        const guild_id = group_id.split("-")
         const i = {
           ...data.bot.gl.get(group_id),
           ...data,
-          guild_id,
-          channel_id,
+          guild_id: guild_id[0],
+          channel_id: guild_id[1],
         }
         return {
           ...i,
@@ -935,18 +812,12 @@ Bot.adapter.push(
           getForwardMsg: this.getForwardMsg.bind(this, i),
           getInfo: this.getGuildInfo.bind(this, i),
           getChannelArray: this.getGuildChannelArray.bind(this, i),
-          getChannelList: async () => {
-            const array = []
-            for (const { channel_id } of await this.getGuildChannelArray(i)) {
-              array.push(channel_id)
-            }
-            return array
-          },
+          getChannelList: this.getGuildChannelList.bind(this, i),
           getChannelMap: this.getGuildChannelMap.bind(this, i),
           getMemberArray: this.getGuildMemberArray.bind(this, i),
           getMemberList: this.getGuildMemberList.bind(this, i),
           getMemberMap: this.getGuildMemberMap.bind(this, i),
-          pickMember: (user_id) => this.pickMember(i, group_id, user_id),
+          pickMember: this.pickMember.bind(this, i),
         }
       }
 
@@ -973,25 +844,24 @@ Bot.adapter.push(
         getMemberArray: this.getMemberArray.bind(this, i),
         getMemberList: this.getMemberList.bind(this, i),
         getMemberMap: this.getMemberMap.bind(this, i),
-        pickMember: (user_id) => this.pickMember(i, group_id, user_id),
-        pokeMember: (qq) => this.sendGroupMsg(i, { type: "poke", data: { qq } }),
-        setName: (name) => this.setGroupName(i, name),
-        setAvatar: (file) => this.setGroupAvatar(i, file),
-        setAdmin: (user_id, enable) => this.setGroupAdmin(i, user_id, enable),
-        setCard: (user_id, card) => this.setGroupCard(i, user_id, card),
-        setTitle: (user_id, title, duration) => this.setGroupTitle(i, user_id, title, duration),
-        sign: () => this.sendGroupSign(i),
-        muteMember: (user_id, duration) => this.setGroupBan(i, user_id, duration),
-        muteAll: (enable) => this.setGroupWholeKick(i, enable),
-        kickMember: (user_id, reject) => this.setGroupKick(i, user_id, reject),
-        quit: () => this.setGroupLeave(i, false),
+        pickMember: this.pickMember.bind(this, i, group_id),
+        pokeMember: qq => this.sendGroupMsg(i, { type: "poke", qq }),
+        setName: this.setGroupName.bind(this, i),
+        setAvatar: this.setGroupAvatar.bind(this, i),
+        setAdmin: this.setGroupAdmin.bind(this, i),
+        setCard: this.setGroupCard.bind(this, i),
+        setTitle: this.setGroupTitle.bind(this, i),
+        sign: this.sendGroupSign.bind(this, i),
+        muteMember: this.setGroupBan.bind(this, i),
+        muteAll: this.setGroupWholeKick.bind(this, i),
+        kickMember: this.setGroupKick.bind(this, i),
+        quit: this.setGroupLeave.bind(this, i),
         fs: this.getGroupFs(i),
         get is_owner() {
           return data.bot.gml.get(group_id)?.get(data.self_id)?.role === "owner"
         },
         get is_admin() {
-          const role = data.bot.gml.get(group_id)?.get(data.self_id)?.role
-          return role === "admin" || this.is_owner
+          return data.bot.gml.get(group_id)?.get(data.self_id)?.role === "admin" || this.is_owner
         },
       }
     }
@@ -1005,25 +875,25 @@ Bot.adapter.push(
           start_time: data.time,
           stat: {},
           get lost_pkt_cnt() {
-            return this.stat.packet_lost || 0
+            return this.stat.packet_lost
           },
           get lost_times() {
-            return this.stat.lost_times || 0
+            return this.stat.lost_times
           },
           get recv_msg_cnt() {
-            return this.stat.message_received || 0
+            return this.stat.message_received
           },
           get recv_pkt_cnt() {
-            return this.stat.packet_received || 0
+            return this.stat.packet_received
           },
           get sent_msg_cnt() {
-            return this.stat.message_sent || 0
+            return this.stat.message_sent
           },
           get sent_pkt_cnt() {
-            return this.stat.packet_sent || 0
+            return this.stat.packet_sent
           },
         },
-        model: "TRSS Yunzai",
+        model: "TRSS Yunzai ",
 
         info: {},
         get uin() {
@@ -1037,7 +907,7 @@ Bot.adapter.push(
         },
 
         setProfile: this.setProfile.bind(this, data),
-        setNickname: (nickname) => this.setProfile(data, { nickname }),
+        setNickname: nickname => this.setProfile(data, { nickname }),
         setAvatar: this.setAvatar.bind(this, data),
 
         pickFriend: this.pickFriend.bind(this, data),
@@ -1080,132 +950,98 @@ Bot.adapter.push(
 
       if (!Bot.uin.includes(data.self_id)) Bot.uin.push(data.self_id)
 
-      // 设置机器人型号（可选，忽略错误）
-      data.bot.sendApi("_set_model_show", {
-        model: data.bot.model,
-        model_show: data.bot.model,
-      }).catch(() => {})
+      data.bot
+        .sendApi("_set_model_show", {
+          model: data.bot.model,
+          model_show: data.bot.model,
+        })
+        .catch(() => {})
 
-      // 获取登录信息
-      try {
-        data.bot.info = await data.bot.sendApi("get_login_info")
-      } catch (err) {
-        Bot.makeLog("error", ["获取登录信息失败", err])
-        data.bot.info = {}
+      data.bot.info = (await data.bot.sendApi("get_login_info").catch(i => i.error)).data
+      data.bot.guild_info = (
+        await data.bot.sendApi("get_guild_service_profile").catch(i => i.error)
+      ).data
+      data.bot.clients = (await data.bot.sendApi("get_online_clients").catch(i => i.error)).clients
+      data.bot.version = {
+        ...(await data.bot.sendApi("get_version_info").catch(i => i.error)).data,
+        id: this.id,
+        name: this.name,
+        get version() {
+          return this.app_full_name || `${this.app_name} v${this.app_version}`
+        },
       }
 
-      // 获取频道服务信息（可选）
-      try {
-        data.bot.guild_info = await data.bot.sendApi("get_guild_service_profile")
-      } catch (err) {
-        data.bot.guild_info = {}
-      }
-
-      // 获取在线客户端（可选）
-      try {
-        const result = await data.bot.sendApi("get_online_clients")
-        data.bot.clients = result.clients || []
-      } catch (err) {
-        data.bot.clients = []
-      }
-
-      // 获取版本信息
-      try {
-        data.bot.version = await data.bot.sendApi("get_version_info")
-        data.bot.version = {
-          ...data.bot.version,
-          id: this.id,
-          name: this.name,
-          get version() {
-            return this.app_full_name || `${this.app_name} v${this.app_version}`
-          },
+      if (
+        (data.bot.cookies["qun.qq.com"] = (
+          await data.bot.sendApi("get_cookies", { domain: "qun.qq.com" }).catch(i => i.error)
+        ).cookies)
+      )
+        for (const i of [
+          "aq",
+          "connect",
+          "docs",
+          "game",
+          "gamecenter",
+          "haoma",
+          "id",
+          "kg",
+          "mail",
+          "mma",
+          "office",
+          "openmobile",
+          "qqweb",
+          "qzone",
+          "ti",
+          "v",
+          "vip",
+          "y",
+        ]) {
+          const domain = `${i}.qq.com`
+          data.bot.cookies[domain] = await data.bot
+            .sendApi("get_cookies", { domain })
+            .then(i => i.cookies)
+            .catch(i => i.error)
         }
-      } catch (err) {
-        data.bot.version = {
-          id: this.id,
-          name: this.name,
-          version: "Unknown",
-        }
-      }
+      data.bot.bkn = (await data.bot.sendApi("get_csrf_token").catch(i => i.error)).token
 
-      // 获取cookies（优化错误处理）
-      try {
-        const mainCookies = await data.bot.sendApi("get_cookies", { domain: "qun.qq.com" })
-        if (mainCookies?.cookies) {
-          data.bot.cookies["qun.qq.com"] = mainCookies.cookies
-          
-          // 尝试获取其他域名的cookies
-          const domains = [
-            "aq", "connect", "docs", "game", "gamecenter", "haoma",
-            "id", "kg", "mail", "mma", "office", "openmobile",
-            "qqweb", "qzone", "ti", "v", "vip", "y"
-          ]
-          
-          for (const i of domains) {
-            const domain = `${i}.qq.com`
-            try {
-              const result = await data.bot.sendApi("get_cookies", { domain })
-              if (result?.cookies) {
-                data.bot.cookies[domain] = result.cookies
-              }
-            } catch (err) {
-              // 静默处理单个域名cookie获取失败
-            }
-          }
-        }
-      } catch (err) {
-        Bot.makeLog("warn", "获取cookies失败，部分功能可能受限")
-      }
-
-      // 获取CSRF Token（可选）
-      try {
-        const result = await data.bot.sendApi("get_csrf_token")
-        data.bot.bkn = result.token
-      } catch (err) {
-        data.bot.bkn = null
-      }
-
-      // 异步加载好友和群组信息
-      data.bot.getFriendMap().catch(() => {})
-      data.bot.getGroupMemberMap().catch(() => {})
+      data.bot.getFriendMap()
+      data.bot.getGroupMemberMap()
 
       Bot.makeLog(
         "mark",
         `${this.name}(${this.id}) ${data.bot.version.version} 已连接`,
-        data.self_id
+        data.self_id,
       )
       Bot.em(`connect.${data.self_id}`, data)
     }
 
     makeMessage(data) {
       data.message = this.parseMsg(data.message)
-      
       switch (data.message_type) {
         case "private": {
-          const name = data.sender?.card || 
-                      data.sender?.nickname || 
-                      data.bot.fl.get(data.user_id)?.nickname
+          const name =
+            data.sender.card || data.sender.nickname || data.bot.fl.get(data.user_id)?.nickname
           Bot.makeLog(
             "info",
             `好友消息：${name ? `[${name}] ` : ""}${data.raw_message}`,
             `${data.self_id} <= ${data.user_id}`,
-            true
+            true,
           )
           break
         }
         case "group": {
           const group_name = data.group_name || data.bot.gl.get(data.group_id)?.group_name
-          let user_name = data.sender?.card || data.sender?.nickname
+          let user_name = data.sender.card || data.sender.nickname
           if (!user_name) {
-            const user = data.bot.gml.get(data.group_id)?.get(data.user_id) || 
-                        data.bot.fl.get(data.user_id)
+            const user =
+              data.bot.gml.get(data.group_id)?.get(data.user_id) || data.bot.fl.get(data.user_id)
             if (user) user_name = user?.card || user?.nickname
           }
           Bot.makeLog(
             "info",
             `群消息：${user_name ? `[${group_name ? `${group_name}, ` : ""}${user_name}] ` : ""}${data.raw_message}`,
             `${data.self_id} <= ${data.group_id}, ${data.user_id}`,
-            true
+            true,
           )
           break
         }
@@ -1214,9 +1050,9 @@ Bot.adapter.push(
           data.group_id = `${data.guild_id}-${data.channel_id}`
           Bot.makeLog(
             "info",
-            `频道消息：[${data.sender?.nickname}] ${Bot.String(data.message)}`,
+            `频道消息：[${data.sender.nickname}] ${Bot.String(data.message)}`,
             `${data.self_id} <= ${data.group_id}, ${data.user_id}`,
-            true
+            true,
           )
           Object.defineProperty(data, "friend", {
             get() {
@@ -1238,7 +1074,7 @@ Bot.adapter.push(
             "info",
             `好友消息撤回：${data.message_id}`,
             `${data.self_id} <= ${data.user_id}`,
-            true
+            true,
           )
           break
         case "group_recall":
@@ -1246,7 +1082,7 @@ Bot.adapter.push(
             "info",
             `群消息撤回：${data.operator_id} => ${data.user_id} ${data.message_id}`,
             `${data.self_id} <= ${data.group_id}`,
-            true
+            true,
           )
           break
         case "group_increase": {
@@ -1254,15 +1090,12 @@ Bot.adapter.push(
             "info",
             `群成员增加：${data.operator_id} => ${data.user_id} ${data.sub_type}`,
             `${data.self_id} <= ${data.group_id}`,
-            true
+            true,
           )
           const group = data.bot.pickGroup(data.group_id)
-          group.getInfo().catch(() => {})
-          if (data.user_id === data.self_id && cfg.bot.cache_group_member) {
-            group.getMemberMap().catch(() => {})
-          } else {
-            group.pickMember(data.user_id).getInfo().catch(() => {})
-          }
+          group.getInfo()
+          if (data.user_id === data.self_id && cfg.bot.cache_group_member) group.getMemberMap()
+          else group.pickMember(data.user_id).getInfo()
           break
         }
         case "group_decrease": {
@@ -1270,13 +1103,13 @@ Bot.adapter.push(
             "info",
             `群成员减少：${data.operator_id} => ${data.user_id} ${data.sub_type}`,
             `${data.self_id} <= ${data.group_id}`,
-            true
+            true,
           )
           if (data.user_id === data.self_id) {
             data.bot.gl.delete(data.group_id)
             data.bot.gml.delete(data.group_id)
           } else {
-            data.bot.pickGroup(data.group_id).getInfo().catch(() => {})
+            data.bot.pickGroup(data.group_id).getInfo()
             data.bot.gml.get(data.group_id)?.delete(data.user_id)
           }
           break
@@ -1286,17 +1119,17 @@ Bot.adapter.push(
             "info",
             `群管理员变动：${data.sub_type}`,
             `${data.self_id} <= ${data.group_id}, ${data.user_id}`,
-            true
+            true,
           )
           data.set = data.sub_type === "set"
-          data.bot.pickMember(data.group_id, data.user_id).getInfo().catch(() => {})
+          data.bot.pickMember(data.group_id, data.user_id).getInfo()
           break
         case "group_upload":
           Bot.makeLog(
             "info",
             `群文件上传：${Bot.String(data.file)}`,
             `${data.self_id} <= ${data.group_id}, ${data.user_id}`,
-            true
+            true,
           )
           Bot.em("message.group.normal", {
             ...data,
@@ -1312,72 +1145,69 @@ Bot.adapter.push(
             "info",
             `群禁言：${data.operator_id} => ${data.user_id} ${data.sub_type} ${data.duration}秒`,
             `${data.self_id} <= ${data.group_id}`,
-            true
+            true,
           )
-          data.bot.pickMember(data.group_id, data.user_id).getInfo().catch(() => {})
+          data.bot.pickMember(data.group_id, data.user_id).getInfo()
           break
         case "group_msg_emoji_like":
           Bot.makeLog(
             "info",
             [`群消息回应：${data.message_id}`, data.likes],
             `${data.self_id} <= ${data.group_id}, ${data.user_id}`,
-            true
+            true,
           )
           break
         case "friend_add":
           Bot.makeLog("info", "好友添加", `${data.self_id} <= ${data.user_id}`, true)
-          data.bot.pickFriend(data.user_id).getInfo().catch(() => {})
+          data.bot.pickFriend(data.user_id).getInfo()
           break
         case "notify":
           if (data.group_id) data.notice_type = "group"
           else data.notice_type = "friend"
           data.user_id ??= data.operator_id || data.target_id
-          
           switch (data.sub_type) {
             case "poke":
               data.operator_id = data.user_id
-              if (data.group_id) {
+              if (data.group_id)
                 Bot.makeLog(
                   "info",
                   `群戳一戳：${data.operator_id} => ${data.target_id}`,
                   `${data.self_id} <= ${data.group_id}`,
-                  true
+                  true,
                 )
-              } else {
+              else
                 Bot.makeLog(
                   "info",
                   `好友戳一戳：${data.operator_id} => ${data.target_id}`,
                   data.self_id,
-                  true
                 )
-              }
               break
             case "honor":
               Bot.makeLog(
                 "info",
                 `群荣誉：${data.honor_type}`,
                 `${data.self_id} <= ${data.group_id}, ${data.user_id}`,
-                true
+                true,
               )
-              data.bot.pickMember(data.group_id, data.user_id).getInfo().catch(() => {})
+              data.bot.pickMember(data.group_id, data.user_id).getInfo()
               break
             case "title":
               Bot.makeLog(
                 "info",
                 `群头衔：${data.title}`,
                 `${data.self_id} <= ${data.group_id}, ${data.user_id}`,
-                true
+                true,
               )
-              data.bot.pickMember(data.group_id, data.user_id).getInfo().catch(() => {})
+              data.bot.pickMember(data.group_id, data.user_id).getInfo()
               break
             case "group_name":
               Bot.makeLog(
                 "info",
                 `群名更改：${data.name_new}`,
                 `${data.self_id} <= ${data.group_id}, ${data.user_id}`,
-                true
+                true,
               )
-              data.bot.pickGroup(data.group_id).getInfo().catch(() => {})
+              data.bot.pickGroup(data.group_id).getInfo()
               break
             case "input_status":
               data.post_type = "internal"
@@ -1391,7 +1221,7 @@ Bot.adapter.push(
                 "info",
                 `资料卡点赞：${data.times}次`,
                 `${data.self_id} <= ${data.operator_id}`,
-                true
+                true,
               )
               break
             default:
@@ -1403,16 +1233,16 @@ Bot.adapter.push(
             "info",
             `群名片更新：${data.card_old} => ${data.card_new}`,
             `${data.self_id} <= ${data.group_id}, ${data.user_id}`,
-            true
+            true,
           )
-          data.bot.pickMember(data.group_id, data.user_id).getInfo().catch(() => {})
+          data.bot.pickMember(data.group_id, data.user_id).getInfo()
           break
         case "offline_file":
           Bot.makeLog(
             "info",
             `离线文件：${Bot.String(data.file)}`,
             `${data.self_id} <= ${data.user_id}`,
-            true
+            true,
           )
           Bot.em("message.private.friend", {
             ...data,
@@ -1427,16 +1257,10 @@ Bot.adapter.push(
           Bot.makeLog(
             "info",
             `客户端${data.online ? "上线" : "下线"}：${Bot.String(data.client)}`,
-            data.self_id
+            data.self_id,
           )
-          try {
-            const result = await data.bot.sendApi("get_online_clients")
-            data.clients = result.clients || []
-            data.bot.clients = data.clients
-          } catch (err) {
-            data.clients = []
-            data.bot.clients = []
-          }
+          data.clients = (await data.bot.sendApi("get_online_clients")).clients
+          data.bot.clients = data.clients
           break
         case "essence":
           data.notice_type = "group_essence"
@@ -1444,7 +1268,7 @@ Bot.adapter.push(
             "info",
             `群精华消息：${data.operator_id} => ${data.sender_id} ${data.sub_type} ${data.message_id}`,
             `${data.self_id} <= ${data.group_id}`,
-            true
+            true,
           )
           break
         case "guild_channel_recall":
@@ -1452,7 +1276,7 @@ Bot.adapter.push(
             "info",
             `频道消息撤回：${data.operator_id} => ${data.user_id} ${data.message_id}`,
             `${data.self_id} <= ${data.guild_id}-${data.channel_id}`,
-            true
+            true,
           )
           break
         case "message_reactions_updated":
@@ -1461,7 +1285,7 @@ Bot.adapter.push(
             "info",
             `频道消息表情贴：${data.message_id} ${Bot.String(data.current_reactions)}`,
             `${data.self_id} <= ${data.guild_id}-${data.channel_id}, ${data.user_id}`,
-            true
+            true,
           )
           break
         case "channel_updated":
@@ -1470,7 +1294,7 @@ Bot.adapter.push(
             "info",
             `子频道更新：${Bot.String(data.old_info)} => ${Bot.String(data.new_info)}`,
             `${data.self_id} <= ${data.guild_id}-${data.channel_id}, ${data.user_id}`,
-            true
+            true,
           )
           break
         case "channel_created":
@@ -1479,9 +1303,9 @@ Bot.adapter.push(
             "info",
             `子频道创建：${Bot.String(data.channel_info)}`,
             `${data.self_id} <= ${data.guild_id}-${data.channel_id}, ${data.user_id}`,
-            true
+            true,
           )
-          data.bot.getGroupMap().catch(() => {})
+          data.bot.getGroupMap()
           break
         case "channel_destroyed":
           data.notice_type = "guild_channel_destroyed"
@@ -1489,9 +1313,9 @@ Bot.adapter.push(
             "info",
             `子频道删除：${Bot.String(data.channel_info)}`,
             `${data.self_id} <= ${data.guild_id}-${data.channel_id}, ${data.user_id}`,
-            true
+            true,
           )
-          data.bot.getGroupMap().catch(() => {})
+          data.bot.getGroupMap()
           break
         case "bot_offline":
           data.post_type = "system"
@@ -1527,10 +1351,10 @@ Bot.adapter.push(
             "info",
             `加好友请求：${data.comment}(${data.flag})`,
             `${data.self_id} <= ${data.user_id}`,
-            true
+            true,
           )
           data.sub_type = "add"
-          data.approve = function (approve = true, remark = "") {
+          data.approve = function (approve, remark) {
             return this.bot.setFriendAddRequest(this.flag, approve, remark)
           }
           break
@@ -1539,9 +1363,9 @@ Bot.adapter.push(
             "info",
             `加群请求：${data.sub_type} ${data.comment}(${data.flag})`,
             `${data.self_id} <= ${data.group_id}, ${data.user_id}`,
-            true
+            true,
           )
-          data.approve = function (approve = true, reason = "") {
+          data.approve = function (approve, reason) {
             return this.bot.setGroupAddRequest(this.flag, approve, reason, this.sub_type)
           }
           break
@@ -1554,9 +1378,7 @@ Bot.adapter.push(
     }
 
     heartbeat(data) {
-      if (data.status) {
-        Object.assign(data.bot.stat, data.status)
-      }
+      if (data.status) Object.assign(data.bot.stat, data.status)
     }
 
     makeMeta(data, ws) {
@@ -1568,7 +1390,7 @@ Bot.adapter.push(
           this.connect(data, ws)
           break
         default:
-          Bot.makeLog("warn", `未知元事件：${logger.magenta(data.raw)}`, data.self_id)
+          Bot.makeLog("warn", `未知消息：${logger.magenta(data.raw)}`, data.self_id)
       }
     }
 
@@ -1606,15 +1428,14 @@ Bot.adapter.push(
         const cache = this.echo.get(data.echo)
         if (cache) return cache.resolve(data)
       }
-      
       Bot.makeLog("warn", `未知消息：${logger.magenta(data.raw)}`, data.self_id)
     }
 
     load() {
       if (!Array.isArray(Bot.wsf[this.path])) Bot.wsf[this.path] = []
       Bot.wsf[this.path].push((ws, ...args) =>
-        ws.on("message", data => this.message(data, ws, ...args))
+        ws.on("message", data => this.message(data, ws, ...args)),
       )
     }
-  })()
+  })(),
 )
