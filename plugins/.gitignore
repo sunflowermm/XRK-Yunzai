@@ -28,5 +28,17 @@ example/**
 
 !adapter
 !adapter/**
+
+!api
+api/**
+!api/bot.js
+!api/core.js
+!api/device.js
+!api/files.js
+!api/loader.js
+!api/plugin.js
+!api/stdin.js
+!api/write.js
+
 *.psd
 *.map

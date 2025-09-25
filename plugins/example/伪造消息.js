@@ -1,8 +1,10 @@
+import moment from "moment";
+
 export class MessageFabricator extends plugin {
   constructor() {
     super({
       name: '制造消息',
-      dsc: '制造自定义聊天记录，支持文字、图片、视频',
+      dsc: '制造自定义聊天记录，支持文字、图片、视频、时间伪造',
       event: 'message',
       priority: 5000,
       rule: [
@@ -29,7 +31,7 @@ export class MessageFabricator extends plugin {
     }
     
     try {
-      // 分割多条消息
+      // 分割多条消息，保留换行符
       const messages = content.split('||').map(msg => msg.trim()).filter(msg => msg);
       
       if (messages.length === 0) {
@@ -71,11 +73,11 @@ export class MessageFabricator extends plugin {
     const parts = messageStr.split('|').map(p => p.trim());
     
     if (parts.length < 3) {
-      await e.reply(`❌ 第${index + 1}条消息格式错误！\n格式：QQ号|昵称|消息内容`);
+      await e.reply(`❌ 第${index + 1}条消息格式错误！\n格式：QQ号|昵称|消息内容|时间(可选)`);
       return null;
     }
     
-    const [qq, nickname, content] = parts;
+    const [qq, nickname, content, timeStr] = parts;
     
     // 解析QQ号
     const user_id = this.parseQQ(qq, e);
@@ -84,14 +86,72 @@ export class MessageFabricator extends plugin {
       return null;
     }
     
-    // 处理消息内容
+    // 处理消息内容（支持换行符）
     const processedContent = this.processContent(content);
+    
+    // 处理时间
+    const time = this.parseTime(timeStr);
     
     return {
       message: processedContent,
       nickname: nickname || '匿名用户',
-      user_id: user_id
+      user_id: user_id,
+      time: time
     };
+  }
+  
+  /**
+   * 解析时间
+   */
+  parseTime(timeStr) {
+    if (!timeStr) {
+      // 如果没有提供时间，返回当前时间戳
+      return Math.floor(Date.now() / 1000);
+    }
+    
+    // 支持多种时间格式
+    const patterns = [
+      { regex: /^-(\d+)秒?$/i, unit: 'seconds' },
+      { regex: /^-(\d+)分(钟)?$/i, unit: 'minutes' },
+      { regex: /^-(\d+)(小)?时$/i, unit: 'hours' },
+      { regex: /^-(\d+)天$/i, unit: 'days' },
+      { regex: /^刚刚$/i, value: 0 },
+      { regex: /^昨天$/i, value: -1, unit: 'days' },
+      { regex: /^前天$/i, value: -2, unit: 'days' }
+    ];
+    
+    for (const pattern of patterns) {
+      const match = timeStr.match(pattern.regex);
+      if (match) {
+        const value = pattern.value !== undefined ? pattern.value : -parseInt(match[1]);
+        const unit = pattern.unit || 'seconds';
+        return moment().add(value, unit).unix();
+      }
+    }
+    
+    // 尝试解析为具体时间（如 "2024-01-01 12:00:00"）
+    const parsedTime = moment(timeStr, [
+      'YYYY-MM-DD HH:mm:ss',
+      'YYYY-MM-DD HH:mm',
+      'YYYY/MM/DD HH:mm:ss',
+      'YYYY/MM/DD HH:mm',
+      'MM-DD HH:mm',
+      'MM/DD HH:mm',
+      'HH:mm:ss',
+      'HH:mm'
+    ], true);
+    
+    if (parsedTime.isValid()) {
+      // 如果只有时间没有日期，使用今天的日期
+      if (timeStr.match(/^\d{1,2}:\d{2}(:\d{2})?$/)) {
+        const todayTime = moment().format('YYYY-MM-DD') + ' ' + timeStr;
+        return moment(todayTime).unix();
+      }
+      return parsedTime.unix();
+    }
+    
+    // 如果无法解析，返回当前时间
+    return Math.floor(Date.now() / 1000);
   }
   
   /**
@@ -119,9 +179,12 @@ export class MessageFabricator extends plugin {
   }
   
   /**
-   * 处理消息内容（图片、视频、文字）
+   * 处理消息内容（图片、视频、文字、换行）
    */
   processContent(content) {
+    // 首先处理换行符
+    content = content.replace(/\\n/g, '\n');
+    
     const processedContent = [];
     const segments = [];
     
@@ -157,10 +220,17 @@ export class MessageFabricator extends plugin {
     // 构建消息内容
     let lastEnd = 0;
     for (const seg of segments) {
-      // 添加文本部分
+      // 添加文本部分（保留换行符）
       if (seg.start > lastEnd) {
         const text = content.substring(lastEnd, seg.start);
-        if (text) processedContent.push(text);
+        if (text) {
+          // 将文本按换行符分割，并正确处理
+          const lines = text.split('\n');
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i]) processedContent.push(lines[i]);
+            if (i < lines.length - 1) processedContent.push('\n');
+          }
+        }
       }
       
       // 添加媒体元素
@@ -173,10 +243,21 @@ export class MessageFabricator extends plugin {
       lastEnd = seg.end;
     }
     
-    // 添加剩余文本
+    // 添加剩余文本（保留换行符）
     if (lastEnd < content.length) {
       const text = content.substring(lastEnd);
-      if (text) processedContent.push(text);
+      if (text) {
+        const lines = text.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i]) processedContent.push(lines[i]);
+          if (i < lines.length - 1) processedContent.push('\n');
+        }
+      }
+    }
+    
+    // 如果整个内容就是纯文本（没有媒体元素），直接返回处理后的内容
+    if (segments.length === 0) {
+      return content;
     }
     
     return processedContent.length > 0 ? processedContent : content;
@@ -193,7 +274,8 @@ export class MessageFabricator extends plugin {
         msgs.push({
           message: msg.message,
           nickname: msg.nickname,
-          user_id: String(msg.user_id)
+          user_id: String(msg.user_id),
+          time: msg.time // 添加时间字段
         });
       }
       
@@ -222,7 +304,7 @@ export class MessageFabricator extends plugin {
     const helpMsg = `📝 制造消息使用说明
 
 【基础格式】
-#制造消息 QQ号|昵称|消息内容
+#制造消息 QQ号|昵称|消息内容|时间(可选)
 
 【多条消息】
 使用 || 分隔：
@@ -234,20 +316,30 @@ export class MessageFabricator extends plugin {
   • 自己：me / 我
   • 机器人：bot / 机器人
 
+◆ 时间格式(可选)：
+  • 相对时间：-10秒、-5分钟、-2小时、-1天
+  • 特殊时间：刚刚、昨天、前天
+  • 具体时间：14:30、2024-01-01 12:00:00
+  • 不填则使用当前时间
+
 ◆ 内容标记：
   • 图片：[图片:URL] 或 [图:URL]
   • 视频：[视频:URL]
+  • 换行：使用 \\n 表示换行
   • 普通文字直接输入即可
 
 【使用示例】
 ◆ 简单对话：
-#制造消息 10001|小明|你好 || me|我|你好呀
+#制造消息 10001|小明|你好|-5分钟 || me|我|你好呀|刚刚
+
+◆ 带换行的消息：
+#制造消息 985400061|沈农小瑶学姐|所有人拜读《瑶瑶经》\\n1.瑶瑶是天\\n2.不可辱骂瑶瑶\\n3.必须点赞瑶瑶每一条朋友圈|昨天
 
 ◆ 带图片的消息：
-#制造消息 bot|助手|看这张图[图片:http://xxx.jpg] || me|我|收到了
+#制造消息 bot|助手|看这张图[图片:http://xxx.jpg]|-1小时 || me|我|收到了|刚刚
 
 ◆ 混合内容：
-#制造消息 10001|张三|这是今天的视频[视频:http://xxx.mp4] || me|我|视频不错`;
+#制造消息 10001|张三|这是今天的视频[视频:http://xxx.mp4]|14:30`;
     
     await e.reply(helpMsg);
     return true;
