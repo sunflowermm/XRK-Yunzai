@@ -1,8 +1,8 @@
-import Renderer from "../../../renderer/Renderer.js";
+import Renderer from "../../../lib/puppeteer/renderer/Renderer.js";
 import os from "node:os";
 import lodash from "lodash";
 import puppeteer from "puppeteer";
-import cfg from "../../../../config/config.js";
+import cfg from "../../../lib/config/config.js";
 import fs from "node:fs";
 
 const _path = process.cwd();
