@@ -1,6 +1,6 @@
-import cfg from '../config/config.js';
+import cfg from '../../lib/config/config.js';
 import WebSocket from 'ws';
-import BotUtil from '../util.js';
+import BotUtil from '../../lib/common/util.js';
 
 // 数据存储
 const devices = new Map();

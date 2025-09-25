@@ -23,11 +23,11 @@ example/**
 !example/伪造消息.js
 !example/葵崽插件.js
 
-!XRK
-!XRK/**
-
 !adapter
-!adapter/**
+adapter/**
+!adapter/ComWeChat.js
+!adapter/OneBotv11.js
+!adapter/stdin.js
 
 !api
 api/**
@@ -39,6 +39,15 @@ api/**
 !api/plugin.js
 !api/stdin.js
 !api/write.js
+
+!events
+events/**
+!events/online.js
+!events/connect.js
+!events/device.js
+!events/message.js
+!events/notice.js
+!events/request.js
 
 *.psd
 *.map

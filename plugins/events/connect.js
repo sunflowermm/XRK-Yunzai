@@ -1,5 +1,5 @@
-import EventListener from "../listener/listener.js"
-import cfg from "../config/config.js"
+import EventListener from "../../lib/listener/listener.js"
+import cfg from "../../lib/config/config.js"
 
 /**
  * 监听连接事件（理论上属于各类适配器的上线的事件）
