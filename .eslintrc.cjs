@@ -2,7 +2,7 @@ const { StrictMode } = require("react");
 
 module.exports = {
   env: {
-    es2021: true,
+    es2025: true,
     node: true
   },
   extends: ['standard'],
