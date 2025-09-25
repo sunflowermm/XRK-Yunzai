@@ -294,7 +294,7 @@ class ServerManager extends BaseManager {
       
       process.argv = originalArgv;
     } catch (error) {
-      await this.logger.error(`服务器模式启动失败: ${error.message}`);
+      await this.logger.error(`服务器模式启动失败: ${error}`);
       throw error;
     }
   }
