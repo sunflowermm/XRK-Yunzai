@@ -1,265 +1,128 @@
-import cfg from "../../lib/config/config.js";
-import path from "node:path";
-import { ulid } from "ulid";
+import cfg from "../../lib/config/config.js"
+import path from "node:path"
+import { ulid } from "ulid"
 
-/**
- * 超时值验证工具
- * 确保所有setTimeout/setInterval使用的值在安全范围内
- */
-class TimeoutValidator {
-  static MAX_TIMEOUT = 2147483647; // 2^31-1，Node.js最大超时值
-  static DEFAULT_TIMEOUT = 60000;   // 默认60秒
-  static MIN_TIMEOUT = 0;            // 最小值
-
-  /**
-   * 验证并修正超时值
-   * @param {number} value - 原始超时值
-   * @param {number} defaultValue - 默认值
-   * @param {string} context - 上下文描述（用于日志）
-   * @returns {number} 安全的超时值
-   */
-  static validate(value, defaultValue = this.DEFAULT_TIMEOUT, context = '') {
-    // 类型检查
-    if (typeof value !== 'number' || isNaN(value)) {
-      if (context) {
-        Bot.makeLog("warn", `超时值非法 [${context}]: ${value}, 使用默认值 ${defaultValue}ms`);
-      }
-      return defaultValue;
-    }
-
-    // 范围检查
-    if (value < this.MIN_TIMEOUT) {
-      if (context) {
-        Bot.makeLog("warn", `超时值过小 [${context}]: ${value}ms, 使用最小值 ${this.MIN_TIMEOUT}ms`);
-      }
-      return this.MIN_TIMEOUT;
-    }
-
-    if (value > this.MAX_TIMEOUT) {
-      if (context) {
-        Bot.makeLog("warn", `超时值过大 [${context}]: ${value}ms, 使用最大值 ${this.MAX_TIMEOUT}ms`);
-      }
-      return this.MAX_TIMEOUT;
-    }
-
-    return Math.floor(value);
-  }
-
-  /**
-   * 创建安全的setTimeout
-   * @param {Function} callback - 回调函数
-   * @param {number} delay - 延时
-   * @param {string} context - 上下文描述
-   * @returns {NodeJS.Timeout} 定时器ID
-   */
-  static setTimeout(callback, delay, context = '') {
-    const safeDelay = this.validate(delay, this.DEFAULT_TIMEOUT, context);
-    return setTimeout(callback, safeDelay);
-  }
-
-  /**
-   * 创建安全的setInterval
-   * @param {Function} callback - 回调函数
-   * @param {number} interval - 间隔
-   * @param {string} context - 上下文描述
-   * @returns {NodeJS.Timeout} 定时器ID
-   */
-  static setInterval(callback, interval, context = '') {
-    const safeInterval = this.validate(interval, this.DEFAULT_TIMEOUT, context);
-    return setInterval(callback, safeInterval);
-  }
-}
-
-/**
- * OneBotv11适配器
- * 实现OneBot v11协议的适配器
- */
 Bot.adapter.push(
   new (class OneBotv11Adapter {
-    // 适配器标识
-    id = "QQ";
-    name = "OneBotv11";
-    path = this.name;
-    
-    // 请求管理
-    echo = new Map();        // 存储待响应的请求
-    timeout = 60000;         // 默认超时时间（60秒）
-    
-    // 请求计数和限制
-    requestCount = 0;
-    maxConcurrentRequests = 100;  // 最大并发请求数
-    requestQueue = [];             // 请求队列
+    id = "QQ"
+    name = "OneBotv11"
+    path = this.name
+    echo = new Map()
+    timeout = 60000
 
-    /**
-     * 日志处理 - 隐藏base64内容
-     * @param {*} msg - 消息内容
-     * @returns {string} 处理后的消息
-     */
     makeLog(msg) {
-      return Bot.String(msg).replace(/base64:\/\/.*?(,|]|")/g, "base64://...$1");
+      return Bot.String(msg).replace(/base64:\/\/.*?(,|]|")/g, "base64://...$1")
     }
 
-    /**
-     * 发送API请求到OneBot实现
-     * @param {Object} data - 数据对象
-     * @param {WebSocket} ws - WebSocket连接
-     * @param {string} action - API动作
-     * @param {Object} params - 参数
-     * @returns {Promise<Object>} API响应
-     */
     async sendApi(data, ws, action, params = {}) {
-      // 生成唯一请求ID
-      const echo = ulid();
-      const request = { action, params, echo };
+      const echo = ulid()
+      const request = { action, params, echo }
+      ws.sendMsg(request)
+      const cache = Promise.withResolvers()
+      this.echo.set(echo, cache)
       
-      // 发送请求
-      ws.sendMsg(request);
-      
-      // 创建Promise解析器
-      const cache = Promise.withResolvers();
-      this.echo.set(echo, cache);
-      
-      // 设置超时处理（修复：使用安全的超时值）
-      const safeTimeout = TimeoutValidator.validate(this.timeout, 60000, 'sendApi');
-      const timeout = TimeoutValidator.setTimeout(() => {
-        cache.reject(Bot.makeError("请求超时", request, { timeout: safeTimeout }));
-        Bot.makeLog("error", ["请求超时", request], data.self_id);
-        ws.terminate();
-        this.echo.delete(echo);
-      }, safeTimeout, 'sendApi timeout');
+      const timeout = setTimeout(() => {
+        cache.reject(Bot.makeError("请求超时", request, { timeout: this.timeout }))
+        Bot.makeLog("error", ["请求超时", request], data.self_id)
+        ws.terminate()
+      }, this.timeout)
 
       return cache.promise
         .then(data => {
-          // 检查返回码
           if (data.retcode !== 0 && data.retcode !== 1) {
-            throw Bot.makeError(data.msg || data.wording, request, { error: data });
+            throw Bot.makeError(data.msg || data.wording, request, { error: data })
           }
-          
-          // 返回代理对象以便访问data属性
           return data.data
             ? new Proxy(data, {
                 get: (target, prop) => target.data[prop] ?? target[prop],
               })
-            : data;
+            : data
         })
         .finally(() => {
-          clearTimeout(timeout);
-          this.echo.delete(echo);
-        });
+          clearTimeout(timeout)
+          this.echo.delete(echo)
+        })
     }
 
-    /**
-     * 处理文件内容，转换为base64格式
-     * @param {*} file - 文件内容
-     * @param {Object} opts - 选项
-     * @returns {Promise<string>} base64字符串或URL
-     */
     async makeFile(file, opts) {
       file = await Bot.Buffer(file, {
         http: true,
-        size: 10485760,  // 10MB限制
+        size: 10485760,
         ...opts,
-      });
-      
-      if (Buffer.isBuffer(file)) {
-        return `base64://${file.toString("base64")}`;
-      }
-      
-      return file;
+      })
+      if (Buffer.isBuffer(file)) return `base64://${file.toString("base64")}`
+      return file
     }
 
-    /**
-     * 构造消息数组
-     * @param {*} msg - 消息内容
-     * @returns {Promise<Array>} [消息数组, 转发消息数组]
-     */
     async makeMsg(msg) {
-      if (!Array.isArray(msg)) msg = [msg];
-      
-      const msgs = [];
-      const forward = [];
+      if (!Array.isArray(msg)) msg = [msg]
+      const msgs = []
+      const forward = []
       
       for (let i of msg) {
-        // 标准化消息格式
         if (typeof i !== "object") {
-          i = { type: "text", data: { text: String(i) } };
+          i = { type: "text", data: { text: String(i) } }
         } else if (!i.data) {
-          i = { type: i.type, data: { ...i, type: undefined } };
+          i = { type: i.type, data: { ...i, type: undefined } }
         }
 
-        // 处理不同消息类型
         switch (i.type) {
           case "at":
-            i.data.qq = String(i.data.qq);
-            break;
+            i.data.qq = String(i.data.qq)
+            break
           case "reply":
-            i.data.id = String(i.data.id);
-            break;
+            i.data.id = String(i.data.id)
+            break
           case "button":
-            continue;  // 跳过按钮类型
+            continue
           case "node":
-            forward.push(...(Array.isArray(i.data) ? i.data : [i.data]));
-            continue;
+            forward.push(...(Array.isArray(i.data) ? i.data : [i.data]))
+            continue
           case "raw":
-            i = i.data;
-            break;
+            i = i.data
+            break
         }
 
-        // 处理文件类型
         if (i.data?.file) {
-          i.data.file = await this.makeFile(i.data.file);
+          i.data.file = await this.makeFile(i.data.file)
         }
 
-        msgs.push(i);
+        msgs.push(i)
       }
-      
-      return [msgs, forward];
+      return [msgs, forward]
     }
 
-    /**
-     * 发送消息
-     * @param {*} msg - 消息内容
-     * @param {Function} send - 发送函数
-     * @param {Function} sendForwardMsg - 发送转发消息函数
-     * @returns {Promise<Object>} 发送结果
-     */
     async sendMsg(msg, send, sendForwardMsg) {
-      const [message, forward] = await this.makeMsg(msg);
-      const ret = [];
+      const [message, forward] = await this.makeMsg(msg)
+      const ret = []
 
-      // 发送转发消息
       if (forward.length) {
         try {
-          const data = await sendForwardMsg(forward);
-          if (Array.isArray(data)) ret.push(...data);
-          else ret.push(data);
+          const data = await sendForwardMsg(forward)
+          if (Array.isArray(data)) ret.push(...data)
+          else ret.push(data)
         } catch (err) {
-          Bot.makeLog("error", ["发送转发消息失败", err]);
+          Bot.makeLog("error", ["发送转发消息失败", err])
         }
       }
 
-      // 发送普通消息
       if (message.length) {
         try {
-          ret.push(await send(message));
+          ret.push(await send(message))
         } catch (err) {
-          Bot.makeLog("error", ["发送消息失败", err]);
+          Bot.makeLog("error", ["发送消息失败", err])
         }
       }
       
-      // 返回结果处理
-      if (ret.length === 1) return ret[0];
+      if (ret.length === 1) return ret[0]
 
-      const message_id = [];
+      const message_id = []
       for (const i of ret) {
-        if (i?.message_id) message_id.push(i.message_id);
+        if (i?.message_id) message_id.push(i.message_id)
       }
-      return { data: ret, message_id };
+      return { data: ret, message_id }
     }
 
-    /**
-     * 发送好友消息
-     */
     sendFriendMsg(data, msg) {
       return this.sendMsg(
         msg,
@@ -269,19 +132,16 @@ Bot.adapter.push(
             `发送好友消息：${this.makeLog(message)}`,
             `${data.self_id} => ${data.user_id}`,
             true
-          );
+          )
           return data.bot.sendApi("send_msg", {
             user_id: data.user_id,
             message,
-          });
+          })
         },
         msg => this.sendFriendForwardMsg(data, msg)
-      );
+      )
     }
 
-    /**
-     * 发送群消息
-     */
     sendGroupMsg(data, msg) {
       return this.sendMsg(
         msg,
@@ -291,19 +151,16 @@ Bot.adapter.push(
             `发送群消息：${this.makeLog(message)}`,
             `${data.self_id} => ${data.group_id}`,
             true
-          );
+          )
           return data.bot.sendApi("send_msg", {
             group_id: data.group_id,
             message,
-          });
+          })
         },
         msg => this.sendGroupForwardMsg(data, msg)
-      );
+      )
     }
 
-    /**
-     * 发送频道消息
-     */
     sendGuildMsg(data, msg) {
       return this.sendMsg(
         msg,
@@ -313,65 +170,52 @@ Bot.adapter.push(
             `发送频道消息：${this.makeLog(message)}`,
             `${data.self_id} => ${data.guild_id}-${data.channel_id}`,
             true
-          );
+          )
           return data.bot.sendApi("send_guild_channel_msg", {
             guild_id: data.guild_id,
             channel_id: data.channel_id,
             message,
-          });
+          })
         },
         msg => Bot.sendForwardMsg(msg => this.sendGuildMsg(data, msg), msg)
-      );
+      )
     }
 
-    /**
-     * 撤回消息
-     */
     async recallMsg(data, message_id) {
-      Bot.makeLog("info", `撤回消息：${message_id}`, data.self_id);
+      Bot.makeLog("info", `撤回消息：${message_id}`, data.self_id)
+      if (!Array.isArray(message_id)) message_id = [message_id]
       
-      if (!Array.isArray(message_id)) message_id = [message_id];
-      
-      const msgs = [];
+      const msgs = []
       for (const i of message_id) {
         try {
-          msgs.push(await data.bot.sendApi("delete_msg", { message_id: i }));
+          msgs.push(await data.bot.sendApi("delete_msg", { message_id: i }))
         } catch (err) {
-          msgs.push(err);
+          msgs.push(err)
         }
       }
-      return msgs;
+      return msgs
     }
 
-    /**
-     * 解析消息格式
-     */
     parseMsg(msg) {
-      const array = [];
+      const array = []
       for (const i of Array.isArray(msg) ? msg : [msg]) {
         if (typeof i === "object") {
-          array.push({ ...i.data, type: i.type });
+          array.push({ ...i.data, type: i.type })
         } else {
-          array.push({ type: "text", text: String(i) });
+          array.push({ type: "text", text: String(i) })
         }
       }
-      return array;
+      return array
     }
 
-    /**
-     * 获取消息详情
-     */
     async getMsg(data, message_id) {
-      const msg = await data.bot.sendApi("get_msg", { message_id });
+      const msg = await data.bot.sendApi("get_msg", { message_id })
       if (msg?.message) {
-        msg.message = this.parseMsg(msg.message);
+        msg.message = this.parseMsg(msg.message)
       }
-      return msg;
+      return msg
     }
 
-    /**
-     * 获取好友消息历史
-     */
     async getFriendMsgHistory(data, message_seq, count = 20, reverseOrder = true) {
       try {
         const result = await data.bot.sendApi("get_friend_msg_history", {
@@ -379,22 +223,19 @@ Bot.adapter.push(
           message_seq,
           count,
           reverseOrder,
-        });
-        const msgs = result?.messages || [];
+        })
+        const msgs = result?.messages || []
         
         for (const i of Array.isArray(msgs) ? msgs : [msgs]) {
-          if (i?.message) i.message = this.parseMsg(i.message);
+          if (i?.message) i.message = this.parseMsg(i.message)
         }
-        return msgs;
+        return msgs
       } catch (err) {
-        Bot.makeLog("error", ["获取好友消息历史失败", err]);
-        return [];
+        Bot.makeLog("error", ["获取好友消息历史失败", err])
+        return []
       }
     }
 
-    /**
-     * 获取群消息历史
-     */
     async getGroupMsgHistory(data, message_seq, count = 20, reverseOrder = true) {
       try {
         const result = await data.bot.sendApi("get_group_msg_history", {
@@ -402,47 +243,41 @@ Bot.adapter.push(
           message_seq,
           count,
           reverseOrder,
-        });
-        const msgs = result?.messages || [];
+        })
+        const msgs = result?.messages || []
         
         for (const i of Array.isArray(msgs) ? msgs : [msgs]) {
-          if (i?.message) i.message = this.parseMsg(i.message);
+          if (i?.message) i.message = this.parseMsg(i.message)
         }
-        return msgs;
+        return msgs
       } catch (err) {
-        Bot.makeLog("error", ["获取群消息历史失败", err]);
-        return [];
+        Bot.makeLog("error", ["获取群消息历史失败", err])
+        return []
       }
     }
 
-    /**
-     * 获取转发消息内容
-     */
     async getForwardMsg(data, message_id) {
       try {
-        const result = await data.bot.sendApi("get_forward_msg", { message_id });
-        const msgs = result?.messages || [];
+        const result = await data.bot.sendApi("get_forward_msg", { message_id })
+        const msgs = result?.messages || []
         
         for (const i of Array.isArray(msgs) ? msgs : [msgs]) {
-          if (i?.message) i.message = this.parseMsg(i.message || i.content);
+          if (i?.message) i.message = this.parseMsg(i.message || i.content)
         }
-        return msgs;
+        return msgs
       } catch (err) {
-        Bot.makeLog("error", ["获取转发消息失败", err]);
-        return [];
+        Bot.makeLog("error", ["获取转发消息失败", err])
+        return []
       }
     }
 
-    /**
-     * 构造转发消息节点
-     */
     async makeForwardMsg(msg) {
-      const msgs = [];
+      const msgs = []
       for (const i of msg) {
-        const [content, forward] = await this.makeMsg(i.message);
+        const [content, forward] = await this.makeMsg(i.message)
         
         if (forward.length) {
-          msgs.push(...(await this.makeForwardMsg(forward)));
+          msgs.push(...(await this.makeForwardMsg(forward)))
         }
         
         if (content.length) {
@@ -454,89 +289,81 @@ Bot.adapter.push(
               content,
               time: i.time,
             },
-          });
+          })
         }
       }
-      return msgs;
+      return msgs
     }
 
-    /**
-     * 发送好友转发消息
-     */
     async sendFriendForwardMsg(data, msg) {
       Bot.makeLog(
         "info",
         `发送好友转发消息：${this.makeLog(msg)}`,
         `${data.self_id} => ${data.user_id}`,
         true
-      );
+      )
       return data.bot.sendApi("send_private_forward_msg", {
         user_id: data.user_id,
         messages: await this.makeForwardMsg(msg),
-      });
+      })
     }
 
-    /**
-     * 发送群转发消息
-     */
     async sendGroupForwardMsg(data, msg) {
       Bot.makeLog(
         "info",
         `发送群转发消息：${this.makeLog(msg)}`,
         `${data.self_id} => ${data.group_id}`,
         true
-      );
+      )
       return data.bot.sendApi("send_group_forward_msg", {
         group_id: data.group_id,
         messages: await this.makeForwardMsg(msg),
-      });
+      })
     }
 
-    // 好友相关API
     async getFriendArray(data) {
       try {
-        const result = await data.bot.sendApi("get_friend_list");
-        return result || [];
+        const result = await data.bot.sendApi("get_friend_list")
+        return result || []
       } catch (err) {
-        Bot.makeLog("error", ["获取好友列表失败", err]);
-        return [];
+        Bot.makeLog("error", ["获取好友列表失败", err])
+        return []
       }
     }
 
     async getFriendList(data) {
-      const array = [];
+      const array = []
       for (const { user_id } of await this.getFriendArray(data)) {
-        array.push(user_id);
+        array.push(user_id)
       }
-      return array;
+      return array
     }
 
     async getFriendMap(data) {
-      const map = new Map();
+      const map = new Map()
       for (const i of await this.getFriendArray(data)) {
-        map.set(i.user_id, i);
+        map.set(i.user_id, i)
       }
-      data.bot.fl = map;
-      return map;
+      data.bot.fl = map
+      return map
     }
 
     async getFriendInfo(data) {
       try {
         const info = await data.bot.sendApi("get_stranger_info", {
           user_id: data.user_id,
-        });
-        data.bot.fl.set(data.user_id, info);
-        return info;
+        })
+        data.bot.fl.set(data.user_id, info)
+        return info
       } catch (err) {
-        Bot.makeLog("error", ["获取好友信息失败", err]);
-        return {};
+        Bot.makeLog("error", ["获取好友信息失败", err])
+        return {}
       }
     }
 
-    // 群组相关API
     async getGroupArray(data) {
       try {
-        const array = await data.bot.sendApi("get_group_list") || [];
+        const array = await data.bot.sendApi("get_group_list") || []
         
         // 尝试获取频道列表
         try {
@@ -550,86 +377,85 @@ Bot.adapter.push(
                 channel,
                 group_id: `${guild.guild_id}-${channel.channel_id}`,
                 group_name: `${guild.guild_name}-${channel.channel_name}`,
-              });
+              })
             }
           }
         } catch (err) {
           // 静默处理频道列表获取失败
         }
         
-        return array;
+        return array
       } catch (err) {
-        Bot.makeLog("error", ["获取群列表失败", err]);
-        return [];
+        Bot.makeLog("error", ["获取群列表失败", err])
+        return []
       }
     }
 
     async getGroupList(data) {
-      const array = [];
+      const array = []
       for (const { group_id } of await this.getGroupArray(data)) {
-        array.push(group_id);
+        array.push(group_id)
       }
-      return array;
+      return array
     }
 
     async getGroupMap(data) {
-      const map = new Map();
+      const map = new Map()
       for (const i of await this.getGroupArray(data)) {
-        map.set(i.group_id, i);
+        map.set(i.group_id, i)
       }
-      data.bot.gl = map;
-      return map;
+      data.bot.gl = map
+      return map
     }
 
     async getGroupInfo(data) {
       try {
         const info = await data.bot.sendApi("get_group_info", {
           group_id: data.group_id,
-        });
-        data.bot.gl.set(data.group_id, info);
-        return info;
+        })
+        data.bot.gl.set(data.group_id, info)
+        return info
       } catch (err) {
-        Bot.makeLog("error", ["获取群信息失败", err]);
-        return {};
+        Bot.makeLog("error", ["获取群信息失败", err])
+        return {}
       }
     }
 
-    // 群成员相关API
     async getMemberArray(data) {
       try {
         const result = await data.bot.sendApi("get_group_member_list", {
           group_id: data.group_id,
-        });
-        return result || [];
+        })
+        return result || []
       } catch (err) {
-        Bot.makeLog("error", ["获取群成员列表失败", err]);
-        return [];
+        Bot.makeLog("error", ["获取群成员列表失败", err])
+        return []
       }
     }
 
     async getMemberList(data) {
-      const array = [];
+      const array = []
       for (const { user_id } of await this.getMemberArray(data)) {
-        array.push(user_id);
+        array.push(user_id)
       }
-      return array;
+      return array
     }
 
     async getMemberMap(data) {
-      const map = new Map();
+      const map = new Map()
       for (const i of await this.getMemberArray(data)) {
-        map.set(i.user_id, i);
+        map.set(i.user_id, i)
       }
-      data.bot.gml.set(data.group_id, map);
-      return map;
+      data.bot.gml.set(data.group_id, map)
+      return map
     }
 
     async getGroupMemberMap(data) {
-      if (!cfg.bot.cache_group_member) return this.getGroupMap(data);
+      if (!cfg.bot.cache_group_member) return this.getGroupMap(data)
       
       for (const [group_id, group] of await this.getGroupMap(data)) {
-        if (group.guild) continue;
-        await this.getMemberMap({ ...data, group_id });
+        if (group.guild) continue
+        await this.getMemberMap({ ...data, group_id })
       }
     }
 
@@ -638,36 +464,151 @@ Bot.adapter.push(
         const info = await data.bot.sendApi("get_group_member_info", {
           group_id: data.group_id,
           user_id: data.user_id,
-        });
+        })
         
-        let gml = data.bot.gml.get(data.group_id);
+        let gml = data.bot.gml.get(data.group_id)
         if (!gml) {
-          gml = new Map();
-          data.bot.gml.set(data.group_id, gml);
+          gml = new Map()
+          data.bot.gml.set(data.group_id, gml)
         }
-        gml.set(data.user_id, info);
-        return info;
+        gml.set(data.user_id, info)
+        return info
       } catch (err) {
-        Bot.makeLog("error", ["获取群成员信息失败", err]);
-        return {};
+        Bot.makeLog("error", ["获取群成员信息失败", err])
+        return {}
       }
     }
 
-    // 群管理相关API
+    async getGuildArray(data) {
+      try {
+        const result = await data.bot.sendApi("get_guild_list")
+        return result || []
+      } catch (err) {
+        return []
+      }
+    }
+
+    async getGuildInfo(data) {
+      try {
+        return await data.bot.sendApi("get_guild_meta_by_guest", {
+          guild_id: data.guild_id,
+        })
+      } catch (err) {
+        return {}
+      }
+    }
+
+    async getGuildChannelArray(data) {
+      try {
+        const result = await data.bot.sendApi("get_guild_channel_list", {
+          guild_id: data.guild_id,
+        })
+        return result || []
+      } catch (err) {
+        return []
+      }
+    }
+
+    async getGuildChannelMap(data) {
+      const map = new Map()
+      for (const i of await this.getGuildChannelArray(data)) {
+        map.set(i.channel_id, i)
+      }
+      return map
+    }
+
+    async getGuildMemberArray(data) {
+      const array = []
+      let next_token = ""
+      
+      while (true) {
+        try {
+          const list = await data.bot.sendApi("get_guild_member_list", {
+            guild_id: data.guild_id,
+            next_token,
+          })
+          
+          if (!list) break
+          
+          for (const i of list.members || []) {
+            array.push({
+              ...i,
+              user_id: i.tiny_id,
+            })
+          }
+          
+          if (list.finished) break
+          next_token = list.next_token
+        } catch (err) {
+          break
+        }
+      }
+      
+      return array
+    }
+
+    async getGuildMemberList(data) {
+      const array = []
+      for (const { user_id } of await this.getGuildMemberArray(data)) {
+        array.push(user_id)
+      }
+      return array
+    }
+
+    async getGuildMemberMap(data) {
+      const map = new Map()
+      for (const i of await this.getGuildMemberArray(data)) {
+        map.set(i.user_id, i)
+      }
+      data.bot.gml.set(data.group_id, map)
+      return map
+    }
+
+    async getGuildMemberInfo(data) {
+      try {
+        return await data.bot.sendApi("get_guild_member_profile", {
+          guild_id: data.guild_id,
+          user_id: data.user_id,
+        })
+      } catch (err) {
+        return {}
+      }
+    }
+
+    setProfile(data, profile) {
+      Bot.makeLog("info", `设置资料：${Bot.String(profile)}`, data.self_id)
+      return data.bot.sendApi("set_qq_profile", profile)
+    }
+
+    async setAvatar(data, file) {
+      Bot.makeLog("info", `设置头像：${file}`, data.self_id)
+      return data.bot.sendApi("set_qq_avatar", {
+        file: await this.makeFile(file),
+      })
+    }
+
+    sendLike(data, times) {
+      Bot.makeLog("info", `点赞：${times}次`, `${data.self_id} => ${data.user_id}`, true)
+      return data.bot.sendApi("send_like", {
+        user_id: data.user_id,
+        times,
+      })
+    }
+
     setGroupName(data, group_name) {
-      Bot.makeLog("info", `设置群名：${group_name}`, `${data.self_id} => ${data.group_id}`, true);
+      Bot.makeLog("info", `设置群名：${group_name}`, `${data.self_id} => ${data.group_id}`, true)
       return data.bot.sendApi("set_group_name", {
         group_id: data.group_id,
         group_name,
-      });
+      })
     }
 
     async setGroupAvatar(data, file) {
-      Bot.makeLog("info", `设置群头像：${file}`, `${data.self_id} => ${data.group_id}`, true);
+      Bot.makeLog("info", `设置群头像：${file}`, `${data.self_id} => ${data.group_id}`, true)
       return data.bot.sendApi("set_group_portrait", {
         group_id: data.group_id,
         file: await this.makeFile(file),
-      });
+      })
     }
 
     setGroupAdmin(data, user_id, enable) {
@@ -676,12 +617,12 @@ Bot.adapter.push(
         `${enable ? "设置" : "取消"}群管理员：${user_id}`,
         `${data.self_id} => ${data.group_id}`,
         true
-      );
+      )
       return data.bot.sendApi("set_group_admin", {
         group_id: data.group_id,
         user_id,
         enable,
-      });
+      })
     }
 
     setGroupCard(data, user_id, card) {
@@ -690,54 +631,48 @@ Bot.adapter.push(
         `设置群名片：${card}`,
         `${data.self_id} => ${data.group_id}, ${user_id}`,
         true
-      );
+      )
       return data.bot.sendApi("set_group_card", {
         group_id: data.group_id,
         user_id,
         card,
-      });
+      })
     }
 
-    /**
-     * 设置群头衔（修复：确保duration在安全范围内）
-     */
     setGroupTitle(data, user_id, special_title, duration = -1) {
-      // 验证duration值
-      const safeDuration = duration === -1 ? -1 : TimeoutValidator.validate(duration, 86400000, 'setGroupTitle');
-      
       Bot.makeLog(
         "info",
-        `设置群头衔：${special_title} ${safeDuration}`,
+        `设置群头衔：${special_title} ${duration}`,
         `${data.self_id} => ${data.group_id}, ${user_id}`,
         true
-      );
+      )
       return data.bot.sendApi("set_group_special_title", {
         group_id: data.group_id,
         user_id,
         special_title,
-        duration: safeDuration,
-      });
+        duration,
+      })
     }
 
-    /**
-     * 设置群禁言（修复：确保duration在安全范围内）
-     */
+    sendGroupSign(data) {
+      Bot.makeLog("info", "群打卡", `${data.self_id} => ${data.group_id}`, true)
+      return data.bot.sendApi("send_group_sign", {
+        group_id: data.group_id,
+      })
+    }
+
     setGroupBan(data, user_id, duration = 600) {
-      // 验证duration值（最大30天）
-      const MAX_BAN_DURATION = 2592000; // 30天（秒）
-      const safeDuration = Math.min(Math.max(0, duration), MAX_BAN_DURATION);
-      
       Bot.makeLog(
         "info",
-        `禁言群成员：${safeDuration}秒`,
+        `禁言群成员：${duration}秒`,
         `${data.self_id} => ${data.group_id}, ${user_id}`,
         true
-      );
+      )
       return data.bot.sendApi("set_group_ban", {
         group_id: data.group_id,
         user_id,
-        duration: safeDuration,
-      });
+        duration,
+      })
     }
 
     setGroupWholeKick(data, enable) {
@@ -746,11 +681,11 @@ Bot.adapter.push(
         `${enable ? "开启" : "关闭"}全员禁言`,
         `${data.self_id} => ${data.group_id}`,
         true
-      );
+      )
       return data.bot.sendApi("set_group_whole_ban", {
         group_id: data.group_id,
         enable,
-      });
+      })
     }
 
     setGroupKick(data, user_id, reject_add_request = false) {
@@ -759,64 +694,28 @@ Bot.adapter.push(
         `踢出群成员${reject_add_request ? "拒绝再次加群" : ""}`,
         `${data.self_id} => ${data.group_id}, ${user_id}`,
         true
-      );
+      )
       return data.bot.sendApi("set_group_kick", {
         group_id: data.group_id,
         user_id,
         reject_add_request,
-      });
+      })
     }
 
     setGroupLeave(data, is_dismiss = false) {
-      Bot.makeLog("info", is_dismiss ? "解散" : "退群", `${data.self_id} => ${data.group_id}`, true);
+      Bot.makeLog("info", is_dismiss ? "解散" : "退群", `${data.self_id} => ${data.group_id}`, true)
       return data.bot.sendApi("set_group_leave", {
         group_id: data.group_id,
         is_dismiss,
-      });
+      })
     }
 
-    sendGroupSign(data) {
-      Bot.makeLog("info", "群打卡", `${data.self_id} => ${data.group_id}`, true);
-      return data.bot.sendApi("send_group_sign", {
-        group_id: data.group_id,
-      });
-    }
-
-    // 个人信息相关API
-    setProfile(data, profile) {
-      Bot.makeLog("info", `设置资料：${Bot.String(profile)}`, data.self_id);
-      return data.bot.sendApi("set_qq_profile", profile);
-    }
-
-    async setAvatar(data, file) {
-      Bot.makeLog("info", `设置头像：${file}`, data.self_id);
-      return data.bot.sendApi("set_qq_avatar", {
-        file: await this.makeFile(file),
-      });
-    }
-
-    sendLike(data, times) {
-      Bot.makeLog("info", `点赞：${times}次`, `${data.self_id} => ${data.user_id}`, true);
-      return data.bot.sendApi("send_like", {
-        user_id: data.user_id,
-        times,
-      });
-    }
-
-    // 文件相关API
-    async sendGroupFile(data, file, folder = "", name = path.basename(file)) {
-      Bot.makeLog(
-        "info",
-        `发送群文件：${folder || ""}/${name}(${file})`,
-        `${data.self_id} => ${data.group_id}`,
-        true
-      );
-      return data.bot.sendApi("upload_group_file", {
-        group_id: data.group_id,
-        folder,
-        file: (await this.makeFile(file, { file: true })).replace("file://", ""),
-        name,
-      });
+    downloadFile(data, url, thread_count = 1, headers = "") {
+      return data.bot.sendApi("download_file", {
+        url,
+        thread_count,
+        headers,
+      })
     }
 
     async sendFriendFile(data, file, name = path.basename(file)) {
@@ -825,21 +724,134 @@ Bot.adapter.push(
         `发送好友文件：${name}(${file})`,
         `${data.self_id} => ${data.user_id}`,
         true
-      );
+      )
       return data.bot.sendApi("upload_private_file", {
         user_id: data.user_id,
         file: (await this.makeFile(file, { file: true })).replace("file://", ""),
         name,
-      });
+      })
     }
 
-    // 创建对象方法
+    async sendGroupFile(data, file, folder = "", name = path.basename(file)) {
+      Bot.makeLog(
+        "info",
+        `发送群文件：${folder || ""}/${name}(${file})`,
+        `${data.self_id} => ${data.group_id}`,
+        true
+      )
+      return data.bot.sendApi("upload_group_file", {
+        group_id: data.group_id,
+        folder,
+        file: (await this.makeFile(file, { file: true })).replace("file://", ""),
+        name,
+      })
+    }
+
+    deleteGroupFile(data, file_id, busid) {
+      Bot.makeLog(
+        "info",
+        `删除群文件：${file_id}(${busid})`,
+        `${data.self_id} => ${data.group_id}`,
+        true
+      )
+      return data.bot.sendApi("delete_group_file", {
+        group_id: data.group_id,
+        file_id,
+        busid,
+      })
+    }
+
+    createGroupFileFolder(data, name) {
+      Bot.makeLog("info", `创建群文件夹：${name}`, `${data.self_id} => ${data.group_id}`, true)
+      return data.bot.sendApi("create_group_file_folder", {
+        group_id: data.group_id,
+        name,
+      })
+    }
+
+    getGroupFileSystemInfo(data) {
+      return data.bot.sendApi("get_group_file_system_info", {
+        group_id: data.group_id,
+      })
+    }
+
+    getGroupFiles(data, folder_id) {
+      if (folder_id) {
+        return data.bot.sendApi("get_group_files_by_folder", {
+          group_id: data.group_id,
+          folder_id,
+        })
+      }
+      return data.bot.sendApi("get_group_root_files", {
+        group_id: data.group_id,
+      })
+    }
+
+    getGroupFileUrl(data, file_id, busid) {
+      return data.bot.sendApi("get_group_file_url", {
+        group_id: data.group_id,
+        file_id,
+        busid,
+      })
+    }
+
+    getGroupFs(data) {
+      return {
+        upload: this.sendGroupFile.bind(this, data),
+        rm: this.deleteGroupFile.bind(this, data),
+        mkdir: this.createGroupFileFolder.bind(this, data),
+        df: this.getGroupFileSystemInfo.bind(this, data),
+        ls: this.getGroupFiles.bind(this, data),
+        download: this.getGroupFileUrl.bind(this, data),
+      }
+    }
+
+    deleteFriend(data) {
+      Bot.makeLog("info", "删除好友", `${data.self_id} => ${data.user_id}`, true)
+      return data.bot
+        .sendApi("delete_friend", { user_id: data.user_id })
+        .finally(() => this.getFriendMap(data))
+    }
+
+    setFriendAddRequest(data, flag, approve = true, remark = "") {
+      return data.bot.sendApi("set_friend_add_request", {
+        flag,
+        approve,
+        remark,
+      })
+    }
+
+    setGroupAddRequest(data, flag, approve = true, reason = "", sub_type = "add") {
+      return data.bot.sendApi("set_group_add_request", {
+        flag,
+        sub_type,
+        approve,
+        reason,
+      })
+    }
+
+    getGroupHonorInfo(data) {
+      return data.bot.sendApi("get_group_honor_info", { group_id: data.group_id })
+    }
+
+    getEssenceMsg(data) {
+      return data.bot.sendApi("get_essence_msg_list", { group_id: data.group_id })
+    }
+
+    setEssenceMsg(data, message_id) {
+      return data.bot.sendApi("set_essence_msg", { message_id })
+    }
+
+    deleteEssenceMsg(data, message_id) {
+      return data.bot.sendApi("delete_essence_msg", { message_id })
+    }
+
     pickFriend(data, user_id) {
       const i = {
         ...data.bot.fl.get(user_id),
         ...data,
         user_id,
-      };
+      }
       return {
         ...i,
         sendMsg: this.sendFriendMsg.bind(this, i),
@@ -850,48 +862,99 @@ Bot.adapter.push(
         sendFile: this.sendFriendFile.bind(this, i),
         getInfo: this.getFriendInfo.bind(this, i),
         getAvatarUrl() {
-          return this.avatar || `https://q.qlogo.cn/g?b=qq&s=0&nk=${user_id}`;
+          return this.avatar || `https://q.qlogo.cn/g?b=qq&s=0&nk=${user_id}`
         },
         getChatHistory: this.getFriendMsgHistory.bind(this, i),
         thumbUp: this.sendLike.bind(this, i),
-      };
+        delete: this.deleteFriend.bind(this, i),
+      }
     }
 
     pickMember(data, group_id, user_id) {
+      if (typeof group_id === "string" && group_id.includes("-")) {
+        const [guild_id, channel_id] = group_id.split("-")
+        const i = {
+          ...data,
+          guild_id,
+          channel_id,
+          user_id,
+        }
+        return {
+          ...this.pickGroup(i, group_id),
+          ...i,
+          getInfo: this.getGuildMemberInfo.bind(this, i),
+          getAvatarUrl: async () => {
+            const info = await this.getGuildMemberInfo(i)
+            return info.avatar_url
+          },
+        }
+      }
+
       const i = {
         ...data.bot.gml.get(group_id)?.get(user_id),
         ...data,
         group_id,
         user_id,
-      };
+      }
       return {
         ...this.pickFriend(i, user_id),
         ...i,
         getInfo: this.getMemberInfo.bind(this, i),
         getAvatarUrl() {
-          return this.avatar || `https://q.qlogo.cn/g?b=qq&s=0&nk=${user_id}`;
+          return this.avatar || `https://q.qlogo.cn/g?b=qq&s=0&nk=${user_id}`
         },
         poke: () => this.sendGroupMsg(i, { type: "poke", data: { qq: user_id } }),
         mute: (duration = 600) => this.setGroupBan(i, user_id, duration),
         kick: (reject = false) => this.setGroupKick(i, user_id, reject),
         get is_friend() {
-          return data.bot.fl.has(user_id);
+          return data.bot.fl.has(user_id)
         },
         get is_owner() {
-          return this.role === "owner";
+          return this.role === "owner"
         },
         get is_admin() {
-          return this.role === "admin" || this.is_owner;
+          return this.role === "admin" || this.is_owner
         },
-      };
+      }
     }
 
     pickGroup(data, group_id) {
+      if (typeof group_id === "string" && group_id.includes("-")) {
+        const [guild_id, channel_id] = group_id.split("-")
+        const i = {
+          ...data.bot.gl.get(group_id),
+          ...data,
+          guild_id,
+          channel_id,
+        }
+        return {
+          ...i,
+          sendMsg: this.sendGuildMsg.bind(this, i),
+          getMsg: this.getMsg.bind(this, i),
+          recallMsg: this.recallMsg.bind(this, i),
+          getForwardMsg: this.getForwardMsg.bind(this, i),
+          getInfo: this.getGuildInfo.bind(this, i),
+          getChannelArray: this.getGuildChannelArray.bind(this, i),
+          getChannelList: async () => {
+            const array = []
+            for (const { channel_id } of await this.getGuildChannelArray(i)) {
+              array.push(channel_id)
+            }
+            return array
+          },
+          getChannelMap: this.getGuildChannelMap.bind(this, i),
+          getMemberArray: this.getGuildMemberArray.bind(this, i),
+          getMemberList: this.getGuildMemberList.bind(this, i),
+          getMemberMap: this.getGuildMemberMap.bind(this, i),
+          pickMember: (user_id) => this.pickMember(i, group_id, user_id),
+        }
+      }
+
       const i = {
         ...data.bot.gl.get(group_id),
         ...data,
         group_id,
-      };
+      }
       return {
         ...i,
         sendMsg: this.sendGroupMsg.bind(this, i),
@@ -902,9 +965,11 @@ Bot.adapter.push(
         sendFile: (file, name) => this.sendGroupFile(i, file, undefined, name),
         getInfo: this.getGroupInfo.bind(this, i),
         getAvatarUrl() {
-          return this.avatar || `https://p.qlogo.cn/gh/${group_id}/${group_id}/0`;
+          return this.avatar || `https://p.qlogo.cn/gh/${group_id}/${group_id}/0`
         },
         getChatHistory: this.getGroupMsgHistory.bind(this, i),
+        getHonorInfo: this.getGroupHonorInfo.bind(this, i),
+        getEssence: this.getEssenceMsg.bind(this, i),
         getMemberArray: this.getMemberArray.bind(this, i),
         getMemberList: this.getMemberList.bind(this, i),
         getMemberMap: this.getMemberMap.bind(this, i),
@@ -920,23 +985,18 @@ Bot.adapter.push(
         muteAll: (enable) => this.setGroupWholeKick(i, enable),
         kickMember: (user_id, reject) => this.setGroupKick(i, user_id, reject),
         quit: () => this.setGroupLeave(i, false),
+        fs: this.getGroupFs(i),
         get is_owner() {
-          return data.bot.gml.get(group_id)?.get(data.self_id)?.role === "owner";
+          return data.bot.gml.get(group_id)?.get(data.self_id)?.role === "owner"
         },
         get is_admin() {
-          const role = data.bot.gml.get(group_id)?.get(data.self_id)?.role;
-          return role === "admin" || this.is_owner;
+          const role = data.bot.gml.get(group_id)?.get(data.self_id)?.role
+          return role === "admin" || this.is_owner
         },
-      };
+      }
     }
 
-    /**
-     * 建立连接
-     * @param {Object} data - 连接数据
-     * @param {WebSocket} ws - WebSocket连接
-     */
     async connect(data, ws) {
-      // 创建Bot实例
       Bot[data.self_id] = {
         adapter: this,
         ws: ws,
@@ -945,35 +1005,35 @@ Bot.adapter.push(
           start_time: data.time,
           stat: {},
           get lost_pkt_cnt() {
-            return this.stat.packet_lost || 0;
+            return this.stat.packet_lost || 0
           },
           get lost_times() {
-            return this.stat.lost_times || 0;
+            return this.stat.lost_times || 0
           },
           get recv_msg_cnt() {
-            return this.stat.message_received || 0;
+            return this.stat.message_received || 0
           },
           get recv_pkt_cnt() {
-            return this.stat.packet_received || 0;
+            return this.stat.packet_received || 0
           },
           get sent_msg_cnt() {
-            return this.stat.message_sent || 0;
+            return this.stat.message_sent || 0
           },
           get sent_pkt_cnt() {
-            return this.stat.packet_sent || 0;
+            return this.stat.packet_sent || 0
           },
         },
         model: "TRSS Yunzai",
 
         info: {},
         get uin() {
-          return this.info.user_id;
+          return this.info.user_id
         },
         get nickname() {
-          return this.info.nickname;
+          return this.info.nickname
         },
         get avatar() {
-          return `https://q.qlogo.cn/g?b=qq&s=0&nk=${this.uin}`;
+          return `https://q.qlogo.cn/g?b=qq&s=0&nk=${this.uin}`
         },
 
         setProfile: this.setProfile.bind(this, data),
@@ -982,7 +1042,7 @@ Bot.adapter.push(
 
         pickFriend: this.pickFriend.bind(this, data),
         get pickUser() {
-          return this.pickFriend;
+          return this.pickFriend
         },
         getFriendArray: this.getFriendArray.bind(this, data),
         getFriendList: this.getFriendList.bind(this, data),
@@ -1000,104 +1060,177 @@ Bot.adapter.push(
 
         request_list: [],
         getSystemMsg() {
-          return this.request_list;
+          return this.request_list
         },
-      };
-      
-      data.bot = Bot[data.self_id];
+        setFriendAddRequest: this.setFriendAddRequest.bind(this, data),
+        setGroupAddRequest: this.setGroupAddRequest.bind(this, data),
 
-      // 添加到UIN列表
-      if (!Bot.uin.includes(data.self_id)) {
-        Bot.uin.push(data.self_id);
+        setEssenceMessage: this.setEssenceMsg.bind(this, data),
+        removeEssenceMessage: this.deleteEssenceMsg.bind(this, data),
+
+        cookies: {},
+        getCookies(domain) {
+          return this.cookies[domain]
+        },
+        getCsrfToken() {
+          return this.bkn
+        },
+      }
+      data.bot = Bot[data.self_id]
+
+      if (!Bot.uin.includes(data.self_id)) Bot.uin.push(data.self_id)
+
+      // 设置机器人型号（可选，忽略错误）
+      data.bot.sendApi("_set_model_show", {
+        model: data.bot.model,
+        model_show: data.bot.model,
+      }).catch(() => {})
+
+      // 获取登录信息
+      try {
+        data.bot.info = await data.bot.sendApi("get_login_info")
+      } catch (err) {
+        Bot.makeLog("error", ["获取登录信息失败", err])
+        data.bot.info = {}
       }
 
-      // 初始化Bot信息
+      // 获取频道服务信息（可选）
       try {
-        // 获取登录信息
-        data.bot.info = await data.bot.sendApi("get_login_info");
-        
-        // 获取版本信息
-        data.bot.version = await data.bot.sendApi("get_version_info");
+        data.bot.guild_info = await data.bot.sendApi("get_guild_service_profile")
+      } catch (err) {
+        data.bot.guild_info = {}
+      }
+
+      // 获取在线客户端（可选）
+      try {
+        const result = await data.bot.sendApi("get_online_clients")
+        data.bot.clients = result.clients || []
+      } catch (err) {
+        data.bot.clients = []
+      }
+
+      // 获取版本信息
+      try {
+        data.bot.version = await data.bot.sendApi("get_version_info")
         data.bot.version = {
           ...data.bot.version,
           id: this.id,
           name: this.name,
           get version() {
-            return this.app_full_name || `${this.app_name} v${this.app_version}`;
+            return this.app_full_name || `${this.app_name} v${this.app_version}`
           },
-        };
+        }
       } catch (err) {
-        Bot.makeLog("error", ["初始化Bot信息失败", err]);
+        data.bot.version = {
+          id: this.id,
+          name: this.name,
+          version: "Unknown",
+        }
+      }
+
+      // 获取cookies（优化错误处理）
+      try {
+        const mainCookies = await data.bot.sendApi("get_cookies", { domain: "qun.qq.com" })
+        if (mainCookies?.cookies) {
+          data.bot.cookies["qun.qq.com"] = mainCookies.cookies
+          
+          // 尝试获取其他域名的cookies
+          const domains = [
+            "aq", "connect", "docs", "game", "gamecenter", "haoma",
+            "id", "kg", "mail", "mma", "office", "openmobile",
+            "qqweb", "qzone", "ti", "v", "vip", "y"
+          ]
+          
+          for (const i of domains) {
+            const domain = `${i}.qq.com`
+            try {
+              const result = await data.bot.sendApi("get_cookies", { domain })
+              if (result?.cookies) {
+                data.bot.cookies[domain] = result.cookies
+              }
+            } catch (err) {
+              // 静默处理单个域名cookie获取失败
+            }
+          }
+        }
+      } catch (err) {
+        Bot.makeLog("warn", "获取cookies失败，部分功能可能受限")
+      }
+
+      // 获取CSRF Token（可选）
+      try {
+        const result = await data.bot.sendApi("get_csrf_token")
+        data.bot.bkn = result.token
+      } catch (err) {
+        data.bot.bkn = null
       }
 
       // 异步加载好友和群组信息
-      data.bot.getFriendMap().catch(() => {});
-      data.bot.getGroupMemberMap().catch(() => {});
+      data.bot.getFriendMap().catch(() => {})
+      data.bot.getGroupMemberMap().catch(() => {})
 
       Bot.makeLog(
         "mark",
         `${this.name}(${this.id}) ${data.bot.version.version} 已连接`,
         data.self_id
-      );
-      
-      Bot.em(`connect.${data.self_id}`, data);
+      )
+      Bot.em(`connect.${data.self_id}`, data)
     }
 
-    /**
-     * 处理消息事件
-     */
     makeMessage(data) {
-      data.message = this.parseMsg(data.message);
+      data.message = this.parseMsg(data.message)
       
       switch (data.message_type) {
         case "private": {
           const name = data.sender?.card || 
                       data.sender?.nickname || 
-                      data.bot.fl.get(data.user_id)?.nickname;
+                      data.bot.fl.get(data.user_id)?.nickname
           Bot.makeLog(
             "info",
             `好友消息：${name ? `[${name}] ` : ""}${data.raw_message}`,
             `${data.self_id} <= ${data.user_id}`,
             true
-          );
-          break;
+          )
+          break
         }
         case "group": {
-          const group_name = data.group_name || data.bot.gl.get(data.group_id)?.group_name;
-          let user_name = data.sender?.card || data.sender?.nickname;
+          const group_name = data.group_name || data.bot.gl.get(data.group_id)?.group_name
+          let user_name = data.sender?.card || data.sender?.nickname
           if (!user_name) {
             const user = data.bot.gml.get(data.group_id)?.get(data.user_id) || 
-                        data.bot.fl.get(data.user_id);
-            if (user) user_name = user?.card || user?.nickname;
+                        data.bot.fl.get(data.user_id)
+            if (user) user_name = user?.card || user?.nickname
           }
           Bot.makeLog(
             "info",
             `群消息：${user_name ? `[${group_name ? `${group_name}, ` : ""}${user_name}] ` : ""}${data.raw_message}`,
             `${data.self_id} <= ${data.group_id}, ${data.user_id}`,
             true
-          );
-          break;
+          )
+          break
         }
         case "guild":
-          data.message_type = "group";
-          data.group_id = `${data.guild_id}-${data.channel_id}`;
+          data.message_type = "group"
+          data.group_id = `${data.guild_id}-${data.channel_id}`
           Bot.makeLog(
             "info",
             `频道消息：[${data.sender?.nickname}] ${Bot.String(data.message)}`,
             `${data.self_id} <= ${data.group_id}, ${data.user_id}`,
             true
-          );
-          break;
+          )
+          Object.defineProperty(data, "friend", {
+            get() {
+              return this.member || {}
+            },
+          })
+          break
         default:
-          Bot.makeLog("warn", `未知消息：${logger.magenta(data.raw)}`, data.self_id);
+          Bot.makeLog("warn", `未知消息：${logger.magenta(data.raw)}`, data.self_id)
       }
 
-      Bot.em(`${data.post_type}.${data.message_type}.${data.sub_type}`, data);
+      Bot.em(`${data.post_type}.${data.message_type}.${data.sub_type}`, data)
     }
 
-    /**
-     * 处理通知事件
-     */
     async makeNotice(data) {
       switch (data.notice_type) {
         case "friend_recall":
@@ -1106,80 +1239,287 @@ Bot.adapter.push(
             `好友消息撤回：${data.message_id}`,
             `${data.self_id} <= ${data.user_id}`,
             true
-          );
-          break;
+          )
+          break
         case "group_recall":
           Bot.makeLog(
             "info",
             `群消息撤回：${data.operator_id} => ${data.user_id} ${data.message_id}`,
             `${data.self_id} <= ${data.group_id}`,
             true
-          );
-          break;
-        case "group_increase":
+          )
+          break
+        case "group_increase": {
           Bot.makeLog(
             "info",
             `群成员增加：${data.operator_id} => ${data.user_id} ${data.sub_type}`,
             `${data.self_id} <= ${data.group_id}`,
             true
-          );
-          const group = data.bot.pickGroup(data.group_id);
-          group.getInfo().catch(() => {});
+          )
+          const group = data.bot.pickGroup(data.group_id)
+          group.getInfo().catch(() => {})
           if (data.user_id === data.self_id && cfg.bot.cache_group_member) {
-            group.getMemberMap().catch(() => {});
+            group.getMemberMap().catch(() => {})
           } else {
-            group.pickMember(data.user_id).getInfo().catch(() => {});
+            group.pickMember(data.user_id).getInfo().catch(() => {})
           }
-          break;
-        case "group_decrease":
+          break
+        }
+        case "group_decrease": {
           Bot.makeLog(
             "info",
             `群成员减少：${data.operator_id} => ${data.user_id} ${data.sub_type}`,
             `${data.self_id} <= ${data.group_id}`,
             true
-          );
+          )
           if (data.user_id === data.self_id) {
-            data.bot.gl.delete(data.group_id);
-            data.bot.gml.delete(data.group_id);
+            data.bot.gl.delete(data.group_id)
+            data.bot.gml.delete(data.group_id)
           } else {
-            data.bot.pickGroup(data.group_id).getInfo().catch(() => {});
-            data.bot.gml.get(data.group_id)?.delete(data.user_id);
+            data.bot.pickGroup(data.group_id).getInfo().catch(() => {})
+            data.bot.gml.get(data.group_id)?.delete(data.user_id)
           }
-          break;
+          break
+        }
         case "group_admin":
           Bot.makeLog(
             "info",
             `群管理员变动：${data.sub_type}`,
             `${data.self_id} <= ${data.group_id}, ${data.user_id}`,
             true
-          );
-          data.set = data.sub_type === "set";
-          data.bot.pickMember(data.group_id, data.user_id).getInfo().catch(() => {});
-          break;
+          )
+          data.set = data.sub_type === "set"
+          data.bot.pickMember(data.group_id, data.user_id).getInfo().catch(() => {})
+          break
+        case "group_upload":
+          Bot.makeLog(
+            "info",
+            `群文件上传：${Bot.String(data.file)}`,
+            `${data.self_id} <= ${data.group_id}, ${data.user_id}`,
+            true
+          )
+          Bot.em("message.group.normal", {
+            ...data,
+            post_type: "message",
+            message_type: "group",
+            sub_type: "normal",
+            message: [{ ...data.file, type: "file" }],
+            raw_message: `[文件：${data.file.name}]`,
+          })
+          break
         case "group_ban":
           Bot.makeLog(
             "info",
             `群禁言：${data.operator_id} => ${data.user_id} ${data.sub_type} ${data.duration}秒`,
             `${data.self_id} <= ${data.group_id}`,
             true
-          );
-          data.bot.pickMember(data.group_id, data.user_id).getInfo().catch(() => {});
-          break;
+          )
+          data.bot.pickMember(data.group_id, data.user_id).getInfo().catch(() => {})
+          break
+        case "group_msg_emoji_like":
+          Bot.makeLog(
+            "info",
+            [`群消息回应：${data.message_id}`, data.likes],
+            `${data.self_id} <= ${data.group_id}, ${data.user_id}`,
+            true
+          )
+          break
+        case "friend_add":
+          Bot.makeLog("info", "好友添加", `${data.self_id} <= ${data.user_id}`, true)
+          data.bot.pickFriend(data.user_id).getInfo().catch(() => {})
+          break
+        case "notify":
+          if (data.group_id) data.notice_type = "group"
+          else data.notice_type = "friend"
+          data.user_id ??= data.operator_id || data.target_id
+          
+          switch (data.sub_type) {
+            case "poke":
+              data.operator_id = data.user_id
+              if (data.group_id) {
+                Bot.makeLog(
+                  "info",
+                  `群戳一戳：${data.operator_id} => ${data.target_id}`,
+                  `${data.self_id} <= ${data.group_id}`,
+                  true
+                )
+              } else {
+                Bot.makeLog(
+                  "info",
+                  `好友戳一戳：${data.operator_id} => ${data.target_id}`,
+                  data.self_id,
+                  true
+                )
+              }
+              break
+            case "honor":
+              Bot.makeLog(
+                "info",
+                `群荣誉：${data.honor_type}`,
+                `${data.self_id} <= ${data.group_id}, ${data.user_id}`,
+                true
+              )
+              data.bot.pickMember(data.group_id, data.user_id).getInfo().catch(() => {})
+              break
+            case "title":
+              Bot.makeLog(
+                "info",
+                `群头衔：${data.title}`,
+                `${data.self_id} <= ${data.group_id}, ${data.user_id}`,
+                true
+              )
+              data.bot.pickMember(data.group_id, data.user_id).getInfo().catch(() => {})
+              break
+            case "group_name":
+              Bot.makeLog(
+                "info",
+                `群名更改：${data.name_new}`,
+                `${data.self_id} <= ${data.group_id}, ${data.user_id}`,
+                true
+              )
+              data.bot.pickGroup(data.group_id).getInfo().catch(() => {})
+              break
+            case "input_status":
+              data.post_type = "internal"
+              data.notice_type = "input"
+              data.end ??= data.event_type !== 1
+              data.message ||= data.status_text || `对方${data.end ? "结束" : "正在"}输入...`
+              Bot.makeLog("info", data.message, `${data.self_id} <= ${data.user_id}`, true)
+              break
+            case "profile_like":
+              Bot.makeLog(
+                "info",
+                `资料卡点赞：${data.times}次`,
+                `${data.self_id} <= ${data.operator_id}`,
+                true
+              )
+              break
+            default:
+              Bot.makeLog("warn", `未知通知：${logger.magenta(data.raw)}`, data.self_id)
+          }
+          break
+        case "group_card":
+          Bot.makeLog(
+            "info",
+            `群名片更新：${data.card_old} => ${data.card_new}`,
+            `${data.self_id} <= ${data.group_id}, ${data.user_id}`,
+            true
+          )
+          data.bot.pickMember(data.group_id, data.user_id).getInfo().catch(() => {})
+          break
+        case "offline_file":
+          Bot.makeLog(
+            "info",
+            `离线文件：${Bot.String(data.file)}`,
+            `${data.self_id} <= ${data.user_id}`,
+            true
+          )
+          Bot.em("message.private.friend", {
+            ...data,
+            post_type: "message",
+            message_type: "private",
+            sub_type: "friend",
+            message: [{ ...data.file, type: "file" }],
+            raw_message: `[文件：${data.file.name}]`,
+          })
+          break
+        case "client_status":
+          Bot.makeLog(
+            "info",
+            `客户端${data.online ? "上线" : "下线"}：${Bot.String(data.client)}`,
+            data.self_id
+          )
+          try {
+            const result = await data.bot.sendApi("get_online_clients")
+            data.clients = result.clients || []
+            data.bot.clients = data.clients
+          } catch (err) {
+            data.clients = []
+            data.bot.clients = []
+          }
+          break
+        case "essence":
+          data.notice_type = "group_essence"
+          Bot.makeLog(
+            "info",
+            `群精华消息：${data.operator_id} => ${data.sender_id} ${data.sub_type} ${data.message_id}`,
+            `${data.self_id} <= ${data.group_id}`,
+            true
+          )
+          break
+        case "guild_channel_recall":
+          Bot.makeLog(
+            "info",
+            `频道消息撤回：${data.operator_id} => ${data.user_id} ${data.message_id}`,
+            `${data.self_id} <= ${data.guild_id}-${data.channel_id}`,
+            true
+          )
+          break
+        case "message_reactions_updated":
+          data.notice_type = "guild_message_reactions_updated"
+          Bot.makeLog(
+            "info",
+            `频道消息表情贴：${data.message_id} ${Bot.String(data.current_reactions)}`,
+            `${data.self_id} <= ${data.guild_id}-${data.channel_id}, ${data.user_id}`,
+            true
+          )
+          break
+        case "channel_updated":
+          data.notice_type = "guild_channel_updated"
+          Bot.makeLog(
+            "info",
+            `子频道更新：${Bot.String(data.old_info)} => ${Bot.String(data.new_info)}`,
+            `${data.self_id} <= ${data.guild_id}-${data.channel_id}, ${data.user_id}`,
+            true
+          )
+          break
+        case "channel_created":
+          data.notice_type = "guild_channel_created"
+          Bot.makeLog(
+            "info",
+            `子频道创建：${Bot.String(data.channel_info)}`,
+            `${data.self_id} <= ${data.guild_id}-${data.channel_id}, ${data.user_id}`,
+            true
+          )
+          data.bot.getGroupMap().catch(() => {})
+          break
+        case "channel_destroyed":
+          data.notice_type = "guild_channel_destroyed"
+          Bot.makeLog(
+            "info",
+            `子频道删除：${Bot.String(data.channel_info)}`,
+            `${data.self_id} <= ${data.guild_id}-${data.channel_id}, ${data.user_id}`,
+            true
+          )
+          data.bot.getGroupMap().catch(() => {})
+          break
+        case "bot_offline":
+          data.post_type = "system"
+          data.notice_type = "offline"
+          Bot.makeLog("info", `${data.tag || "账号下线"}：${data.message}`, data.self_id)
+          Bot.sendMasterMsg(`[${data.self_id}] ${data.tag || "账号下线"}：${data.message}`)
+          break
         default:
-          Bot.makeLog("warn", `未知通知：${logger.magenta(data.raw)}`, data.self_id);
+          Bot.makeLog("warn", `未知通知：${logger.magenta(data.raw)}`, data.self_id)
       }
 
-      let notice = data.notice_type.split("_");
-      data.notice_type = notice.shift();
-      notice = notice.join("_");
-      if (notice) data.sub_type = notice;
+      let notice = data.notice_type.split("_")
+      data.notice_type = notice.shift()
+      notice = notice.join("_")
+      if (notice) data.sub_type = notice
 
-      Bot.em(`${data.post_type}.${data.notice_type}.${data.sub_type}`, data);
+      if (data.guild_id && data.channel_id) {
+        data.group_id = `${data.guild_id}-${data.channel_id}`
+        Object.defineProperty(data, "friend", {
+          get() {
+            return this.member || {}
+          },
+        })
+      }
+
+      Bot.em(`${data.post_type}.${data.notice_type}.${data.sub_type}`, data)
     }
 
-    /**
-     * 处理请求事件
-     */
     makeRequest(data) {
       switch (data.request_type) {
         case "friend":
@@ -1188,107 +1528,93 @@ Bot.adapter.push(
             `加好友请求：${data.comment}(${data.flag})`,
             `${data.self_id} <= ${data.user_id}`,
             true
-          );
-          data.sub_type = "add";
+          )
+          data.sub_type = "add"
           data.approve = function (approve = true, remark = "") {
-            return this.bot.setFriendAddRequest(this.flag, approve, remark);
-          };
-          break;
+            return this.bot.setFriendAddRequest(this.flag, approve, remark)
+          }
+          break
         case "group":
           Bot.makeLog(
             "info",
             `加群请求：${data.sub_type} ${data.comment}(${data.flag})`,
             `${data.self_id} <= ${data.group_id}, ${data.user_id}`,
             true
-          );
+          )
           data.approve = function (approve = true, reason = "") {
-            return this.bot.setGroupAddRequest(this.flag, approve, reason, this.sub_type);
-          };
-          break;
+            return this.bot.setGroupAddRequest(this.flag, approve, reason, this.sub_type)
+          }
+          break
         default:
-          Bot.makeLog("warn", `未知请求：${logger.magenta(data.raw)}`, data.self_id);
+          Bot.makeLog("warn", `未知请求：${logger.magenta(data.raw)}`, data.self_id)
       }
 
-      data.bot.request_list.push(data);
-      Bot.em(`${data.post_type}.${data.request_type}.${data.sub_type}`, data);
+      data.bot.request_list.push(data)
+      Bot.em(`${data.post_type}.${data.request_type}.${data.sub_type}`, data)
     }
 
-    /**
-     * 处理心跳
-     */
     heartbeat(data) {
       if (data.status) {
-        Object.assign(data.bot.stat, data.status);
+        Object.assign(data.bot.stat, data.status)
       }
     }
 
-    /**
-     * 处理元事件
-     */
     makeMeta(data, ws) {
       switch (data.meta_event_type) {
         case "heartbeat":
-          this.heartbeat(data);
-          break;
+          this.heartbeat(data)
+          break
         case "lifecycle":
-          this.connect(data, ws);
-          break;
+          this.connect(data, ws)
+          break
         default:
-          Bot.makeLog("warn", `未知元事件：${logger.magenta(data.raw)}`, data.self_id);
+          Bot.makeLog("warn", `未知元事件：${logger.magenta(data.raw)}`, data.self_id)
       }
     }
 
-    /**
-     * 消息处理入口
-     */
     message(data, ws) {
       try {
         data = {
           ...JSON.parse(data),
           raw: Bot.String(data),
-        };
+        }
       } catch (err) {
-        return Bot.makeLog("error", ["解码数据失败", data, err]);
+        return Bot.makeLog("error", ["解码数据失败", data, err])
       }
 
       if (data.post_type) {
         if (data.meta_event_type !== "lifecycle" && !Bot.uin.includes(data.self_id)) {
-          Bot.makeLog("warn", `找不到对应Bot，忽略消息：${logger.magenta(data.raw)}`, data.self_id);
-          return false;
+          Bot.makeLog("warn", `找不到对应Bot，忽略消息：${logger.magenta(data.raw)}`, data.self_id)
+          return false
         }
-        data.bot = Bot[data.self_id];
+        data.bot = Bot[data.self_id]
 
         switch (data.post_type) {
           case "meta_event":
-            return this.makeMeta(data, ws);
+            return this.makeMeta(data, ws)
           case "message":
-            return this.makeMessage(data);
+            return this.makeMessage(data)
           case "notice":
-            return this.makeNotice(data);
+            return this.makeNotice(data)
           case "request":
-            return this.makeRequest(data);
+            return this.makeRequest(data)
           case "message_sent":
-            data.post_type = "message";
-            return this.makeMessage(data);
+            data.post_type = "message"
+            return this.makeMessage(data)
         }
       } else if (data.echo) {
-        const cache = this.echo.get(data.echo);
-        if (cache) return cache.resolve(data);
+        const cache = this.echo.get(data.echo)
+        if (cache) return cache.resolve(data)
       }
       
-      Bot.makeLog("warn", `未知消息：${logger.magenta(data.raw)}`, data.self_id);
+      Bot.makeLog("warn", `未知消息：${logger.magenta(data.raw)}`, data.self_id)
     }
 
-    /**
-     * 加载适配器
-     */
     load() {
-      if (!Array.isArray(Bot.wsf[this.path])) {
-        Bot.wsf[this.path] = [];
-      }
+      if (!Array.isArray(Bot.wsf[this.path])) Bot.wsf[this.path] = []
       Bot.wsf[this.path].push((ws, ...args) =>
         ws.on("message", data => this.message(data, ws, ...args))
-      );
+      )
     }
   })()
-);
+)
