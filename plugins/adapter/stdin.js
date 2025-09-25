@@ -4,7 +4,7 @@ import os from "os";
 import { exec } from "child_process";
 import path from "path";
 import { ulid } from "ulid";
-import BotUtil from "../../lib/util.js";
+import BotUtil from "../../lib/common/util.js";
 
 const tempDir = path.join(process.cwd(), "www/stdin");
 const mediaDir = path.join(process.cwd(), "www/media");

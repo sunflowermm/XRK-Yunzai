@@ -1,4 +1,4 @@
-import EventListener from '../listener/listener.js'
+import EventListener from '../../lib/listener/listener.js'
 
 /**
  * 监听群聊消息 （理论上属于各类适配器的消息事件）

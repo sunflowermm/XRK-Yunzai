@@ -1,5 +1,5 @@
 import os from 'os';
-import cfg from '../config/config.js';
+import cfg from '../../lib/config/config.js';
 
 /**
  * 核心系统API

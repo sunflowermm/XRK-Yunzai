@@ -1,4 +1,4 @@
-import EventListener from '../listener/listener.js'
+import EventListener from '../../lib/listener/listener.js'
 
 /**
  * 监听消息 事件

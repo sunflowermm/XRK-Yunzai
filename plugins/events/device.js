@@ -1,4 +1,4 @@
-import EventListener from '../listener/listener.js'
+import EventListener from '../../lib/listener/listener.js'
 
 export default class devicesEvent extends EventListener {
   constructor () {

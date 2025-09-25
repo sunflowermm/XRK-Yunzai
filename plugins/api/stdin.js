@@ -167,7 +167,7 @@ export default {
 
   async init(app, Bot) {
     if (!global.stdinHandler) {
-      const StdinHandler = (await import('../../plugins/adapter/Stdin.js')).StdinHandler;
+      const StdinHandler = (await import('../adapter/Stdin.js')).StdinHandler;
       global.stdinHandler = new StdinHandler();
     }
 
