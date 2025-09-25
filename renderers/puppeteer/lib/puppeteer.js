@@ -1,4 +1,4 @@
-import Renderer from "../../../lib/puppeteer/renderer/Renderer.js";
+import Renderer from "../../../lib/renderer/Renderer.js";
 import os from "node:os";
 import lodash from "lodash";
 import puppeteer from "puppeteer";
