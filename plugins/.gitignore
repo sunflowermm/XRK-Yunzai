@@ -28,6 +28,9 @@ adapter/**
 !adapter/ComWeChat.js
 !adapter/OneBotv11.js
 !adapter/stdin.js
+!adapter/GSUIDCORE.js
+!adapter/QBQBot.js
+!adapter/Satori.js
 
 !api
 api/**
@@ -48,6 +51,7 @@ events/**
 !events/message.js
 !events/notice.js
 !events/request.js
+
 
 *.psd
 *.map
