@@ -55,7 +55,7 @@ events/**
 !python
 python/**
 !python/example/
-!python/example/测试.py
+!python/example/index.py
 !python/requirements.txt
 *.psd
 *.map
