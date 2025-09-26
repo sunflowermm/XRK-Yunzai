@@ -2018,3 +2018,6 @@ class OneBotv11Adapter {
     )
   }
 }
+
+// 创建并注册适配器实例
+Bot.adapter.push(new OneBotv11Adapter())
