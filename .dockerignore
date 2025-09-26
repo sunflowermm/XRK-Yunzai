@@ -1,0 +1,58 @@
+# Node modules
+node_modules/
+*/node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build
+dist/
+build/
+
+# PM2
+.pm2/
+pm2.json
+pm2.yaml
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+*.md
+docs/
+
+# Testing
+test/
+tests/
+coverage/
+.nyc_output/
+
+# Temporary files
+tmp/
+temp/
