@@ -130,14 +130,12 @@ class OneBotv11Adapter {
     const forward = []
     
     for (let i of msg) {
-      // 标准化消息格式
       if (typeof i !== "object") {
         i = { type: "text", data: { text: String(i) } }
       } else if (!i.data) {
         i = { type: i.type, data: { ...i, type: undefined } }
       }
 
-      // 处理不同消息类型
       switch (i.type) {
         case "at":
           i.data.qq = String(i.data.qq)
@@ -146,7 +144,7 @@ class OneBotv11Adapter {
           i.data.id = String(i.data.id)
           break
         case "button":
-          continue // 跳过按钮消息
+          continue
         case "node":
           forward.push(...(Array.isArray(i.data) ? i.data : [i.data]))
           continue
@@ -232,24 +230,20 @@ class OneBotv11Adapter {
       const info = await data.bot.sendApi("get_group_member_info", {
         group_id: data.group_id,
         user_id: data.user_id,
-        no_cache: true  // 强制获取最新数据
+        no_cache: true
       })
       
-      // 确保缓存结构存在
       let gml = data.bot.gml.get(data.group_id)
       if (!gml) {
         gml = new Map()
         data.bot.gml.set(data.group_id, gml)
       }
       
-      // 规范化role字段
       if (info) {
         // OneBot v11 标准role字段："owner"/"admin"/"member"
         if (!info.role && info.permission) {
-          // 兼容旧版本
           info.role = info.permission
         } else if (!info.role) {
-          // 根据其他字段推断
           if (info.is_owner) {
             info.role = "owner"
           } else if (info.is_admin) {
@@ -382,15 +376,11 @@ class OneBotv11Adapter {
       }
     }
 
-    // 获取缓存的成员信息
     let memberInfo = data.bot.gml.get(group_id)?.get(user_id)
     
-    // 如果没有缓存或缺少role信息，主动获取
     if (!memberInfo || !memberInfo.role) {
-      // 异步获取最新信息，但不阻塞当前操作
       this.getMemberInfo({ ...data, group_id, user_id }).then(info => {
         if (info && info.role) {
-          // 更新缓存
           let gml = data.bot.gml.get(group_id)
           if (!gml) {
             gml = new Map()
@@ -408,7 +398,6 @@ class OneBotv11Adapter {
       user_id,
     }
 
-    // 构造成员对象
     const member = {
       ...this.pickFriend(i, user_id),
       ...i,
@@ -423,19 +412,16 @@ class OneBotv11Adapter {
       mute: (duration = 600) => this.setGroupBan(i, user_id, duration),
       kick: (reject = false) => this.setGroupKick(i, user_id, reject),
       
-      // 修复：正确的getter实现
       get is_friend() {
         return data.bot.fl.has(user_id)
       },
       get is_owner() {
-        // 优先使用缓存的role信息，如果没有则尝试从其他字段判断
         const currentInfo = data.bot.gml.get(group_id)?.get(user_id)
         return currentInfo?.role === "owner" || 
                this.role === "owner" || 
                this.permission === "owner"
       },
       get is_admin() {
-        // 优先使用缓存的role信息
         const currentInfo = data.bot.gml.get(group_id)?.get(user_id)
         const role = currentInfo?.role || this.role || this.permission
         return role === "admin" || role === "owner" || this.is_owner
@@ -688,7 +674,6 @@ class OneBotv11Adapter {
         })
     )
 
-    // 设置机器人型号（可选）
     initTasks.push(
       data.bot.sendApi("_set_model_show", {
         model: data.bot.model,
@@ -1398,7 +1383,6 @@ class OneBotv11Adapter {
     }
   }
 
-  // 群组操作
   setGroupName(data, group_name) {
     Bot.makeLog("info", `设置群名：${group_name}`, 
       `${data.self_id} => ${data.group_id}`, true)
@@ -1518,7 +1502,6 @@ class OneBotv11Adapter {
     })
   }
 
-  // 文件相关
   downloadFile(data, url, thread_count = 1, headers = "") {
     return data.bot.sendApi("download_file", {
       url,
@@ -1616,7 +1599,6 @@ class OneBotv11Adapter {
     }
   }
 
-  // 请求处理
   setFriendAddRequest(data, flag, approve = true, remark = "") {
     return data.bot.sendApi("set_friend_add_request", {
       flag,
@@ -1634,7 +1616,6 @@ class OneBotv11Adapter {
     })
   }
 
-  // 群荣誉和精华消息
   getGroupHonorInfo(data) {
     return data.bot.sendApi("get_group_honor_info", { 
       group_id: data.group_id 
@@ -1655,7 +1636,6 @@ class OneBotv11Adapter {
     return data.bot.sendApi("delete_essence_msg", { message_id })
   }
 
-  // 频道相关
   async getGuildArray(data) {
     try {
       const result = await data.bot.sendApi("get_guild_list")
@@ -1752,7 +1732,6 @@ class OneBotv11Adapter {
     }
   }
 
-  // 个人信息相关
   setProfile(data, profile) {
     Bot.makeLog("info", `设置资料：${Bot.String(profile)}`, data.self_id)
     return data.bot.sendApi("set_qq_profile", profile)
@@ -1774,7 +1753,6 @@ class OneBotv11Adapter {
     })
   }
 
-  // 通知处理方法（简化版，具体实现参考原代码）
   handleFriendRecall(data) {
     Bot.makeLog(
       "info",
@@ -2068,5 +2046,4 @@ class OneBotv11Adapter {
   }
 }
 
-// 导出并注册适配器
 Bot.adapter.push(new OneBotv11Adapter())
