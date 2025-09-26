@@ -10,10 +10,16 @@ Bot.adapter.push(
     echo = new Map()
     timeout = 60000
 
+    /**
+     * 生成日志消息（隐藏base64内容）
+     */
     makeLog(msg) {
       return Bot.String(msg).replace(/base64:\/\/.*?(,|]|")/g, "base64://...$1")
     }
 
+    /**
+     * 发送API请求
+     */
     sendApi(data, ws, action, params = {}) {
       const echo = ulid()
       const request = { action, params, echo }
@@ -42,6 +48,9 @@ Bot.adapter.push(
         })
     }
 
+    /**
+     * 转换文件为base64格式
+     */
     async makeFile(file, opts) {
       file = await Bot.Buffer(file, {
         http: true,
@@ -52,6 +61,9 @@ Bot.adapter.push(
       return file
     }
 
+    /**
+     * 处理消息格式
+     */
     async makeMsg(msg) {
       if (!Array.isArray(msg)) msg = [msg]
       const msgs = []
@@ -78,12 +90,14 @@ Bot.adapter.push(
         }
 
         if (i.data.file) i.data.file = await this.makeFile(i.data.file)
-
         msgs.push(i)
       }
       return [msgs, forward]
     }
 
+    /**
+     * 发送消息（支持普通和转发）
+     */
     async sendMsg(msg, send, sendForwardMsg) {
       const [message, forward] = await this.makeMsg(msg)
       const ret = []
@@ -169,6 +183,9 @@ Bot.adapter.push(
       return msgs
     }
 
+    /**
+     * 解析消息内容
+     */
     parseMsg(msg) {
       const array = []
       for (const i of Array.isArray(msg) ? msg : [msg])
@@ -225,6 +242,9 @@ Bot.adapter.push(
       return msgs
     }
 
+    /**
+     * 构建转发消息
+     */
     async makeForwardMsg(msg) {
       const msgs = []
       for (const i of msg) {
@@ -312,7 +332,7 @@ Bot.adapter.push(
               group_name: `${guild.guild_name}-${channel.channel_name}`,
             })
       } catch (err) {
-        //Bot.makeLog("error", ["获取频道列表错误", err])
+        // 获取频道列表失败，静默处理
       }
       return array
     }
@@ -363,12 +383,24 @@ Bot.adapter.push(
       return map
     }
 
+    /**
+     * 获取所有群的成员映射表
+     */
     async getGroupMemberMap(data) {
-      if (!cfg.bot.cache_group_member) return this.getGroupMap(data)
-      for (const [group_id, group] of await this.getGroupMap(data)) {
+      await this.getGroupMap(data)
+      
+      // 始终获取所有群成员信息
+      for (const [group_id, group] of data.bot.gl) {
         if (group.guild) continue
-        await this.getMemberMap({ ...data, group_id })
+        try {
+          await this.getMemberMap({ ...data, group_id })
+          Bot.makeLog("debug", `已加载群 ${group_id} 的成员列表`, data.self_id)
+        } catch (err) {
+          Bot.makeLog("error", `加载群 ${group_id} 成员失败: ${err.message}`, data.self_id)
+        }
       }
+      
+      return data.bot.gml
     }
 
     async getMemberInfo(data) {
@@ -439,7 +471,7 @@ Bot.adapter.push(
     async getGuildMemberList(data) {
       const array = []
       for (const { user_id } of await this.getGuildMemberArray(data)) array.push(user_id)
-      return array.push
+      return array
     }
 
     async getGuildMemberMap(data) {
@@ -726,6 +758,9 @@ Bot.adapter.push(
       return data.bot.sendApi("delete_essence_msg", { message_id })
     }
 
+    /**
+     * 创建好友对象
+     */
     pickFriend(data, user_id) {
       const i = {
         ...data.bot.fl.get(user_id),
@@ -750,6 +785,9 @@ Bot.adapter.push(
       }
     }
 
+    /**
+     * 创建成员对象
+     */
     pickMember(data, group_id, user_id) {
       if (typeof group_id === "string" && group_id.match("-")) {
         const guild_id = group_id.split("-")
@@ -766,6 +804,8 @@ Bot.adapter.push(
           getAvatarUrl: async () => (await this.getGuildMemberInfo(i)).avatar_url,
         }
       }
+      
+      // 获取成员信息
       const memberInfo = data.bot.gml.get(group_id)?.get(user_id) || {}
       const i = {
         ...memberInfo,
@@ -788,16 +828,17 @@ Bot.adapter.push(
           return data.bot.fl.has(user_id)
         },
         get is_owner() {
-          // 修复: 直接使用缓存中的role信息
           return memberInfo.role === "owner"
         },
         get is_admin() {
-          // 修复: 直接使用缓存中的role信息
           return memberInfo.role === "admin" || memberInfo.role === "owner"
         },
       }
     }
 
+    /**
+     * 创建群对象
+     */
     pickGroup(data, group_id) {
       if (typeof group_id === "string" && group_id.match("-")) {
         const guild_id = group_id.split("-")
@@ -829,6 +870,7 @@ Bot.adapter.push(
         ...data,
         group_id,
       }
+      
       return {
         ...i,
         sendMsg: this.sendGroupMsg.bind(this, i),
@@ -861,16 +903,19 @@ Bot.adapter.push(
         quit: this.setGroupLeave.bind(this, i),
         fs: this.getGroupFs(i),
         get is_owner() {
-          const botMemberInfo = i.bot.gml.get(group_id)?.get(i.self_id)
+          const botMemberInfo = data.bot.gml.get(group_id)?.get(data.self_id)
           return botMemberInfo?.role === "owner"
         },
         get is_admin() {
-          const botMemberInfo = i.bot.gml.get(group_id)?.get(i.self_id)
+          const botMemberInfo = data.bot.gml.get(group_id)?.get(data.self_id)
           return botMemberInfo?.role === "admin" || botMemberInfo?.role === "owner"
         },
       }
     }
 
+    /**
+     * 建立连接时初始化Bot实例
+     */
     async connect(data, ws) {
       Bot[data.self_id] = {
         adapter: this,
@@ -898,7 +943,7 @@ Bot.adapter.push(
             return this.stat.packet_sent
           },
         },
-        model: "XRK Yunzai ",
+        model: "XRK Yunzai",
 
         info: {},
         get uin() {
@@ -955,6 +1000,7 @@ Bot.adapter.push(
 
       if (!Bot.uin.includes(data.self_id)) Bot.uin.push(data.self_id)
 
+      // 设置显示模型
       data.bot
         .sendApi("_set_model_show", {
           model: data.bot.model,
@@ -962,6 +1008,7 @@ Bot.adapter.push(
         })
         .catch(() => {})
 
+      // 获取账号信息
       data.bot.info = (await data.bot.sendApi("get_login_info").catch(i => i.error)).data
       data.bot.guild_info = (
         await data.bot.sendApi("get_guild_service_profile").catch(i => i.error)
@@ -976,6 +1023,7 @@ Bot.adapter.push(
         },
       }
 
+      // 获取cookies
       if (
         (data.bot.cookies["qun.qq.com"] = (
           await data.bot.sendApi("get_cookies", { domain: "qun.qq.com" }).catch(i => i.error)
@@ -1009,8 +1057,9 @@ Bot.adapter.push(
         }
       data.bot.bkn = (await data.bot.sendApi("get_csrf_token").catch(i => i.error)).token
 
-      data.bot.getFriendMap()
-      data.bot.getGroupMemberMap()
+      // 初始化联系人和群成员列表
+      await data.bot.getFriendMap()
+      await data.bot.getGroupMemberMap()
 
       Bot.makeLog(
         "mark",
@@ -1020,6 +1069,9 @@ Bot.adapter.push(
       Bot.em(`connect.${data.self_id}`, data)
     }
 
+    /**
+     * 处理消息事件
+     */
     makeMessage(data) {
       data.message = this.parseMsg(data.message)
       switch (data.message_type) {
@@ -1072,6 +1124,9 @@ Bot.adapter.push(
       Bot.em(`${data.post_type}.${data.message_type}.${data.sub_type}`, data)
     }
 
+    /**
+     * 处理通知事件
+     */
     async makeNotice(data) {
       switch (data.notice_type) {
         case "friend_recall":
@@ -1099,8 +1154,8 @@ Bot.adapter.push(
           )
           const group = data.bot.pickGroup(data.group_id)
           group.getInfo()
-          if (data.user_id === data.self_id && cfg.bot.cache_group_member) group.getMemberMap()
-          else group.pickMember(data.user_id).getInfo()
+          // 新成员加入时更新成员列表
+          group.pickMember(data.user_id).getInfo()
           break
         }
         case "group_decrease": {
@@ -1349,6 +1404,9 @@ Bot.adapter.push(
       Bot.em(`${data.post_type}.${data.notice_type}.${data.sub_type}`, data)
     }
 
+    /**
+     * 处理请求事件
+     */
     makeRequest(data) {
       switch (data.request_type) {
         case "friend":
@@ -1382,10 +1440,16 @@ Bot.adapter.push(
       Bot.em(`${data.post_type}.${data.request_type}.${data.sub_type}`, data)
     }
 
+    /**
+     * 处理心跳
+     */
     heartbeat(data) {
       if (data.status) Object.assign(data.bot.stat, data.status)
     }
 
+    /**
+     * 处理元事件
+     */
     makeMeta(data, ws) {
       switch (data.meta_event_type) {
         case "heartbeat":
@@ -1399,6 +1463,9 @@ Bot.adapter.push(
       }
     }
 
+    /**
+     * WebSocket消息处理入口
+     */
     message(data, ws) {
       try {
         data = {
@@ -1436,6 +1503,9 @@ Bot.adapter.push(
       Bot.makeLog("warn", `未知消息：${logger.magenta(data.raw)}`, data.self_id)
     }
 
+    /**
+     * 加载适配器
+     */
     load() {
       if (!Array.isArray(Bot.wsf[this.path])) Bot.wsf[this.path] = []
       Bot.wsf[this.path].push((ws, ...args) =>
