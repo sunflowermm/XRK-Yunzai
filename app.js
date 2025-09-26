@@ -257,9 +257,7 @@ class DependencyManager {
       /** 安装缺失的依赖 */
       if (missingDeps.length > 0) {
         await this.installDependencies(missingDeps);
-      } else {
-        await this.logger.success('所有依赖已就绪');
-      }
+      } else { }
     } catch (error) {
       await this.logger.error(`依赖检查失败: ${error.message}`);
       throw error;
@@ -292,8 +290,6 @@ class EnvironmentValidator {
     if (majorVersion < 14) {
       throw new Error(`Node.js版本过低: ${nodeVersion}, 需要 v14.0.0 或更高版本`);
     }
-    
-    await this.logger.success(`Node.js版本: ${nodeVersion}`);
   }
 
   /**
@@ -310,8 +306,6 @@ class EnvironmentValidator {
     for (const dir of requiredDirs) {
       await fs.mkdir(dir, { recursive: true });
     }
-    
-    await this.logger.success('必要目录已就绪');
   }
 
   /**
@@ -319,12 +313,9 @@ class EnvironmentValidator {
    * @returns {Promise<void>}
    */
   async validate() {
-    await this.logger.log('开始环境验证...');
     
     await this.checkNodeVersion();
     await this.checkRequiredDirectories();
-    
-    await this.logger.success('环境验证通过');
   }
 }
 
@@ -347,10 +338,6 @@ class Bootstrap {
    */
   async initialize() {
     await this.logger.ensureLogDir();
-    await this.logger.log('========================================');
-    await this.logger.log('葵崽服务器引导程序启动');
-    await this.logger.log('========================================');
-    
     /** 验证环境 */
     await this.environmentValidator.validate();
     
