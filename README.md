@@ -25,6 +25,12 @@
 # 使用Gitcode
 git clone --depth=1 https://gitcode.com/Xrkseek/XRK-Yunzai.git
 cd XRK-Yunzai 
+# 使用Gitee
+git clone --depth=1 https://gitee.com/xrkseek/XRK-Yunzai.git
+cd XRK-Yunzai 
+# 使用Github
+git clone --depth=1 https://github.com/Xrkseek/XRK-Yunzai.git
+cd XRK-Yunzai 
 ```
 
 ###  安装依赖<自动>
@@ -45,25 +51,13 @@ cd XRK-Yunzai
 node app # 启动
 ```
 
-###  葵崽到底改了哪里，相比于其他崽有哪些妥协和升级？
-
-- 启动逻辑大改，让icqq带着账号登录，以方便多开，也优化了pm2相关
-- 使用单例多开的方式，提高了日志的可读性和多开的可运营性(商用)
-- stdin用户接入http，云崽也成为了拥有post的方法的api，真正意义上成为了机器人和消息处理器，而并非qq机器人或者多端机器人，可投入工农商三用，成为真正意义上的后端语言
-- 无论是对象抑或是属性和变量的定义将在葵崽更好的呈现，不会不清晰
-- 任务处理器更加多元化，函数更加通用(以方便后续对多类型文件或事件的处理)
-- 引入了时雨崽的底层并进行了部分修改，支持双崽的所有函数和插件并进行了兼容处理
-- 在很多细节处理上优化了用户体验，诸如icqq登录，chromium实例占用检查，全局的实例数量控制，以及一些函数的规范化
-- 增加了喵崽没有的守护进程，得灵感于时雨崽，区分了服务器模式和icqq模式下的监听事件s
-- loader部分做了很多的修改优化，以提高兼容性防止报错
-
 ### 葵崽重要特性
 
 [点进来吧](./stdin.md)
 
 <hr>
 
-## 致谢
+## 致谢(永远不变)
 
 |                           Nickname                            |       name       |   Contribution   |
 |:-------------------------------------------------------------:|------------------|------------------|
