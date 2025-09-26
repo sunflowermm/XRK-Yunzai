@@ -170,7 +170,5 @@ export default {
       const StdinHandler = (await import('../adapter/Stdin.js')).StdinHandler;
       global.stdinHandler = new StdinHandler();
     }
-
-    logger.info('标准输入API模块已加载');
   }
 };

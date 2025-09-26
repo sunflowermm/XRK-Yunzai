@@ -214,8 +214,4 @@ export default {
       });
     }]
   },
-
-  init(app, Bot) {
-    logger.info('Bot管理API模块已加载');
-  }
 };

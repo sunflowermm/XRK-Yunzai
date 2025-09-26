@@ -785,6 +785,5 @@ export default {
       const onlineCount = [...devices.values()].filter(d => d.online).length;
       BotUtil.makeLog('debug', `[设备管理器] 在线设备: ${onlineCount}/${devices.size}`, 'DeviceManager');
     }, 60000);
-    BotUtil.makeLog('info', `[设备管理器] 初始化完成 - 心跳间隔=${deviceManager.heartbeatInterval}s, 超时=${deviceManager.heartbeatTimeout}s`, 'DeviceManager');
   }
 };

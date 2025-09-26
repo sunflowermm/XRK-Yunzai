@@ -494,7 +494,5 @@ export default {
         }
       }
     }, 60 * 60 * 1000);
-
-    logger.info('文件管理API模块已加载');
   }
 };

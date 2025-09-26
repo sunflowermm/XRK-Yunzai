@@ -295,9 +295,4 @@ export default {
       }
     }
   ],
-
-  init(app, Bot) {
-    logger.info('[Data Editor API] 数据编辑API已加载');
-    logger.info('[Data Editor API] 支持的功能：JSON/YAML 文件读写操作');
-  }
 };
