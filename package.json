@@ -5,6 +5,9 @@
   "description": "Integrated Bot",
   "main": "app.js",
   "type": "module",
+  "scripts": {
+    "py-setup": "pip install -r plugins/python/requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple"
+  },
   "dependencies": {
     "systeminformation": "^5.25.11",
     "glob": "^11.0.3",

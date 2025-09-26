@@ -52,6 +52,10 @@ events/**
 !events/notice.js
 !events/request.js
 
-
+!python
+python/**
+!python/example/
+!python/example/测试.py
+!python/requirements.txt
 *.psd
 *.map

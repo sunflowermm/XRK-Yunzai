@@ -1,4 +1,9 @@
 *
 !.gitignore
-!xrk/
-!xrk/**
+
+!xrk
+xrk/**
+!xrk/index.html
+!xrk/api-config.json
+!xrk/style.css
+!xrk/app.js
