@@ -4,7 +4,7 @@
 # 服务器基础配置
 server:
   # 服务器名称
-  name: "Yunzai Webserver"
+  name: "XRK Webserver"
   
   # 服务器监听地址
   # 0.0.0.0 表示监听所有网络接口
@@ -23,12 +23,12 @@ domain:
   # 主域名列表
   # 支持多个域名，第一个为主域名
   hosts:
-    - "example.com"
+    - "xrkk.cc"
   
   # 域名重定向规则
   redirects:
-    # 强制重定向到主域名
-    enforceMain: true
+    # 强制重定向到主域名（默认关闭，避免与nginx冲突）
+    enforceMain: false
     # 强制使用HTTPS（当HTTPS启用时）
     enforceHttps: true
     # 重定向状态码 (301永久/302临时)
@@ -37,28 +37,25 @@ domain:
   # 域名路由映射
   # 不同域名可映射到不同目录
   routes:
-    "example.com": "www"
+    "xrkk.cc": "www"
 
 # HTTPS配置
 https:
   # 是否启用HTTPS
-  enabled: false
+  enabled: true
   
   # SSL证书配置
-  # 支持单证书或多域名证书
+  # 支持单证书或多域名证书 如果是 Let's Encrypt 请自己配置动续签
   certificates:
     # 默认证书
     default:
-      key: "/path/to/private.key"
-      cert: "/path/to/certificate.crt"
+      key: "/etc/letsencrypt/live/xrkk.cc/privkey.pem"
+      cert: "/etc/letsencrypt/live/xrkk.cc/fullchain.pem"
       # 可选：证书链
       ca: ""
     
     # 域名特定证书（可选）
     domains: {}
-      # "example.com":
-      #   key: "/path/to/example.key"
-      #   cert: "/path/to/example.crt"
   
   # SSL/TLS选项
   options:
@@ -66,9 +63,9 @@ https:
     minVersion: "TLSv1.2"
     # 是否启用HTTP/2
     http2: true
-    # HSTS（HTTP严格传输安全）
+    # HSTS（HTTP严格传输安全）配置
     hsts:
-      enabled: true
+      enabled: false
       maxAge: 31536000
       includeSubDomains: true
       preload: false
@@ -113,14 +110,8 @@ security:
   # Helmet安全头配置
   helmet:
     enabled: true
-    # 内容安全策略
     csp:
       enabled: false
-      directives:
-        defaultSrc: ["'self'"]
-        scriptSrc: ["'self'", "'unsafe-inline'"]
-        styleSrc: ["'self'", "'unsafe-inline'"]
-        imgSrc: ["'self'", "data:", "https:"]
   
   # CORS跨域配置
   cors:
@@ -208,12 +199,6 @@ compression:
   level: 6
   # 最小压缩大小
   threshold: 1024
-  # 压缩的MIME类型
-  filter:
-    - "text/*"
-    - "application/json"
-    - "application/javascript"
-    - "application/xml"
 
 # 日志配置
 logging:
@@ -223,7 +208,7 @@ logging:
   errors: true
   # 调试日志
   debug: false
-  # 静默路径（不记录日志）
+  # 静默路径
   quiet:
     - "/health"
     - "/favicon.ico"
