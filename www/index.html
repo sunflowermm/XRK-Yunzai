@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XRK-MultiBot | 向日葵机器人框架</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* 动态背景粒子 */
+        #particles {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        .particle {
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            animation: float 20s infinite linear;
+        }
+
+        @keyframes float {
+            from {
+                transform: translateY(100vh) rotate(0deg);
+                opacity: 0;
+            }
+            10% {
+                opacity: 1;
+            }
+            90% {
+                opacity: 1;
+            }
+            to {
+                transform: translateY(-100vh) rotate(360deg);
+                opacity: 0;
+            }
+        }
+
+        /* 向日葵动画 */
+        .sunflower-container {
+            position: fixed;
+            bottom: -50px;
+            left: 50px;
+            z-index: 2;
+            animation: sway 4s ease-in-out infinite;
+        }
+
+        @keyframes sway {
+            0%, 100% { transform: rotate(-3deg); }
+            50% { transform: rotate(3deg); }
+        }
+
+        .sunflower {
+            width: 150px;
+            height: 150px;
+            position: relative;
+        }
+
+        .sunflower-center {
+            width: 60px;
+            height: 60px;
+            background: radial-gradient(circle, #8B4513, #654321);
+            border-radius: 50%;
+            position: absolute;
+            top: 45px;
+            left: 45px;
+            z-index: 2;
+            box-shadow: 0 0 20px rgba(139, 69, 19, 0.5);
+        }
+
+        .petal {
+            width: 40px;
+            height: 80px;
+            background: linear-gradient(135deg, #FFD700, #FFA500);
+            border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+            position: absolute;
+            top: 35px;
+            left: 55px;
+            transform-origin: center bottom;
+            box-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
+            animation: petalGlow 3s ease-in-out infinite;
+        }
+
+        @keyframes petalGlow {
+            0%, 100% { filter: brightness(1); }
+            50% { filter: brightness(1.2); }
+        }
+
+        .petal:nth-child(1) { transform: rotate(0deg) translateY(-30px); }
+        .petal:nth-child(2) { transform: rotate(30deg) translateY(-30px); }
+        .petal:nth-child(3) { transform: rotate(60deg) translateY(-30px); }
+        .petal:nth-child(4) { transform: rotate(90deg) translateY(-30px); }
+        .petal:nth-child(5) { transform: rotate(120deg) translateY(-30px); }
+        .petal:nth-child(6) { transform: rotate(150deg) translateY(-30px); }
+        .petal:nth-child(7) { transform: rotate(180deg) translateY(-30px); }
+        .petal:nth-child(8) { transform: rotate(210deg) translateY(-30px); }
+        .petal:nth-child(9) { transform: rotate(240deg) translateY(-30px); }
+        .petal:nth-child(10) { transform: rotate(270deg) translateY(-30px); }
+        .petal:nth-child(11) { transform: rotate(300deg) translateY(-30px); }
+        .petal:nth-child(12) { transform: rotate(330deg) translateY(-30px); }
+
+        /* 主容器 */
+        .main-container {
+            position: relative;
+            z-index: 10;
+            padding: 40px 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        /* 标题部分 */
+        .header {
+            text-align: center;
+            margin-bottom: 60px;
+            animation: fadeInDown 1s ease-out;
+        }
+
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .title {
+            font-size: 3.5em;
+            color: #fff;
+            text-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            margin-bottom: 10px;
+            font-weight: bold;
+            background: linear-gradient(45deg, #FFD700, #FFA500);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            font-size: 1.3em;
+            color: rgba(255, 255, 255, 0.9);
+            text-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+
+        .version-badge {
+            display: inline-block;
+            background: rgba(255, 215, 0, 0.9);
+            color: #333;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            margin-top: 10px;
+            font-weight: bold;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        /* 项目卡片 */
+        .projects-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 30px;
+            margin-bottom: 50px;
+        }
+
+        .project-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            animation: fadeInUp 1s ease-out;
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .project-card::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: linear-gradient(45deg, transparent, rgba(255, 215, 0, 0.1), transparent);
+            transform: rotate(45deg);
+            transition: all 0.5s;
+            opacity: 0;
+        }
+
+        .project-card:hover::before {
+            animation: shimmer 0.5s ease;
+            opacity: 1;
+        }
+
+        @keyframes shimmer {
+            from { transform: translateX(-100%) translateY(-100%) rotate(45deg); }
+            to { transform: translateX(100%) translateY(100%) rotate(45deg); }
+        }
+
+        .project-card:hover {
+            transform: translateY(-10px) scale(1.02);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .project-icon {
+            width: 60px;
+            height: 60px;
+            margin: 0 auto 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 15px;
+            font-size: 28px;
+            color: white;
+        }
+
+        .project-name {
+            font-size: 1.5em;
+            color: #333;
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+
+        .project-url {
+            color: #666;
+            font-size: 0.9em;
+            margin-bottom: 20px;
+            word-break: break-all;
+            font-family: 'Courier New', monospace;
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 8px;
+        }
+
+        .project-button {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 12px 30px;
+            border-radius: 25px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .project-button::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            transition: all 0.5s;
+        }
+
+        .project-button:hover::after {
+            width: 300px;
+            height: 300px;
+        }
+
+        .project-button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        /* 特性展示 */
+        .features-section {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            padding: 40px;
+            backdrop-filter: blur(10px);
+            margin-bottom: 50px;
+        }
+
+        .features-title {
+            text-align: center;
+            font-size: 2em;
+            color: white;
+            margin-bottom: 30px;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+
+        .feature-item {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 20px;
+            border-radius: 15px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .feature-item:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .feature-icon {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .feature-name {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .feature-desc {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        /* 页脚 */
+        .footer {
+            text-align: center;
+            padding: 30px;
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .footer-links {
+            margin-top: 20px;
+        }
+
+        .footer-link {
+            color: #FFD700;
+            text-decoration: none;
+            margin: 0 15px;
+            transition: all 0.3s ease;
+            display: inline-block;
+        }
+
+        .footer-link:hover {
+            color: #FFA500;
+            transform: scale(1.1);
+        }
+
+        /* 控制台彩蛋 */
+        .console-easter-egg {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 50px;
+            height: 50px;
+            background: rgba(255, 215, 0, 0.9);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            z-index: 100;
+            animation: bounce 2s infinite;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+
+        .console-easter-egg:hover {
+            transform: scale(1.2);
+            background: #FFD700;
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .title {
+                font-size: 2.5em;
+            }
+            
+            .projects-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .sunflower-container {
+                left: 10px;
+                transform: scale(0.7);
+            }
+        }
+
+        /* 加载动画 */
+        .loader {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.5s ease;
+        }
+
+        .loader-sunflower {
+            animation: spin 2s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <!-- 加载动画 -->
+    <div class="loader" id="loader">
+        <div class="loader-sunflower">🌻</div>
+    </div>
+
+    <!-- 粒子背景 -->
+    <div id="particles"></div>
+
+    <!-- 向日葵装饰 -->
+    <div class="sunflower-container">
+        <div class="sunflower">
+            <div class="petal"></div>
+            <div class="petal"></div>
+            <div class="petal"></div>
+            <div class="petal"></div>
+            <div class="petal"></div>
+            <div class="petal"></div>
+            <div class="petal"></div>
+            <div class="petal"></div>
+            <div class="petal"></div>
+            <div class="petal"></div>
+            <div class="petal"></div>
+            <div class="petal"></div>
+            <div class="sunflower-center"></div>
+        </div>
+    </div>
+
+    <!-- 主容器 -->
+    <div class="main-container">
+        <!-- 标题部分 -->
+        <header class="header">
+            <h1 class="title">🌻 XRK-MultiBot</h1>
+            <p class="subtitle">基于Yunzai-Bot的向日葵机器人框架</p>
+            <span class="version-badge">v3.0.5</span>
+        </header>
+
+        <!-- 项目卡片 -->
+        <div class="projects-grid">
+            <div class="project-card">
+                <div class="project-icon">📦</div>
+                <h3 class="project-name">GitCode 仓库</h3>
+                <div class="project-url">gitcode.com/Xrkseek/XRK-Yunzai</div>
+                <a href="https://gitcode.com/Xrkseek/XRK-Yunzai" target="_blank" class="project-button">
+                    访问仓库
+                </a>
+            </div>
+
+            <div class="project-card">
+                <div class="project-icon">🚀</div>
+                <h3 class="project-name">Gitee 仓库</h3>
+                <div class="project-url">gitee.com/xrkseek/XRK-Yunzai</div>
+                <a href="https://gitee.com/xrkseek/XRK-Yunzai" target="_blank" class="project-button">
+                    访问仓库
+                </a>
+            </div>
+
+            <div class="project-card">
+                <div class="project-icon">🌍</div>
+                <h3 class="project-name">GitHub 仓库</h3>
+                <div class="project-url">github.com/Xrkseek/XRK-Yunzai</div>
+                <a href="https://github.com/Xrkseek/XRK-Yunzai" target="_blank" class="project-button">
+                    访问仓库
+                </a>
+            </div>
+        </div>
+
+        <!-- 特性展示 -->
+        <div class="features-section">
+            <h2 class="features-title">✨ 核心特性</h2>
+            <div class="features-grid">
+                <div class="feature-item">
+                    <div class="feature-icon">🔧</div>
+                    <div class="feature-name">模块化设计</div>
+                    <div class="feature-desc">灵活的插件系统，轻松扩展功能</div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">⚡</div>
+                    <div class="feature-name">高性能</div>
+                    <div class="feature-desc">优化的底层架构，响应速度快</div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">🎨</div>
+                    <div class="feature-name">丰富功能</div>
+                    <div class="feature-desc">内置多种实用功能和娱乐插件</div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">📱</div>
+                    <div class="feature-name">多平台支持</div>
+                    <div class="feature-desc">支持QQ、微信等多个平台</div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">🛠️</div>
+                    <div class="feature-name">易于部署</div>
+                    <div class="feature-desc">简单的安装流程，快速上手</div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">🌻</div>
+                    <div class="feature-name">向日葵特色</div>
+                    <div class="feature-desc">独特的向日葵插件生态系统</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 致谢部分 -->
+        <div class="features-section">
+            <h2 class="features-title">🙏 致谢</h2>
+            <div class="features-grid">
+                <div class="feature-item">
+                    <div class="feature-icon">👑</div>
+                    <div class="feature-name">Yunzai-Bot V3</div>
+                    <div class="feature-desc">乐神的元老级项目</div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">🐱</div>
+                    <div class="feature-name">Miao-Yunzai</div>
+                    <div class="feature-desc">喵喵提供的优化方向</div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">⭐</div>
+                    <div class="feature-name">TRSS-Yunzai</div>
+                    <div class="feature-desc">时雨的艺术品级贡献</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 页脚 -->
+    <footer class="footer">
+        <p>© 2024 XRK-MultiBot | 向日葵机器人框架</p>
+        <div class="footer-links">
+            <a href="https://gitee.com/xrkseek" target="_blank" class="footer-link">作者主页</a>
+            <a href="#" class="footer-link" onclick="showDocs()">文档</a>
+            <a href="#" class="footer-link" onclick="showSupport()">支持</a>
+        </div>
+    </footer>
+
+    <!-- 控制台彩蛋 -->
+    <div class="console-easter-egg" onclick="showEasterEgg()" title="点击查看彩蛋">
+        🌻
+    </div>
+
+    <script>
+        // 页面加载完成后隐藏加载动画
+        window.addEventListener('load', function() {
+            setTimeout(() => {
+                document.getElementById('loader').classList.add('hidden');
+            }, 500);
+        });
+
+        // 生成粒子背景
+        function createParticles() {
+            const particlesContainer = document.getElementById('particles');
+            const particleCount = 50;
+            
+            for (let i = 0; i < particleCount; i++) {
+                const particle = document.createElement('div');
+                particle.className = 'particle';
+                particle.style.left = Math.random() * 100 + '%';
+                particle.style.animationDelay = Math.random() * 20 + 's';
+                particle.style.animationDuration = (15 + Math.random() * 10) + 's';
+                particlesContainer.appendChild(particle);
+            }
+        }
+
+        // 彩蛋功能
+        let easterEggCount = 0;
+        function showEasterEgg() {
+            easterEggCount++;
+            if (easterEggCount === 1) {
+                console.log('%c🌻 欢迎来到XRK-MultiBot！', 'font-size: 20px; color: #FFD700; font-weight: bold;');
+            } else if (easterEggCount === 3) {
+                console.log('%c🎉 你发现了隐藏彩蛋！', 'font-size: 16px; color: #FF69B4;');
+                console.log('%c向日葵永远向着阳光生长~', 'font-size: 14px; color: #FFA500;');
+                confetti();
+            } else if (easterEggCount === 5) {
+                alert('🌻 恭喜你！你已经完全探索了这个页面！\n加入我们的开发者社区，一起让XRK-MultiBot变得更好！');
+                easterEggCount = 0;
+            }
+        }
+
+        // 彩带效果
+        function confetti() {
+            const colors = ['#FFD700', '#FFA500', '#FF69B4', '#667eea', '#764ba2'];
+            const confettiCount = 100;
+            
+            for (let i = 0; i < confettiCount; i++) {
+                setTimeout(() => {
+                    const confetti = document.createElement('div');
+                    confetti.style.position = 'fixed';
+                    confetti.style.width = '10px';
+                    confetti.style.height = '10px';
+                    confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                    confetti.style.left = Math.random() * 100 + '%';
+                    confetti.style.top = '-10px';
+                    confetti.style.borderRadius = '50%';
+                    confetti.style.zIndex = '9999';
+                    confetti.style.pointerEvents = 'none';
+                    document.body.appendChild(confetti);
+                    
+                    let posY = -10;
+                    let posX = parseFloat(confetti.style.left);
+                    let velocityY = 2 + Math.random() * 3;
+                    let velocityX = (Math.random() - 0.5) * 2;
+                    
+                    const fall = setInterval(() => {
+                        posY += velocityY;
+                        posX += velocityX;
+                        velocityY += 0.1;
+                        
+                        confetti.style.top = posY + 'px';
+                        confetti.style.left = posX + '%';
+                        confetti.style.transform = `rotate(${posY * 2}deg)`;
+                        
+                        if (posY > window.innerHeight) {
+                            clearInterval(fall);
+                            confetti.remove();
+                        }
+                    }, 20);
+                }, i * 10);
+            }
+        }
+
+        // 文档链接
+        function showDocs() {
+            alert('📚 文档正在建设中...\n您可以查看项目README了解更多信息！');
+        }
+
+        // 支持链接
+        function showSupport() {
+            if (confirm('💝 感谢您的支持！\n是否前往项目主页给个Star？')) {
+                window.open('https://gitee.com/xrkseek/XRK-Yunzai', '_blank');
+            }
+        }
+
+        // 动态标题
+        let titleIndex = 0;
+        const titles = ['🌻 XRK-MultiBot', '🌟 向日葵机器人', '🚀 云崽框架', '✨ XRK-Yunzai'];
+        setInterval(() => {
+            titleIndex = (titleIndex + 1) % titles.length;
+            document.title = titles[titleIndex];
+        }, 3000);
+
+        // 键盘快捷键
+        document.addEventListener('keydown', function(e) {
+            // Ctrl + K 打开控制台彩蛋
+            if (e.ctrlKey && e.key === 'k') {
+                e.preventDefault();
+                showEasterEgg();
+            }
+            // Ctrl + G 快速访问GitHub
+            if (e.ctrlKey && e.key === 'g') {
+                e.preventDefault();
+                window.open('https://github.com/Xrkseek/XRK-Yunzai', '_blank');
+            }
+        });
+
+        // 鼠标跟随效果
+        document.addEventListener('mousemove', function(e) {
+            const cards = document.querySelectorAll('.project-card');
+            cards.forEach(card => {
+                const rect = card.getBoundingClientRect();
+                const x = e.clientX - rect.left - rect.width / 2;
+                const y = e.clientY - rect.top - rect.height / 2;
+                
+                const angle = Math.atan2(y, x);
+                const distance = Math.sqrt(x * x + y * y);
+                const maxDistance = 100;
+                
+                if (distance < maxDistance) {
+                    const force = (maxDistance - distance) / maxDistance;
+                    const forceX = Math.cos(angle) * force * 5;
+                    const forceY = Math.sin(angle) * force * 5;
+                    
+                    card.style.transform = `translateX(${-forceX}px) translateY(${-forceY}px)`;
+                }
+            });
+        });
+
+        // 自动轮播展示
+        let currentHighlight = 0;
+        const cards = document.querySelectorAll('.project-card');
+        
+        function highlightCard() {
+            cards.forEach((card, index) => {
+                if (index === currentHighlight) {
+                    card.style.boxShadow = '0 20px 40px rgba(255, 215, 0, 0.5)';
+                    card.style.transform = 'scale(1.05)';
+                } else {
+                    card.style.boxShadow = '0 15px 35px rgba(0, 0, 0, 0.2)';
+                    card.style.transform = 'scale(1)';
+                }
+            });
+            currentHighlight = (currentHighlight + 1) % cards.length;
+        }
+        
+        setInterval(highlightCard, 3000);
+
+        // 初始化
+        createParticles();
+        
+        // 控制台欢迎信息
+        console.log('%c', 'padding: 100px 200px; background: url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 200 200\'%3E%3Ctext x=\'50%25\' y=\'50%25\' text-anchor=\'middle\' font-size=\'80\' fill=\'%23FFD700\'%3E🌻%3C/text%3E%3C/svg%3E") no-repeat center; background-size: contain;');
+        console.log('%cXRK-MultiBot v3.0.5', 'font-size: 24px; color: #667eea; font-weight: bold; text-shadow: 2px 2px 4px rgba(0,0,0,0.2);');
+        console.log('%c向日葵机器人框架 - 永远向着阳光生长', 'font-size: 14px; color: #764ba2; font-style: italic;');
+        console.log('%c输入 showEasterEgg() 查看更多彩蛋！', 'font-size: 12px; color: #FFA500;');
+    </script>
+</body>
+</html>
