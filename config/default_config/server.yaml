@@ -1,99 +1,238 @@
-# XRK-Yunzai服务器配置
-name: XRK-Yunzai Server  # 服务器名称
-url:                     # 自定义外部URL（可选）
-host: 0.0.0.0           # 监听地址
-port: 2537              # 监听端口
+# 服务器配置文件
+# 该配置用于控制HTTP/HTTPS服务器的行为
+
+# 服务器基础配置
+server:
+  # 服务器名称
+  name: "Yunzai Webserver"
+  
+  # 服务器监听地址
+  # 0.0.0.0 表示监听所有网络接口
+  # 127.0.0.1 表示仅监听本地回环
+  host: "0.0.0.0"
+  
+  # 服务器基础URL（用于外部访问）
+  # 留空则自动检测
+  url: ""
+
+# 域名配置
+domain:
+  # 是否启用域名解析
+  enabled: false
+  
+  # 主域名列表
+  # 支持多个域名，第一个为主域名
+  hosts:
+    - "example.com"
+  
+  # 域名重定向规则
+  redirects:
+    # 强制重定向到主域名
+    enforceMain: true
+    # 强制使用HTTPS（当HTTPS启用时）
+    enforceHttps: true
+    # 重定向状态码 (301永久/302临时)
+    statusCode: 301
+  
+  # 域名路由映射
+  # 不同域名可映射到不同目录
+  routes:
+    "example.com": "www"
 
 # HTTPS配置
 https:
+  # 是否启用HTTPS
   enabled: false
-  key: ./config/certs/privkey.pem
-  cert: ./config/certs/fullchain.pem
+  
+  # SSL证书配置
+  # 支持单证书或多域名证书
+  certificates:
+    # 默认证书
+    default:
+      key: "/path/to/private.key"
+      cert: "/path/to/certificate.crt"
+      # 可选：证书链
+      ca: ""
+    
+    # 域名特定证书（可选）
+    domains: {}
+      # "example.com":
+      #   key: "/path/to/example.key"
+      #   cert: "/path/to/example.crt"
+  
+  # SSL/TLS选项
+  options:
+    # 最小TLS版本
+    minVersion: "TLSv1.2"
+    # 是否启用HTTP/2
+    http2: true
+    # HSTS（HTTP严格传输安全）
+    hsts:
+      enabled: true
+      maxAge: 31536000
+      includeSubDomains: true
+      preload: false
 
 # 静态文件服务配置
 static:
-  - route: /www           # 路由路径
-    path: www            # 文件系统路径
+  # 默认静态目录
+  - route: "/"
+    path: "www"
+    # 默认文档
+    index: ["index.html", "index.htm"]
+    # 配置选项
     options:
-      index: true        # 是否启用默认文档
-      dotfiles: deny     # 处理隐藏文件：ignore/allow/deny
-      extensions:        # 默认文件扩展名
-        - html
-        - htm
-      fallthrough: true  # 404时是否继续到下一个中间件
-      maxAge: 1d         # 缓存时间
-      browse: false      # 是否启用目录浏览
-      headers:           # 自定义响应头
-        X-Custom-Header: value
-
-  - route: /public
-    path: public
+      # 是否显示目录列表
+      browse: false
+      # 点文件处理 (deny/allow/ignore)
+      dotfiles: "deny"
+      # 缓存控制
+      maxAge: "1d"
+      # 是否启用ETag
+      etag: true
+      # 是否启用Last-Modified
+      lastModified: true
+      # 文件扩展名优先级
+      extensions: ["html", "htm"]
+  
+  # 其他静态目录
+  - route: "/static"
+    path: "static"
     options:
-      index: true
-      maxAge: 7d
-
-  - route: /media
-    path: www/media
+      browse: false
+      maxAge: "7d"
+  
+  - route: "/public"
+    path: "public"
     options:
-      maxAge: 30d
       browse: true
-
-# 认证配置
-auth:
-  whitelist:            # 免认证路径
-    - /www
-    - /public
-    - /static
-    - /favicon.ico
-    - /health
-  skip:                 # 跳过认证的路径（兼容旧版）
-    - /www
-    - /media
-    - /api/files
-
-# CORS配置
-cors:
-  origins:              # 允许的源
-    - "*"              # 或具体域名列表
-  methods: GET, POST, PUT, DELETE, OPTIONS
-  headers: Origin, X-Requested-With, Content-Type, Accept, X-API-Key, Authorization
-  credentials: false    # 是否允许携带凭证
+      maxAge: "1h"
 
 # 安全配置
 security:
-  helmet: true          # 启用Helmet安全头
-  csp: false           # 内容安全策略（false表示禁用）
-  hiddenFiles:         # 隐藏文件规则（正则或字符串）
-    - /^\./
-    - /\/\./
-    - node_modules
-    - .git
-    - .env
-    - /config\//
-    - /private/
+  # Helmet安全头配置
+  helmet:
+    enabled: true
+    # 内容安全策略
+    csp:
+      enabled: false
+      directives:
+        defaultSrc: ["'self'"]
+        scriptSrc: ["'self'", "'unsafe-inline'"]
+        styleSrc: ["'self'", "'unsafe-inline'"]
+        imgSrc: ["'self'", "data:", "https:"]
+  
+  # CORS跨域配置
+  cors:
+    enabled: true
+    origins: ["*"]
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    headers: ["Content-Type", "Authorization", "X-API-Key"]
+    credentials: false
+    maxAge: 86400
+  
+  # 隐藏文件模式
+  hiddenFiles:
+    - "^\\..*"
+    - "node_modules"
+    - "\\.git"
+    - "\\.env"
+    - "config/"
+    - "private/"
 
-# 速率限制
+# 认证配置
+auth:
+  # API密钥认证
+  apiKey:
+    enabled: true
+    # 密钥文件路径
+    file: "config/server_config/api_key.json"
+    # 密钥长度
+    length: 64
+  
+  # 白名单路径（无需认证）
+  whitelist:
+    - "/"
+    - "/www"
+    - "/static"
+    - "/public"
+    - "/favicon.ico"
+    - "/health"
+    - "/robots.txt"
+  
+  # 跳过认证的路径
+  skip:
+    - "/api/public"
+
+# 速率限制配置
 rateLimit:
   enabled: true
+  
+  # 全局限制
+  global:
+    windowMs: 900000  # 15分钟
+    max: 1000         # 最大请求数
+    message: "请求过于频繁，请稍后再试"
+  
+  # API限制
   api:
-    windowMs: 900000    # 15分钟
-    max: 100           # 最大请求数
-    message: Too many requests from this IP
+    windowMs: 60000   # 1分钟
+    max: 60          # 最大请求数
+    message: "API请求过于频繁"
+  
+  # 静态文件限制
+  static:
+    windowMs: 60000
+    max: 300
+  
+  # 跳过本地连接
+  skipLocal: true
 
-# 请求体大小限制
+# 请求限制
 limits:
-  json: 10mb
-  urlencoded: 10mb
-  raw: 10mb
-  text: 10mb
+  # URL编码数据大小
+  urlencoded: "10mb"
+  # JSON数据大小
+  json: "10mb"
+  # 原始数据大小
+  raw: "50mb"
+  # 文本数据大小
+  text: "10mb"
+  # 文件上传大小
+  fileSize: "100mb"
+
+# 压缩配置
+compression:
+  enabled: true
+  # 压缩级别 (0-9)
+  level: 6
+  # 最小压缩大小
+  threshold: 1024
+  # 压缩的MIME类型
+  filter:
+    - "text/*"
+    - "application/json"
+    - "application/javascript"
+    - "application/xml"
 
 # 日志配置
 logging:
-  requests: true        # 记录HTTP请求
+  # 请求日志
+  requests: true
+  # 错误日志
+  errors: true
+  # 调试日志
+  debug: false
+  # 静默路径（不记录日志）
+  quiet:
+    - "/health"
+    - "/favicon.ico"
 
-# 性能优化
-compression: true       # 启用gzip压缩
-detectPublicIP: true   # 检测外网IP
-
-# 默认路由
-defaultRoute: /www/xrk     # 404时的默认重定向路径
+# 其他配置
+misc:
+  # 是否检测公网IP
+  detectPublicIP: true
+  # 默认路由（404时重定向）
+  defaultRoute: "/"
+  # 是否启用文件目录浏览
+  directoryListing: false
