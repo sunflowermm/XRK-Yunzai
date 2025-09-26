@@ -184,7 +184,7 @@ class DependencyManager {
    * @returns {Promise<string[]>} 缺失的依赖名称数组
    */
   async getMissingDependencies(dependencies, nodeModulesPath) {
-    const depNames = Object.keys(dependencies);
+    const depNames = Object.keys(dependencies).filter(dep => dep !== 'md5' && dep !== 'oicq');
     const checkResults = await Promise.all(
       depNames.map(async (dep) => ({
         name: dep,
