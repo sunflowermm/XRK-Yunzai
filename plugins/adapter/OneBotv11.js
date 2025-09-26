@@ -858,10 +858,10 @@ Bot.adapter.push(
         quit: this.setGroupLeave.bind(this, i),
         fs: this.getGroupFs(i),
         get is_owner() {
-          return data.bot.gml.get(group_id)?.get(data.self_id)?.role === "owner"
+          return i.bot.gml.get(group_id)?.get(i.self_id)?.role === "owner"
         },
         get is_admin() {
-          return data.bot.gml.get(group_id)?.get(data.self_id)?.role === "admin" || this.is_owner
+          return i.bot.gml.get(group_id)?.get(i.self_id)?.role === "admin" || this.is_owner
         },
       }
     }
