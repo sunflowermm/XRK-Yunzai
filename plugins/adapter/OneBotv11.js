@@ -766,13 +766,14 @@ Bot.adapter.push(
           getAvatarUrl: async () => (await this.getGuildMemberInfo(i)).avatar_url,
         }
       }
-
+      const memberInfo = data.bot.gml.get(group_id)?.get(user_id) || {}
       const i = {
-        ...data.bot.gml.get(group_id)?.get(user_id),
+        ...memberInfo,
         ...data,
         group_id,
         user_id,
       }
+      
       return {
         ...this.pickFriend(i, user_id),
         ...i,
@@ -787,10 +788,12 @@ Bot.adapter.push(
           return data.bot.fl.has(user_id)
         },
         get is_owner() {
-          return this.role === "owner"
+          // 修复: 直接使用缓存中的role信息
+          return memberInfo.role === "owner"
         },
         get is_admin() {
-          return this.role === "admin" || this.is_owner
+          // 修复: 直接使用缓存中的role信息
+          return memberInfo.role === "admin" || memberInfo.role === "owner"
         },
       }
     }
@@ -858,10 +861,12 @@ Bot.adapter.push(
         quit: this.setGroupLeave.bind(this, i),
         fs: this.getGroupFs(i),
         get is_owner() {
-          return i.bot.gml.get(group_id)?.get(i.self_id)?.role === "owner"
+          const botMemberInfo = i.bot.gml.get(group_id)?.get(i.self_id)
+          return botMemberInfo?.role === "owner"
         },
         get is_admin() {
-          return i.bot.gml.get(group_id)?.get(i.self_id)?.role === "admin" || this.is_owner
+          const botMemberInfo = i.bot.gml.get(group_id)?.get(i.self_id)
+          return botMemberInfo?.role === "admin" || botMemberInfo?.role === "owner"
         },
       }
     }
@@ -893,7 +898,7 @@ Bot.adapter.push(
             return this.stat.packet_sent
           },
         },
-        model: "TRSS Yunzai ",
+        model: "XRK Yunzai ",
 
         info: {},
         get uin() {
