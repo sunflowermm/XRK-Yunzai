@@ -356,7 +356,6 @@ class Bootstrap {
    * @returns {Promise<void>}
    */
   async startMainApplication() {
-    await this.logger.log('启动主应用程序...');
     
     try {
       /** 动态导入主程序 */
