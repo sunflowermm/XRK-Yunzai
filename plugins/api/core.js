@@ -62,9 +62,30 @@ export default {
           return res.status(403).json({ success: false, message: 'Unauthorized' });
         }
 
+        function serialize(obj, seen = new WeakSet()) {
+          if (typeof obj === 'function') {
+            return obj.toString();
+          }
+          if (typeof obj !== 'object' || obj === null) {
+            return obj;
+          }
+          if (seen.has(obj)) {
+            return '[Circular]';
+          }
+          seen.add(obj);
+          if (Array.isArray(obj)) {
+            return obj.map(item => serialize(item, seen));
+          }
+          const result = {};
+          for (const [key, value] of Object.entries(obj)) {
+            result[key] = serialize(value, seen);
+          }
+          return result;
+        }
+
         res.json({
           success: true,
-          config: cfg
+          config: serialize(cfg)
         });
       }
     },
