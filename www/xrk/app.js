@@ -1577,7 +1577,7 @@ class APIControlCenter {
             warning: '⚠️',
             info: 'ℹ️'
         };
-
+        
         toast.className = `toast ${type}`;
         toast.innerHTML = `
             <span class="toast-icon">${icons[type]}</span>

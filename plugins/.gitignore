@@ -52,10 +52,5 @@ events/**
 !events/notice.js
 !events/request.js
 
-!python
-python/**
-!python/example/
-!python/example/index.py
-!python/requirements.txt
 *.psd
 *.map

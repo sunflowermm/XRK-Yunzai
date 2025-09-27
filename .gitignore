@@ -146,4 +146,8 @@ yunzai
 /temp/
 /pnpm-lock.yaml
 
+/www
+/www/favicon.ico
+/www/index.html
+
 package.json

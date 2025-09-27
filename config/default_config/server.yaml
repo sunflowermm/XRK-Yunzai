@@ -1,223 +1,240 @@
-# 服务器配置文件
-# 该配置用于控制HTTP/HTTPS服务器的行为
+# ========================================
+#           服务器配置文件 v2.0
+# ========================================
+# 本配置文件控制HTTP/HTTPS服务器的行为
+# 适用于Yunzai-Bot及其衍生项目
 
-# 服务器基础配置
+# ----------------------------------------
+#            基础配置
+# ----------------------------------------
 server:
-  # 服务器名称
-  name: "XRK Webserver"
+  # 服务器名称（将显示在日志中）
+  name: "Yunzai Server"
   
-  # 服务器监听地址
-  # 0.0.0.0 表示监听所有网络接口
-  # 127.0.0.1 表示仅监听本地回环
+  # 监听地址
+  # - 0.0.0.0: 监听所有网络接口（允许外部访问）
+  # - 127.0.0.1: 仅监听本地（仅本机可访问）
   host: "0.0.0.0"
   
-  # 服务器基础URL（用于外部访问）
-  # 留空则自动检测
+  # 外部访问URL（可选）
+  # 用于生成完整的访问链接，留空则自动检测
+  # 示例: https://bot.example.com
   url: ""
 
-# 域名配置
-domain:
-  # 是否启用域名解析
+# ----------------------------------------
+#            HTTPS配置
+# ----------------------------------------
+https:
+  # 是否启用HTTPS服务
+  # 注意：启用前请确保已正确配置SSL证书
   enabled: false
   
-  # 主域名列表
-  # 支持多个域名，第一个为主域名
-  hosts:
-    - "xrkk.cc"
-  
-  # 域名重定向规则
-  redirects:
-    # 强制重定向到主域名（默认关闭，避免与nginx冲突）
-    enforceMain: false
-    # 强制使用HTTPS（当HTTPS启用时）
-    enforceHttps: true
-    # 重定向状态码 (301永久/302临时)
-    statusCode: 301
-  
-  # 域名路由映射
-  # 不同域名可映射到不同目录
-  routes:
-    "xrkk.cc": "www"
-
-# HTTPS配置
-https:
-  # 是否启用HTTPS
-  enabled: true
-  
   # SSL证书配置
-  # 支持单证书或多域名证书 如果是 Let's Encrypt 请自己配置动续签
-  certificates:
-    # 默认证书
-    default:
-      key: "/etc/letsencrypt/live/xrkk.cc/privkey.pem"
-      cert: "/etc/letsencrypt/live/xrkk.cc/fullchain.pem"
-      # 可选：证书链
-      ca: ""
+  certificate:
+    # 私钥文件路径（必需）
+    key: "/path/to/privkey.pem"
     
-    # 域名特定证书（可选）
-    domains: {}
+    # 证书文件路径（必需）
+    cert: "/path/to/fullchain.pem"
+    
+    # CA证书链文件路径（可选）
+    # 某些证书可能需要提供完整的证书链
+    ca: ""
   
-  # SSL/TLS选项
-  options:
-    # 最小TLS版本
+  # TLS配置
+  tls:
+    # 最低TLS版本（建议不低于TLSv1.2）
     minVersion: "TLSv1.2"
-    # 是否启用HTTP/2
+    
+    # 是否启用HTTP/2协议（提升性能）
     http2: true
-    # HSTS（HTTP严格传输安全）配置
-    hsts:
-      enabled: false
-      maxAge: 31536000
-      includeSubDomains: true
-      preload: false
+  
+  # HSTS（HTTP严格传输安全）配置
+  # 警告：启用后所有HTTP请求将强制重定向到HTTPS
+  hsts:
+    enabled: false
+    # 有效期（秒），31536000 = 1年
+    maxAge: 31536000
+    # 是否包含子域名
+    includeSubDomains: true
+    # 是否允许预加载（需要提交到浏览器预加载列表）
+    preload: false
 
-# 静态文件服务配置
+# ----------------------------------------
+#            静态文件服务
+# ----------------------------------------
 static:
-  # 默认静态目录
-  - route: "/"
-    path: "www"
-    # 默认文档
-    index: ["index.html", "index.htm"]
-    # 配置选项
-    options:
-      # 是否显示目录列表
-      browse: false
-      # 点文件处理 (deny/allow/ignore)
-      dotfiles: "deny"
-      # 缓存控制
-      maxAge: "1d"
-      # 是否启用ETag
-      etag: true
-      # 是否启用Last-Modified
-      lastModified: true
-      # 文件扩展名优先级
-      extensions: ["html", "htm"]
+  # 默认首页文件列表
+  # 按顺序查找，返回第一个存在的文件
+  index:
+    - "index.html"
+    - "index.htm"
+    - "default.html"
   
-  # 其他静态目录
-  - route: "/static"
-    path: "static"
-    options:
-      browse: false
-      maxAge: "7d"
+  # 是否允许自动添加扩展名
+  # 例如：/page 会尝试 /page.html
+  extensions: false
   
-  - route: "/public"
-    path: "public"
-    options:
-      browse: true
-      maxAge: "1h"
+  # 缓存时间设置
+  cache:
+    # 静态资源缓存时间（秒）
+    # 86400 = 1天, 604800 = 7天
+    static: 86400     # CSS/JS文件
+    images: 604800    # 图片文件
+  
+  # 缓存总时间（适用于其他文件）
+  # 支持格式：1d = 1天, 1h = 1小时
+  cacheTime: "1d"
 
-# 安全配置
+# ----------------------------------------
+#            安全配置
+# ----------------------------------------
 security:
   # Helmet安全头配置
+  # 自动添加安全相关的HTTP头部
   helmet:
     enabled: true
-    csp:
-      enabled: false
   
-  # CORS跨域配置
-  cors:
-    enabled: true
-    origins: ["*"]
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-    headers: ["Content-Type", "Authorization", "X-API-Key"]
-    credentials: false
-    maxAge: 86400
+  # HSTS配置（需要HTTPS启用）
+  hsts:
+    enabled: false
+    maxAge: 31536000
+    includeSubDomains: true
+    preload: false
   
-  # 隐藏文件模式
+  # 隐藏文件/目录模式
+  # 匹配这些模式的文件将返回404
   hiddenFiles:
-    - "^\\..*"
-    - "node_modules"
-    - "\\.git"
-    - "\\.env"
-    - "config/"
-    - "private/"
+    - "^\\..*"        # 所有点开头的文件
+    - "node_modules"  # Node.js依赖目录
+    - "\\.git"        # Git版本控制目录
+    - "\\.env"        # 环境变量文件
+    - "config/"       # 配置目录
+    - "private/"      # 私有目录
 
-# 认证配置
-auth:
-  # API密钥认证
-  apiKey:
-    enabled: true
-    # 密钥文件路径
-    file: "config/server_config/api_key.json"
-    # 密钥长度
-    length: 64
-  
-  # 白名单路径（无需认证）
-  whitelist:
-    - "/"
-    - "/www"
-    - "/static"
-    - "/public"
-    - "/favicon.ico"
-    - "/health"
-    - "/robots.txt"
-  
-  # 跳过认证的路径
-  skip:
-    - "/api/public"
-
-# 速率限制配置
-rateLimit:
+# ----------------------------------------
+#         跨域资源共享（CORS）
+# ----------------------------------------
+cors:
+  # 是否启用CORS
   enabled: true
   
-  # 全局限制
+  # 允许的来源
+  # - "*": 允许所有来源（不安全）
+  # - 具体域名列表: ["https://example.com"]
+  origins: ["*"]
+  
+  # 允许的HTTP方法
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+  
+  # 允许的请求头
+  headers: ["Content-Type", "Authorization", "X-API-Key"]
+  
+  # 是否允许携带凭证（cookies等）
+  credentials: false
+  
+  # 预检请求缓存时间（秒）
+  maxAge: 86400
+
+# ----------------------------------------
+#            认证配置
+# ----------------------------------------
+auth:
+  # API密钥配置
+  apiKey:
+    # 是否启用API密钥认证
+    enabled: true
+    
+    # 密钥存储文件路径
+    file: "config/server_config/api_key.json"
+    
+    # 密钥长度（字符数）
+    length: 64
+  
+  # 无需认证的路径（白名单）
+  # 这些路径可以直接访问
+  whitelist:
+    - "/"              # 根目录
+    - "/favicon.ico"   # 网站图标
+    - "/health"        # 健康检查
+    - "/status"        # 状态接口
+    - "/robots.txt"    # 爬虫规则
+    # 注意：静态文件默认允许访问
+
+# ----------------------------------------
+#            速率限制
+# ----------------------------------------
+rateLimit:
+  # 是否启用速率限制（防止恶意请求）
+  enabled: true
+  
+  # 全局限制（所有请求）
   global:
-    windowMs: 900000  # 15分钟
+    windowMs: 900000  # 时间窗口：15分钟
     max: 1000         # 最大请求数
     message: "请求过于频繁，请稍后再试"
   
-  # API限制
+  # API接口限制（更严格）
   api:
-    windowMs: 60000   # 1分钟
+    windowMs: 60000   # 时间窗口：1分钟
     max: 60          # 最大请求数
     message: "API请求过于频繁"
-  
-  # 静态文件限制
-  static:
-    windowMs: 60000
-    max: 300
-  
-  # 跳过本地连接
-  skipLocal: true
 
-# 请求限制
+# ----------------------------------------
+#            请求限制
+# ----------------------------------------
 limits:
-  # URL编码数据大小
-  urlencoded: "10mb"
-  # JSON数据大小
-  json: "10mb"
-  # 原始数据大小
-  raw: "50mb"
-  # 文本数据大小
-  text: "10mb"
-  # 文件上传大小
-  fileSize: "100mb"
+  # 各种请求体大小限制
+  urlencoded: "10mb"  # URL编码数据
+  json: "10mb"        # JSON数据
+  raw: "50mb"         # 原始数据
+  text: "10mb"        # 文本数据
+  fileSize: "100mb"   # 文件上传
 
-# 压缩配置
+# ----------------------------------------
+#            压缩配置
+# ----------------------------------------
 compression:
+  # 是否启用响应压缩（减少带宽使用）
   enabled: true
-  # 压缩级别 (0-9)
+  
+  # 压缩级别（0-9）
+  # 0: 无压缩（最快）
+  # 9: 最大压缩（最慢）
+  # 推荐：6（平衡）
   level: 6
-  # 最小压缩大小
+  
+  # 最小压缩大小（字节）
+  # 小于此大小的响应不会被压缩
   threshold: 1024
 
-# 日志配置
+# ----------------------------------------
+#            日志配置
+# ----------------------------------------
 logging:
-  # 请求日志
+  # 是否记录请求日志
   requests: true
-  # 错误日志
+  
+  # 是否记录错误日志
   errors: true
-  # 调试日志
+  
+  # 是否启用调试日志（详细）
   debug: false
-  # 静默路径
+  
+  # 静默路径（不记录日志）
+  # 避免健康检查等接口刷屏
   quiet:
     - "/health"
     - "/favicon.ico"
+    - "/robots.txt"
 
-# 其他配置
+# ----------------------------------------
+#            其他配置
+# ----------------------------------------
 misc:
-  # 是否检测公网IP
+  # 是否自动检测公网IP
+  # 用于显示外网访问地址
   detectPublicIP: true
-  # 默认路由（404时重定向）
+  
+  # 404时的默认重定向路径
   defaultRoute: "/"
-  # 是否启用文件目录浏览
-  directoryListing: false
