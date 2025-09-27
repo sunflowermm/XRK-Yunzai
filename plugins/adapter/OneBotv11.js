@@ -1,4 +1,3 @@
-import cfg from "../../lib/config/config.js"
 import path from "node:path"
 import { ulid } from "ulid"
 
