@@ -635,6 +635,8 @@ Bot.adapter.push(
       });
     }
 
+    // ========== 其他方法保持不变 ==========
+
     setProfile(data, profile) {
       Bot.makeLog("info", `设置资料：${Bot.String(profile)}`, data.self_id)
       return data.bot.sendApi("set_qq_profile", profile)
