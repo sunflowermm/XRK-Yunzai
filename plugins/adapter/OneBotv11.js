@@ -291,201 +291,348 @@ Bot.adapter.push(
     }
 
     async getFriendArray(data) {
-      return (await data.bot.sendApi("get_friend_list")).data || []
+      try {
+        const result = await data.bot.sendApi("get_friend_list");
+        return result?.data || [];
+      } catch (err) {
+        Bot.makeLog("error", `获取好友列表失败: ${err.message}`, data.self_id);
+        return [];
+      }
     }
 
     async getFriendList(data) {
-      const array = []
-      for (const { user_id } of await this.getFriendArray(data)) array.push(user_id)
-      return array
+      const array = [];
+      const friendArray = await this.getFriendArray(data);
+      if (Array.isArray(friendArray)) {
+        for (const item of friendArray) {
+          if (item && item.user_id !== undefined) {
+            array.push(item.user_id);
+          }
+        }
+      }
+      return array;
     }
 
     async getFriendMap(data) {
-      const map = new Map()
-      for (const i of await this.getFriendArray(data)) map.set(i.user_id, i)
-      data.bot.fl = map
-      return map
+      const map = new Map();
+      const friendArray = await this.getFriendArray(data);
+      if (Array.isArray(friendArray)) {
+        for (const i of friendArray) {
+          if (i && i.user_id !== undefined) {
+            map.set(i.user_id, i);
+          }
+        }
+      }
+      data.bot.fl = map;
+      return map;
     }
 
     async getFriendInfo(data) {
-      const info = (
-        await data.bot.sendApi("get_stranger_info", {
-          user_id: data.user_id,
-        })
-      ).data
-      data.bot.fl.set(data.user_id, info)
-      return info
+      try {
+        const info = (
+          await data.bot.sendApi("get_stranger_info", {
+            user_id: data.user_id,
+          })
+        ).data;
+        if (info) {
+          data.bot.fl.set(data.user_id, info);
+        }
+        return info;
+      } catch (err) {
+        Bot.makeLog("error", `获取好友信息失败: ${err.message}`, data.self_id);
+        return null;
+      }
     }
 
     async getGroupArray(data) {
-      const array = (await data.bot.sendApi("get_group_list")).data
+      let array = [];
       try {
-        for (const guild of await this.getGuildArray(data))
-          for (const channel of await this.getGuildChannelArray({
-            ...data,
-            guild_id: guild.guild_id,
-          }))
-            array.push({
-              guild,
-              channel,
-              group_id: `${guild.guild_id}-${channel.channel_id}`,
-              group_name: `${guild.guild_name}-${channel.channel_name}`,
-            })
+        const result = await data.bot.sendApi("get_group_list");
+        array = result?.data || [];
       } catch (err) {
-        // 获取频道列表失败，静默处理
+        Bot.makeLog("error", `获取群列表失败: ${err.message}`, data.self_id);
+        array = [];
       }
-      return array
+      
+      // 尝试获取频道列表
+      try {
+        const guildArray = await this.getGuildArray(data);
+        if (Array.isArray(guildArray)) {
+          for (const guild of guildArray) {
+            try {
+              const channels = await this.getGuildChannelArray({
+                ...data,
+                guild_id: guild.guild_id,
+              });
+              if (Array.isArray(channels)) {
+                for (const channel of channels) {
+                  array.push({
+                    guild,
+                    channel,
+                    group_id: `${guild.guild_id}-${channel.channel_id}`,
+                    group_name: `${guild.guild_name}-${channel.channel_name}`,
+                  });
+                }
+              }
+            } catch (err) {
+            }
+          }
+        }
+      } catch (err) {
+      }
+      
+      return array;
     }
 
     async getGroupList(data) {
-      const array = []
-      for (const { group_id } of await this.getGroupArray(data)) array.push(group_id)
-      return array
+      const array = [];
+      const groupArray = await this.getGroupArray(data);
+      if (Array.isArray(groupArray)) {
+        for (const item of groupArray) {
+          if (item && item.group_id !== undefined) {
+            array.push(item.group_id);
+          }
+        }
+      }
+      return array;
     }
 
     async getGroupMap(data) {
-      const map = new Map()
-      for (const i of await this.getGroupArray(data)) map.set(i.group_id, i)
-      data.bot.gl = map
-      return map
+      const map = new Map();
+      const groupArray = await this.getGroupArray(data);
+      if (Array.isArray(groupArray)) {
+        for (const i of groupArray) {
+          if (i && i.group_id !== undefined) {
+            map.set(i.group_id, i);
+          }
+        }
+      }
+      data.bot.gl = map;
+      return map;
     }
 
     async getGroupInfo(data) {
-      const info = (
-        await data.bot.sendApi("get_group_info", {
-          group_id: data.group_id,
-        })
-      ).data
-      data.bot.gl.set(data.group_id, info)
-      return info
+      try {
+        const info = (
+          await data.bot.sendApi("get_group_info", {
+            group_id: data.group_id,
+          })
+        ).data;
+        if (info) {
+          data.bot.gl.set(data.group_id, info);
+        }
+        return info;
+      } catch (err) {
+        Bot.makeLog("error", `获取群信息失败: ${err.message}`, data.self_id);
+        return null;
+      }
     }
 
     async getMemberArray(data) {
-      return (
-        (
-          await data.bot.sendApi("get_group_member_list", {
-            group_id: data.group_id,
-          })
-        ).data || []
-      )
+      try {
+        const result = await data.bot.sendApi("get_group_member_list", {
+          group_id: data.group_id,
+        });
+        return result?.data || [];
+      } catch (err) {
+        Bot.makeLog("error", `获取群成员列表失败: ${err.message}`, data.self_id);
+        return [];
+      }
     }
 
     async getMemberList(data) {
-      const array = []
-      for (const { user_id } of await this.getMemberArray(data)) array.push(user_id)
-      return array
+      const array = [];
+      const memberArray = await this.getMemberArray(data);
+      if (Array.isArray(memberArray)) {
+        for (const item of memberArray) {
+          if (item && item.user_id !== undefined) {
+            array.push(item.user_id);
+          }
+        }
+      }
+      return array;
     }
 
     async getMemberMap(data) {
-      const map = new Map()
-      for (const i of await this.getMemberArray(data)) map.set(i.user_id, i)
-      data.bot.gml.set(data.group_id, map)
-      return map
+      const map = new Map();
+      const memberArray = await this.getMemberArray(data);
+      if (Array.isArray(memberArray)) {
+        for (const i of memberArray) {
+          if (i && i.user_id !== undefined) {
+            map.set(i.user_id, i);
+          }
+        }
+      }
+      if (!data.bot.gml) {
+        data.bot.gml = new Map();
+      }
+      data.bot.gml.set(data.group_id, map);
+      return map;
     }
 
     /**
      * 获取所有群的成员映射表
      */
     async getGroupMemberMap(data) {
-      await this.getGroupMap(data)
+      await this.getGroupMap(data);
       
-      // 始终获取所有群成员信息
+      if (!data.bot.gml) {
+        data.bot.gml = new Map();
+      }
+      
       for (const [group_id, group] of data.bot.gl) {
-        if (group.guild) continue
+        if (group?.guild) continue;
         try {
-          await this.getMemberMap({ ...data, group_id })
-          Bot.makeLog("debug", `已加载群 ${group_id} 的成员列表`, data.self_id)
+          await this.getMemberMap({ ...data, group_id });
+          Bot.makeLog("debug", `已加载群 ${group_id} 的成员列表`, data.self_id);
         } catch (err) {
-          Bot.makeLog("error", `加载群 ${group_id} 成员失败: ${err.message}`, data.self_id)
+          Bot.makeLog("error", `加载群 ${group_id} 成员失败: ${err.message}`, data.self_id);
         }
       }
       
-      return data.bot.gml
+      return data.bot.gml;
     }
 
     async getMemberInfo(data) {
-      const info = (
-        await data.bot.sendApi("get_group_member_info", {
-          group_id: data.group_id,
-          user_id: data.user_id,
-        })
-      ).data
-      let gml = data.bot.gml.get(data.group_id)
-      if (!gml) {
-        gml = new Map()
-        data.bot.gml.set(data.group_id, gml)
+      try {
+        const info = (
+          await data.bot.sendApi("get_group_member_info", {
+            group_id: data.group_id,
+            user_id: data.user_id,
+          })
+        ).data;
+        
+        if (!data.bot.gml) {
+          data.bot.gml = new Map();
+        }
+        
+        let gml = data.bot.gml.get(data.group_id);
+        if (!gml) {
+          gml = new Map();
+          data.bot.gml.set(data.group_id, gml);
+        }
+        
+        if (info) {
+          gml.set(data.user_id, info);
+        }
+        
+        return info;
+      } catch (err) {
+        Bot.makeLog("error", `获取群成员信息失败: ${err.message}`, data.self_id);
+        return null;
       }
-      gml.set(data.user_id, info)
-      return info
     }
 
     async getGuildArray(data) {
-      return (await data.bot.sendApi("get_guild_list")).data || []
+      try {
+        const result = await data.bot.sendApi("get_guild_list");
+        return result?.data || [];
+      } catch (err) {
+        Bot.makeLog("debug", `获取频道列表失败: ${err.message}`, data.self_id);
+        return [];
+      }
     }
 
     getGuildInfo(data) {
       return data.bot.sendApi("get_guild_meta_by_guest", {
         guild_id: data.guild_id,
-      })
+      });
     }
 
     async getGuildChannelArray(data) {
-      return (
-        (
-          await data.bot.sendApi("get_guild_channel_list", {
-            guild_id: data.guild_id,
-          })
-        ).data || []
-      )
+      try {
+        const result = await data.bot.sendApi("get_guild_channel_list", {
+          guild_id: data.guild_id,
+        });
+        return result?.data || [];
+      } catch (err) {
+        Bot.makeLog("debug", `获取子频道列表失败: ${err.message}`, data.self_id);
+        return [];
+      }
     }
 
     async getGuildChannelMap(data) {
-      const map = new Map()
-      for (const i of await this.getGuildChannelArray(data)) map.set(i.channel_id, i)
-      return map
+      const map = new Map();
+      const channelArray = await this.getGuildChannelArray(data);
+      if (Array.isArray(channelArray)) {
+        for (const i of channelArray) {
+          if (i && i.channel_id !== undefined) {
+            map.set(i.channel_id, i);
+          }
+        }
+      }
+      return map;
     }
 
     async getGuildMemberArray(data) {
-      const array = []
-      let next_token = ""
+      const array = [];
+      let next_token = "";
+      
       while (true) {
-        const list = (
-          await data.bot.sendApi("get_guild_member_list", {
+        try {
+          const result = await data.bot.sendApi("get_guild_member_list", {
             guild_id: data.guild_id,
             next_token,
-          })
-        ).data
-        if (!list) break
-
-        for (const i of list.members)
-          array.push({
-            ...i,
-            user_id: i.tiny_id,
-          })
-        if (list.finished) break
-        next_token = list.next_token
+          });
+          
+          const list = result?.data;
+          if (!list) break;
+          
+          if (Array.isArray(list.members)) {
+            for (const i of list.members) {
+              array.push({
+                ...i,
+                user_id: i.tiny_id,
+              });
+            }
+          }
+          
+          if (list.finished) break;
+          next_token = list.next_token;
+        } catch (err) {
+          Bot.makeLog("debug", `获取频道成员列表失败: ${err.message}`, data.self_id);
+          break;
+        }
       }
-      return array
+      
+      return array;
     }
 
     async getGuildMemberList(data) {
-      const array = []
-      for (const { user_id } of await this.getGuildMemberArray(data)) array.push(user_id)
-      return array
+      const array = [];
+      const memberArray = await this.getGuildMemberArray(data);
+      if (Array.isArray(memberArray)) {
+        for (const item of memberArray) {
+          if (item && item.user_id !== undefined) {
+            array.push(item.user_id);
+          }
+        }
+      }
+      return array;
     }
 
     async getGuildMemberMap(data) {
-      const map = new Map()
-      for (const i of await this.getGuildMemberArray(data)) map.set(i.user_id, i)
-      data.bot.gml.set(data.group_id, map)
-      return map
+      const map = new Map();
+      const memberArray = await this.getGuildMemberArray(data);
+      if (Array.isArray(memberArray)) {
+        for (const i of memberArray) {
+          if (i && i.user_id !== undefined) {
+            map.set(i.user_id, i);
+          }
+        }
+      }
+      if (!data.bot.gml) {
+        data.bot.gml = new Map();
+      }
+      data.bot.gml.set(data.group_id, map);
+      return map;
     }
 
     getGuildMemberInfo(data) {
       return data.bot.sendApi("get_guild_member_profile", {
         guild_id: data.guild_id,
         user_id: data.user_id,
-      })
+      });
     }
 
     setProfile(data, profile) {
@@ -805,8 +952,8 @@ Bot.adapter.push(
         }
       }
       
-      // 获取成员信息
-      const memberInfo = data.bot.gml.get(group_id)?.get(user_id) || {}
+      // 获取成员信息（添加安全检查）
+      const memberInfo = data.bot.gml?.get(group_id)?.get(user_id) || {}
       const i = {
         ...memberInfo,
         ...data,
@@ -903,11 +1050,11 @@ Bot.adapter.push(
         quit: this.setGroupLeave.bind(this, i),
         fs: this.getGroupFs(i),
         get is_owner() {
-          const botMemberInfo = data.bot.gml.get(group_id)?.get(data.self_id)
+          const botMemberInfo = data.bot.gml?.get(group_id)?.get(data.self_id)
           return botMemberInfo?.role === "owner"
         },
         get is_admin() {
-          const botMemberInfo = data.bot.gml.get(group_id)?.get(data.self_id)
+          const botMemberInfo = data.bot.gml?.get(group_id)?.get(data.self_id)
           return botMemberInfo?.role === "admin" || botMemberInfo?.role === "owner"
         },
       }
@@ -1009,7 +1156,7 @@ Bot.adapter.push(
         .catch(() => {})
 
       // 获取账号信息
-      data.bot.info = (await data.bot.sendApi("get_login_info").catch(i => i.error)).data
+      data.bot.info = (await data.bot.sendApi("get_login_info").catch(i => i.error)).data || {}
       data.bot.guild_info = (
         await data.bot.sendApi("get_guild_service_profile").catch(i => i.error)
       ).data
@@ -1091,7 +1238,7 @@ Bot.adapter.push(
           let user_name = data.sender.card || data.sender.nickname
           if (!user_name) {
             const user =
-              data.bot.gml.get(data.group_id)?.get(data.user_id) || data.bot.fl.get(data.user_id)
+              data.bot.gml?.get(data.group_id)?.get(data.user_id) || data.bot.fl.get(data.user_id)
             if (user) user_name = user?.card || user?.nickname
           }
           Bot.makeLog(
@@ -1170,7 +1317,7 @@ Bot.adapter.push(
             data.bot.gml.delete(data.group_id)
           } else {
             data.bot.pickGroup(data.group_id).getInfo()
-            data.bot.gml.get(data.group_id)?.delete(data.user_id)
+            data.bot.gml?.get(data.group_id)?.delete(data.user_id)
           }
           break
         }
