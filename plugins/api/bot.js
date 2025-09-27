@@ -22,7 +22,7 @@ export default {
           })
           .map(([uin, bot]) => ({
             uin,
-            online: bot.status?.online || false,
+            online: bot.stat?.online || false,
             nickname: bot.nickname || uin,
             adapter: bot.adapter?.name || 'unknown',
             friends: bot.fl?.size || 0,
