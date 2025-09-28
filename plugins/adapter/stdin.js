@@ -4,15 +4,18 @@ import os from "os";
 import { exec } from "child_process";
 import path from "path";
 import { ulid } from "ulid";
+import crypto from 'crypto';
 import BotUtil from "../../lib/common/util.js";
 
-const tempDir = path.join(process.cwd(), "www/stdin");
-const mediaDir = path.join(process.cwd(), "www/media");
+const tempDir = path.join(process.cwd(), "www", "stdin");
+const mediaDir = path.join(process.cwd(), "www", "media");
 const pluginsLoader = (await import("../../lib/plugins/loader.js")).default;
 
 // 确保目录存在
 for (const dir of [tempDir, mediaDir]) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
 }
 
 // 定期清理临时文件
@@ -20,11 +23,12 @@ setInterval(() => {
   try {
     const now = Date.now();
     for (const dir of [tempDir, mediaDir]) {
+      if (!fs.existsSync(dir)) continue;
       const files = fs.readdirSync(dir);
       files.forEach(file => {
         const filePath = path.join(dir, file);
         const stats = fs.statSync(filePath);
-        if (now - stats.mtimeMs > 3600000) {
+        if (now - stats.mtimeMs > 3600000) { // 1小时后清理
           fs.unlinkSync(filePath);
           logger.debug(`已清理临时文件: ${file}`);
         }
@@ -85,13 +89,19 @@ export class StdinHandler {
         }),
         getGroupArray: () => [],
         getFriendArray: () => [],
-        fileToUrl: async (filePath) => {
+        fileToUrl: async (filePath, opts = {}) => {
           try {
-            const result = await BotUtil.fileToUrl(filePath, { 
-              baseUrl: Bot.url,
-              returnPath: true 
-            });
-            return typeof result === 'string' ? result : result.url;
+            // 如果是URL直接返回
+            if (typeof filePath === 'string' && filePath.startsWith('http')) {
+              return filePath;
+            }
+
+            // 获取服务器URL
+            const baseUrl = Bot.getServerUrl ? Bot.getServerUrl() : `http://localhost:${Bot.httpPort || 3000}`;
+            
+            // 处理文件
+            const result = await this.processFileToUrl(filePath, baseUrl);
+            return result;
           } catch (err) {
             logger.error(`文件转URL失败: ${err.message}`);
             return '';
@@ -101,11 +111,67 @@ export class StdinHandler {
     }
   }
 
+  /**
+   * 将文件转换为URL [API 基础知识和教程 ...](https://apifox.com/apiskills/how-to-convert-image-to-base64-in-nodejs/)
+   */
+  async processFileToUrl(filePath, baseUrl) {
+    try {
+      let buffer;
+      let fileName;
+      let fileExt = 'file';
+
+      // 处理不同类型的输入
+      if (Buffer.isBuffer(filePath)) {
+        buffer = filePath;
+        // 尝试检测文件类型
+        const fileType = await BotUtil.fileType({ buffer });
+        fileExt = fileType?.type?.ext || 'file';
+        fileName = `${ulid()}.${fileExt}`;
+      } else if (typeof filePath === 'string') {
+        // 检查文件是否存在
+        if (fs.existsSync(filePath)) {
+          buffer = await fs.promises.readFile(filePath);
+          fileName = path.basename(filePath);
+          fileExt = path.extname(fileName).slice(1) || 'file';
+        } else {
+          throw new Error(`文件不存在: ${filePath}`);
+        }
+      } else if (typeof filePath === 'object' && filePath.buffer) {
+        buffer = filePath.buffer;
+        fileName = filePath.name || `${ulid()}.${filePath.ext || 'file'}`;
+        fileExt = filePath.ext || path.extname(fileName).slice(1) || 'file';
+      } else {
+        throw new Error('不支持的文件格式');
+      }
+
+      // 确保文件名合法
+      fileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+      
+      // 保存文件到media目录
+      const targetPath = path.join(mediaDir, fileName);
+      await fs.promises.writeFile(targetPath, buffer);
+
+      // 返回访问URL
+      const url = `${baseUrl}/media/${fileName}`;
+      logger.debug(`文件已保存: ${targetPath} -> ${url}`);
+      
+      return url;
+    } catch (error) {
+      logger.error(`processFileToUrl错误: ${error.message}`);
+      throw error;
+    }
+  }
+
   async processCommand(input, userInfo = {}) {
     try {
       // 解析JSON输入
       if (typeof input === 'string') {
-        try { input = JSON.parse(input); } catch {}
+        try { 
+          const parsed = JSON.parse(input);
+          input = parsed;
+        } catch {
+          // 不是JSON，保持原样
+        }
       }
 
       // 处理消息数组
@@ -116,11 +182,23 @@ export class StdinHandler {
       }
 
       const trimmedInput = typeof input === 'string' ? input.trim() : '';
-      if (!trimmedInput) return { success: true, code: 200, message: "空输入已忽略", timestamp: Date.now() };
+      if (!trimmedInput) {
+        return { 
+          success: true, 
+          code: 200, 
+          message: "空输入已忽略", 
+          timestamp: Date.now() 
+        };
+      }
 
       // 内置命令处理
       const builtinCommands = {
-        "exit": () => ({ success: true, code: 200, message: "退出命令已接收", command: "exit" }),
+        "exit": () => ({ 
+          success: true, 
+          code: 200, 
+          message: "退出命令已接收", 
+          command: "exit" 
+        }),
         "help": () => ({
           success: true,
           code: 200,
@@ -133,18 +211,37 @@ export class StdinHandler {
             "cleanup: 清理临时文件"
           ]
         }),
-        "clear": () => ({ success: true, code: 200, message: "清屏命令已接收", command: "clear" }),
+        "clear": () => ({ 
+          success: true, 
+          code: 200, 
+          message: "清屏命令已接收", 
+          command: "clear" 
+        }),
         "cleanup": () => {
           this.cleanupTempFiles();
-          return { success: true, code: 200, message: "临时文件清理完成", command: "cleanup" };
+          return { 
+            success: true, 
+            code: 200, 
+            message: "临时文件清理完成", 
+            command: "cleanup" 
+          };
         }
       };
 
-      const commandAliases = { "退出": "exit", "帮助": "help", "清屏": "clear", "清理": "cleanup" };
+      const commandAliases = { 
+        "退出": "exit", 
+        "帮助": "help", 
+        "清屏": "clear", 
+        "清理": "cleanup" 
+      };
+      
       const command = commandAliases[trimmedInput] || trimmedInput;
 
       if (builtinCommands[command]) {
-        return { ...builtinCommands[command](), timestamp: Date.now() };
+        return { 
+          ...builtinCommands[command](), 
+          timestamp: Date.now() 
+        };
       }
 
       logger.tag(trimmedInput, "命令", "green");
@@ -152,7 +249,13 @@ export class StdinHandler {
       return await this.handleEvent(event);
     } catch (error) {
       logger.error(`处理命令错误: ${error.message}`);
-      return { success: false, code: 500, error: error.message, stack: error.stack, timestamp: Date.now() };
+      return { 
+        success: false, 
+        code: 500, 
+        error: error.message, 
+        stack: error.stack, 
+        timestamp: Date.now() 
+      };
     }
   }
 
@@ -216,6 +319,9 @@ export class StdinHandler {
     return response;
   }
 
+  /**
+   * 处理消息内容，包括图片文件等 [腾讯云](https://cloud.tencent.com/developer/ask/sof/1228959/answer/1705028)
+   */
   async processMessageContent(content) {
     if (!Array.isArray(content)) content = [content];
     const processed = [];
@@ -244,33 +350,73 @@ export class StdinHandler {
     return processed;
   }
 
+  /**
+   * 处理媒体文件，转换为可访问的URL [Node.js + Express 处理图片上传的三种方法](https://www.javascriptcn.com/post/651118fd95b1f8cacd976e49)
+   */
   async processMediaFile(item) {
     try {
-      const fileInfo = await BotUtil.fileType({ 
-        file: item.file || item.url || item.path, 
-        name: item.name 
-      });
-      
-      if (!fileInfo.buffer) {
-        if (item.path && await BotUtil.fileExists(item.path)) {
-          const buffer = await fs.promises.readFile(item.path);
-          fileInfo.buffer = buffer;
-          fileInfo.name = item.name || path.basename(item.path);
-        } else {
-          return item;
+      let buffer;
+      let fileName;
+      let fileExt = 'file';
+      let mimeType = 'application/octet-stream';
+
+      // 获取文件内容
+      if (item.file || item.url || item.path) {
+        const fileInfo = await BotUtil.fileType({ 
+          file: item.file || item.url || item.path, 
+          name: item.name 
+        });
+        
+        buffer = fileInfo.buffer;
+        fileName = fileInfo.name || item.name;
+        fileExt = fileInfo.type?.ext || 'file';
+        mimeType = fileInfo.type?.mime || 'application/octet-stream';
+        
+        // 如果没有获取到buffer，尝试读取本地文件
+        if (!buffer && item.path && fs.existsSync(item.path)) {
+          buffer = await fs.promises.readFile(item.path);
+          fileName = fileName || path.basename(item.path);
+          fileExt = path.extname(fileName).slice(1) || fileExt;
+        }
+      } else if (item.buffer) {
+        buffer = item.buffer;
+        fileName = item.name;
+      }
+
+      if (!buffer) {
+        logger.warn(`无法获取文件内容: ${JSON.stringify(item)}`);
+        return item;
+      }
+
+      // 生成唯一文件名
+      if (!fileName) {
+        fileName = `${ulid()}.${fileExt}`;
+      } else {
+        // 确保文件名安全
+        fileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+        // 如果没有扩展名，添加扩展名
+        if (!path.extname(fileName) && fileExt !== 'file') {
+          fileName = `${fileName}.${fileExt}`;
         }
       }
 
-      const fileName = fileInfo.name || `${ulid()}.${fileInfo.type?.ext || 'file'}`;
+      // 保存文件到media目录
       const filePath = path.join(mediaDir, fileName);
+      await fs.promises.writeFile(filePath, buffer);
       
-      await fs.promises.writeFile(filePath, fileInfo.buffer);
-      
-      const fileUrl = `${Bot.url}/media/${fileName}`;
+      // 生成访问URL
+      const baseUrl = Bot.getServerUrl ? Bot.getServerUrl() : `http://localhost:${Bot.httpPort || 3000}`;
+      const fileUrl = `${baseUrl}/media/${fileName}`;
 
+      logger.debug(`媒体文件已保存: ${filePath} -> ${fileUrl}`);
+
+      // 如果是图片且设置了自动打开
       if (item.type === 'image' && process.env.OPEN_IMAGES === 'true') {
         this.openImageFile(filePath);
       }
+
+      // 计算文件MD5 [Node.js 中图片如何转为 base64 格式](https://apifox.com/apiskills/how-to-convert-image-to-base64-in-nodejs/)
+      const md5 = crypto.createHash('md5').update(buffer).digest('hex');
 
       return { 
         type: item.type,
@@ -278,8 +424,9 @@ export class StdinHandler {
         url: fileUrl, 
         path: path.resolve(filePath),
         name: fileName,
-        size: fileInfo.buffer.length,
-        md5: fileInfo.md5
+        size: buffer.length,
+        md5: md5,
+        mime: mimeType
       };
     } catch (error) {
       logger.error(`处理媒体文件错误: ${error.message}`);
@@ -290,12 +437,14 @@ export class StdinHandler {
   openImageFile(filePath) {
     try {
       const commands = { 
-        "win32": `start ${filePath}`, 
-        "darwin": `open ${filePath}`, 
-        "linux": `xdg-open ${filePath}` 
+        "win32": `start "" "${filePath}"`, 
+        "darwin": `open "${filePath}"`, 
+        "linux": `xdg-open "${filePath}"` 
       };
       const platform = os.platform();
-      if (commands[platform]) exec(commands[platform]);
+      if (commands[platform]) {
+        exec(commands[platform]);
+      }
     } catch (error) {
       logger.error(`打开图片失败: ${error.message}`);
     }
@@ -344,10 +493,14 @@ export class StdinHandler {
         parts.push(item.text);
       } else if (item.type === 'image') {
         parts.push(`[图片: ${item.name || '未命名'} - ${item.url}]`);
+      } else if (item.type === 'video') {
+        parts.push(`[视频: ${item.name || '未命名'} - ${item.url}]`);
+      } else if (item.type === 'audio') {
+        parts.push(`[音频: ${item.name || '未命名'} - ${item.url}]`);
       } else if (item.type === 'file') {
         parts.push(`[文件: ${item.name || '未命名'} - ${item.url}]`);
       } else {
-        parts.push(JSON.stringify(item));
+        parts.push(`[${item.type}]`);
       }
     }
     
@@ -355,7 +508,7 @@ export class StdinHandler {
   }
 
   startImprovedListener() {
-    const appVersion = "1.4.2";
+    const appVersion = "1.4.3";
     logger.gradientLine('=', 27);
     logger.title(`葵崽标准输入 v${appVersion}`, "yellow");
     logger.tip("输入 'help' 获取帮助");
@@ -369,7 +522,7 @@ export class StdinHandler {
     const nickname = userInfo.nickname || userId;
     const time = Math.floor(Date.now() / 1000);
     const messageId = `${userId}_${time}_${Math.floor(Math.random() * 1000)}`;
-    const adapter = userInfo.adapter || 'stdin';  // 默认使用stdin适配器
+    const adapter = userInfo.adapter || 'stdin';
 
     let message = Array.isArray(input) ? input : 
                   typeof input === 'string' && input ? [{ type: "text", text: input }] : [];
@@ -452,7 +605,7 @@ export class StdinHandler {
           processedItems.push(item);
         } else if (item.type === 'forward') {
           processedItems.push(item);
-          textLogs.push(`[转发消息] ${JSON.stringify(item.messages || item)}`);
+          textLogs.push(`[转发消息]`);
         } else {
           const typeMap = {
             'at': `[@${item.qq || item.id}]`,
@@ -512,6 +665,7 @@ export class StdinHandler {
       let cleaned = 0;
 
       for (const dir of [tempDir, mediaDir]) {
+        if (!fs.existsSync(dir)) continue;
         const files = fs.readdirSync(dir);
         files.forEach(file => {
           const filePath = path.join(dir, file);
@@ -530,6 +684,7 @@ export class StdinHandler {
   }
 
   load() {
+    Bot.wsf = Bot.wsf || {};
     Bot.wsf['stdin'] = Bot.wsf['stdin'] || [];
     Bot.wsf['stdin'].push(this.handleStdin.bind(this));
   }
@@ -539,6 +694,7 @@ export class StdinHandler {
   }
 }
 
+// 创建并加载stdin处理器
 const stdinHandler = new StdinHandler();
 stdinHandler.load();
 

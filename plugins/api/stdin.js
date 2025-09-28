@@ -1,5 +1,9 @@
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from 'url';
+import crypto from 'crypto';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * 标准输入API
@@ -37,7 +41,7 @@ export default {
             uptime: process.uptime(),
             temp_files: fs.existsSync(tempDir) ? fs.readdirSync(tempDir).length : 0,
             media_files: fs.existsSync(mediaDir) ? fs.readdirSync(mediaDir).length : 0,
-            base_url: Bot.url,
+            base_url: Bot.getServerUrl ? Bot.getServerUrl() : `http://localhost:${Bot.httpPort || 3000}`,
             timestamp: Date.now()
           }
         });
@@ -166,9 +170,17 @@ export default {
   },
 
   async init(app, Bot) {
+    // 确保stdin适配器已加载
     if (!global.stdinHandler) {
-      const StdinHandler = (await import('../adapter/Stdin.js')).StdinHandler;
-      global.stdinHandler = new StdinHandler();
+      const StdinModule = await import('../adapter/Stdin.js');
+      if (StdinModule.StdinHandler) {
+        global.stdinHandler = new StdinModule.StdinHandler();
+      }
+    }
+    
+    // 设置Bot的URL
+    if (!Bot.url && Bot.getServerUrl) {
+      Bot.url = Bot.getServerUrl();
     }
   }
 };
