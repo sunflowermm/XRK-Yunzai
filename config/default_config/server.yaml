@@ -21,7 +21,7 @@ server:
 proxy:
   # 是否启用反向代理功能
   # 启用后可以实现多域名解析、路径重写、负载均衡等
-  enabled: true
+  enabled: false
   
   # HTTP监听端口（作为反向代理时建议使用80）
   httpPort: 80
