@@ -4,5 +4,5 @@
 xrk/**
 !xrk/index.html
 !xrk/api-config.json
-!xrk/style.css
+!xrk/styles.css
 !xrk/app.js
