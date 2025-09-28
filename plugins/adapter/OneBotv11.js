@@ -37,8 +37,8 @@ Bot.adapter.push(
             throw Bot.makeError(data.msg || data.wording, request, { error: data })
           return data.data
             ? new Proxy(data, {
-                get: (target, prop) => target.data[prop] ?? target[prop],
-              })
+              get: (target, prop) => target.data[prop] ?? target[prop],
+            })
             : data
         })
         .finally(() => {
@@ -352,7 +352,7 @@ Bot.adapter.push(
         Bot.makeLog("error", `获取群列表失败: ${err.message}`, data.self_id);
         array = [];
       }
-      
+
       // 尝试获取频道列表
       try {
         const guildArray = await this.getGuildArray(data);
@@ -379,7 +379,7 @@ Bot.adapter.push(
         }
       } catch (err) {
       }
-      
+
       return array;
     }
 
@@ -474,11 +474,11 @@ Bot.adapter.push(
      */
     async getGroupMemberMap(data) {
       await this.getGroupMap(data);
-      
+
       if (!data.bot.gml) {
         data.bot.gml = new Map();
       }
-      
+
       for (const [group_id, group] of data.bot.gl) {
         if (group?.guild) continue;
         try {
@@ -488,7 +488,7 @@ Bot.adapter.push(
           Bot.makeLog("error", `加载群 ${group_id} 成员失败: ${err.message}`, data.self_id);
         }
       }
-      
+
       return data.bot.gml;
     }
 
@@ -500,21 +500,21 @@ Bot.adapter.push(
             user_id: data.user_id,
           })
         ).data;
-        
+
         if (!data.bot.gml) {
           data.bot.gml = new Map();
         }
-        
+
         let gml = data.bot.gml.get(data.group_id);
         if (!gml) {
           gml = new Map();
           data.bot.gml.set(data.group_id, gml);
         }
-        
+
         if (info) {
           gml.set(data.user_id, info);
         }
-        
+
         return info;
       } catch (err) {
         Bot.makeLog("error", `获取群成员信息失败: ${err.message}`, data.self_id);
@@ -566,17 +566,17 @@ Bot.adapter.push(
     async getGuildMemberArray(data) {
       const array = [];
       let next_token = "";
-      
+
       while (true) {
         try {
           const result = await data.bot.sendApi("get_guild_member_list", {
             guild_id: data.guild_id,
             next_token,
           });
-          
+
           const list = result?.data;
           if (!list) break;
-          
+
           if (Array.isArray(list.members)) {
             for (const i of list.members) {
               array.push({
@@ -585,7 +585,7 @@ Bot.adapter.push(
               });
             }
           }
-          
+
           if (list.finished) break;
           next_token = list.next_token;
         } catch (err) {
@@ -593,7 +593,7 @@ Bot.adapter.push(
           break;
         }
       }
-      
+
       return array;
     }
 
@@ -952,7 +952,7 @@ Bot.adapter.push(
           getAvatarUrl: async () => (await this.getGuildMemberInfo(i)).avatar_url,
         }
       }
-      
+
       // 获取成员信息（添加安全检查）
       const memberInfo = data.bot.gml?.get(group_id)?.get(user_id) || {}
       const i = {
@@ -961,7 +961,7 @@ Bot.adapter.push(
         group_id,
         user_id,
       }
-      
+
       return {
         ...this.pickFriend(i, user_id),
         ...i,
@@ -1018,7 +1018,7 @@ Bot.adapter.push(
         ...data,
         group_id,
       }
-      
+
       return {
         ...i,
         sendMsg: this.sendGroupMsg.bind(this, i),
@@ -1154,7 +1154,7 @@ Bot.adapter.push(
           model: data.bot.model,
           model_show: data.bot.model,
         })
-        .catch(() => {})
+        .catch(() => { })
 
       // 获取账号信息
       data.bot.info = (await data.bot.sendApi("get_login_info").catch(i => i.error)).data || {}
@@ -1205,9 +1205,23 @@ Bot.adapter.push(
         }
       data.bot.bkn = (await data.bot.sendApi("get_csrf_token").catch(i => i.error)).token
 
-      // 初始化联系人和群成员列表
-      await data.bot.getFriendMap()
-      await data.bot.getGroupMemberMap()
+      try {
+        await data.bot.getFriendMap()
+      } catch (err) {
+        BotUtil.makeLog("warn", `获取好友列表失败: ${err.message}`, data.self_id)
+        if (!(data.bot.fl instanceof Map)) {
+          data.bot.fl = new Map()
+        }
+      }
+
+      try {
+        await data.bot.getGroupMemberMap()
+      } catch (err) {
+        BotUtil.makeLog("warn", `获取群成员列表失败: ${err.message}`, data.self_id)
+        if (!(data.bot.gml instanceof Map)) {
+          data.bot.gml = new Map()
+        }
+      }
 
       Bot.makeLog(
         "mark",
