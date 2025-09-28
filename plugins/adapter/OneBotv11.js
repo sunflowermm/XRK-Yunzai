@@ -1158,9 +1158,6 @@ Bot.adapter.push(
 
       // 获取账号信息
       data.bot.info = (await data.bot.sendApi("get_login_info").catch(i => i.error)).data || {}
-      data.bot.guild_info = (
-        await data.bot.sendApi("get_guild_service_profile").catch(i => i.error)
-      ).data
       data.bot.clients = (await data.bot.sendApi("get_online_clients").catch(i => i.error)).clients
       data.bot.version = {
         ...(await data.bot.sendApi("get_version_info").catch(i => i.error)).data,
