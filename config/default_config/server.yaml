@@ -1,205 +1,209 @@
-# ========================================
-#      反向代理服务器配置文件
-# ========================================
-# 本配置文件控制HTTP/HTTPS服务器和反向代理的行为
-
 # ----------------------------------------
 #            基础配置
 # ----------------------------------------
 server:
   # 服务器名称（将显示在日志中）
-  name: "XRK Proxy Server"
+  name: "XRK Server"
   
-  # Bot内部服务监听地址
-  # Bot服务将监听在随机高端口上，仅供内部使用
-  host: "127.0.0.1"
+  # 监听地址
+  # - 0.0.0.0: 监听所有网络接口（允许外部访问）
+  # - 127.0.0.1: 仅监听本地（仅本机可访问）
+  host: "0.0.0.0"
   
   # 外部访问URL（可选）
   # 用于生成完整的访问链接，留空则自动检测
-  # 这是Bot服务的对外URL，通过反向代理访问
+  # 示例: https://bot.example.com
   url: "http://127.0.0.1"
 
 # ----------------------------------------
-#         反向代理配置（核心功能）
+#          反向代理配置（新增）
 # ----------------------------------------
 proxy:
   # 是否启用反向代理功能
-  # 启用后将监听80和443端口，提供域名路由和反向代理
-  enabled: false
+  # 启用后可以实现多域名解析、路径重写、负载均衡等
+  enabled: true
+  
+  # HTTP监听端口（作为反向代理时建议使用80）
+  httpPort: 80
+  
+  # HTTPS监听端口（作为反向代理时建议使用443）
+  httpsPort: 443
   
   # 域名配置列表
-  # 每个域名可以独立配置SSL证书、路由规则等
+  # 每个域名可以有不同的配置和处理方式
   domains:
-    # ======== 主域名配置 ========
-    - # 域名（必需）
-      # 支持精确匹配和通配符（*.example.com）
-      domain: "xrkk.cc"
+    # 主域名配置示例
+    - domain: "xrkk.cc"
+      # 静态文件根目录（可选）
+      # 如果不配置，使用默认的www目录
+      staticRoot: "./www"
       
-      # 类型（必需）
-      # - local: 代理到本地Bot服务
-      # - proxy: 反向代理到其他服务器
-      # - static: 静态文件服务
-      type: "local"
+      # 是否启用SSL（需要配置证书）
+      ssl:
+        enabled: true
+        certificate:
+          # 域名专用证书路径
+          key: "/path/to/xrkk.cc.key"
+          cert: "/path/to/xrkk.cc.cert"
+          ca: ""  # CA证书链（可选）
       
-      # 目标地址（type为proxy时必需）
-      # 示例: http://localhost:3000
-      # target: ""
+      # 目标服务器（如果需要代理到其他服务）
+      # 不配置则直接提供静态文件服务
+      # target: "http://localhost:3000"
       
       # 路径重写规则（可选）
-      # 格式: { "原路径规则": "新路径" }
-      # 支持正则表达式
-      pathRewrite: {}
-      
-      # 自定义请求头（可选）
-      # 添加到代理请求中的额外头部
-      headers: {}
-      
-      # 是否启用WebSocket支持
-      ws: true
-      
-      # 是否启用CORS（跨域资源共享）
-      corsEnabled: false
-      
-      # SSL证书配置（可选，用于HTTPS）
-      ssl:
-        # 证书文件路径（PEM格式）
-        cert: "/path/to/xrkk.cc/fullchain.pem"
-        # 私钥文件路径
-        key: "/path/to/xrkk.cc/privkey.pem"
-        # CA证书链（可选）
-        ca: ""
+      # rewritePath:
+      #   from: "/"
+      #   to: "/"
     
-    # ======== 子域名配置示例 ========
-    # - # XRK子域名 - 将/xrk路径映射为根目录
-    #   domain: "xrk.xrkk.cc"
-    #   type: "local"
+    # 子域名配置示例（已注释）
+    # - domain: "xrk.xrkk.cc"
+    #   # 子域名专用的静态文件目录
+    #   staticRoot: "./www/xrk"
     #   
-    #   # 路径重写：访问 xrk.xrkk.cc/ 实际访问 /xrk/
-    #   pathRewrite:
-    #     "^/": "/xrk/"
-    #   
-    #   # 独立的SSL证书
+    #   # SSL配置（每个域名可以有自己的证书）
     #   ssl:
-    #     cert: "/path/to/xrk.xrkk.cc/fullchain.pem"
-    #     key: "/path/to/xrk.xrkk.cc/privkey.pem"
+    #     enabled: true
+    #     certificate:
+    #       key: "/path/to/xrk.xrkk.cc.key"
+    #       cert: "/path/to/xrk.xrkk.cc.cert"
     #   
-    #   ws: true
-    
-    # ======== API子域名示例 ========
-    # - domain: "api.xrkk.cc"
-    #   type: "local"
+    #   # 路径重写：将 /xrk/* 重写为 /*
+    #   # 使得xrk.xrkk.cc/index.html 等同于访问原本的 /xrk/index.html
+    #   rewritePath:
+    #     from: "/xrk"
+    #     to: "/"
     #   
-    #   # API路径直接映射
-    #   pathRewrite:
-    #     "^/": "/api/"
-    #   
-    #   # API专用配置
-    #   corsEnabled: true  # API通常需要CORS
-    #   
-    #   # 自定义头部
+    #   # 自定义请求和响应头（可选）
     #   headers:
-    #     "X-API-Version": "v2"
-    #     "X-Powered-By": "XRK-Server"
-    #   
-    #   ssl:
-    #     cert: "/path/to/api.xrkk.cc/fullchain.pem"
-    #     key: "/path/to/api.xrkk.cc/privkey.pem"
+    #     request:
+    #       # 添加到代理请求的头部
+    #       X-Custom-Header: "xrk-subdomain"
+    #     response:
+    #       # 添加到响应的头部
+    #       X-Frame-Options: "SAMEORIGIN"
     
-    # ======== 静态资源域名示例 ========
-    # - domain: "static.xrkk.cc"
-    #   type: "static"
-    #   
-    #   # 静态文件根目录
-    #   root: "www/static"
-    #   
-    #   # 不需要WebSocket
-    #   ws: false
-    #   
-    #   ssl:
-    #     cert: "/path/to/static.xrkk.cc/fullchain.pem"
-    #     key: "/path/to/static.xrkk.cc/privkey.pem"
+    # API子域名示例（反向代理到后端服务）
+    #- domain: "api.xrkk.cc"
+    # 代理到后端API服务
+    #  target: "http://localhost:8080"
+    #  
+    #  ssl:
+    #    enabled: true
+    #    certificate:
+    #      key: "/path/to/api.xrkk.cc.key"
+    #      cert: "/path/to/api.xrkk.cc.cert"
+    #  
+      # 保持原始Host头（某些后端服务需要）
+    #  preserveHostHeader: true
+      
+      # WebSocket支持
+    #  ws: true
+      
+      # 超时设置（毫秒）
+    #  timeout: 30000
+      
+      # 更复杂的路径重写规则
+    #  pathRewrite:
+    #    "^/v1": "/api/v1"
+    #    "^/v2": "/api/v2"
+    #    "^/legacy": ""
     
-    # ======== 通配符域名示例 ========
-    # - # 所有子域名都代理到同一服务
-    #   domain: "*.app.xrkk.cc"
-    #   type: "proxy"
-    #   
-    #   # 代理到另一个服务
-    #   target: "http://localhost:8080"
-    #   
-    #   # 保持原始主机头
-    #   changeOrigin: false
-    #   
-    #   # 通配符SSL证书
-    #   ssl:
-    #     cert: "/path/to/wildcard.app.xrkk.cc/fullchain.pem"
-    #     key: "/path/to/wildcard.app.xrkk.cc/privkey.pem"
+    # 通配符域名示例（处理所有子域名）
+    #- domain: "*.test.xrkk.cc"
+      # 所有 *.test.xrkk.cc 的请求都代理到这里
+    #  target: "http://localhost:9000"
+      
+      # 通配符证书
+    #  ssl:
+    #    enabled: true
+    #    certificate:
+    #      key: "/path/to/wildcard.test.xrkk.cc.key"
+    #      cert: "/path/to/wildcard.test.xrkk.cc.cert"
+      
+      # 动态路径重写（基于子域名）
+      # 例如：dev.test.xrkk.cc → http://localhost:9000/dev
+      # 例如：staging.test.xrkk.cc → http://localhost:9000/staging
+    #  rewritePath:
+    #    from: "/"
+    #    to: "/${subdomain}/"  # ${subdomain}会被实际子域名替换
     
-    # ======== 外部服务反向代理示例 ========
-    # - domain: "blog.xrkk.cc"
-    #   type: "proxy"
-    #   
-    #   # 代理到外部博客服务
-    #   target: "http://blog-server:2368"
-    #   
-    #   # 修改Origin头部
-    #   changeOrigin: true
-    #   
-    #   # 路径保持不变
-    #   pathRewrite: {}
-    #   
-    #   ssl:
-    #     cert: "/path/to/blog.xrkk.cc/fullchain.pem"
-    #     key: "/path/to/blog.xrkk.cc/privkey.pem"
-  
-  # 全局代理配置
-  globalOptions:
-    # 超时设置（毫秒）
-    timeout: 30000
-    
-    # 是否跟随重定向
-    followRedirects: false
-    
-    # 最大重定向次数
-    maxRedirects: 5
-    
-    # 是否验证SSL证书（代理到HTTPS时）
-    rejectUnauthorized: true
+    # 负载均衡示例（轮询多个后端服务器）
+    #- domain: "lb.xrkk.cc"
+      # 多个目标服务器（将自动负载均衡）
+      # 注：基础版本只支持单个target，负载均衡需要额外实现
+    #  target: "http://localhost:3001"
+      
+      # 健康检查配置（可选）
+    #  healthCheck:
+    #    enabled: true
+    #    path: "/health"
+    #    interval: 30000  # 检查间隔（毫秒）
+    #    timeout: 5000    # 超时时间（毫秒）
 
 # ----------------------------------------
-#         Bot服务HTTPS配置
+#            HTTPS配置
 # ----------------------------------------
-# 注意：这是Bot内部服务的HTTPS，不是反向代理的HTTPS
 https:
-  # 是否为Bot服务启用HTTPS
-  # 通常不需要，因为有反向代理处理SSL
+  # 是否启用HTTPS服务（全局默认证书）
+  # 注意：现在每个域名可以有自己的证书
   enabled: false
   
-  # Bot服务的SSL证书（如果启用）
+  # 默认SSL证书配置（当域名没有配置专用证书时使用）
   certificate:
-    key: ""
-    cert: ""
+    # 私钥文件路径（必需）
+    key: "/path/to/default/privkey.pem"
+    
+    # 证书文件路径（必需）
+    cert: "/path/to/default/fullchain.pem"
+    
+    # CA证书链文件路径（可选）
+    # 某些证书可能需要提供完整的证书链
     ca: ""
+  
+  # TLS配置
+  tls:
+    # 最低TLS版本（建议不低于TLSv1.2）
+    minVersion: "TLSv1.2"
+    
+    # 是否启用HTTP/2协议（提升性能）
+    http2: true
+  
+  # HSTS（HTTP严格传输安全）配置
+  # 警告：启用后所有HTTP请求将强制重定向到HTTPS
+  hsts:
+    enabled: false
+    # 有效期（秒），31536000 = 1年
+    maxAge: 31536000
+    # 是否包含子域名
+    includeSubDomains: true
+    # 是否允许预加载（需要提交到浏览器预加载列表）
+    preload: false
 
 # ----------------------------------------
 #            静态文件服务
 # ----------------------------------------
 static:
   # 默认首页文件列表
+  # 按顺序查找，返回第一个存在的文件
   index:
     - "index.html"
     - "index.htm"
     - "default.html"
   
   # 是否允许自动添加扩展名
+  # 例如：/page 会尝试 /page.html
   extensions: false
   
   # 缓存时间设置
   cache:
-    static: 86400     # CSS/JS文件（1天）
-    images: 604800    # 图片文件（7天）
+    # 静态资源缓存时间（秒）
+    # 86400 = 1天, 604800 = 7天
+    static: 86400     # CSS/JS文件
+    images: 604800    # 图片文件
   
-  # 缓存总时间
+  # 缓存总时间（适用于其他文件）
+  # 支持格式：1d = 1天, 1h = 1小时
   cacheTime: "1d"
 
 # ----------------------------------------
@@ -207,10 +211,19 @@ static:
 # ----------------------------------------
 security:
   # Helmet安全头配置
+  # 自动添加安全相关的HTTP头部
   helmet:
     enabled: true
   
+  # HSTS配置（需要HTTPS启用）
+  hsts:
+    enabled: false
+    maxAge: 31536000
+    includeSubDomains: true
+    preload: false
+  
   # 隐藏文件/目录模式
+  # 匹配这些模式的文件将返回404
   hiddenFiles:
     - "^\\..*"        # 所有点开头的文件
     - "node_modules"  # Node.js依赖目录
@@ -223,12 +236,24 @@ security:
 #         跨域资源共享（CORS）
 # ----------------------------------------
 cors:
-  # 全局CORS配置（Bot服务）
+  # 是否启用CORS
   enabled: true
+  
+  # 允许的来源
+  # - "*": 允许所有来源（不安全）
+  # - 具体域名列表: ["https://example.com", "https://xrkk.cc"]
   origins: ["*"]
+  
+  # 允许的HTTP方法
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+  
+  # 允许的请求头
   headers: ["Content-Type", "Authorization", "X-API-Key"]
+  
+  # 是否允许携带凭证（cookies等）
   credentials: false
+  
+  # 预检请求缓存时间（秒）
   maxAge: 86400
 
 # ----------------------------------------
@@ -237,72 +262,90 @@ cors:
 auth:
   # API密钥配置
   apiKey:
+    # 是否启用API密钥认证
     enabled: true
+    
+    # 密钥存储文件路径
     file: "config/server_config/api_key.json"
+    
+    # 密钥长度（字符数）
     length: 64
   
   # 无需认证的路径（白名单）
+  # 这些路径可以直接访问
   whitelist:
-    - "/"
-    - "/favicon.ico"
-    - "/health"
-    - "/status"
-    - "/robots.txt"
-    - "/xrk/*"
-    - "/media/*"
-    - "/uploads/*"
+    - "/"              # 根目录
+    - "/favicon.ico"   # 网站图标
+    - "/health"        # 健康检查
+    - "/status"        # 状态接口
+    - "/robots.txt"    # 爬虫规则
+    - "/xrk"           # 葵崽的API接口测试页面
+    - "/media/*"       # 媒体文件目录
+    - "/uploads/*"     # 上传文件目录
+    # 注意：静态文件默认允许访问
 
 # ----------------------------------------
 #            速率限制
 # ----------------------------------------
 rateLimit:
-  # 是否启用速率限制
+  # 是否启用速率限制（防止恶意请求）
   enabled: true
   
-  # 全局限制
+  # 全局限制（所有请求）
   global:
-    windowMs: 900000  # 15分钟
-    max: 1000
+    windowMs: 900000  # 时间窗口：15分钟
+    max: 1000         # 最大请求数
     message: "请求过于频繁，请稍后再试"
   
-  # API接口限制
+  # API接口限制（更严格）
   api:
-    windowMs: 60000   # 1分钟
-    max: 60
+    windowMs: 60000   # 时间窗口：1分钟
+    max: 60           # 最大请求数
     message: "API请求过于频繁"
 
 # ----------------------------------------
 #            请求限制
 # ----------------------------------------
 limits:
-  urlencoded: "10mb"
-  json: "10mb"
-  raw: "50mb"
-  text: "10mb"
-  fileSize: "100mb"
+  # 各种请求体大小限制
+  urlencoded: "10mb"  # URL编码数据
+  json: "10mb"        # JSON数据
+  raw: "50mb"         # 原始数据
+  text: "10mb"        # 文本数据
+  fileSize: "100mb"   # 文件上传
 
 # ----------------------------------------
 #            压缩配置
 # ----------------------------------------
 compression:
+  # 是否启用响应压缩（减少带宽使用）
   enabled: true
+  
+  # 压缩级别（0-9）
+  # 0: 无压缩（最快）
+  # 9: 最大压缩（最慢）
+  # 推荐：6（平衡）
   level: 6
+  
+  # 最小压缩大小（字节）
+  # 小于此大小的响应不会被压缩
   threshold: 1024
 
 # ----------------------------------------
 #            日志配置
 # ----------------------------------------
 logging:
-  # 请求日志
+  # 是否记录请求日志
   requests: true
   
-  # 错误日志
+  # 是否记录错误日志
   errors: true
   
-  # 调试日志
+  # 是否启用调试日志（详细）
   debug: false
   
-  # 静默路径（避免刷屏）
+  # 静默路径列表
+  # 这些路径的请求不会记录日志（避免刷屏）
   quiet:
     - "/health"
     - "/favicon.ico"
@@ -313,78 +356,8 @@ logging:
 # ----------------------------------------
 misc:
   # 是否自动检测公网IP
+  # 用于显示外网访问地址
   detectPublicIP: true
   
   # 404时的默认重定向路径
   defaultRoute: "/"
-
-# ----------------------------------------
-#            配置示例说明
-# ----------------------------------------
-# 使用示例：
-# 
-# 1. 基本域名代理（主站）
-#    - 访问: https://xrkk.cc
-#    - 实际: 本地Bot服务的www目录
-#
-# 2. 子域名路径映射
-#    - 访问: https://xrk.xrkk.cc/
-#    - 实际: 本地Bot服务的/xrk/路径
-#
-# 3. API子域名
-#    - 访问: https://api.xrkk.cc/v2/user
-#    - 实际: 本地Bot服务的/api/v2/user
-#
-# 4. 静态资源域名
-#    - 访问: https://static.xrkk.cc/images/logo.png
-#    - 实际: www/static/images/logo.png文件
-#
-# 5. 反向代理外部服务
-#    - 访问: https://blog.xrkk.cc
-#    - 实际: 代理到blog-server:2368
-#
-# ----------------------------------------
-#            SSL证书获取建议
-# ----------------------------------------
-# 推荐使用 Let's Encrypt 免费SSL证书
-# 
-# 安装 Certbot:
-#   Ubuntu/Debian: sudo apt-get install certbot
-#   CentOS/RHEL: sudo yum install certbot
-#
-# 获取证书（需要先停止占用80端口的服务）:
-#   certbot certonly --standalone -d xrkk.cc -d www.xrkk.cc
-#   certbot certonly --standalone -d xrk.xrkk.cc
-#   certbot certonly --standalone -d api.xrkk.cc
-#
-# 通配符证书（需要DNS验证）:
-#   certbot certonly --manual --preferred-challenges dns -d "*.xrkk.cc"
-#
-# 证书位置:
-#   /etc/letsencrypt/live/域名/fullchain.pem  (证书)
-#   /etc/letsencrypt/live/域名/privkey.pem    (私钥)
-#
-# 自动续期（添加到crontab）:
-#   0 0 1 * * certbot renew --quiet --post-hook "pm2 restart bot"
-#
-# ----------------------------------------
-#            部署建议
-# ----------------------------------------
-# 1. 使用PM2管理进程：
-#    pm2 start app.js --name bot-proxy
-#    pm2 save
-#    pm2 startup
-#
-# 2. 确保防火墙开放端口：
-#    sudo ufw allow 80/tcp
-#    sudo ufw allow 443/tcp
-#
-# 3. 使用root权限或端口转发：
-#    方法1: sudo node app.js
-#    方法2: 使用setcap允许Node.js绑定低端口
-#           sudo setcap 'cap_net_bind_service=+ep' $(which node)
-#
-# 4. 日志管理：
-#    建议配置日志轮转避免日志文件过大
-#
-# ----------------------------------------
