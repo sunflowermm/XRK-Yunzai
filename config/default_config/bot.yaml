@@ -16,6 +16,12 @@ log_align: "XRKYZ"
 # scheme7: ['#11998e', '#38ef7d', '#56ab2f', '#a8e063', '#76b852'],  // 绿野渐变
 log_color: 'default'
 
+# 日志ID长度（默认16个字符）
+log_id_length: 20
+
+# ID显示时的美化字符（用于填充空白）
+log_id_filler: '·'  # 可选: '·', '─', '•', '═', '»', '→'
+
 # 群聊和频道中过滤自己的消息
 ignore_self: true
 
