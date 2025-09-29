@@ -7,7 +7,7 @@
  * 
  * 主要功能：
  * - 自动检查和安装缺失的依赖
- * - 动态加载导入映射
+ * - 处理动态imports配置
  * - 确保运行环境完整性
  * - 启动主应用程序
  * 
@@ -15,6 +15,7 @@
  * - 依赖检查仅在本地执行
  * - 不会自动更新已安装的包
  * - 所有操作都有完整的错误处理
+ * - imports配置从data/importsJson目录动态加载并应用到package.json
  */
 
 import fs from 'fs/promises';
@@ -23,9 +24,6 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-
-/** 导入动态导入管理器 */
-import { initializeImports } from './imports.js';
 
 /** 获取当前模块的目录路径 */
 const __filename = fileURLToPath(import.meta.url);
@@ -304,8 +302,7 @@ class EnvironmentValidator {
     const requiredDirs = [
       './logs',
       './config',
-      './data',
-      './data/importsJson'
+      './data'
     ];
     
     for (const dir of requiredDirs) {
@@ -318,6 +315,7 @@ class EnvironmentValidator {
    * @returns {Promise<void>}
    */
   async validate() {
+    
     await this.checkNodeVersion();
     await this.checkRequiredDirectories();
   }
@@ -337,12 +335,55 @@ class Bootstrap {
   }
 
   /**
+   * 加载并应用动态imports配置
+   * @private
+   * @param {string} packageJsonPath - package.json路径
+   * @returns {Promise<void>}
+   */
+  async loadDynamicImports(packageJsonPath) {
+    const importsDir = path.join(process.cwd(), 'data', 'importsJson');
+    try {
+      await fs.access(importsDir);
+    } catch {
+      await this.logger.log('importsJson目录不存在，跳过动态imports加载');
+      return;
+    }
+
+    const files = await fs.readdir(importsDir);
+    const jsonFiles = files.filter(file => file.endsWith('.json'));
+
+    if (jsonFiles.length === 0) {
+      await this.logger.log('importsJson目录无JSON文件，跳过动态imports加载');
+      return;
+    }
+
+    let mergedImports = {};
+    for (const file of jsonFiles) {
+      const filePath = path.join(importsDir, file);
+      const content = await fs.readFile(filePath, 'utf-8');
+      const data = JSON.parse(content);
+      if (data.imports && typeof data.imports === 'object') {
+        Object.assign(mergedImports, data.imports);
+      }
+    }
+
+    if (Object.keys(mergedImports).length === 0) {
+      await this.logger.log('无有效的imports配置，跳过应用');
+      return;
+    }
+
+    const packageJson = await this.dependencyManager.parsePackageJson(packageJsonPath);
+    packageJson.imports = { ... (packageJson.imports || {}), ...mergedImports };
+    await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
+    await this.logger.success('动态imports已应用到package.json');
+  }
+
+  /**
    * 初始化引导流程
    * @returns {Promise<void>}
    */
   async initialize() {
     await this.logger.ensureLogDir();
-    
     /** 验证环境 */
     await this.environmentValidator.validate();
     
@@ -354,14 +395,9 @@ class Bootstrap {
       packageJsonPath,
       nodeModulesPath
     });
-    
-    /** 初始化动态导入管理器 */
-    try {
-      await initializeImports();
-    } catch (error) {
-      await this.logger.error(`动态导入管理器初始化失败: ${error.message}`);
-      // 不中断启动流程，允许应用继续运行
-    }
+
+    /** 加载动态imports */
+    await this.loadDynamicImports(packageJsonPath);
   }
 
   /**
@@ -369,6 +405,7 @@ class Bootstrap {
    * @returns {Promise<void>}
    */
   async startMainApplication() {
+    
     try {
       /** 动态导入主程序 */
       await import('./start.js');
@@ -426,3 +463,6 @@ process.on('unhandledRejection', async (reason) => {
  */
 const bootstrap = new Bootstrap();
 bootstrap.run();
+
+/** 导出引导器供测试使用 */
+export default Bootstrap;
