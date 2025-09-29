@@ -144,3 +144,5 @@ yunzai
 /data/
 /temp/
 /pnpm-lock.yaml
+
+package.json
