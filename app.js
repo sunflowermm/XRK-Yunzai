@@ -302,7 +302,8 @@ class EnvironmentValidator {
     const requiredDirs = [
       './logs',
       './config',
-      './data'
+      './data',
+      './data/importsJson'
     ];
     
     for (const dir of requiredDirs) {
@@ -353,7 +354,6 @@ class Bootstrap {
     const jsonFiles = files.filter(file => file.endsWith('.json'));
 
     if (jsonFiles.length === 0) {
-      await this.logger.log('importsJson目录无JSON文件，跳过动态imports加载');
       return;
     }
 
@@ -368,14 +368,12 @@ class Bootstrap {
     }
 
     if (Object.keys(mergedImports).length === 0) {
-      await this.logger.log('无有效的imports配置，跳过应用');
       return;
     }
 
     const packageJson = await this.dependencyManager.parsePackageJson(packageJsonPath);
     packageJson.imports = { ... (packageJson.imports || {}), ...mergedImports };
     await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
-    await this.logger.success('动态imports已应用到package.json');
   }
 
   /**
