@@ -20,7 +20,7 @@ log_color: 'default'
 log_id_length: 20
 
 # ID显示时的美化字符（用于填充空白）
-log_id_filler: '*'  # 可选: '·', '─', '•', '═', '»', '→'
+log_id_filler: '.'  # 可选: '·', '─', '•', '═', '»', '→'
 
 # 群聊和频道中过滤自己的消息
 ignore_self: true
