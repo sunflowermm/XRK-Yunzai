@@ -105,19 +105,19 @@ export class sendLog extends plugin {
       for (let line of lines) {
         if (!line) continue
         
-        // 清理所有ANSI转义序列
-        line = line.replace(/\x1b$$[0-9;]*m/g, "")  // 颜色代码
-        line = line.replace(/\[38;5;\d+m/g, "")     // 256色代码
-        line = line.replace(/\[39m/g, "")           // 重置颜色
-        line = line.replace(/\[\d+m/g, "")          // 其他格式代码
-        line = line.replace(/\u001b\[[^m]*m/g, "") // Unicode转义
-        line = line.replace(/\r|\n/g, "")           // 换行符
+        // 清理ANSI转义序列 - 修复正则表达式
+        line = line.replace(/\x1b\[[0-9;]*m/g, "")
+        line = line.replace(/\[38;5;\d+m/g, "")
+        line = line.replace(/\[39m/g, "")
+        line = line.replace(/\[\d+m/g, "")
+        line = line.replace(/\u001b\[[^m]*m/g, "")
+        line = line.replace(/\r|\n/g, "")
         
-        // 清理多余的方括号
-        line = line.replace(/\[{2,}/g, "[").replace(/$${2,}/g, "]")
+        // 清理方括号重复
+        line = line.replace(/\[{2,}/g, "[").replace(/\]{2,}/g, "]")
         
-        // 识别日志级别
-        const levelMatch = line.match(/$$(ERROR|WARN|INFO|DEBUG|TRACE|FATAL|MARK)$$/i)
+        // 识别日志级别 - 修复：移除错误的 $$ 匹配
+        const levelMatch = line.match(/\[(ERROR|WARN|INFO|DEBUG|TRACE|FATAL|MARK)\]/i)
         if (levelMatch) {
           const level = levelMatch[1].toUpperCase()
           const levelEmoji = {
@@ -133,7 +133,7 @@ export class sendLog extends plugin {
         }
         
         // 清理特殊符号
-        line = line.replace(/[✧✗]/g, "").trim()
+        line = line.replace(/[✧✗✓]/g, "").trim()
         
         cleanedLines.push(line)
       }
@@ -163,7 +163,6 @@ export class sendLog extends plugin {
     }
   }
 
-  /** 构建转发消息数据 */
   async buildForwardData(logs, type, keyWord, finalLineNum, originalLineNum, logFile) {
     const messages = []
     const timestamp = moment().format("YYYY-MM-DD HH:mm:ss")
@@ -173,7 +172,6 @@ export class sendLog extends plugin {
       ? `🔍 包含"${keyWord}"的${type}日志`
       : `📋 最近${type}日志`
     
-    // 标题消息
     messages.push({
       message: [
         title,
@@ -186,7 +184,6 @@ export class sendLog extends plugin {
       user_id: Bot.uin
     })
 
-    // 行数调整提醒
     if (originalLineNum > this.maxNum) {
       messages.push({
         message: `⚠️ 行数超过最大限制，已调整为${this.maxNum}行`,
@@ -195,7 +192,6 @@ export class sendLog extends plugin {
       })
     }
 
-    // 关键词信息
     if (keyWord) {
       messages.push({
         message: `🔍 搜索关键词: "${keyWord}"`,
@@ -204,7 +200,6 @@ export class sendLog extends plugin {
       })
     }
 
-    // 日志内容分页
     const batchSize = 30
     for (let i = 0; i < logs.length; i += batchSize) {
       const batch = logs.slice(i, Math.min(i + batchSize, logs.length))
@@ -228,7 +223,6 @@ export class sendLog extends plugin {
       })
     }
 
-    // 使用说明
     messages.push({
       message: [
         "━".repeat(30),
@@ -248,7 +242,6 @@ export class sendLog extends plugin {
     return messages
   }
 
-  /** 生成转发消息 */
   async makeForwardMsg(e, msgList) {
     try {
       const msgs = []
@@ -304,7 +297,6 @@ export class sendLog extends plugin {
     }
   }
 
-  /** 发送错误提示 */
   async replyError(errorMsg) {
     try {
       const messages = [
