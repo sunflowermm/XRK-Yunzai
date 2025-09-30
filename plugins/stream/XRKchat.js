@@ -19,6 +19,7 @@ const EMOJI_REACTIONS = {
 // 全局存储
 const messageHistory = new Map();
 const globalAIState = new Map();
+const userCache = new Map();
 let emotionImages = {};
 
 export default class XRKChatStream extends StreamBase {
@@ -325,6 +326,47 @@ export default class XRKChatStream extends StreamBase {
     return '图片内容';
   }
 
+  /** 获取机器人角色 */
+  async getBotRole(e) {
+    if (!e.isGroup) return '';
+    
+    const cacheKey = `bot_role_${e.group_id}`;
+    const cached = userCache.get(cacheKey);
+    if (cached && Date.now() - cached.time < 300000) {
+      return cached.role;
+    }
+    
+    try {
+      const member = e.group.pickMember(e.self_id);
+      const info = await member.getInfo();
+      const role = info.role === 'owner' ? '群主' : 
+                   info.role === 'admin' ? '管理员' : '成员';
+      
+      userCache.set(cacheKey, { role, time: Date.now() });
+      return role;
+    } catch {
+      return '成员';
+    }
+  }
+
+  /** 检查权限 */
+  async checkPermission(e, permission) {
+    if (!e.isGroup) return false;
+    if (e.isMaster) return true;
+    
+    const role = await this.getBotRole(e);
+    
+    switch (permission) {
+      case 'mute':
+      case 'admin':
+        return role === '群主' || role === '管理员';
+      case 'owner':
+        return role === '群主';
+      default:
+        return false;
+    }
+  }
+
   /** 处理AI响应 */
   async processResponse(e, response, context) {
     try {
@@ -341,7 +383,9 @@ export default class XRKChatStream extends StreamBase {
         const result = await this.process(responseSegment, { 
           e, 
           ...context,
-          getEmotionImage: (emotion) => this.getRandomEmotionImage(emotion)
+          getEmotionImage: (emotion) => this.getRandomEmotionImage(emotion),
+          checkPermission: (perm) => this.checkPermission(e, perm),
+          getBotRole: () => this.getBotRole(e)
         });
         
         // 发送表情包
@@ -380,7 +424,7 @@ export default class XRKChatStream extends StreamBase {
         // 执行其他功能
         for (const exec of result.executed || []) {
           if (exec.result?.action && exec.result.action !== 'emotion') {
-            // 已在handler中执行
+            // 功能已在handler中执行
           }
         }
         
@@ -428,7 +472,7 @@ export default class XRKChatStream extends StreamBase {
 
   /** 初始化规则 */
   initRules() {
-    // 继续使用之前定义的所有规则
+    // 基础互动规则
     this.addRule({
       name: 'at',
       group: 'interaction',
@@ -485,6 +529,7 @@ export default class XRKChatStream extends StreamBase {
       }
     });
 
+    // 表情回应规则
     this.addRule({
       name: 'emojiReaction',
       group: 'emotion',
@@ -507,6 +552,7 @@ export default class XRKChatStream extends StreamBase {
       }
     });
 
+    // 表情包规则
     this.addRule({
       name: 'emotion',
       group: 'emotion',
@@ -527,6 +573,30 @@ export default class XRKChatStream extends StreamBase {
       }
     });
 
+    // 点赞规则
+    this.addRule({
+      name: 'thumbUp',
+      group: 'interaction',
+      enabled: true,
+      reg: /\[点赞:(\d+):(\d+)\]/gi,
+      regPrompt: '[点赞:QQ号:次数] - 给某人点赞',
+      priority: 70,
+      handler: async (result, context) => {
+        const { e } = context;
+        if (!e.isGroup) return null;
+        
+        const [qq, count] = result.params;
+        try {
+          const thumbCount = Math.min(parseInt(count) || 1, 50);
+          await e.group.pickMember(qq).thumbUp(thumbCount);
+          return { action: 'thumbUp', target: qq, count: thumbCount };
+        } catch {
+          return null;
+        }
+      }
+    });
+
+    // 签到规则
     this.addRule({
       name: 'sign',
       group: 'action',
@@ -538,8 +608,232 @@ export default class XRKChatStream extends StreamBase {
         const { e } = context;
         if (!e.isGroup) return null;
         
-        await e.group.sign();
-        return { action: 'sign' };
+        try {
+          await e.group.sign();
+          return { action: 'sign' };
+        } catch {
+          return null;
+        }
+      }
+    });
+
+    // 管理功能规则 - 禁言
+    this.addRule({
+      name: 'mute',
+      group: 'admin',
+      enabled: true,
+      reg: /\[禁言:(\d+):(\d+)\]/gi,
+      regPrompt: '[禁言:QQ号:秒数] - 禁言某人',
+      priority: 50,
+      handler: async (result, context) => {
+        const { e } = context;
+        if (!e.isGroup) return null;
+        
+        const hasPermission = await context.checkPermission?.('mute');
+        if (!hasPermission) return null;
+        
+        const [qq, seconds] = result.params;
+        try {
+          await e.group.muteMember(qq, parseInt(seconds));
+          return { action: 'mute', target: qq, duration: seconds };
+        } catch {
+          return null;
+        }
+      }
+    });
+
+    // 管理功能规则 - 解禁
+    this.addRule({
+      name: 'unmute',
+      group: 'admin',
+      enabled: true,
+      reg: /\[解禁:(\d+)\]/gi,
+      regPrompt: '[解禁:QQ号] - 解除禁言',
+      priority: 49,
+      handler: async (result, context) => {
+        const { e } = context;
+        if (!e.isGroup) return null;
+        
+        const hasPermission = await context.checkPermission?.('mute');
+        if (!hasPermission) return null;
+        
+        const qq = result.params[0];
+        try {
+          await e.group.muteMember(qq, 0);
+          return { action: 'unmute', target: qq };
+        } catch {
+          return null;
+        }
+      }
+    });
+
+    // 精华消息规则
+    this.addRule({
+      name: 'essence',
+      group: 'admin',
+      enabled: true,
+      reg: /\[精华:([^\]]+)\]/gi,
+      regPrompt: '[精华:消息ID] - 设置精华消息',
+      priority: 48,
+      handler: async (result, context) => {
+        const { e } = context;
+        if (!e.isGroup) return null;
+        
+        const hasPermission = await context.checkPermission?.('admin');
+        if (!hasPermission) return null;
+        
+        const msgId = result.params[0];
+        try {
+          await e.group.setEssence(msgId);
+          return { action: 'essence', msgId };
+        } catch {
+          return null;
+        }
+      }
+    });
+
+    // 群公告规则
+    this.addRule({
+      name: 'notice',
+      group: 'admin',
+      enabled: true,
+      reg: /\[公告:([^\]]+)\]/gi,
+      regPrompt: '[公告:内容] - 发布群公告',
+      priority: 47,
+      handler: async (result, context) => {
+        const { e } = context;
+        if (!e.isGroup) return null;
+        
+        const hasPermission = await context.checkPermission?.('admin');
+        if (!hasPermission) return null;
+        
+        const content = result.params[0];
+        try {
+          await e.group.sendNotice(content);
+          return { action: 'notice', content };
+        } catch {
+          return null;
+        }
+      }
+    });
+
+    // 全员禁言规则
+    this.addRule({
+      name: 'muteAll',
+      group: 'admin',
+      enabled: true,
+      reg: /\[全员禁言\]/gi,
+      regPrompt: '[全员禁言] - 开启全员禁言',
+      priority: 46,
+      handler: async (result, context) => {
+        const { e } = context;
+        if (!e.isGroup) return null;
+        
+        const hasPermission = await context.checkPermission?.('admin');
+        if (!hasPermission) return null;
+        
+        try {
+          await e.group.muteAll(true);
+          return { action: 'muteAll' };
+        } catch {
+          return null;
+        }
+      }
+    });
+
+    // 解除全员禁言规则
+    this.addRule({
+      name: 'unmuteAll',
+      group: 'admin',
+      enabled: true,
+      reg: /\[解除全员禁言\]/gi,
+      regPrompt: '[解除全员禁言] - 解除全员禁言',
+      priority: 45,
+      handler: async (result, context) => {
+        const { e } = context;
+        if (!e.isGroup) return null;
+        
+        const hasPermission = await context.checkPermission?.('admin');
+        if (!hasPermission) return null;
+        
+        try {
+          await e.group.muteAll(false);
+          return { action: 'unmuteAll' };
+        } catch {
+          return null;
+        }
+      }
+    });
+
+    // 踢人规则
+    this.addRule({
+      name: 'kick',
+      group: 'admin',
+      enabled: true,
+      reg: /\[踢出:(\d+)\]/gi,
+      regPrompt: '[踢出:QQ号] - 踢出群成员',
+      priority: 44,
+      handler: async (result, context) => {
+        const { e } = context;
+        if (!e.isGroup) return null;
+        
+        const hasPermission = await context.checkPermission?.('admin');
+        if (!hasPermission) return null;
+        
+        const qq = result.params[0];
+        try {
+          await e.group.kickMember(qq);
+          return { action: 'kick', target: qq };
+        } catch {
+          return null;
+        }
+      }
+    });
+
+    // 设置头衔规则
+    this.addRule({
+      name: 'setTitle',
+      group: 'admin',
+      enabled: true,
+      reg: /\[头衔:(\d+):([^\]]+)\]/gi,
+      regPrompt: '[头衔:QQ号:头衔内容] - 设置群头衔',
+      priority: 43,
+      handler: async (result, context) => {
+        const { e } = context;
+        if (!e.isGroup) return null;
+        
+        const hasPermission = await context.checkPermission?.('owner');
+        if (!hasPermission) return null;
+        
+        const [qq, title] = result.params;
+        try {
+          await e.group.setTitle(qq, title);
+          return { action: 'setTitle', target: qq, title };
+        } catch {
+          return null;
+        }
+      }
+    });
+
+    // 撤回消息规则
+    this.addRule({
+      name: 'recall',
+      group: 'admin',
+      enabled: true,
+      reg: /\[撤回:([^\]]+)\]/gi,
+      regPrompt: '[撤回:消息ID] - 撤回消息',
+      priority: 42,
+      handler: async (result, context) => {
+        const { e } = context;
+        if (!e.isGroup) return null;
+        
+        const msgId = result.params[0];
+        try {
+          await e.group.recallMsg(msgId);
+          return { action: 'recall', msgId };
+        } catch {
+          return null;
+        }
       }
     });
   }
@@ -576,11 +870,42 @@ ${isGlobalTrigger ? '观察群聊后主动发言' : '被召唤回复'}
 在文字中插入以下标记来发送表情包（一次对话只能使用一个表情包）：
 [开心] [惊讶] [伤心] [大笑] [害怕] [生气]
 
+【互动功能】
+[CQ:at,qq=QQ号] - @某人（确保QQ号存在）
+[CQ:poke,qq=QQ号] - 戳一戳某人
+[CQ:reply,id=消息ID] - 回复某条消息
+[回应:消息ID:表情类型] - 给消息添加表情回应（开心/惊讶/伤心/大笑/害怕/喜欢/爱心/生气）
+[点赞:QQ号:次数] - 给某人点赞（1-50次）
+[签到] - 执行群签到`;
+
+    // 添加管理功能（如果有权限）
+    if (botRole === '群主' || botRole === '管理员') {
+      basePrompt += `
+
+【管理功能】
+[禁言:QQ号:秒数] - 禁言某人（最多2592000秒/30天）
+[解禁:QQ号] - 解除禁言
+[精华:消息ID] - 设置精华消息
+[公告:内容] - 发布群公告
+[全员禁言] - 开启全员禁言
+[解除全员禁言] - 解除全员禁言
+[踢出:QQ号] - 踢出群成员
+[撤回:消息ID] - 撤回消息`;
+    }
+
+    if (botRole === '群主') {
+      basePrompt += `
+[头衔:QQ号:头衔内容] - 设置群头衔`;
+    }
+
+    basePrompt += `
+
 【重要限制】
 1. 每次回复最多只能发一个表情包
 2. 最多使用一个竖线(|)分隔
 3. @人之前要确认QQ号是否在群聊记录中出现过
-4. 不要重复使用相同的功能`;
+4. 不要重复使用相同的功能
+5. 管理功能要谨慎使用，确保合理性`;
 
     return this.buildSystemPrompt(basePrompt, context);
   }
