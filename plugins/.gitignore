@@ -52,5 +52,9 @@ events/**
 !events/notice.js
 !events/request.js
 
+!stream
+stream/**
+!stream/XRKChatStream.js
+
 *.psd
 *.map

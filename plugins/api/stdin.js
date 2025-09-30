@@ -169,9 +169,8 @@ export default {
   },
 
   async init(app, Bot) {
-    // 确保stdin适配器已加载
     if (!global.stdinHandler) {
-      const StdinModule = await import('../adapter/Stdin.js');
+      const StdinModule = await import('../adapter/stdin.js');
       if (StdinModule.StdinHandler) {
         global.stdinHandler = new StdinModule.StdinHandler();
       }

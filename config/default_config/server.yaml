@@ -94,16 +94,16 @@ proxy:
     #      key: "/path/to/api.xrkk.cc.key"
     #      cert: "/path/to/api.xrkk.cc.cert"
     #  
-      # 保持原始Host头（某些后端服务需要）
+    # 保持原始Host头（某些后端服务需要）
     #  preserveHostHeader: true
       
-      # WebSocket支持
+    # WebSocket支持
     #  ws: true
       
-      # 超时设置（毫秒）
+    # 超时设置（毫秒）
     #  timeout: 30000
       
-      # 更复杂的路径重写规则
+    # 更复杂的路径重写规则
     #  pathRewrite:
     #    "^/v1": "/api/v1"
     #    "^/v2": "/api/v2"
@@ -111,30 +111,30 @@ proxy:
     
     # 通配符域名示例（处理所有子域名）
     #- domain: "*.test.xrkk.cc"
-      # 所有 *.test.xrkk.cc 的请求都代理到这里
+    # 所有 *.test.xrkk.cc 的请求都代理到这里
     #  target: "http://localhost:9000"
       
-      # 通配符证书
+    # 通配符证书
     #  ssl:
     #    enabled: true
     #    certificate:
     #      key: "/path/to/wildcard.test.xrkk.cc.key"
     #      cert: "/path/to/wildcard.test.xrkk.cc.cert"
       
-      # 动态路径重写（基于子域名）
-      # 例如：dev.test.xrkk.cc → http://localhost:9000/dev
-      # 例如：staging.test.xrkk.cc → http://localhost:9000/staging
+    # 动态路径重写（基于子域名）
+    # 例如：dev.test.xrkk.cc → http://localhost:9000/dev
+    # 例如：staging.test.xrkk.cc → http://localhost:9000/staging
     #  rewritePath:
     #    from: "/"
     #    to: "/${subdomain}/"  # ${subdomain}会被实际子域名替换
     
     # 负载均衡示例（轮询多个后端服务器）
     #- domain: "lb.xrkk.cc"
-      # 多个目标服务器（将自动负载均衡）
-      # 注：基础版本只支持单个target，负载均衡需要额外实现
+    # 多个目标服务器（将自动负载均衡）
+    # 注：基础版本只支持单个target，负载均衡需要额外实现
     #  target: "http://localhost:3001"
       
-      # 健康检查配置（可选）
+    # 健康检查配置（可选）
     #  healthCheck:
     #    enabled: true
     #    path: "/health"
