@@ -9,7 +9,8 @@ export default class XRKChatStream extends StreamBase {
       config: {
         maxRetries: 2,
         retryDelay: 500,
-        timeout: 5000
+        timeout: 5000,
+        debug: false
       }
     });
   }
@@ -24,7 +25,7 @@ export default class XRKChatStream extends StreamBase {
       priority: 100,
       handler: async (result, context) => {
         const { e } = context;
-        if (!e.isGroup) return null;
+        if (!e?.isGroup) return null;
         
         const qq = result.params[0];
         try {
@@ -46,7 +47,7 @@ export default class XRKChatStream extends StreamBase {
       priority: 90,
       handler: async (result, context) => {
         const { e } = context;
-        if (!e.isGroup) return null;
+        if (!e?.isGroup) return null;
         
         const qq = result.params[0];
         try {
@@ -80,7 +81,7 @@ export default class XRKChatStream extends StreamBase {
       priority: 80,
       handler: async (result, context) => {
         const { e } = context;
-        if (!e.isGroup) return null;
+        if (!e?.isGroup) return null;
         
         const [msgId, emojiType] = result.params;
         const emojiMap = {
@@ -94,9 +95,14 @@ export default class XRKChatStream extends StreamBase {
         
         const emojiIds = emojiMap[emojiType];
         if (emojiIds) {
-          const emojiId = emojiIds[Math.floor(Math.random() * emojiIds.length)];
-          await e.group.setEmojiLike(msgId, emojiId);
-          return { action: 'emoji', msgId, emoji: emojiId };
+          try {
+            const emojiId = emojiIds[Math.floor(Math.random() * emojiIds.length)];
+            await e.group.setEmojiLike(msgId, emojiId);
+            return { action: 'emoji', msgId, emoji: emojiId };
+          } catch (error) {
+            console.warn(`表情回应失败: ${error.message}`);
+            return null;
+          }
         }
         return null;
       }
@@ -111,12 +117,16 @@ export default class XRKChatStream extends StreamBase {
       priority: 70,
       handler: async (result, context) => {
         const { e } = context;
-        if (!e.isGroup) return null;
+        if (!e?.isGroup) return null;
         
         const [qq, count] = result.params;
         const thumbCount = Math.min(parseInt(count) || 1, 50);
-        await e.group.pickMember(qq).thumbUp(thumbCount);
-        return { action: 'thumbUp', target: qq, count: thumbCount };
+        try {
+          await e.group.pickMember(qq).thumbUp(thumbCount);
+          return { action: 'thumbUp', target: qq, count: thumbCount };
+        } catch {
+          return null;
+        }
       }
     });
 
@@ -129,10 +139,14 @@ export default class XRKChatStream extends StreamBase {
       priority: 60,
       handler: async (result, context) => {
         const { e } = context;
-        if (!e.isGroup) return null;
+        if (!e?.isGroup) return null;
         
-        await e.group.sign();
-        return { action: 'sign' };
+        try {
+          await e.group.sign();
+          return { action: 'sign' };
+        } catch {
+          return null;
+        }
       }
     });
 
@@ -151,8 +165,12 @@ export default class XRKChatStream extends StreamBase {
         const { e } = context;
         const [qq, seconds] = result.params;
         
-        await e.group.muteMember(qq, parseInt(seconds));
-        return { action: 'mute', target: qq, duration: seconds };
+        try {
+          await e.group.muteMember(qq, parseInt(seconds));
+          return { action: 'mute', target: qq, duration: seconds };
+        } catch {
+          return null;
+        }
       }
     });
 
@@ -171,8 +189,12 @@ export default class XRKChatStream extends StreamBase {
         const { e } = context;
         const qq = result.params[0];
         
-        await e.group.muteMember(qq, 0);
-        return { action: 'unmute', target: qq };
+        try {
+          await e.group.muteMember(qq, 0);
+          return { action: 'unmute', target: qq };
+        } catch {
+          return null;
+        }
       }
     });
 
@@ -191,8 +213,12 @@ export default class XRKChatStream extends StreamBase {
         const { e } = context;
         const msgId = result.params[0];
         
-        await e.group.setEssence(msgId);
-        return { action: 'essence', msgId };
+        try {
+          await e.group.setEssence(msgId);
+          return { action: 'essence', msgId };
+        } catch {
+          return null;
+        }
       }
     });
 
@@ -211,8 +237,12 @@ export default class XRKChatStream extends StreamBase {
         const { e } = context;
         const content = result.params[0];
         
-        await e.group.sendNotice(content);
-        return { action: 'notice', content };
+        try {
+          await e.group.sendNotice(content);
+          return { action: 'notice', content };
+        } catch {
+          return null;
+        }
       }
     });
 
@@ -247,7 +277,11 @@ export default class XRKChatStream extends StreamBase {
         const [dateStr, timeStr, content] = result.params;
         
         if (context.createReminder) {
-          return await context.createReminder(context.e, [dateStr, timeStr, content]);
+          try {
+            return await context.createReminder(context.e, [dateStr, timeStr, content]);
+          } catch {
+            return null;
+          }
         }
         return null;
       }
@@ -255,7 +289,7 @@ export default class XRKChatStream extends StreamBase {
   }
 
   async getBotRole(e) {
-    if (!e.isGroup) return '';
+    if (!e?.isGroup) return '';
     
     try {
       const member = e.group.pickMember(e.self_id);
@@ -271,14 +305,16 @@ export default class XRKChatStream extends StreamBase {
     const { e, dateStr, isGlobalTrigger } = context;
     const botRole = context.botRole || '成员';
     
+    const botNickname = typeof Bot !== 'undefined' && Bot.nickname ? Bot.nickname : '机器人';
+    
     let basePrompt = `【人设设定】
 ${persona}
 
 【身份信息】
-名字：${Bot.nickname}
-QQ号：${e.self_id}
-${e.isGroup ? `群名：${e.group?.group_name || '未知'}
-群号：${e.group_id}
+名字：${botNickname}
+QQ号：${e?.self_id || '未知'}
+${e?.isGroup ? `群名：${e.group?.group_name || '未知'}
+群号：${e.group_id || '未知'}
 身份：${botRole}` : ''}
 
 【时间信息】
@@ -304,7 +340,7 @@ ${isGlobalTrigger ? '观察群聊后主动发言' : '被召唤回复'}
 ${isGlobalTrigger ? '1. 主动发言要有新意，不要重复他人观点\n2. 可以随机戳一戳活跃的成员\n3. 语气要自然，像普通群员一样' : '1. 回复要针对性强，不要答非所问\n2. 被召唤时更要积极互动'}
 3. @人时只使用出现在群聊记录中的QQ号
 4. 多使用戳一戳和表情回应来增加互动性
-${e.isMaster ? '5. 对主人要特别友好和尊重' : ''}`;
+${e?.isMaster ? '5. 对主人要特别友好和尊重' : ''}`;
 
     return this.buildSystemPrompt(basePrompt, context);
   }
