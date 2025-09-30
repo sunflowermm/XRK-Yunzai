@@ -35,37 +35,26 @@ export class sendLog extends plugin {
       let logFile
       let type = logType
       
-      switch (logType) {
-        case "错误":
-          logFile = path.join(this.logDir, "error.log")
-          break
-        case "追踪":
-          logFile = path.join(this.logDir, "trace.log")
-          break
-        default:
-          logFile = path.join(this.logDir, `command.${moment().format("YYYY-MM-DD")}.log`)
-          type = "运行"
-      }
+      // 获取当前日志文件
+      const currentDate = moment().format("YYYY-MM-DD")
+      logFile = path.join(this.logDir, `app.${currentDate}.log`)
 
+      // 检查日志文件是否存在
       try {
         await fs.access(logFile)
       } catch (err) {
-        if (type === "运行") {
-          const recentFile = await this.findRecentLogFile()
-          if (recentFile) {
-            logFile = recentFile
-          } else {
-            return await this.replyError(`暂无${type}日志文件`)
-          }
+        const recentFile = await this.findRecentLogFile()
+        if (recentFile) {
+          logFile = recentFile
         } else {
-          return await this.replyError(`暂无${type}日志文件`)
+          return await this.replyError(`暂无日志文件`)
         }
       }
 
       const log = await this.getLog(logFile, finalLineNum, keyWord)
 
       if (lodash.isEmpty(log)) {
-        const errorMsg = keyWord ? `未找到包含"${keyWord}"的${type}日志` : `暂无${type}日志`
+        const errorMsg = keyWord ? `未找到包含"${keyWord}"的日志` : `暂无日志`
         return await this.replyError(errorMsg)
       }
 
@@ -105,18 +94,7 @@ export class sendLog extends plugin {
       for (let line of lines) {
         if (!line) continue
         
-        // 清理ANSI转义序列 - 修复正则表达式
-        line = line.replace(/\x1b\[[0-9;]*m/g, "")
-        line = line.replace(/\[38;5;\d+m/g, "")
-        line = line.replace(/\[39m/g, "")
-        line = line.replace(/\[\d+m/g, "")
-        line = line.replace(/\u001b\[[^m]*m/g, "")
-        line = line.replace(/\r|\n/g, "")
-        
-        // 清理方括号重复
-        line = line.replace(/\[{2,}/g, "[").replace(/\]{2,}/g, "]")
-        
-        // 识别日志级别 - 修复：移除错误的 $$ 匹配
+        // 识别日志级别
         const levelMatch = line.match(/\[(ERROR|WARN|INFO|DEBUG|TRACE|FATAL|MARK)\]/i)
         if (levelMatch) {
           const level = levelMatch[1].toUpperCase()
@@ -132,10 +110,7 @@ export class sendLog extends plugin {
           line = `${levelEmoji[level] || "•"} ${line}`
         }
         
-        // 清理特殊符号
-        line = line.replace(/[✧✗✓]/g, "").trim()
-        
-        cleanedLines.push(line)
+        cleanedLines.push(line.trim())
       }
 
       return cleanedLines
@@ -148,14 +123,25 @@ export class sendLog extends plugin {
   async findRecentLogFile() {
     try {
       const files = await fs.readdir(this.logDir)
-      const commandLogs = files
-        .filter(file => file.startsWith("command.") && file.endsWith(".log"))
+      const appLogs = files
+        .filter(file => file.startsWith("app.") && file.endsWith(".log"))
         .sort()
         .reverse()
       
-      if (commandLogs.length > 0) {
-        return path.join(this.logDir, commandLogs[0])
+      if (appLogs.length > 0) {
+        return path.join(this.logDir, appLogs[0])
       }
+      
+      // 兼容旧格式
+      const oldLogs = files
+        .filter(file => file.match(/^\d{4}-\d{2}-\d{2}\.log$/))
+        .sort()
+        .reverse()
+      
+      if (oldLogs.length > 0) {
+        return path.join(this.logDir, oldLogs[0])
+      }
+      
       return null
     } catch (err) {
       logger.error("查找最近日志文件失败:", err)
@@ -169,8 +155,8 @@ export class sendLog extends plugin {
     const fileName = path.basename(logFile)
     
     const title = keyWord 
-      ? `🔍 包含"${keyWord}"的${type}日志`
-      : `📋 最近${type}日志`
+      ? `🔍 包含"${keyWord}"的日志`
+      : `📋 最近日志`
     
     messages.push({
       message: [
@@ -227,13 +213,12 @@ export class sendLog extends plugin {
       message: [
         "━".repeat(30),
         "💡 使用提示:",
-        "• #运行日志 - 查看运行日志",
-        "• #错误日志 - 查看错误日志",  
-        "• #追踪日志 - 查看追踪日志",
-        "• #运行日志100 - 指定显示行数",
-        "• #运行日志 关键词 - 搜索日志",
+        "• #日志 - 查看最近日志",
+        "• #日志100 - 指定显示行数",
+        "• #日志 关键词 - 搜索日志",
         "",
-        `📝 最大显示: ${this.maxNum}行`
+        `📝 最大显示: ${this.maxNum}行`,
+        `🗂️ 日志保留: ${global.logger?.platform?.().maxLogAge || '3天'}`
       ].join("\n"),
       nickname: "使用说明",
       user_id: Bot.uin
