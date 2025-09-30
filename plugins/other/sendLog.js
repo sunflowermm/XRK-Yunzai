@@ -202,7 +202,6 @@ export class sendLog extends plugin {
   formatLogLine(line, index) {
     if (!line) return ""
     
-    // 提取日志级别
     const levelMatch = line.match(/\[([A-Z]+)\]/i)
     if (levelMatch) {
       const level = levelMatch[1].toUpperCase()
@@ -212,7 +211,6 @@ export class sendLog extends plugin {
       }
     }
     
-    // 检查是否是堆栈跟踪行
     if (line.includes('Stack:') || line.match(/^\s+at\s/)) {
       return `  ↳ ${line.trim()}`
     }
@@ -235,7 +233,6 @@ export class sendLog extends plugin {
     const timestamp = moment().format("YYYY-MM-DD HH:mm:ss")
     const fileName = path.basename(logFile)
     
-    // 构建标题消息
     const headerInfo = this.buildHeaderInfo(logName, keyWord, filterLevel, timestamp, fileName, logs.length)
     messages.push({
       message: headerInfo,
@@ -243,7 +240,6 @@ export class sendLog extends plugin {
       user_id: Bot.uin
     })
 
-    // 如果有搜索条件，显示统计信息
     if (keyWord || filterLevel) {
       const statsInfo = this.buildStatsInfo(keyWord, filterLevel, logs.length)
       messages.push({
@@ -253,7 +249,6 @@ export class sendLog extends plugin {
       })
     }
 
-    // 分批发送日志内容
     const totalPages = Math.ceil(logs.length / this.batchSize)
     
     for (let i = 0; i < logs.length; i += this.batchSize) {
@@ -268,7 +263,6 @@ export class sendLog extends plugin {
       })
     }
 
-    // 添加使用说明
     messages.push({
       message: this.buildUsageInfo(),
       nickname: "使用说明",
@@ -291,7 +285,6 @@ export class sendLog extends plugin {
     
     return [
       title,
-      "━".repeat(35),
       `📅 查询时间: ${timestamp}`,
       `📁 日志文件: ${fileName}`,
       `📊 记录条数: ${count}条`,
@@ -336,10 +329,8 @@ export class sendLog extends plugin {
 
   buildBatchContent(batch, startIdx, pageNum, totalPages) {
     const lines = [
-      "─".repeat(35),
       `📄 第 ${pageNum}/${totalPages} 页`,
       `📍 范围: #${startIdx + 1} - #${startIdx + batch.length}`,
-      "─".repeat(35),
       ""
     ]
     
@@ -355,7 +346,6 @@ export class sendLog extends plugin {
     const platformInfo = logger.platform?.() || {}
     
     return [
-      "━".repeat(35),
       "💡 命令说明:",
       "• #日志 - 查看最近运行日志",
       "• #错误日志 - 仅显示ERROR级别",
@@ -406,7 +396,6 @@ export class sendLog extends plugin {
     try {
       const errorInfo = [
         "❌ 操作失败",
-        "━".repeat(35),
         errorMsg,
         "💡 请检查:",
         "• 日志文件是否存在",
