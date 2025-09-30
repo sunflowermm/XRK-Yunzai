@@ -19,10 +19,10 @@ export class sendLog extends plugin {
       ],
     })
 
-    this.lineNum = 100
+    this.lineNum = 120  // 默认显示120条
     this.maxNum = 1000
     this.logDir = "logs"
-    this.batchSize = 1
+    this.maxPerForward = 30  // 每个转发消息最多30条
     
     // 日志级别配置
     this.levelConfig = {
@@ -58,16 +58,9 @@ export class sendLog extends plugin {
         return await this.replyError(errorMsg)
       }
 
-      // 构建并发送转发消息
-      const forwardData = await this.buildForwardData(logs, logName, keyWord, lineNum, logFile, filterLevel)
-      const forwardMsg = await this.makeForwardMsg(this.e, forwardData)
+      // 分批发送转发消息
+      await this.sendLogBatches(logs, logName, keyWord, lineNum, logFile, filterLevel)
       
-      if (!forwardMsg) {
-        await this.e.reply(`❌ 生成转发消息失败，可能内容过长`)
-        return false
-      }
-      
-      await this.e.reply(forwardMsg)
       logger.info(`[sendLog] 成功发送${logName}，共${logs.length}条`)
       return true
       
@@ -76,6 +69,114 @@ export class sendLog extends plugin {
       await this.e.reply(`❌ 发送日志时发生错误: ${error.message}`)
       return false
     }
+  }
+
+  async sendLogBatches(logs, logName, keyWord, lineNum, logFile, filterLevel) {
+    const timestamp = moment().format("YYYY-MM-DD HH:mm:ss")
+    const fileName = path.basename(logFile)
+    
+    // 计算需要发送多少批次
+    const totalBatches = Math.ceil(logs.length / this.maxPerForward)
+    
+    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+      const startIdx = batchIndex * this.maxPerForward
+      const endIdx = Math.min(startIdx + this.maxPerForward, logs.length)
+      const batchLogs = logs.slice(startIdx, endIdx)
+      
+      // 构建当前批次的转发消息
+      const forwardData = this.buildBatchForwardData(
+        batchLogs, 
+        logName, 
+        keyWord, 
+        filterLevel,
+        timestamp, 
+        fileName,
+        batchIndex + 1,
+        totalBatches,
+        startIdx,
+        logs.length
+      )
+      
+      const forwardMsg = await this.makeForwardMsg(this.e, forwardData)
+      
+      if (!forwardMsg) {
+        await this.e.reply(`❌ 生成第${batchIndex + 1}批转发消息失败`)
+        continue
+      }
+      
+      await this.e.reply(forwardMsg)
+      
+      // 批次之间添加短暂延迟，避免发送过快
+      if (batchIndex < totalBatches - 1) {
+        await this.sleep(500)
+      }
+    }
+  }
+
+  buildBatchForwardData(batchLogs, logName, keyWord, filterLevel, timestamp, fileName, batchNum, totalBatches, startIdx, totalCount) {
+    const messages = []
+    
+    // 第一批添加头部信息
+    if (batchNum === 1) {
+      const headerInfo = this.buildHeaderInfo(logName, keyWord, filterLevel, timestamp, fileName, totalCount)
+      messages.push({
+        message: headerInfo,
+        nickname: "📋 日志信息",
+        user_id: Bot.uin
+      })
+      
+      if (keyWord || filterLevel) {
+        const statsInfo = this.buildStatsInfo(keyWord, filterLevel, totalCount)
+        messages.push({
+          message: statsInfo,
+          nickname: "📊 筛选统计",
+          user_id: Bot.uin
+        })
+      }
+    }
+    
+    // 批次信息
+    messages.push({
+      message: `📦 第 ${batchNum}/${totalBatches} 批\n📍 日志范围: #${startIdx + 1} - #${startIdx + batchLogs.length}\n共 ${batchLogs.length} 条日志`,
+      nickname: `批次 ${batchNum}/${totalBatches}`,
+      user_id: Bot.uin
+    })
+    
+    // 每条日志作为独立消息
+    batchLogs.forEach((log, idx) => {
+      const logNum = startIdx + idx + 1
+      const level = this.extractLogLevel(log)
+      const nickname = level ? `${level} [${logNum}]` : `日志 [${logNum}]`
+      
+      messages.push({
+        message: log,
+        nickname: nickname,
+        user_id: Bot.uin
+      })
+    })
+    
+    // 最后一批添加使用说明
+    if (batchNum === totalBatches) {
+      messages.push({
+        message: this.buildUsageInfo(),
+        nickname: "💡 使用说明",
+        user_id: Bot.uin
+      })
+    }
+    
+    return messages
+  }
+
+  extractLogLevel(logLine) {
+    const levelMatch = logLine.match(/\[([A-Z]+)\]/i)
+    if (levelMatch) {
+      const level = levelMatch[1].toUpperCase()
+      const config = this.levelConfig[level]
+      if (config) {
+        return `${config.emoji} ${level}`
+      }
+    }
+    return null
   }
 
   normalizeLogType(type) {
@@ -212,10 +313,10 @@ export class sendLog extends plugin {
     }
     
     if (line.includes('Stack:') || line.match(/^\s+at\s/)) {
-      return `  ↳ ${line.trim()}`
+      return `↳ ${line.trim()}`
     }
     
-    return `• ${line}`
+    return line
   }
 
   buildErrorMessage(logName, keyWord, filterLevel) {
@@ -226,50 +327,6 @@ export class sendLog extends plugin {
       return `暂无 ${filterLevel} 级别的日志记录`
     }
     return `暂无${logName}记录`
-  }
-
-  async buildForwardData(logs, logName, keyWord, lineNum, logFile, filterLevel) {
-    const messages = []
-    const timestamp = moment().format("YYYY-MM-DD HH:mm:ss")
-    const fileName = path.basename(logFile)
-    
-    const headerInfo = this.buildHeaderInfo(logName, keyWord, filterLevel, timestamp, fileName, logs.length)
-    messages.push({
-      message: headerInfo,
-      nickname: "日志系统",
-      user_id: Bot.uin
-    })
-
-    if (keyWord || filterLevel) {
-      const statsInfo = this.buildStatsInfo(keyWord, filterLevel, logs.length)
-      messages.push({
-        message: statsInfo,
-        nickname: "统计信息",
-        user_id: Bot.uin
-      })
-    }
-
-    const totalPages = Math.ceil(logs.length / this.batchSize)
-    
-    for (let i = 0; i < logs.length; i += this.batchSize) {
-      const batch = logs.slice(i, Math.min(i + this.batchSize, logs.length))
-      const pageNum = Math.floor(i / this.batchSize) + 1
-      
-      const batchContent = this.buildBatchContent(batch, i, pageNum, totalPages)
-      messages.push({
-        message: batchContent,
-        nickname: `${logName} [${pageNum}/${totalPages}]`,
-        user_id: Bot.uin
-      })
-    }
-
-    messages.push({
-      message: this.buildUsageInfo(),
-      nickname: "使用说明",
-      user_id: Bot.uin
-    })
-
-    return messages
   }
 
   buildHeaderInfo(logName, keyWord, filterLevel, timestamp, fileName, count) {
@@ -327,27 +384,12 @@ export class sendLog extends plugin {
     return lines.join("\n")
   }
 
-  buildBatchContent(batch, startIdx, pageNum, totalPages) {
-    const lines = [
-      `📄 第 ${pageNum}/${totalPages} 页`,
-      `📍 范围: #${startIdx + 1} - #${startIdx + batch.length}`,
-      ""
-    ]
-    
-    // 添加编号的日志行
-    batch.forEach((log, idx) => {
-      lines.push(`[${startIdx + idx + 1}] ${log}`)
-    })
-    
-    return lines.join("\n")
-  }
-
   buildUsageInfo() {
     const platformInfo = logger.platform?.() || {}
     
     return [
       "💡 命令说明:",
-      "• #日志 - 查看最近运行日志",
+      "• #日志 - 查看最近120条日志",
       "• #错误日志 - 仅显示ERROR级别",
       "• #调试日志 - 仅显示DEBUG级别",
       "• #追踪日志 - 查看trace日志",
@@ -355,8 +397,9 @@ export class sendLog extends plugin {
       "• #日志 关键词 - 搜索特定内容",
       "",
       "📊 系统配置:",
-      `• 最大显示: ${this.maxNum}行`,
-      `• 分页大小: ${this.batchSize}条/页`,
+      `• 默认显示: ${this.lineNum}条`,
+      `• 最大显示: ${this.maxNum}条`,
+      `• 每批最多: ${this.maxPerForward}条`,
       `• 主日志保留: ${platformInfo.mainLogAge || '3天'}`,
       `• 追踪日志保留: ${platformInfo.traceLogAge || '1天'}`
     ].join("\n")
@@ -417,5 +460,9 @@ export class sendLog extends plugin {
     }
     
     return false
+  }
+
+  sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms))
   }
 }
