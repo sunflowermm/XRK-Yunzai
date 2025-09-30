@@ -22,204 +22,171 @@ export class sendLog extends plugin {
     this.lineNum = 100
     this.maxNum = 1000
     this.logDir = "logs"
+    this.batchSize = 20  // 改为20条一批
+    
+    // 日志级别配置
+    this.levelConfig = {
+      ERROR: { emoji: "❌", color: "red" },
+      WARN: { emoji: "⚠️", color: "yellow" },
+      INFO: { emoji: "ℹ️", color: "blue" },
+      DEBUG: { emoji: "🔧", color: "gray" },
+      TRACE: { emoji: "📝", color: "gray" },
+      FATAL: { emoji: "💀", color: "darkred" },
+      MARK: { emoji: "📌", color: "green" }
+    }
   }
 
   async sendLog() {
     try {
       const match = this.e.msg.match(/^#(运行|错误|追踪)?日志(\d+)?(.*)$/)
       const logType = match[1] || "运行"
-      const lineNum = match[2] ? parseInt(match[2]) : this.lineNum
-      const keyWord = match[3] ? match[3].trim() : ""
-      const finalLineNum = Math.min(lineNum, this.maxNum)
+      const lineNum = Math.min(parseInt(match[2]) || this.lineNum, this.maxNum)
+      const keyWord = match[3]?.trim() || ""
       
-      let logFile
-      let type = logType
-      
-      // 获取当前日志文件
-      const currentDate = moment().format("YYYY-MM-DD")
-      logFile = path.join(this.logDir, `app.${currentDate}.log`)
-
-      // 检查日志文件是否存在
-      try {
-        await fs.access(logFile)
-      } catch (err) {
-        const recentFile = await this.findRecentLogFile()
-        if (recentFile) {
-          logFile = recentFile
-        } else {
-          return await this.replyError(`暂无日志文件`)
-        }
+      // 获取日志文件
+      const logFile = await this.getLogFile()
+      if (!logFile) {
+        return await this.replyError(`暂无日志文件`)
       }
 
-      const log = await this.getLog(logFile, finalLineNum, keyWord)
-
-      if (lodash.isEmpty(log)) {
+      // 读取和处理日志
+      const logs = await this.getLog(logFile, lineNum, keyWord)
+      if (lodash.isEmpty(logs)) {
         const errorMsg = keyWord ? `未找到包含"${keyWord}"的日志` : `暂无日志`
         return await this.replyError(errorMsg)
       }
 
-      const forwardData = await this.buildForwardData(log, type, keyWord, finalLineNum, lineNum, logFile)
+      // 构建并发送转发消息
+      const forwardData = await this.buildForwardData(logs, logType, keyWord, lineNum, logFile)
       const forwardMsg = await this.makeForwardMsg(this.e, forwardData)
       
-      if (forwardMsg) {
-        await this.e.reply(forwardMsg)
-      } else {
-        await this.replyError('生成转发消息失败，日志可能过长')
+      if (!forwardMsg) {
+        await this.replyError('生成转发消息失败')
+        return false
       }
       
+      await this.e.reply(forwardMsg)
       return true
       
     } catch (error) {
-      logger.error(`[sendLog] 发送日志失败: ${error}`)
+      logger.error(`[sendLog] 发送日志失败:`, error)
       await this.replyError('发送日志时发生错误')
       return false
     }
   }
 
-  async getLog(logFile, lineNum = 100, keyWord = "") {
+  async getLogFile() {
     try {
-      let log = await fs.readFile(logFile, "utf8")
-      let lines = log.split("\n").filter(line => line.trim())
-
-      if (keyWord) {
-        lines = lines.filter(line => line.toLowerCase().includes(keyWord.toLowerCase()))
-        lines = lines.slice(-this.maxNum)
-      } else {
-        lines = lines.slice(-lineNum)
+      // 优先使用当前日期的日志文件
+      const currentDate = moment().format("YYYY-MM-DD")
+      const currentLogFile = path.join(this.logDir, `app.${currentDate}.log`)
+      
+      try {
+        await fs.access(currentLogFile)
+        return currentLogFile
+      } catch {
+        // 查找最近的日志文件
+        return await this.findRecentLogFile()
       }
-
-      lines = lines.reverse()
-
-      const cleanedLines = []
-      for (let line of lines) {
-        if (!line) continue
-        
-        // 识别日志级别
-        const levelMatch = line.match(/\[(ERROR|WARN|INFO|DEBUG|TRACE|FATAL|MARK)\]/i)
-        if (levelMatch) {
-          const level = levelMatch[1].toUpperCase()
-          const levelEmoji = {
-            ERROR: "❌",
-            WARN: "⚠️",
-            INFO: "ℹ️",
-            DEBUG: "🔧",
-            TRACE: "📝",
-            FATAL: "💀",
-            MARK: "📌"
-          }
-          line = `${levelEmoji[level] || "•"} ${line}`
-        }
-        
-        cleanedLines.push(line.trim())
-      }
-
-      return cleanedLines
-    } catch (err) {
-      logger.error(`读取日志文件失败: ${logFile}`, err)
-      return []
+    } catch (error) {
+      logger.error("[sendLog] 获取日志文件失败:", error)
+      return null
     }
   }
 
   async findRecentLogFile() {
     try {
       const files = await fs.readdir(this.logDir)
+      
       const appLogs = files
         .filter(file => file.startsWith("app.") && file.endsWith(".log"))
         .sort()
         .reverse()
       
-      if (appLogs.length > 0) {
-        return path.join(this.logDir, appLogs[0])
-      }
+      return appLogs.length > 0 ? path.join(this.logDir, appLogs[0]) : null
       
-      // 兼容旧格式
-      const oldLogs = files
-        .filter(file => file.match(/^\d{4}-\d{2}-\d{2}\.log$/))
-        .sort()
-        .reverse()
-      
-      if (oldLogs.length > 0) {
-        return path.join(this.logDir, oldLogs[0])
-      }
-      
-      return null
     } catch (err) {
-      logger.error("查找最近日志文件失败:", err)
+      logger.error("[sendLog] 查找日志文件失败:", err)
       return null
     }
   }
 
-  async buildForwardData(logs, type, keyWord, finalLineNum, originalLineNum, logFile) {
+  async getLog(logFile, lineNum = 100, keyWord = "") {
+    try {
+      const content = await fs.readFile(logFile, "utf8")
+      let lines = content.split("\n").filter(line => line.trim())
+
+      // 关键词过滤
+      if (keyWord) {
+        const lowerKeyword = keyWord.toLowerCase()
+        lines = lines.filter(line => line.toLowerCase().includes(lowerKeyword))
+        lines = lines.slice(-this.maxNum)  // 限制搜索结果数量
+      } else {
+        lines = lines.slice(-lineNum)
+      }
+
+      // 反转并格式化日志行
+      return lines.reverse().map(line => this.formatLogLine(line))
+      
+    } catch (err) {
+      logger.error(`[sendLog] 读取日志文件失败: ${logFile}`, err)
+      return []
+    }
+  }
+
+  formatLogLine(line) {
+    if (!line) return ""
+    
+    // 识别并标记日志级别
+    const levelMatch = line.match(/$$(ERROR|WARN|INFO|DEBUG|TRACE|FATAL|MARK)$$/i)
+    if (levelMatch) {
+      const level = levelMatch[1].toUpperCase()
+      const config = this.levelConfig[level]
+      if (config) {
+        return `${config.emoji} ${line.trim()}`
+      }
+    }
+    
+    return `• ${line.trim()}`
+  }
+
+  async buildForwardData(logs, type, keyWord, lineNum, logFile) {
     const messages = []
     const timestamp = moment().format("YYYY-MM-DD HH:mm:ss")
     const fileName = path.basename(logFile)
     
-    const title = keyWord 
-      ? `🔍 包含"${keyWord}"的日志`
-      : `📋 最近日志`
-    
+    // 标题消息
     messages.push({
-      message: [
-        title,
-        "━".repeat(30),
-        `📅 查询时间: ${timestamp}`,
-        `📁 日志文件: ${fileName}`,
-        `📊 显示条数: ${logs.length}条`
-      ].join("\n"),
+      message: this.buildHeaderMessage(keyWord, timestamp, fileName, logs.length),
       nickname: "日志系统",
       user_id: Bot.uin
     })
 
-    if (originalLineNum > this.maxNum) {
-      messages.push({
-        message: `⚠️ 行数超过最大限制，已调整为${this.maxNum}行`,
-        nickname: "系统提示",
-        user_id: Bot.uin
-      })
-    }
-
+    // 搜索信息（如果有关键词）
     if (keyWord) {
       messages.push({
-        message: `🔍 搜索关键词: "${keyWord}"`,
+        message: `🔍 搜索关键词: "${keyWord}"\n💡 共找到 ${logs.length} 条相关日志`,
         nickname: "搜索信息",
         user_id: Bot.uin
       })
     }
 
-    const batchSize = 30
-    for (let i = 0; i < logs.length; i += batchSize) {
-      const batch = logs.slice(i, Math.min(i + batchSize, logs.length))
-      const pageNum = Math.floor(i / batchSize) + 1
-      const totalPages = Math.ceil(logs.length / batchSize)
-      
-      const header = [
-        "─".repeat(35),
-        `📄 第 ${pageNum}/${totalPages} 页`,
-        `💬 条目 ${i + 1}-${Math.min(i + batchSize, logs.length)}`,
-        "─".repeat(35),
-        ""
-      ].join("\n")
-      
-      const numberedBatch = batch.map((log, idx) => `[${i + idx + 1}] ${log}`)
+    // 分批发送日志内容（20条一批）
+    const totalPages = Math.ceil(logs.length / this.batchSize)
+    for (let i = 0; i < logs.length; i += this.batchSize) {
+      const batch = logs.slice(i, Math.min(i + this.batchSize, logs.length))
+      const pageNum = Math.floor(i / this.batchSize) + 1
       
       messages.push({
-        message: header + numberedBatch.join("\n"),
-        nickname: `日志内容 [${pageNum}]`,
+        message: this.buildBatchMessage(batch, i, pageNum, totalPages),
+        nickname: `日志内容 [${pageNum}/${totalPages}]`,
         user_id: Bot.uin
       })
     }
 
+    // 使用说明
     messages.push({
-      message: [
-        "━".repeat(30),
-        "💡 使用提示:",
-        "• #日志 - 查看最近日志",
-        "• #日志100 - 指定显示行数",
-        "• #日志 关键词 - 搜索日志",
-        "",
-        `📝 最大显示: ${this.maxNum}行`,
-        `🗂️ 日志保留: ${global.logger?.platform?.().maxLogAge || '3天'}`
-      ].join("\n"),
+      message: this.buildFooterMessage(),
       nickname: "使用说明",
       user_id: Bot.uin
     })
@@ -227,90 +194,114 @@ export class sendLog extends plugin {
     return messages
   }
 
+  buildHeaderMessage(keyWord, timestamp, fileName, logCount) {
+    const title = keyWord ? `🔍 包含"${keyWord}"的日志` : `📋 最近日志`
+    
+    return [
+      title,
+      "━".repeat(30),
+      `📅 查询时间: ${timestamp}`,
+      `📁 日志文件: ${fileName}`,
+      `📊 显示条数: ${logCount}条`
+    ].join("\n")
+  }
+
+  buildBatchMessage(batch, startIdx, pageNum, totalPages) {
+    const header = [
+      "─".repeat(35),
+      `📄 第 ${pageNum}/${totalPages} 页`,
+      `💬 条目 ${startIdx + 1}-${startIdx + batch.length}`,
+      "─".repeat(35),
+      ""
+    ].join("\n")
+    
+    const numberedBatch = batch.map((log, idx) => 
+      `[${startIdx + idx + 1}] ${log}`
+    )
+    
+    return header + numberedBatch.join("\n")
+  }
+
+  buildFooterMessage() {
+    return [
+      "━".repeat(30),
+      "💡 使用提示:",
+      "• #日志 - 查看最近100条",
+      "• #日志200 - 指定显示行数",
+      "• #日志 关键词 - 搜索特定内容",
+      "",
+      `📝 最大显示: ${this.maxNum}行`,
+      `📦 批量大小: ${this.batchSize}条/页`
+    ].join("\n")
+  }
+
   async makeForwardMsg(e, msgList) {
     try {
-      const msgs = []
-      const baseTime = Math.floor(Date.now() / 1000)
+      const msgs = this.prepareMsgsForForward(msgList)
       
-      for (let i = 0; i < msgList.length; i++) {
-        const msg = msgList[i]
-        msgs.push({
-          message: msg.message,
-          nickname: msg.nickname || "日志系统",
-          user_id: String(msg.user_id || Bot.uin),
-          time: msg.time || (baseTime - (msgList.length - i) * 2)
-        })
+      const apis = [
+        e.group?.makeForwardMsg,
+        e.friend?.makeForwardMsg,
+        e.bot?.makeForwardMsg,
+        Bot.makeForwardMsg
+      ].filter(Boolean)
+      
+      for (const api of apis) {
+        try {
+          return await api.call(api === Bot.makeForwardMsg ? Bot : e.group || e.friend || e.bot, msgs)
+        } catch {
+          continue
+        }
       }
       
-      let forwardMsg
-      if (e.group?.makeForwardMsg) {
-        forwardMsg = await e.group.makeForwardMsg(msgs)
-      } else if (e.friend?.makeForwardMsg) {
-        forwardMsg = await e.friend.makeForwardMsg(msgs)
-      } else if (e.bot?.makeForwardMsg) {
-        forwardMsg = await e.bot.makeForwardMsg(msgs)
-      } else if (Bot.makeForwardMsg) {
-        forwardMsg = await Bot.makeForwardMsg(msgs)
-      } else if (Bot.makeForwardArray) {
-        const messages = msgs.map(m => m.message)
-        forwardMsg = await Bot.makeForwardArray(messages)
-      } else {
-        logger.error("[sendLog] 未找到可用的转发消息API")
-        return null
-      }
-      
-      return forwardMsg
+      logger.error("[sendLog] 所有转发消息API均失败")
+      return null
       
     } catch (error) {
-      logger.error(`[sendLog] 制作转发消息失败: ${error}`)
-      
-      try {
-        const simplifiedMsgs = msgList.slice(0, 3).map(m => ({
-          message: typeof m.message === 'string' ? m.message : "日志内容",
-          nickname: m.nickname || "日志系统",
-          user_id: String(Bot.uin)
-        }))
-        
-        if (e.group?.makeForwardMsg) {
-          return await e.group.makeForwardMsg(simplifiedMsgs)
-        }
-      } catch (err) {
-        logger.error(`[sendLog] 简化转发消息也失败: ${err}`)
-      }
-      
+      logger.error(`[sendLog] 制作转发消息失败:`, error)
       return null
     }
   }
 
+  prepareMsgsForForward(msgList) {
+    const baseTime = Math.floor(Date.now() / 1000)
+    
+    return msgList.map((msg, i) => ({
+      message: msg.message,
+      nickname: msg.nickname || "日志系统",
+      user_id: String(msg.user_id || Bot.uin),
+      time: msg.time || (baseTime - (msgList.length - i) * 2)
+    }))
+  }
+
   async replyError(errorMsg) {
     try {
-      const messages = [
-        {
-          message: [
-            "❌ 操作失败",
-            "━".repeat(30),
-            errorMsg,
-            "",
-            "💡 请检查:",
-            "• 日志文件是否存在",
-            "• 命令格式是否正确",
-            "• 是否有足够的权限"
-          ].join("\n"),
-          nickname: "错误提示",
-          user_id: Bot.uin
-        }
-      ]
+      const errorMessage = {
+        message: [
+          "❌ 操作失败",
+          "━".repeat(30),
+          errorMsg,
+          "",
+          "💡 请检查:",
+          "• 日志文件是否存在",
+          "• 命令格式是否正确",
+          "• 是否有足够的权限"
+        ].join("\n"),
+        nickname: "错误提示",
+        user_id: Bot.uin
+      }
       
-      const forwardMsg = await this.makeForwardMsg(this.e, messages)
+      const forwardMsg = await this.makeForwardMsg(this.e, [errorMessage])
       
       if (forwardMsg) {
         await this.e.reply(forwardMsg)
       } else {
+        // 简单回复作为fallback
         await this.e.reply(`❌ ${errorMsg}`)
       }
       
     } catch (error) {
-      logger.error(`[sendLog] 回复错误信息失败: ${error}`)
+      logger.error(`[sendLog] 回复错误信息失败:`, error)
       await this.e.reply(`❌ ${errorMsg}`)
     }
     
