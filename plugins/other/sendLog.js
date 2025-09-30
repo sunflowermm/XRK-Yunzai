@@ -22,7 +22,7 @@ export class sendLog extends plugin {
     this.lineNum = 100
     this.maxNum = 1000
     this.logDir = "logs"
-    this.batchSize = 30
+    this.batchSize = 1
     
     // 日志级别配置
     this.levelConfig = {
