@@ -19,12 +19,11 @@ export class sendLog extends plugin {
       ],
     })
 
-    this.lineNum = 120  // 默认显示120条
+    this.lineNum = 120
     this.maxNum = 1000
     this.logDir = "logs"
-    this.maxPerForward = 30  // 每个转发消息最多30条
+    this.maxPerForward = 30
     
-    // 日志级别配置
     this.levelConfig = {
       ERROR: { emoji: "❌", color: "red" },
       WARN: { emoji: "⚠️", color: "yellow" },
@@ -43,14 +42,12 @@ export class sendLog extends plugin {
       const lineNum = Math.min(parseInt(match[2]) || this.lineNum, this.maxNum)
       const keyWord = match[3]?.trim() || ""
       
-      // 获取日志配置
       const { logFile, filterLevel, logName } = await this.getLogConfig(logType)
       
       if (!logFile) {
         return await this.replyError(`暂无${logName}文件`)
       }
 
-      // 读取和处理日志
       const logs = await this.getLog(logFile, lineNum, keyWord, filterLevel)
       
       if (lodash.isEmpty(logs)) {
@@ -58,7 +55,6 @@ export class sendLog extends plugin {
         return await this.replyError(errorMsg)
       }
 
-      // 分批发送转发消息
       await this.sendLogBatches(logs, logName, keyWord, lineNum, logFile, filterLevel)
       
       logger.info(`[sendLog] 成功发送${logName}，共${logs.length}条`)
@@ -74,8 +70,6 @@ export class sendLog extends plugin {
   async sendLogBatches(logs, logName, keyWord, lineNum, logFile, filterLevel) {
     const timestamp = moment().format("YYYY-MM-DD HH:mm:ss")
     const fileName = path.basename(logFile)
-    
-    // 计算需要发送多少批次
     const totalBatches = Math.ceil(logs.length / this.maxPerForward)
     
     for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
@@ -83,7 +77,6 @@ export class sendLog extends plugin {
       const endIdx = Math.min(startIdx + this.maxPerForward, logs.length)
       const batchLogs = logs.slice(startIdx, endIdx)
       
-      // 构建当前批次的转发消息
       const forwardData = this.buildBatchForwardData(
         batchLogs, 
         logName, 
@@ -106,7 +99,6 @@ export class sendLog extends plugin {
       
       await this.e.reply(forwardMsg)
       
-      // 批次之间添加短暂延迟，避免发送过快
       if (batchIndex < totalBatches - 1) {
         await this.sleep(500)
       }
@@ -116,7 +108,6 @@ export class sendLog extends plugin {
   buildBatchForwardData(batchLogs, logName, keyWord, filterLevel, timestamp, fileName, batchNum, totalBatches, startIdx, totalCount) {
     const messages = []
     
-    // 第一批添加头部信息
     if (batchNum === 1) {
       const headerInfo = this.buildHeaderInfo(logName, keyWord, filterLevel, timestamp, fileName, totalCount)
       messages.push({
@@ -135,14 +126,12 @@ export class sendLog extends plugin {
       }
     }
     
-    // 批次信息
     messages.push({
       message: `📦 第 ${batchNum}/${totalBatches} 批\n📍 日志范围: #${startIdx + 1} - #${startIdx + batchLogs.length}\n共 ${batchLogs.length} 条日志`,
       nickname: `批次 ${batchNum}/${totalBatches}`,
       user_id: Bot.uin
     })
     
-    // 每条日志作为独立消息
     batchLogs.forEach((log, idx) => {
       const logNum = startIdx + idx + 1
       const level = this.extractLogLevel(log)
@@ -155,7 +144,6 @@ export class sendLog extends plugin {
       })
     })
     
-    // 最后一批添加使用说明
     if (batchNum === totalBatches) {
       messages.push({
         message: this.buildUsageInfo(),
@@ -230,7 +218,6 @@ export class sendLog extends plugin {
 
   async findLogFile(prefix = 'app') {
     try {
-      // 优先使用当天的日志文件
       const currentDate = moment().format("YYYY-MM-DD")
       const todayLogFile = path.join(this.logDir, `${prefix}.${currentDate}.log`)
       
@@ -238,17 +225,15 @@ export class sendLog extends plugin {
         await fs.access(todayLogFile)
         return todayLogFile
       } catch {
-        // 如果当天文件不存在，查找最近的日志文件
         const files = await fs.readdir(this.logDir)
         const logFiles = files
           .filter(file => file.startsWith(`${prefix}.`) && file.endsWith('.log'))
-          .sort((a, b) => b.localeCompare(a)) // 按日期降序排序
+          .sort((a, b) => b.localeCompare(a))
         
         if (logFiles.length > 0) {
           return path.join(this.logDir, logFiles[0])
         }
         
-        // 兼容旧格式
         if (prefix === 'app') {
           const oldFiles = files
             .filter(file => file.match(/^\d{4}-\d{2}-\d{2}\.log$/))
@@ -272,7 +257,7 @@ export class sendLog extends plugin {
       const content = await fs.readFile(logFile, "utf8")
       let lines = content.split("\n").filter(line => line.trim())
 
-      // 级别过滤 - 使用更准确的正则匹配 [LEVEL] 格式
+      // 级别过滤
       if (filterLevel) {
         const levelPattern = new RegExp(`\\[${filterLevel}\\]`, 'i')
         lines = lines.filter(line => levelPattern.test(line))
@@ -285,13 +270,11 @@ export class sendLog extends plugin {
       }
 
       // 限制数量
-      const maxLines = (filterLevel || keyWord) ? this.maxNum : lineNum
-      lines = lines.slice(-maxLines)
+      lines = lines.slice(-lineNum)
 
-      // 反转顺序（最新的在前）
+      // 反转顺序
       lines.reverse()
 
-      // 格式化每行
       return lines.map((line, idx) => this.formatLogLine(line, idx))
       
     } catch (err) {
@@ -414,7 +397,6 @@ export class sendLog extends plugin {
         time: Math.floor(Date.now() / 1000) - (msgList.length - i) * 2
       }))
       
-      // 尝试多种API
       const makeForward = e.group?.makeForwardMsg || 
                          e.friend?.makeForwardMsg || 
                          e.bot?.makeForwardMsg ||
