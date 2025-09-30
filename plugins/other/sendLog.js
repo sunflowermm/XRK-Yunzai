@@ -23,6 +23,7 @@ export class sendLog extends plugin {
     this.maxNum = 1000
     this.logDir = "logs"
     this.maxPerForward = 30
+    this.maxLineLength = 300  // 单条日志最大长度
     
     this.levelConfig = {
       ERROR: { emoji: "❌", color: "red" },
@@ -138,7 +139,7 @@ export class sendLog extends plugin {
       const nickname = level ? `${level} [${logNum}]` : `日志 [${logNum}]`
       
       messages.push({
-        message: log,
+        message: this.truncateLog(log),
         nickname: nickname,
         user_id: Bot.uin
       })
@@ -153,6 +154,13 @@ export class sendLog extends plugin {
     }
     
     return messages
+  }
+
+  truncateLog(log) {
+    if (log.length <= this.maxLineLength) {
+      return log
+    }
+    return log.substring(0, this.maxLineLength - 3) + '...'
   }
 
   extractLogLevel(logLine) {
@@ -286,20 +294,26 @@ export class sendLog extends plugin {
   formatLogLine(line, index) {
     if (!line) return ""
     
-    const levelMatch = line.match(/\[([A-Z]+)\]/i)
+    // 先截断长度
+    let formattedLine = line
+    if (line.length > this.maxLineLength) {
+      formattedLine = line.substring(0, this.maxLineLength - 3) + '...'
+    }
+    
+    const levelMatch = formattedLine.match(/\[([A-Z]+)\]/i)
     if (levelMatch) {
       const level = levelMatch[1].toUpperCase()
       const config = this.levelConfig[level]
       if (config) {
-        return `${config.emoji} ${line}`
+        return `${config.emoji} ${formattedLine}`
       }
     }
     
-    if (line.includes('Stack:') || line.match(/^\s+at\s/)) {
-      return `↳ ${line.trim()}`
+    if (formattedLine.includes('Stack:') || formattedLine.match(/^\s+at\s/)) {
+      return `↳ ${formattedLine.trim()}`
     }
     
-    return line
+    return formattedLine
   }
 
   buildErrorMessage(logName, keyWord, filterLevel) {
@@ -328,7 +342,8 @@ export class sendLog extends plugin {
       `📅 查询时间: ${timestamp}`,
       `📁 日志文件: ${fileName}`,
       `📊 记录条数: ${count}条`,
-      `🔄 排序方式: 最新在前`
+      `🔄 排序方式: 最新在前`,
+      `✂️ 单条限制: ${this.maxLineLength}字符`
     ].join("\n")
   }
 
@@ -383,6 +398,7 @@ export class sendLog extends plugin {
       `• 默认显示: ${this.lineNum}条`,
       `• 最大显示: ${this.maxNum}条`,
       `• 每批最多: ${this.maxPerForward}条`,
+      `• 单条限制: ${this.maxLineLength}字符`,
       `• 主日志保留: ${platformInfo.mainLogAge || '3天'}`,
       `• 追踪日志保留: ${platformInfo.traceLogAge || '1天'}`
     ].join("\n")
