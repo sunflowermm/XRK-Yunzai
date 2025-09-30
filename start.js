@@ -103,7 +103,7 @@ class Logger {
     const timestamp = new Date().toISOString();
     const logMessage = `[${timestamp}] [${level}] ${message}\n`;
     this.queue.push(logMessage);
-
+    
     if (!this.isWriting) {
       await this.flushQueue();
     }
@@ -116,10 +116,10 @@ class Logger {
    */
   async flushQueue() {
     if (this.queue.length === 0 || this.isWriting) return;
-
+    
     this.isWriting = true;
     const messages = this.queue.splice(0, this.queue.length);
-
+    
     try {
       await fs.appendFile(this.logFile, messages.join(''));
     } catch (error) {
@@ -182,7 +182,7 @@ class BaseManager {
    */
   async ensureDirectories() {
     for (const dir of Object.values(PATHS)) {
-      await fs.mkdir(dir, { recursive: true }).catch(() => { });
+      await fs.mkdir(dir, { recursive: true }).catch(() => {});
     }
   }
 }
@@ -201,8 +201,8 @@ class PM2Manager extends BaseManager {
    * @returns {string} PM2路径
    */
   getPM2Path() {
-    return process.platform === 'win32'
-      ? 'pm2'
+    return process.platform === 'win32' 
+      ? 'pm2' 
       : path.join(process.cwd(), 'node_modules', 'pm2', 'bin', 'pm2');
   }
 
@@ -226,35 +226,35 @@ class PM2Manager extends BaseManager {
     const pm2Path = this.getPM2Path();
     let cmdCommand = pm2Path;
     let cmdArgs = [command, ...args];
-
+    
     /** Windows平台特殊处理 */
     if (process.platform === 'win32') {
       cmdCommand = 'cmd';
       cmdArgs = ['/c', 'pm2', command, ...args];
     }
-
+    
     await this.logger.log(`执行PM2命令: ${command} ${args.join(' ')}`);
-
+    
     const result = spawnSync(cmdCommand, cmdArgs, {
       stdio: 'inherit',
       windowsHide: true,
       detached: false,
       shell: process.platform === 'win32'
     });
-
+    
     const success = result.status === 0;
-
+    
     if (success) {
       await this.logger.success(`PM2 ${command} ${processName} 成功`);
     } else {
       await this.logger.error(`PM2 ${command} ${processName} 失败，状态码: ${result.status}`);
-
+      
       /** Windows环境下的备用启动方案 */
       if (process.platform === 'win32' && command === 'start') {
         await this.tryAlternativeStartMethod(args);
       }
     }
-
+    
     return success;
   }
 
@@ -270,17 +270,17 @@ class PM2Manager extends BaseManager {
         encoding: 'utf8',
         shell: true
       });
-
+      
       if (npmWhich.stdout) {
         const globalPath = npmWhich.stdout.trim();
         const absolutePm2Path = path.join(globalPath, 'pm2.cmd');
-
+        
         const retryResult = spawnSync(absolutePm2Path, ['start', ...args], {
           stdio: 'inherit',
           windowsHide: true,
           shell: true
         });
-
+        
         if (retryResult.status === 0) {
           await this.logger.success('PM2替代方法启动成功');
         }
@@ -299,7 +299,7 @@ class PM2Manager extends BaseManager {
   async createConfig(port, mode) {
     const processName = this.getProcessName(port);
     const nodeArgs = getNodeArgs();
-
+    
     /** PM2配置对象 */
     const pm2Config = {
       name: processName,
@@ -318,11 +318,11 @@ class PM2Manager extends BaseManager {
         XRK_SERVER_PORT: port.toString()
       }
     };
-
+    
     await fs.mkdir(PATHS.PM2_CONFIG, { recursive: true });
     const configPath = path.join(PATHS.PM2_CONFIG, `pm2_server_${port}.json`);
     await fs.writeFile(configPath, JSON.stringify({ apps: [pm2Config] }, null, 2));
-
+    
     return configPath;
   }
 
@@ -334,7 +334,7 @@ class PM2Manager extends BaseManager {
    */
   async executePortCommand(action, port) {
     const processName = this.getProcessName(port);
-
+    
     /** 命令映射表 */
     const commandMap = {
       start: async () => {
@@ -345,7 +345,7 @@ class PM2Manager extends BaseManager {
       stop: () => this.executePM2Command('stop', [processName], processName),
       restart: () => this.executePM2Command('restart', [processName], processName)
     };
-
+    
     return commandMap[action]?.() || false;
   }
 }
@@ -365,7 +365,7 @@ class ServerManager extends BaseManager {
   constructor(logger, pm2Manager) {
     super(logger);
     this.pm2Manager = pm2Manager;
-
+    
     /** 确保信号处理器单例 */
     if (!globalSignalHandler) {
       globalSignalHandler = new SignalHandler(logger);
@@ -405,13 +405,13 @@ class ServerManager extends BaseManager {
           : '请输入有效的端口号 (1-65535)';
       }
     }]);
-
+    
     const portNum = parseInt(port);
     const portDir = path.join(PATHS.SERVER_BOTS, portNum.toString());
-
+    
     await fs.mkdir(portDir, { recursive: true });
     await this.copyDefaultConfigs(portDir);
-
+    
     return portNum;
   }
 
@@ -424,7 +424,7 @@ class ServerManager extends BaseManager {
   async copyDefaultConfigs(targetDir) {
     try {
       const defaultConfigFiles = await fs.readdir(PATHS.DEFAULT_CONFIG);
-
+      
       for (const file of defaultConfigFiles) {
         if (file.endsWith('.yaml') && file !== 'qq.yaml') {
           const sourcePath = path.join(PATHS.DEFAULT_CONFIG, file);
@@ -432,7 +432,7 @@ class ServerManager extends BaseManager {
           await fs.copyFile(sourcePath, targetPath);
         }
       }
-
+      
       await this.logger.success(`配置文件已创建: ${targetDir}`);
     } catch (error) {
       await this.logger.error(`创建配置文件失败: ${error.message}\n${error.stack}`);
@@ -447,24 +447,24 @@ class ServerManager extends BaseManager {
   async startServerMode(port) {
     await this.logger.log(`启动葵崽服务器，端口: ${port}`);
     global.selectedMode = 'server';
-
+    
     try {
       /** 保存并修改进程参数 */
       const originalArgv = [...process.argv];
       process.argv = [originalArgv[0], originalArgv[1], 'server', port.toString()];
-
+      
       /** 动态导入Bot类 */
       const { default: BotClass } = await import('./lib/bot.js');
-
+      
       /** 清理旧实例 */
       if (global.Bot) {
         delete global.Bot;
       }
-
+      
       /** 创建并运行新实例 */
       global.Bot = new BotClass();
       await global.Bot.run({ port });
-
+      
       /** 恢复进程参数 */
       process.argv = originalArgv;
     } catch (error) {
@@ -474,48 +474,76 @@ class ServerManager extends BaseManager {
   }
 
   /**
-   * 启动服务器（移除自动重启）
+   * 带自动重启机制的服务器启动
    * @param {number} port - 端口号
    * @returns {Promise<void>}
    */
   async startWithAutoRestart(port) {
     global.selectedMode = 'server';
-
+    
     if (!this.signalHandler.isSetup) {
       this.signalHandler.setup();
     }
-
-    const nodeArgs = getNodeArgs();
-    const startArgs = [...nodeArgs, process.argv[1], 'server', port.toString()];
-
-    await this.logger.log(`启动服务器进程，端口: ${port}`);
-
-    // 准备干净的环境变量
-    const cleanEnv = Object.assign({}, process.env, {
-      XRK_SELECTED_MODE: 'server',
-      XRK_SERVER_PORT: port.toString()
-    });
-
-    const result = spawnSync(process.argv[0], startArgs, {
-      stdio: 'inherit',
-      windowsHide: true,
-      env: cleanEnv,
-      detached: false
-    });
-
-    const exitCode = result.status || 0;
-
-    if (exitCode === 0 || exitCode === 255) {
-      await this.logger.log(`进程正常退出，状态码: ${exitCode}`);
-    } else {
-      await this.logger.error(`进程异常退出，状态码: ${exitCode}`);
+    
+    let restartCount = 0;
+    const startTime = Date.now();
+    
+    while (restartCount < CONFIG.MAX_RESTARTS) {
+      const nodeArgs = getNodeArgs();
+      const startArgs = [...nodeArgs, process.argv[1], 'server', port.toString()];
+      
+      await this.logger.log(`启动进程 (尝试 ${restartCount + 1}/${CONFIG.MAX_RESTARTS})`);
+      
+      /** 准备干净的环境变量 */
+      const cleanEnv = Object.assign({}, process.env, {
+        XRK_SELECTED_MODE: 'server',
+        XRK_SERVER_PORT: port.toString()
+      });
+      
+      const result = spawnSync(process.argv[0], startArgs, {
+        stdio: 'inherit',
+        windowsHide: true,
+        env: cleanEnv,
+        detached: false
+      });
+      
+      const exitCode = result.status || 0;
+      await this.logger.log(`进程退出，状态码: ${exitCode}`);
+      
+      /** 正常退出或重启请求 */
+      if (exitCode === 0 || exitCode === 255) {
+        await this.logger.log('正常退出');
+        return;
+      }
+      
+      /** 计算重启延迟 */
+      const waitTime = this.calculateRestartDelay(Date.now() - startTime, restartCount);
+      await this.logger.warning(`将在 ${waitTime / 1000} 秒后重启`);
+      
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      restartCount++;
     }
-
-    // 清理信号处理器
-    if (this.signalHandler) {
-      await this.signalHandler.cleanup();
-    }
+    
+    await this.logger.error(`达到最大重启次数 (${CONFIG.MAX_RESTARTS})，停止重启`);
   }
+
+  /**
+   * 计算重启延迟时间
+   * @private
+   * @param {number} runTime - 运行时间(毫秒)
+   * @param {number} restartCount - 重启次数
+   * @returns {number} 延迟时间(毫秒)
+   */
+  calculateRestartDelay(runTime, restartCount) {
+    /** 快速崩溃检测 */
+    if (runTime < 10000 && restartCount > 2) {
+      return restartCount > 5 
+        ? CONFIG.RESTART_DELAYS.LONG 
+        : CONFIG.RESTART_DELAYS.MEDIUM;
+    }
+    return CONFIG.RESTART_DELAYS.SHORT;
+  }
+
   /**
    * 停止服务器
    * @param {number} port - 端口号
@@ -523,14 +551,14 @@ class ServerManager extends BaseManager {
    */
   async stopServer(port) {
     await this.logger.log(`尝试停止端口 ${port} 的服务器`);
-
+    
     try {
       const { default: fetch } = await import('node-fetch');
       const response = await fetch(`http://localhost:${port}/shutdown`, {
         method: 'POST',
         timeout: 5000
       });
-
+      
       if (response.ok) {
         await this.logger.success('服务器停止请求已发送');
       } else {
@@ -566,30 +594,30 @@ class SignalHandler {
    */
   setup() {
     if (this.isSetup) return;
-
+    
     const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
-
+    
     /** 创建信号处理函数 */
     const createHandler = (signal) => async () => {
       const currentTime = Date.now();
-
+      
       if (this.shouldExit(signal, currentTime)) {
         await this.logger.log(`检测到双击 ${signal} 信号，准备退出`);
         await this.cleanup();
         process.exit(0);
       }
-
+      
       this.lastSignal = signal;
       this.lastSignalTime = currentTime;
       await this.logger.warning(`收到 ${signal} 信号，再次发送将退出程序`);
     };
-
+    
     /** 注册信号处理器 */
     signals.forEach(signal => {
       this.handlers[signal] = createHandler(signal);
       process.on(signal, this.handlers[signal]);
     });
-
+    
     this.isSetup = true;
   }
 
@@ -599,12 +627,12 @@ class SignalHandler {
    */
   async cleanup() {
     if (!this.isSetup) return;
-
+    
     Object.keys(this.handlers).forEach(signal => {
       process.removeListener(signal, this.handlers[signal]);
       delete this.handlers[signal];
     });
-
+    
     this.isSetup = false;
     await this.logger.log('信号处理器已清理');
   }
@@ -617,8 +645,8 @@ class SignalHandler {
    * @returns {boolean} 是否退出
    */
   shouldExit(signal, currentTime) {
-    return signal === this.lastSignal &&
-      currentTime - this.lastSignalTime < CONFIG.SIGNAL_TIME_THRESHOLD;
+    return signal === this.lastSignal && 
+           currentTime - this.lastSignalTime < CONFIG.SIGNAL_TIME_THRESHOLD;
   }
 }
 
@@ -644,9 +672,9 @@ class MenuManager {
    */
   async run() {
     console.log(chalk.cyan('\n🤖 葵崽多端口服务器管理系统\n'));
-
+    
     let shouldExit = false;
-
+    
     while (!shouldExit) {
       try {
         const selected = await this.showMainMenu();
@@ -668,7 +696,7 @@ class MenuManager {
    */
   async showMainMenu() {
     const availablePorts = await this.serverManager.getAvailablePorts();
-
+    
     const choices = [
       ...availablePorts.map(port => ({
         name: `${chalk.green('▶')} 启动服务器 (端口: ${chalk.yellow(port)})`,
@@ -679,7 +707,7 @@ class MenuManager {
       new inquirer.Separator(),
       { name: `${chalk.red('✖')} 退出`, value: { action: 'exit' } }
     ];
-
+    
     const { selected } = await inquirer.prompt([{
       type: 'list',
       name: 'selected',
@@ -687,7 +715,7 @@ class MenuManager {
       choices,
       loop: false
     }]);
-
+    
     return selected;
   }
 
@@ -702,15 +730,15 @@ class MenuManager {
       case 'start_server':
         await this.serverManager.startWithAutoRestart(selected.port);
         break;
-
+        
       case 'add_port':
         await this.handleAddPort();
         break;
-
+        
       case 'pm2_menu':
         await this.showPM2Menu();
         break;
-
+        
       case 'exit':
         console.log(chalk.cyan('\n再见！👋\n'));
         if (globalSignalHandler) {
@@ -718,7 +746,7 @@ class MenuManager {
         }
         return true;
     }
-
+    
     return false;
   }
 
@@ -729,17 +757,17 @@ class MenuManager {
    */
   async handleAddPort() {
     const newPort = await this.serverManager.addNewPort();
-
+    
     if (newPort) {
       console.log(chalk.green(`✓ 端口 ${newPort} 已添加`));
-
+      
       const { startNow } = await inquirer.prompt([{
         type: 'confirm',
         name: 'startNow',
         message: `是否立即启动端口 ${newPort} 的服务器?`,
         default: true
       }]);
-
+      
       if (startNow) {
         await this.serverManager.startWithAutoRestart(newPort);
       }
@@ -753,12 +781,12 @@ class MenuManager {
    */
   async showPM2Menu() {
     const availablePorts = await this.serverManager.getAvailablePorts();
-
+    
     if (availablePorts.length === 0) {
       console.log(chalk.yellow('⚠ 没有可用的服务器端口'));
       return;
     }
-
+    
     const { action } = await inquirer.prompt([{
       type: 'list',
       name: 'action',
@@ -773,9 +801,9 @@ class MenuManager {
       ],
       loop: false
     }]);
-
+    
     if (action === 'back') return;
-
+    
     const port = await this.selectPort(availablePorts, action);
     if (port) {
       await this.pm2Manager.executePortCommand(action, port);
@@ -796,27 +824,27 @@ class MenuManager {
       stop: '停止哪个端口?',
       restart: '重启哪个端口?'
     };
-
+    
     const choices = availablePorts.map(port => ({
       name: `端口 ${port}`,
       value: port
     }));
-
+    
     if (action === 'start') {
       choices.push({ name: '添加新端口', value: 'add' });
     }
-
+    
     const { port } = await inquirer.prompt([{
       type: 'list',
       name: 'port',
       message: actionMessages[action],
       choices
     }]);
-
+    
     if (port === 'add') {
       return await this.serverManager.addNewPort();
     }
-
+    
     return port;
   }
 }
@@ -827,17 +855,17 @@ class MenuManager {
  */
 function getNodeArgs() {
   const nodeArgs = [...process.execArgv];
-
+  
   /** 确保垃圾回收器可用 */
   if (!nodeArgs.includes('--expose-gc')) {
     nodeArgs.push('--expose-gc');
   }
-
+  
   /** 屏蔽警告以提升用户体验 */
   if (!nodeArgs.includes('--no-warnings')) {
     nodeArgs.push('--no-warnings');
   }
-
+  
   return nodeArgs;
 }
 
@@ -848,11 +876,11 @@ function getNodeArgs() {
 process.on('uncaughtException', async (error) => {
   const logger = new Logger();
   await logger.error(`未捕获的异常: ${error.message}\n${error.stack}`);
-
+  
   if (globalSignalHandler) {
     await globalSignalHandler.cleanup();
   }
-
+  
   process.exit(1);
 });
 
@@ -862,10 +890,10 @@ process.on('uncaughtException', async (error) => {
  */
 process.on('unhandledRejection', async (reason) => {
   const logger = new Logger();
-  const errorMessage = reason instanceof Error
-    ? `${reason.message}\n${reason.stack}`
+  const errorMessage = reason instanceof Error 
+    ? `${reason.message}\n${reason.stack}` 
     : String(reason);
-
+  
   await logger.error(`未处理的Promise拒绝: ${errorMessage}`);
 });
 
@@ -891,34 +919,34 @@ async function main() {
   const pm2Manager = new PM2Manager(logger);
   const serverManager = new ServerManager(logger, pm2Manager);
   const menuManager = new MenuManager(serverManager, pm2Manager);
-
+  
   /** 初始化目录结构 */
   await serverManager.ensureDirectories();
   await logger.ensureLogDir();
-
+  
   /** 检查命令行参数 */
   const envPort = process.env.XRK_SERVER_PORT;
   const commandArg = process.argv[2];
   const portArg = process.argv[3] || envPort;
-
+  
   /** 命令行模式 */
   if (commandArg && portArg && !isNaN(parseInt(portArg))) {
     const port = parseInt(portArg);
-
+    
     switch (commandArg) {
       case 'server':
         await serverManager.startServerMode(port);
         return;
-
+        
       case 'stop':
         await serverManager.stopServer(port);
         return;
     }
   }
-
+  
   /** 交互菜单模式 */
   await menuManager.run();
-
+  
   /** 清理资源 */
   if (globalSignalHandler) {
     await globalSignalHandler.cleanup();
@@ -933,10 +961,10 @@ main().catch(async (error) => {
   const logger = new Logger();
   await logger.ensureLogDir();
   await logger.error(`启动失败: ${error.message}\n${error.stack}`);
-
+  
   if (globalSignalHandler) {
     await globalSignalHandler.cleanup();
   }
-
+  
   process.exit(1);
 });
