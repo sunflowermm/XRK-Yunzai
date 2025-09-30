@@ -9,8 +9,7 @@ export default class XRKChatStream extends StreamBase {
       config: {
         maxRetries: 2,
         retryDelay: 500,
-        timeout: 5000,
-        debug: false
+        timeout: 5000
       }
     });
   }
@@ -20,12 +19,12 @@ export default class XRKChatStream extends StreamBase {
       name: 'at',
       group: 'interaction',
       enabled: true,
-      pattern: '\\[CQ:at,qq=(\\d+)\\]',
+      reg: /\[CQ:at,qq=(\d+)\]/gi,
       regPrompt: '[CQ:at,qq=QQ号] - @某人（确保QQ号存在于群聊记录中）',
       priority: 100,
       handler: async (result, context) => {
         const { e } = context;
-        if (!e?.isGroup) return null;
+        if (!e.isGroup) return null;
         
         const qq = result.params[0];
         try {
@@ -42,12 +41,12 @@ export default class XRKChatStream extends StreamBase {
       name: 'poke',
       group: 'interaction',
       enabled: true,
-      pattern: '\\[CQ:poke,qq=(\\d+)\\]',
+      reg: /\[CQ:poke,qq=(\d+)\]/gi,
       regPrompt: '[CQ:poke,qq=QQ号] - 戳一戳某人',
       priority: 90,
       handler: async (result, context) => {
         const { e } = context;
-        if (!e?.isGroup) return null;
+        if (!e.isGroup) return null;
         
         const qq = result.params[0];
         try {
@@ -63,7 +62,7 @@ export default class XRKChatStream extends StreamBase {
       name: 'reply',
       group: 'interaction',
       enabled: true,
-      pattern: '\\[CQ:reply,id=([^\\]]+)\\]',
+      reg: /\[CQ:reply,id=([^\]]+)\]/gi,
       regPrompt: '[CQ:reply,id=消息ID] - 回复某条消息',
       priority: 95,
       handler: async (result, context) => {
@@ -76,12 +75,12 @@ export default class XRKChatStream extends StreamBase {
       name: 'emojiReaction',
       group: 'emotion',
       enabled: true,
-      pattern: '\\[回应:([^:]+):([^\\]]+)\\]',
+      reg: /\[回应:([^:]+):([^\]]+)\]/gi,
       regPrompt: '[回应:消息ID:表情类型] - 给消息添加表情回应',
       priority: 80,
       handler: async (result, context) => {
         const { e } = context;
-        if (!e?.isGroup) return null;
+        if (!e.isGroup) return null;
         
         const [msgId, emojiType] = result.params;
         const emojiMap = {
@@ -95,14 +94,9 @@ export default class XRKChatStream extends StreamBase {
         
         const emojiIds = emojiMap[emojiType];
         if (emojiIds) {
-          try {
-            const emojiId = emojiIds[Math.floor(Math.random() * emojiIds.length)];
-            await e.group.setEmojiLike(msgId, emojiId);
-            return { action: 'emoji', msgId, emoji: emojiId };
-          } catch (error) {
-            console.warn(`表情回应失败: ${error.message}`);
-            return null;
-          }
+          const emojiId = emojiIds[Math.floor(Math.random() * emojiIds.length)];
+          await e.group.setEmojiLike(msgId, emojiId);
+          return { action: 'emoji', msgId, emoji: emojiId };
         }
         return null;
       }
@@ -112,21 +106,17 @@ export default class XRKChatStream extends StreamBase {
       name: 'thumbUp',
       group: 'interaction',
       enabled: true,
-      pattern: '\\[点赞:(\\d+):(\\d+)\\]',
+      reg: /\[点赞:(\d+):(\d+)\]/gi,
       regPrompt: '[点赞:QQ号:次数] - 给某人点赞（1-50次）',
       priority: 70,
       handler: async (result, context) => {
         const { e } = context;
-        if (!e?.isGroup) return null;
+        if (!e.isGroup) return null;
         
         const [qq, count] = result.params;
         const thumbCount = Math.min(parseInt(count) || 1, 50);
-        try {
-          await e.group.pickMember(qq).thumbUp(thumbCount);
-          return { action: 'thumbUp', target: qq, count: thumbCount };
-        } catch {
-          return null;
-        }
+        await e.group.pickMember(qq).thumbUp(thumbCount);
+        return { action: 'thumbUp', target: qq, count: thumbCount };
       }
     });
 
@@ -134,19 +124,15 @@ export default class XRKChatStream extends StreamBase {
       name: 'sign',
       group: 'action',
       enabled: true,
-      pattern: '\\[签到\\]',
+      reg: /\[签到\]/gi,
       regPrompt: '[签到] - 执行群签到',
       priority: 60,
       handler: async (result, context) => {
         const { e } = context;
-        if (!e?.isGroup) return null;
+        if (!e.isGroup) return null;
         
-        try {
-          await e.group.sign();
-          return { action: 'sign' };
-        } catch {
-          return null;
-        }
+        await e.group.sign();
+        return { action: 'sign' };
       }
     });
 
@@ -154,7 +140,7 @@ export default class XRKChatStream extends StreamBase {
       name: 'mute',
       group: 'admin',
       enabled: true,
-      pattern: '\\[禁言:(\\d+):(\\d+)\\]',
+      reg: /\[禁言:(\d+):(\d+)\]/gi,
       regPrompt: '[禁言:QQ号:秒数] - 禁言某人（需要管理权限）',
       priority: 50,
       validator: async (match, context) => {
@@ -165,12 +151,8 @@ export default class XRKChatStream extends StreamBase {
         const { e } = context;
         const [qq, seconds] = result.params;
         
-        try {
-          await e.group.muteMember(qq, parseInt(seconds));
-          return { action: 'mute', target: qq, duration: seconds };
-        } catch {
-          return null;
-        }
+        await e.group.muteMember(qq, parseInt(seconds));
+        return { action: 'mute', target: qq, duration: seconds };
       }
     });
 
@@ -178,7 +160,7 @@ export default class XRKChatStream extends StreamBase {
       name: 'unmute',
       group: 'admin',
       enabled: true,
-      pattern: '\\[解禁:(\\d+)\\]',
+      reg: /\[解禁:(\d+)\]/gi,
       regPrompt: '[解禁:QQ号] - 解除禁言',
       priority: 50,
       validator: async (match, context) => {
@@ -189,12 +171,8 @@ export default class XRKChatStream extends StreamBase {
         const { e } = context;
         const qq = result.params[0];
         
-        try {
-          await e.group.muteMember(qq, 0);
-          return { action: 'unmute', target: qq };
-        } catch {
-          return null;
-        }
+        await e.group.muteMember(qq, 0);
+        return { action: 'unmute', target: qq };
       }
     });
 
@@ -202,7 +180,7 @@ export default class XRKChatStream extends StreamBase {
       name: 'essence',
       group: 'admin',
       enabled: true,
-      pattern: '\\[精华:([^\\]]+)\\]',
+      reg: /\[精华:([^\]]+)\]/gi,
       regPrompt: '[精华:消息ID] - 设置精华消息（需要管理权限）',
       priority: 40,
       validator: async (match, context) => {
@@ -213,12 +191,8 @@ export default class XRKChatStream extends StreamBase {
         const { e } = context;
         const msgId = result.params[0];
         
-        try {
-          await e.group.setEssence(msgId);
-          return { action: 'essence', msgId };
-        } catch {
-          return null;
-        }
+        await e.group.setEssence(msgId);
+        return { action: 'essence', msgId };
       }
     });
 
@@ -226,7 +200,7 @@ export default class XRKChatStream extends StreamBase {
       name: 'notice',
       group: 'admin',
       enabled: true,
-      pattern: '\\[公告:([^\\]]+)\\]',
+      reg: /\[公告:([^\]]+)\]/gi,
       regPrompt: '[公告:内容] - 发布群公告（需要管理权限）',
       priority: 30,
       validator: async (match, context) => {
@@ -237,12 +211,8 @@ export default class XRKChatStream extends StreamBase {
         const { e } = context;
         const content = result.params[0];
         
-        try {
-          await e.group.sendNotice(content);
-          return { action: 'notice', content };
-        } catch {
-          return null;
-        }
+        await e.group.sendNotice(content);
+        return { action: 'notice', content };
       }
     });
 
@@ -250,7 +220,7 @@ export default class XRKChatStream extends StreamBase {
       name: 'emotion',
       group: 'emotion',
       enabled: true,
-      pattern: '\\[(开心|惊讶|伤心|大笑|害怕|生气)\\]',
+      reg: /\[(开心|惊讶|伤心|大笑|害怕|生气)\]/gi,
       regPrompt: '在文字中插入[开心]、[惊讶]等表情包',
       priority: 20,
       handler: async (result, context) => {
@@ -270,18 +240,14 @@ export default class XRKChatStream extends StreamBase {
       name: 'reminder',
       group: 'action',
       enabled: true,
-      pattern: '\\[提醒:(\\d{4}-\\d{2}-\\d{2}) (\\d{2}:\\d{2}):([^\\]]+)\\]',
+      reg: /\[提醒:(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}):([^\]]+)\]/gi,
       regPrompt: '[提醒:年-月-日 时:分:内容] - 设置定时提醒',
       priority: 10,
       handler: async (result, context) => {
         const [dateStr, timeStr, content] = result.params;
         
         if (context.createReminder) {
-          try {
-            return await context.createReminder(context.e, [dateStr, timeStr, content]);
-          } catch {
-            return null;
-          }
+          return await context.createReminder(context.e, [dateStr, timeStr, content]);
         }
         return null;
       }
@@ -289,7 +255,7 @@ export default class XRKChatStream extends StreamBase {
   }
 
   async getBotRole(e) {
-    if (!e?.isGroup) return '';
+    if (!e.isGroup) return '';
     
     try {
       const member = e.group.pickMember(e.self_id);
@@ -305,16 +271,14 @@ export default class XRKChatStream extends StreamBase {
     const { e, dateStr, isGlobalTrigger } = context;
     const botRole = context.botRole || '成员';
     
-    const botNickname = typeof Bot !== 'undefined' && Bot.nickname ? Bot.nickname : '机器人';
-    
     let basePrompt = `【人设设定】
 ${persona}
 
 【身份信息】
-名字：${botNickname}
-QQ号：${e?.self_id || '未知'}
-${e?.isGroup ? `群名：${e.group?.group_name || '未知'}
-群号：${e.group_id || '未知'}
+名字：${Bot.nickname}
+QQ号：${e.self_id}
+${e.isGroup ? `群名：${e.group?.group_name || '未知'}
+群号：${e.group_id}
 身份：${botRole}` : ''}
 
 【时间信息】
@@ -340,7 +304,7 @@ ${isGlobalTrigger ? '观察群聊后主动发言' : '被召唤回复'}
 ${isGlobalTrigger ? '1. 主动发言要有新意，不要重复他人观点\n2. 可以随机戳一戳活跃的成员\n3. 语气要自然，像普通群员一样' : '1. 回复要针对性强，不要答非所问\n2. 被召唤时更要积极互动'}
 3. @人时只使用出现在群聊记录中的QQ号
 4. 多使用戳一戳和表情回应来增加互动性
-${e?.isMaster ? '5. 对主人要特别友好和尊重' : ''}`;
+${e.isMaster ? '5. 对主人要特别友好和尊重' : ''}`;
 
     return this.buildSystemPrompt(basePrompt, context);
   }
