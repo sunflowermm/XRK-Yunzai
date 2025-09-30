@@ -47,14 +47,14 @@ proxy:
           cert: "/path/to/xrkk.cc.cert"
           ca: ""  # CA证书链（可选）
       
-      # 目标服务器（如果需要代理到其他服务）
-      # 不配置则直接提供静态文件服务
-      # target: "http://localhost:3000"
+    # 目标服务器（如果需要代理到其他服务）
+    # 不配置则直接提供静态文件服务
+    # target: "http://localhost:3000"
       
-      # 路径重写规则（可选）
-      # rewritePath:
-      #   from: "/"
-      #   to: "/"
+    # 路径重写规则（可选）
+    # rewritePath:
+    #   from: "/"
+    #   to: "/"
     
     # 子域名配置示例（已注释）
     # - domain: "xrk.xrkk.cc"
