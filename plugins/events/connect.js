@@ -20,11 +20,9 @@ export default class connectEvent extends EventListener {
 
     const restart = await this.getRestartInfo(currentUin)
     
-    if (restart) {
-      await this.handleRestart(currentUin, restart)
-    } else {
-      await this.handleNormalStart(e)
-    }
+    await this.handleRestart(currentUin, restart)
+    await this.handleNormalStart(e)
+    
   }
 
   async getRestartInfo(uin) {
