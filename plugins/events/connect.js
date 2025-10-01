@@ -16,6 +16,12 @@ export default class onlineEvent extends EventListener {
   }
 
   async execute(e) {
+    // 跳过 stdin
+    if (e.self_id === 'stdin') {
+      logger.info('检测到stdin连接，跳过处理');
+      return;
+    }
+
     if (!Bot.uin.includes(e.self_id))
       Bot.uin.push(e.self_id)
     
@@ -186,10 +192,16 @@ export default class onlineEvent extends EventListener {
         });
       }
       
-      // 发送消息
+      const bot = Bot[botUin];
+      if (!bot) {
+        logger.error(`Bot[${botUin}]不存在`);
+        await this.sendSimpleMessage(restartData, restartTime);
+        return;
+      }
+
       const target = restartData.isGroup ? 
-        Bot[botUin].pickGroup(restartData.id) : 
-        Bot[botUin].pickUser(restartData.id);
+        bot.pickGroup(restartData.id) : 
+        bot.pickUser(restartData.id);
       
       if (target && typeof target.makeForwardMsg === 'function') {
         const forwardMsg = await target.makeForwardMsg(msgs);
@@ -248,4 +260,3 @@ export default class onlineEvent extends EventListener {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
-    
