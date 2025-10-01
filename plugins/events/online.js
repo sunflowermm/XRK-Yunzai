@@ -122,9 +122,9 @@ export default class onlineEvent extends EventListener {
       
       const simpleMsg = `✅ 重启成功，耗时${restartTime}秒`;
       if (restart.isGroup) {
-        await Bot[botUin].pickGroup(restart.id).sendMsg(simpleMsg);
+        await Bot.pickGroup(restart.id).sendMsg(simpleMsg);
       } else {
-        await Bot[botUin].pickUser(restart.id).sendMsg(simpleMsg);
+        await Bot.pickUser(restart.id).sendMsg(simpleMsg);
       }
       
       // 删除重启信息
