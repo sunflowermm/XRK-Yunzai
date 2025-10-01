@@ -38,7 +38,7 @@ export default class connectEvent extends EventListener {
   async handleNormalStart(e) {
     if (!cfg.bot.online_msg_exp) return
     
-    const key = `Yz:XRKconnectMsg:${e.self_id}`
+    const key = `Yz:XRKMsg:${e.self_id}`
     if (await redis.get(key)) return
     
     redis.set(key, "1", { EX: cfg.bot.online_msg_exp * 60 })
