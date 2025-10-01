@@ -41,13 +41,14 @@ export default class onlineEvent extends EventListener {
       const restartTime = ((restartCompleteTime - restartData.time) / 1000).toFixed(4);
       
       logger.info(`Bot已就绪，重启耗时${restartTime}秒，准备发送通知...`);
-      
-      // 发送详细的重启消息
       await this.sendDetailedMessage(restartData, restartTime, botUin);
-      
-      // 删除重启信息
       await redis.del(this.key);
-      logger.info('重启消息发送完成');
+      if (!cfg.bot.online_msg_exp) return
+      const key = `Yz:OnlineMsg:${e.self_id}`
+      if (await redis.get(key)) return
+      redis.set(key, "1", { EX: cfg.bot.online_msg_exp * 60 })
+      Bot.sendMasterMsg(`欢迎使用【XRK-MultiBot v${cfg.package.version}】\n【向日葵妈咪妈咪哄】安装原神适配器和向日葵插件\n【#状态】查看运行状态\n【#日志】查看运行日志\n【#重启】重新启动\n【#更新】拉取 Git 更新\n【#全部更新】更新全部插件\n【#更新日志】查看更新日志`)
+ 
       
     } catch (error) {
       logger.error(`处理重启消息失败：${error.message}`);
@@ -83,26 +84,19 @@ export default class onlineEvent extends EventListener {
         continue;
       }
       
-      // 检查Bot是否初始化完成且可以发送消息
       if (bot._ready === true) {
         logger.info(`Bot[${botUin}]已完全就绪`);
         return true;
       }
       
-      // 如果Bot正在初始化，等待更长时间
       if (bot._initializing) {
-        logger.info(`第${retries + 1}次检查：Bot正在初始化中...`);
         retries++;
         await this.delay(this.retryDelay * 2);
         continue;
       }
       
-      // 尝试测试发送能力
       try {
-        // 简单测试pickUser方法是否可用
         if (typeof bot.pickUser === 'function') {
-          logger.info(`第${retries + 1}次检查：Bot基础功能可用`);
-          // 给Bot一点额外时间完成初始化
           await this.delay(500);
           return true;
         }
@@ -113,8 +107,6 @@ export default class onlineEvent extends EventListener {
       retries++;
       await this.delay(this.retryDelay);
     }
-    
-    logger.warn(`Bot[${botUin}]在${this.maxRetries}次检查后仍未就绪`);
     return false;
   }
   
@@ -204,20 +196,13 @@ export default class onlineEvent extends EventListener {
         await target.sendMsg(forwardMsg);
         logger.info('详细重启消息发送成功');
       } else {
-        // 降级为简单消息
         await this.sendSimpleMessage(restartData, restartTime);
       }
       
     } catch (error) {
       logger.error(`发送详细消息失败：${error.message}`);
-      // 降级为简单消息
       await this.sendSimpleMessage(restartData, restartTime);
     }
-    if (!cfg.bot.online_msg_exp) return
-    const key = `Yz:OnlineMsg:${e.self_id}`
-    if (await redis.get(key)) return
-    redis.set(key, "1", { EX: cfg.bot.online_msg_exp * 60 })
-    Bot.sendMasterMsg(`欢迎使用【XRK-MultiBot v${cfg.package.version}】\n【向日葵妈咪妈咪哄】安装原神适配器和向日葵插件\n【#状态】查看运行状态\n【#日志】查看运行日志\n【#重启】重新启动\n【#更新】拉取 Git 更新\n【#全部更新】更新全部插件\n【#更新日志】查看更新日志`)
   }
   
   /**
