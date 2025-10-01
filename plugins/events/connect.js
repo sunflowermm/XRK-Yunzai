@@ -711,7 +711,7 @@ export default class connectEvent extends EventListener {
     ${packages.length > 0 ? `
       <div class="section">
         <div class="section-header">
-          <h2 class="section-title">📦 插件包</h2>
+          <h2 class="section-title">📄 单JS</h2>
           <span class="section-count">${packages.length} 个</span>
         </div>
         ${packages.map(pkg => `
@@ -734,7 +734,7 @@ export default class connectEvent extends EventListener {
     ${single.length > 0 ? `
       <div class="section">
         <div class="section-header">
-          <h2 class="section-title">📄 插件包</h2>
+          <h2 class="section-title">📦 插件包</h2>
           <span class="section-count">${single.length} 个</span>
         </div>
         <div class="plugin-list">
