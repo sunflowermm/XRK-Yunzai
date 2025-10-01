@@ -1,262 +1,192 @@
-import EventListener from "../../lib/listener/listener.js";
-import loader from "../../lib/plugins/loader.js";
-import cfg from '../../lib/config/config.js';
+import EventListener from "../../lib/listener/listener.js"
+import cfg from "../../lib/config/config.js"
+import loader from "../../lib/plugins/loader.js"
 
 /**
- * 监听上线事件
+ * 监听连接事件（理论上属于各类适配器的上线的事件）
+ * 处理上线消息并发送插件加载报告
  */
-export default class onlineEvent extends EventListener {
+export default class connectEvent extends EventListener {
   constructor() {
     super({
-      event: "connect",
-    });
-    this.key = 'Yz:restart';
-    this.maxRetries = 100; // 最大重试次数
-    this.retryDelay = 200; // 重试延迟(毫秒)
+      event: "connect"
+    })
+
+    this.key = 'Yz:restart'
   }
 
   async execute(e) {
-    // 跳过 stdin
-    if (e.self_id === 'stdin') {
-      logger.info('检测到stdin连接，跳过处理');
-      return;
-    }
-
     if (!Bot.uin.includes(e.self_id))
       Bot.uin.push(e.self_id)
-    
-    const restart = await redis.get(this.key);
-    if (!restart) {
-      logger.info('没有检测到重启信息，机器人正常启动');
-      return;
-    }
-    
-    try {
-      const restartData = JSON.parse(restart);
-      const botUin = restartData.uin || Bot.uin[0];
-      const isReady = await this.waitForBotReady(botUin);
-      
-      if (!isReady) {
-        logger.error('Bot未能在规定时间内就绪，尝试发送简单消息');
-        await this.sendSimpleMessage(restartData);
-        await redis.del(this.key);
-        return;
-      }
-      
-      const restartCompleteTime = Date.now();
-      const restartTime = ((restartCompleteTime - restartData.time) / 1000).toFixed(4);
-      
-      logger.info(`Bot已就绪，重启耗时${restartTime}秒，准备发送通知...`);
-      await this.sendDetailedMessage(restartData, restartTime, botUin);
-      await redis.del(this.key);
-      if (!cfg.bot.online_msg_exp) return
-      const key = `Yz:OnlineMsg:${e.self_id}`
-      if (await redis.get(key)) return
-      redis.set(key, "1", { EX: cfg.bot.online_msg_exp * 60 })
-      Bot.sendMasterMsg(`欢迎使用【XRK-MultiBot v${cfg.package.version}】\n【向日葵妈咪妈咪哄】安装原神适配器和向日葵插件\n【#状态】查看运行状态\n【#日志】查看运行日志\n【#重启】重新启动\n【#更新】拉取 Git 更新\n【#全部更新】更新全部插件\n【#更新日志】查看更新日志`)
- 
-      
-    } catch (error) {
-      logger.error(`处理重启消息失败：${error.message}`);
-      logger.error(error.stack);
-      
-      // 尝试发送简单消息
-      try {
-        const restartData = JSON.parse(await redis.get(this.key));
-        if (restartData) {
-          await this.sendSimpleMessage(restartData);
-          await redis.del(this.key);
-        }
-      } catch (innerError) {
-        logger.error('发送简单重启消息也失败了');
-      }
-    }
-  }
-  
-  /**
-   * 等待Bot完全就绪
-   * @param {string} botUin Bot账号
-   * @returns {Promise<boolean>} 是否就绪
-   */
-  async waitForBotReady(botUin) {
-    let retries = 0;
-    
-    while (retries < this.maxRetries) {
-      const bot = Bot[botUin];
-      
-      if (!bot) {
-        retries++;
-        await this.delay(this.retryDelay);
-        continue;
-      }
-      
-      if (bot._ready === true) {
-        logger.info(`Bot[${botUin}]已完全就绪`);
-        return true;
-      }
-      
-      if (bot._initializing) {
-        retries++;
-        await this.delay(this.retryDelay * 2);
-        continue;
-      }
-      
-      try {
-        if (typeof bot.pickUser === 'function') {
-          await this.delay(500);
-          return true;
-        }
-      } catch (err) {
-        logger.warn(`第${retries + 1}次检查：Bot功能测试失败 - ${err.message}`);
-      }
-      
-      retries++;
-      await this.delay(this.retryDelay);
-    }
-    return false;
-  }
-  
-  /**
-   * 发送详细的重启消息
-   */
-  async sendDetailedMessage(restartData, restartTime, botUin) {
-    try {
-      const pluginStats = loader.getPluginStats();
-      const startupTime = (pluginStats.totalLoadTime / 1000).toFixed(4);
-      
-      const msgs = [];
-      
-      // 基础统计信息
-      msgs.push({
-        message: [
-          `📊 启动统计`,
-          `━━━━━━━━━━━━━━`,
-          `🚀 重启耗时：${restartTime}秒`,
-          `⚙️ 系统加载：${startupTime}秒`,
-          `📦 插件总数：${pluginStats.totalPlugins}个`,
-          `📋 定时任务：${pluginStats.taskCount}个`,
-          `🔌 扩展插件：${pluginStats.extendedCount}个`
-        ].join('\n'),
-        nickname: '系统信息',
-        user_id: String(botUin),
-        time: Math.floor((restartData.time - 5000) / 1000)
-      });
-      
-      // 插件详情
-      if (pluginStats.plugins && pluginStats.plugins.length > 0) {
-        const sortedPlugins = pluginStats.plugins.sort((a, b) => b.loadTime - a.loadTime);
-        
-        let pluginListMsg = ['📦 插件加载详情', '━━━━━━━━━━━━━━'];
-        
-        sortedPlugins.forEach((plugin, index) => {
-          const loadTimeMs = plugin.loadTime.toFixed(2);
-          const icon = plugin.loadTime > 100 ? '⚠️' : '✅';
-          pluginListMsg.push(`${icon} [${plugin.name}] ${loadTimeMs}ms`);
-        });
-        
-        pluginListMsg.push('━━━━━━━━━━━━━━');
-        const avgLoadTime = (pluginStats.plugins.reduce((sum, p) => sum + p.loadTime, 0) / pluginStats.plugins.length).toFixed(2);
-        const slowPlugins = pluginStats.plugins.filter(p => p.loadTime > 100).length;
-        
-        pluginListMsg.push(`📈 平均加载：${avgLoadTime}ms`);
-        if (slowPlugins > 0) {
-          pluginListMsg.push(`⚠️ 慢速加载：${slowPlugins}个`);
-        }
-        
-        msgs.push({
-          message: pluginListMsg.join('\n'),
-          nickname: '插件管理器',
-          user_id: String(botUin),
-          time: Math.floor((restartData.time - 3000) / 1000)
-        });
-      }
-      
-      // 优化建议
-      const suggestions = [];
-      if (pluginStats.plugins.some(p => p.loadTime > 200)) {
-        suggestions.push('• 部分插件加载缓慢，建议检查初始化逻辑');
-      }
-      if (pluginStats.totalPlugins > 50) {
-        suggestions.push('• 插件数量较多，可考虑精简未使用的插件');
-      }
-      if (parseFloat(startupTime) > 10) {
-        suggestions.push('• 启动时间较长，建议优化插件加载流程');
-      }
-      
-      if (suggestions.length > 0) {
-        msgs.push({
-          message: ['💡 优化建议', '━━━━━━━━━━━━━━', ...suggestions].join('\n'),
-          nickname: '性能分析',
-          user_id: String(botUin),
-          time: Math.floor((restartData.time - 1000) / 1000)
-        });
-      }
-      
-      const bot = Bot[botUin];
-      if (!bot) {
-        logger.error(`Bot[${botUin}]不存在`);
-        await this.sendSimpleMessage(restartData, restartTime);
-        return;
-      }
 
-      const target = restartData.isGroup ? 
-        bot.pickGroup(restartData.id) : 
-        bot.pickUser(restartData.id);
-      
-      if (target && typeof target.makeForwardMsg === 'function') {
-        const forwardMsg = await target.makeForwardMsg(msgs);
-        await target.sendMsg(forwardMsg);
-        logger.info('详细重启消息发送成功');
-      } else {
-        await this.sendSimpleMessage(restartData, restartTime);
-      }
-      
-    } catch (error) {
-      logger.error(`发送详细消息失败：${error.message}`);
-      await this.sendSimpleMessage(restartData, restartTime);
+    const currentUin = e?.self_id || Bot.uin[0]
+    if (!currentUin) {
+      logger.debug('无法获取机器人QQ号，跳过重启消息发送')
+      return
     }
-  }
-  
-  /**
-   * 发送简单的重启消息
-   */
-  async sendSimpleMessage(restartData, restartTime = null) {
+
+    let restart = await redis.get(`${this.key}:${currentUin}`)
+    if (!restart) {
+      logger.debug('没有检测到重启信息，机器人正常启动')
+      await this.sendOnlineMessage(e)
+      return
+    }
+
     try {
-      const botUin = restartData.uin || Bot.uin[0];
-      const bot = Bot[botUin];
+      restart = JSON.parse(restart)
       
-      if (!bot) {
-        logger.error(`Bot[${botUin}]不存在，无法发送消息`);
-        return;
+      // 计算重启耗时（精确到小数点后4位）
+      const restartTime = ((new Date().getTime() - restart.time) / 1000).toFixed(4)
+      
+      // 获取插件加载统计
+      const stats = loader.getPluginStats()
+      
+      // 构建重启报告消息
+      let msg = [`✅ 重启成功`]
+      msg.push(`⏱️ 重启耗时：${restartTime}秒`)
+      msg.push(`━━━━━━━━━━━━━━━`)
+      msg.push(`📊 插件加载报告`)
+      msg.push(`━━━━━━━━━━━━━━━`)
+      
+      // 统计插件包和单文件插件
+      const pluginPackages = new Map()
+      const singlePlugins = []
+      
+      if (stats.plugins && Array.isArray(stats.plugins)) {
+        stats.plugins.forEach(plugin => {
+          const parts = plugin.name.split('/')
+          if (parts.length > 1) {
+            const packageName = parts[0]
+            if (!pluginPackages.has(packageName)) {
+              pluginPackages.set(packageName, {
+                files: [],
+                totalTime: 0,
+                success: 0,
+                failed: 0
+              })
+            }
+            const pkg = pluginPackages.get(packageName)
+            pkg.files.push(plugin)
+            pkg.totalTime += plugin.loadTime || 0
+            if (plugin.success) {
+              pkg.success++
+            } else {
+              pkg.failed++
+            }
+          } else {
+            // 单文件插件
+            singlePlugins.push(plugin)
+          }
+        })
       }
       
-      let message = '✅ 重启成功';
-      if (restartTime) {
-        message += `，耗时${restartTime}秒`;
+      // 添加插件包信息
+      if (pluginPackages.size > 0) {
+        msg.push(`📦 插件包加载情况：`)
+        for (const [name, info] of pluginPackages) {
+          const status = info.failed === 0 ? '✅' : '⚠️'
+          const loadTime = (info.totalTime / 1000).toFixed(3)
+          msg.push(`  ${status} ${name}`)
+          msg.push(`     ├ 文件数：${info.files.length}个`)
+          msg.push(`     ├ 成功：${info.success}个${info.failed > 0 ? ` / 失败：${info.failed}个` : ''}`)
+          msg.push(`     └ 耗时：${loadTime}秒`)
+        }
       }
       
-      const target = restartData.isGroup ? 
-        bot.pickGroup(restartData.id) : 
-        bot.pickUser(restartData.id);
+      if (singlePlugins.length > 0) {
+        msg.push(`📄 单文件插件：${singlePlugins.length}个`)
+        const successCount = singlePlugins.filter(p => p.success).length
+        const failedCount = singlePlugins.filter(p => !p.success).length
+        if (successCount > 0) msg.push(`  ✅ 成功加载：${successCount}个`)
+        if (failedCount > 0) {
+          msg.push(`  ❌ 加载失败：${failedCount}个`)
+          singlePlugins.filter(p => !p.success).forEach(p => {
+            msg.push(`     - ${p.name}`)
+          })
+        }
+      }
       
-      if (target && typeof target.sendMsg === 'function') {
-        await target.sendMsg(message);
-        logger.info('简单重启消息发送成功');
+      msg.push(`━━━━━━━━━━━━━━━`)
+      msg.push(`📈 加载统计`)
+      msg.push(`  • 插件总数：${stats.totalPlugins || 0}个`)
+      msg.push(`  • 定时任务：${stats.taskCount || 0}个`)
+      msg.push(`  • 扩展插件：${stats.extendedCount || 0}个`)
+      msg.push(`  • 总加载耗时：${((stats.totalLoadTime || 0) / 1000).toFixed(4)}秒`)
+      
+      // 添加系统信息
+      const memUsage = process.memoryUsage()
+      const memoryMB = (memUsage.heapUsed / 1024 / 1024).toFixed(2)
+      msg.push(`━━━━━━━━━━━━━━━`)
+      msg.push(`💾 内存使用：${memoryMB}MB`)
+      msg.push(`🤖 Bot版本：${cfg.package?.version || '未知'}`)
+      
+      // 发送重启报告
+      const msgText = msg.join('\n')
+      
+      if (restart.isGroup) {
+        await Bot[currentUin].pickGroup(restart.id).sendMsg(msgText)
       } else {
-        logger.error('目标对象不可用');
+        await Bot[currentUin].pickUser(restart.id).sendMsg(msgText)
       }
+      
+      // 删除重启标记
+      await redis.del(`${this.key}:${currentUin}`)
+      
+      // 记录日志
+      logger.mark(`[重启完成] 耗时${restartTime}秒，加载插件${stats.totalPlugins}个`)
       
     } catch (error) {
-      logger.error(`发送简单消息失败：${error.message}`);
+      logger.error(`发送重启消息失败：${error}`)
+      logger.error(error.stack)
+      
+      try {
+        const simpleMsg = `重启成功（报告生成失败）`
+        if (restart.isGroup) {
+          await Bot[currentUin].pickGroup(restart.id).sendMsg(simpleMsg)
+        } else {
+          await Bot[currentUin].pickUser(restart.id).sendMsg(simpleMsg)
+        }
+        await redis.del(`${this.key}:${currentUin}`)
+      } catch (err) {
+        logger.error('发送简单重启消息也失败了')
+      }
     }
   }
   
   /**
-   * 延迟函数
-   * @param {number} ms 延迟毫秒数
-   * @returns {Promise}
+   * 发送普通上线消息
    */
-  delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+  async sendOnlineMessage(e) {
+    if (!cfg.bot.online_msg_exp) return
+    
+    const key = `Yz:OnlineMsg:${e.self_id}`
+    if (await redis.get(key)) return
+    
+    redis.set(key, "1", { EX: cfg.bot.online_msg_exp * 60 })
+    
+    // 获取插件统计信息
+    const stats = loader.getPluginStats()
+    
+    const onlineMsg = [
+      `🌻 欢迎使用【XRK-MultiBot v${cfg.package.version}】`,
+      `━━━━━━━━━━━━━━━`,
+      `📊 系统状态`,
+      `  • 插件数量：${stats.totalPlugins || 0}个`,
+      `  • 定时任务：${stats.taskCount || 0}个`,
+      `  • 扩展插件：${stats.extendedCount || 0}个`,
+      `━━━━━━━━━━━━━━━`,
+      `💡 常用命令`,
+      `  【#状态】查看运行状态`,
+      `  【#日志】查看运行日志`,
+      `  【#重启】重新启动`,
+      `  【#更新】拉取 Git 更新`,
+      `  【#全部更新】更新全部插件`,
+      `  【#更新日志】查看更新日志`,
+      `━━━━━━━━━━━━━━━`,
+      `🌻 【向日葵妈咪妈咪哄】`,
+      `   安装原神适配器和向日葵插件`
+    ].join('\n')
+    
+    Bot.sendMasterMsg(onlineMsg)
   }
 }
