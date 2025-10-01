@@ -38,7 +38,10 @@ export default class connectEvent extends EventListener {
   async handleNormalStart(e) {
     if (!cfg.bot.online_msg_exp) return
     
-    const key = `Yz:XRKMsg:${e.self_id}`
+    const key = `Yz:connect888Msg:${e.self_id}`
+    if (await redis.get(key)) return
+    
+    redis.set(key, "1", { EX: cfg.bot.online_msg_exp * 60 })
     await this.sendWelcomeMessage()
   }
 
@@ -86,15 +89,15 @@ export default class connectEvent extends EventListener {
   }
 
   getWelcomeHTML() {
-    return `
-<!DOCTYPE html>
+    return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>XRK-MultiBot 控制面板</title>
+  <title>XRK-MultiBot</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
   <style>
-    /* 字体优化：保留原神字体+中文友好 fallback */
     @font-face {
       font-family: 'Genshin';
       src: url('./fonts/Genshin.ttf') format('truetype');
@@ -102,227 +105,251 @@ export default class connectEvent extends EventListener {
       font-style: normal;
     }
 
-    /* 基础样式重置 + 全局配置 */
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
     body {
-      font-family: 'Genshin', 'Noto Sans SC', -apple-system, 'Segoe UI', system-ui, sans-serif;
-      background-color: #f0f2f5; /* 柔和背景，突出主体 */
+      font-family: 'Genshin', -apple-system, 'Segoe UI', system-ui, sans-serif;
       min-height: 100vh;
+      background: linear-gradient(135deg, #4a6cf7 0%, #764ba2 100%);
       display: flex;
       align-items: center;
       justify-content: center;
       padding: 20px;
+      margin: 0;
     }
 
-    /* 主体容器：固定截图友好尺寸（竖版比例） */
     .container {
       width: 520px;
-      height: 780px;
-      background: rgba(255, 255, 255, 0.99);
-      border-radius: 24px; /* 圆润边角，更现代 */
-      box-shadow: 0 12px 48px rgba(102, 126, 234, 0.15); /* 层次感阴影 */
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-start; /* 顶部开始布局，避免底部留白 */
-      padding: 50px 30px;
+      background: rgba(255, 255, 255, 0.98);
+      border-radius: 24px;
+      box-shadow: 0 15px 40px rgba(0, 0, 0, 0.15);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      padding: 30px 20px;
+      text-align: center;
+      color: white;
       position: relative;
       overflow: hidden;
     }
 
-    /* 顶部Logo区域：增强视觉焦点 */
-    .logo {
-      width: 88px;
-      height: 88px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      border-radius: 22px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 32px;
-      box-shadow: 0 10px 36px rgba(102, 126, 234, 0.3);
-      cursor: pointer;
-    }
-
-    .logo:hover {
-      transform: rotate(5deg) scale(1.05); /* 轻微互动效果，截图时可选静态 */
-      box-shadow: 0 12px 40px rgba(102, 126, 234, 0.35);
-    }
-
-    .logo-text {
-      color: white;
-      font-size: 38px;
-      font-weight: 700;
-      letter-spacing: -1.2px;
-      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-    }
-
-    /* 标题区域：层级分明 */
-    .title {
-      font-size: 32px;
-      color: #1a1a2e;
-      margin-bottom: 8px;
-      font-weight: 700;
-      text-align: center;
-      letter-spacing: 0.5px;
-    }
-
-    .subtitle {
-      font-size: 16px;
-      color: #4a4a6a;
-      margin-bottom: 6px;
-      text-align: center;
-      opacity: 0.9;
-    }
-
-    .version {
-      font-size: 14px;
-      color: #8a8f98;
-      margin-bottom: 40px;
-      font-weight: 500;
-      text-align: center;
-    }
-
-    /* 命令按钮区域：网格布局优化 */
-    .commands {
-      width: 100%;
-      max-width: 420px;
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
-      margin-bottom: 60px; /* 底部留白，避免贴边 */
-    }
-
-    .command {
-      background: #f8fafc;
-      padding: 18px;
-      border-radius: 14px;
-      border: 1px solid #e5e7eb;
-      cursor: pointer;
-    }
-
-    .command:hover {
-      transform: translateY(-3px);
-      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
-      border-color: #8a94e0; /* 主色浅化，过渡自然 */
-      background-color: #fff;
-    }
-
-    .command-tag {
-      font-size: 15px;
-      color: #4c51bf;
-      font-weight: 600;
-      margin-bottom: 6px;
-      letter-spacing: 0.3px;
-    }
-
-    .command-desc {
-      font-size: 13px;
-      color: #6b7280;
-      line-height: 1.5;
-      opacity: 0.9;
-    }
-
-    /* 特殊按钮：强化视觉突出 */
-    .command.special {
-      grid-column: span 2;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      border: none;
-      box-shadow: 0 8px 24px rgba(102, 126, 234, 0.2);
-    }
-
-    .command.special:hover {
-      transform: translateY(-3px);
-      box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
-      background: linear-gradient(135deg, #7286fd 0%, #845ec2 100%); /*  hover时颜色提亮 */
-    }
-
-    .command.special .command-tag,
-    .command.special .command-desc {
-      color: white;
-      opacity: 1;
-    }
-
-    .command.special .command-tag {
-      text-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-    }
-
-    /* 底部信息：弱化但清晰 */
-    .footer {
-      position: absolute;
-      bottom: 28px;
-      font-size: 13px;
-      color: #a1a7b3;
-      text-align: center;
-      letter-spacing: 0.2px;
-    }
-
-    /* 细节装饰：增强精致感（可选，不影响核心功能） */
-    .container::before {
+    .header::before {
       content: '';
       position: absolute;
       top: 0;
       left: 0;
       width: 100%;
-      height: 6px;
-      background: linear-gradient(90deg, #667eea, #764ba2);
-      border-top-left-radius: 24px;
-      border-top-right-radius: 24px;
+      height: 100%;
+      background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+    }
+
+    .logo {
+      width: 80px;
+      height: 80px;
+      background: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 15px;
+      position: relative;
+      z-index: 1;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    }
+
+    .logo-text {
+      color: #667eea;
+      font-size: 36px;
+      font-weight: 700;
+      letter-spacing: -1px;
+    }
+
+    .title {
+      font-size: 28px;
+      margin-bottom: 5px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .version {
+      font-size: 14px;
+      opacity: 0.9;
+      position: relative;
+      z-index: 1;
+    }
+
+    .commands {
+      padding: 25px 20px;
+    }
+
+    .commands-title {
+      font-size: 16px;
+      color: #4b5563;
+      margin-bottom: 15px;
+      padding-left: 5px;
+      font-weight: 600;
+    }
+
+    .command-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .command {
+      background: #f9fafb;
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px solid #e5e7eb;
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+
+    .command:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(102, 126, 234, 0.1);
+      border-color: #667eea;
+    }
+
+    .command-tag {
+      font-size: 14px;
+      color: #4c51bf;
+      font-weight: 600;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+    }
+
+    .command-tag i {
+      margin-right: 6px;
+      font-size: 13px;
+    }
+
+    .command-desc {
+      font-size: 12px;
+      color: #6b7280;
+      line-height: 1.4;
+    }
+
+    .special {
+      grid-column: span 2;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      border: none;
+    }
+
+    .special:hover {
+      box-shadow: 0 5px 20px rgba(102, 126, 234, 0.3);
+    }
+
+    .special .command-tag,
+    .special .command-desc {
+      color: white;
+    }
+
+    .footer {
+      padding: 15px 20px;
+      background: #f9fafb;
+      border-top: 1px solid #e5e7eb;
+      text-align: center;
+      font-size: 12px;
+      color: #9ca3af;
+    }
+
+    .shine-effect {
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: linear-gradient(
+        to right,
+        rgba(255, 255, 255, 0) 0%,
+        rgba(255, 255, 255, 0.1) 50%,
+        rgba(255, 255, 255, 0) 100%
+      );
+      transform: rotate(30deg);
+      animation: shine 6s infinite;
+    }
+
+    @keyframes shine {
+      0% {
+        transform: translateX(-100%) rotate(30deg);
+      }
+      100% {
+        transform: translateX(100%) rotate(30deg);
+      }
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <!-- Logo区域 -->
-    <div class="logo">
-      <div class="logo-text">XK</div>
+    <div class="header">
+      <div class="shine-effect"></div>
+      <div class="logo">
+        <div class="logo-text">XRK</div>
+      </div>
+      <h1 class="title">XRK-MultiBot</h1>
+      <div class="version">Version ${cfg.package.version}</div>
     </div>
-
-    <!-- 标题区域 -->
-    <h1 class="title">XRK-MultiBot</h1>
-    <div class="subtitle">多功能机器人控制面板</div>
-    <div class="version">Version 1.0.0</div> <!-- 固定版本号，方便截图 -->
-
-    <!-- 命令按钮区域 -->
+    
     <div class="commands">
-      <div class="command special">
-        <div class="command-tag">向日葵妈咪妈咪哄</div>
-        <div class="command-desc">一键安装原神适配器和向日葵插件</div>
-      </div>
-      <div class="command">
-        <div class="command-tag">#状态</div>
-        <div class="command-desc">查看机器人当前运行状态</div>
-      </div>
-      <div class="command">
-        <div class="command-tag">#日志</div>
-        <div class="command-desc">查看近期运行日志详情</div>
-      </div>
-      <div class="command">
-        <div class="command-tag">#重启</div>
-        <div class="command-desc">重新启动机器人服务</div>
-      </div>
-      <div class="command">
-        <div class="command-tag">#更新</div>
-        <div class="command-desc">拉取Git最新核心代码</div>
-      </div>
-      <div class="command">
-        <div class="command-tag">#全部更新</div>
-        <div class="command-desc">更新所有已安装插件</div>
-      </div>
-      <div class="command">
-        <div class="command-tag">#更新日志</div>
-        <div class="command-desc">查看版本更新记录</div>
+      <div class="commands-title">可用命令</div>
+      <div class="command-grid">
+        <div class="command special">
+          <div class="command-tag">
+            <i class="fa fa-magic"></i>向日葵妈咪妈咪哄
+          </div>
+          <div class="command-desc">安装原神适配器和向日葵插件</div>
+        </div>
+        
+        <div class="command">
+          <div class="command-tag">
+            <i class="fa fa-dashboard"></i>#状态
+          </div>
+          <div class="command-desc">查看运行状态</div>
+        </div>
+        
+        <div class="command">
+          <div class="command-tag">
+            <i class="fa fa-file-text-o"></i>#日志
+          </div>
+          <div class="command-desc">查看运行日志</div>
+        </div>
+        
+        <div class="command">
+          <div class="command-tag">
+            <i class="fa fa-refresh"></i>#重启
+          </div>
+          <div class="command-desc">重新启动</div>
+        </div>
+        
+        <div class="command">
+          <div class="command-tag">
+            <i class="fa fa-pull-right"></i>#更新
+          </div>
+          <div class="command-desc">拉取Git更新</div>
+        </div>
+        
+        <div class="command">
+          <div class="command-tag">
+            <i class="fa fa-download"></i>#全部更新
+          </div>
+          <div class="command-desc">更新全部插件</div>
+        </div>
+        
+        <div class="command">
+          <div class="command-tag">
+            <i class="fa fa-history"></i>#更新日志
+          </div>
+          <div class="command-desc">查看更新记录</div>
+        </div>
       </div>
     </div>
-
-    <!-- 底部信息 -->
-    <div class="footer">Powered by XRK-Yunzai</div>
+    
+    <div class="footer">
+      Powered by XRK-Yunzai
+    </div>
   </div>
 </body>
 </html>`
