@@ -39,9 +39,7 @@ export default class connectEvent extends EventListener {
     if (!cfg.bot.online_msg_exp) return
     
     const key = `Yz:XRKMsg:${e.self_id}`
-    if (await redis.get(key)) return
     
-    redis.set(key, "1", { EX: cfg.bot.online_msg_exp * 60 })
     await this.sendWelcomeMessage()
   }
 
@@ -95,8 +93,9 @@ export default class connectEvent extends EventListener {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Welcome</title>
+  <title>XRK-MultiBot 控制面板</title>
   <style>
+    /* 字体优化：保留原神字体+中文友好 fallback */
     @font-face {
       font-family: 'Genshin';
       src: url('./fonts/Genshin.ttf') format('truetype');
@@ -104,159 +103,227 @@ export default class connectEvent extends EventListener {
       font-style: normal;
     }
 
+    /* 基础样式重置 + 全局配置 */
     * {
       margin: 0;
       padding: 0;
       box-sizing: border-box;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     body {
-      font-family: 'Genshin', -apple-system, 'Segoe UI', system-ui, sans-serif;
-      width: 600px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      font-family: 'Genshin', 'Noto Sans SC', -apple-system, 'Segoe UI', system-ui, sans-serif;
+      background-color: #f0f2f5; /* 柔和背景，突出主体 */
+      min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
+      padding: 20px;
     }
 
+    /* 主体容器：固定截图友好尺寸（竖版比例） */
     .container {
-      width: 100%;
-      height: 100%;
-      background: rgba(255, 255, 255, 0.98);
+      width: 520px;
+      height: 780px;
+      background: rgba(255, 255, 255, 0.99);
+      border-radius: 24px; /* 圆润边角，更现代 */
+      box-shadow: 0 12px 48px rgba(102, 126, 234, 0.15); /* 层次感阴影 */
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
-      padding: 40px;
+      justify-content: flex-start; /* 顶部开始布局，避免底部留白 */
+      padding: 50px 30px;
       position: relative;
+      overflow: hidden;
     }
 
+    /* 顶部Logo区域：增强视觉焦点 */
     .logo {
-      width: 72px;
-      height: 72px;
-      background: linear-gradient(135deg, #667eea, #764ba2);
-      border-radius: 18px;
+      width: 88px;
+      height: 88px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 22px;
       display: flex;
       align-items: center;
       justify-content: center;
-      margin-bottom: 24px;
-      box-shadow: 0 8px 32px rgba(102, 126, 234, 0.25);
+      margin-bottom: 32px;
+      box-shadow: 0 10px 36px rgba(102, 126, 234, 0.3);
+      cursor: pointer;
+    }
+
+    .logo:hover {
+      transform: rotate(5deg) scale(1.05); /* 轻微互动效果，截图时可选静态 */
+      box-shadow: 0 12px 40px rgba(102, 126, 234, 0.35);
     }
 
     .logo-text {
       color: white;
-      font-size: 32px;
+      font-size: 38px;
       font-weight: 700;
-      letter-spacing: -1px;
+      letter-spacing: -1.2px;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     }
 
+    /* 标题区域：层级分明 */
     .title {
-      font-size: 28px;
+      font-size: 32px;
       color: #1a1a2e;
       margin-bottom: 8px;
       font-weight: 700;
       text-align: center;
+      letter-spacing: 0.5px;
+    }
+
+    .subtitle {
+      font-size: 16px;
+      color: #4a4a6a;
+      margin-bottom: 6px;
+      text-align: center;
+      opacity: 0.9;
     }
 
     .version {
       font-size: 14px;
-      color: #6b7280;
-      margin-bottom: 32px;
+      color: #8a8f98;
+      margin-bottom: 40px;
       font-weight: 500;
+      text-align: center;
     }
 
+    /* 命令按钮区域：网格布局优化 */
     .commands {
       width: 100%;
-      max-width: 440px;
+      max-width: 420px;
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 12px;
+      gap: 16px;
+      margin-bottom: 60px; /* 底部留白，避免贴边 */
     }
 
     .command {
       background: #f8fafc;
-      padding: 14px;
-      border-radius: 12px;
+      padding: 18px;
+      border-radius: 14px;
       border: 1px solid #e5e7eb;
-      transition: all 0.2s ease;
+      cursor: pointer;
     }
 
     .command:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-      border-color: #667eea;
+      transform: translateY(-3px);
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
+      border-color: #8a94e0; /* 主色浅化，过渡自然 */
+      background-color: #fff;
     }
 
     .command-tag {
-      font-size: 14px;
+      font-size: 15px;
       color: #4c51bf;
       font-weight: 600;
-      margin-bottom: 4px;
+      margin-bottom: 6px;
+      letter-spacing: 0.3px;
     }
 
     .command-desc {
-      font-size: 12px;
+      font-size: 13px;
       color: #6b7280;
-      line-height: 1.4;
+      line-height: 1.5;
+      opacity: 0.9;
     }
 
-    .special {
+    /* 特殊按钮：强化视觉突出 */
+    .command.special {
       grid-column: span 2;
-      background: linear-gradient(135deg, #667eea, #764ba2);
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       border: none;
+      box-shadow: 0 8px 24px rgba(102, 126, 234, 0.2);
     }
 
-    .special .command-tag,
-    .special .command-desc {
+    .command.special:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+      background: linear-gradient(135deg, #7286fd 0%, #845ec2 100%); /*  hover时颜色提亮 */
+    }
+
+    .command.special .command-tag,
+    .command.special .command-desc {
       color: white;
+      opacity: 1;
     }
 
+    .command.special .command-tag {
+      text-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    /* 底部信息：弱化但清晰 */
     .footer {
       position: absolute;
-      bottom: 20px;
-      font-size: 12px;
-      color: #9ca3af;
+      bottom: 28px;
+      font-size: 13px;
+      color: #a1a7b3;
+      text-align: center;
+      letter-spacing: 0.2px;
+    }
+
+    /* 细节装饰：增强精致感（可选，不影响核心功能） */
+    .container::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 6px;
+      background: linear-gradient(90deg, #667eea, #764ba2);
+      border-top-left-radius: 24px;
+      border-top-right-radius: 24px;
     }
   </style>
 </head>
 <body>
   <div class="container">
+    <!-- Logo区域 -->
     <div class="logo">
       <div class="logo-text">XK</div>
     </div>
+
+    <!-- 标题区域 -->
     <h1 class="title">XRK-MultiBot</h1>
-    <div class="version">Version ${cfg.package.version}</div>
+    <div class="subtitle">多功能机器人控制面板</div>
+    <div class="version">Version 1.0.0</div> <!-- 固定版本号，方便截图 -->
+
+    <!-- 命令按钮区域 -->
     <div class="commands">
       <div class="command special">
         <div class="command-tag">向日葵妈咪妈咪哄</div>
-        <div class="command-desc">安装原神适配器和向日葵插件</div>
+        <div class="command-desc">一键安装原神适配器和向日葵插件</div>
       </div>
       <div class="command">
         <div class="command-tag">#状态</div>
-        <div class="command-desc">查看运行状态</div>
+        <div class="command-desc">查看机器人当前运行状态</div>
       </div>
       <div class="command">
         <div class="command-tag">#日志</div>
-        <div class="command-desc">查看运行日志</div>
+        <div class="command-desc">查看近期运行日志详情</div>
       </div>
       <div class="command">
         <div class="command-tag">#重启</div>
-        <div class="command-desc">重新启动</div>
+        <div class="command-desc">重新启动机器人服务</div>
       </div>
       <div class="command">
         <div class="command-tag">#更新</div>
-        <div class="command-desc">拉取Git更新</div>
+        <div class="command-desc">拉取Git最新核心代码</div>
       </div>
       <div class="command">
         <div class="command-tag">#全部更新</div>
-        <div class="command-desc">更新全部插件</div>
+        <div class="command-desc">更新所有已安装插件</div>
       </div>
       <div class="command">
         <div class="command-tag">#更新日志</div>
-        <div class="command-desc">查看更新记录</div>
+        <div class="command-desc">查看版本更新记录</div>
       </div>
     </div>
-    <div class="footer">Powered by XRK-Yunzai</div>
+
+    <!-- 底部信息 -->
+    <div class="footer">Powered by XRK-Yunzai | 截图专用版</div>
   </div>
 </body>
 </html>`
