@@ -11,7 +11,7 @@ export default class onlineEvent extends EventListener {
     })
   }
 
-  async execute(e) {
-     Bot.makeLog("info", `葵崽Online事件已触发`, 'event')
+  async execute() {
+     Bot.makeLog("info", `尽情享受吧QaQ`, 'event')
   }
 }
