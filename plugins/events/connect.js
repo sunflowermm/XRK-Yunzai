@@ -1,5 +1,6 @@
 import EventListener from "../../lib/listener/listener.js";
 import loader from "../../lib/plugins/loader.js";
+import cfg from '../../lib/config/config.js';
 
 /**
  * 监听上线事件
