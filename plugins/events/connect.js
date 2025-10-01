@@ -1,6 +1,6 @@
 import EventListener from "../../lib/listener/listener.js"
 import cfg from "../../lib/config/config.js"
-import { takeScreenshot } from "../../lib/common/screenshot.js"
+import { takeScreenshot } from "../../lib/common/takeScreenshot.js"
 import fs from 'fs/promises'
 import { existsSync } from 'fs'
 import path from 'path'
