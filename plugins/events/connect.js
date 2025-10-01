@@ -322,7 +322,7 @@ export default class connectEvent extends EventListener {
     </div>
 
     <!-- 底部信息 -->
-    <div class="footer">Powered by XRK-Yunzai | 截图专用版</div>
+    <div class="footer">Powered by XRK-Yunzai</div>
   </div>
 </body>
 </html>`
