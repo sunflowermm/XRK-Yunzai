@@ -12,38 +12,6 @@ export default class onlineEvent extends EventListener {
   }
 
   async execute(e) {
-    const currentUin = e?.self_id || Bot.uin[0]
-    if (!currentUin) {
-      logger.debug('无法获取机器人QQ号，跳过重启消息发送')
-      return
-    }
-    
-    let restart = await redis.get(`${this.key}:${currentUin}`)
-    if (!restart) {
-      logger.debug('没有检测到重启信息，机器人正常启动')
-      return
-    }
-    
-    try {
-      restart = JSON.parse(restart)
-      let time = restart.time || new Date().getTime()
-      time = (new Date().getTime() - time) / 1000
-      
-      let msg = `重启成功，耗时${time.toFixed(2)}秒`
-      
-      if (restart.isGroup) {
-        await Bot[currentUin].pickGroup(restart.id).sendMsg(msg)
-      } else {
-        await Bot[currentUin].pickUser(restart.id).sendMsg(msg)
-      }
-      await redis.del(`${this.key}:${currentUin}`)
-    } catch (error) {
-      logger.error(`发送重启消息失败：${error}`)
-    }
-
-    if (!cfg.bot.online_msg_exp) return
-    const key = `Yz:loginMsg:${e.self_id}`
-    if (await redis.get(key)) return
-    redis.set(key, "1", { EX: cfg.bot.online_msg_exp * 60 })
+     Bot.makeLog("info", `葵崽Online事件已触发`, 'event')
   }
 }

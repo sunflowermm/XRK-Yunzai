@@ -22,7 +22,7 @@ export default class connectEvent extends EventListener {
     const key = `Yz:loginMsg:${e.self_id}`
     if (await redis.get(key)) return
     redis.set(key, "1", { EX: cfg.bot.online_msg_exp * 60 })
-    for (const i of cfg.master[e.self_id] || [])
+    for (const i of cfg.masterQQ || [])
       e.bot
         .pickFriend(i)
         .sendMsg(
