@@ -1,3 +1,4 @@
+// ========== 第一部分：OneBot适配器优化 ==========
 import path from "node:path"
 import { ulid } from "ulid"
 
@@ -1061,9 +1062,13 @@ Bot.adapter.push(
 
     /**
      * 建立连接时初始化Bot实例
+     * 关键优化：先初始化基础信息并立即触发connect事件，耗时操作异步执行
      */
     async connect(data, ws) {
-      Bot[data.self_id] = {
+      const self_id = data.self_id
+      
+      // 初始化Bot基础结构
+      Bot[self_id] = {
         adapter: this,
         ws: ws,
         sendApi: this.sendApi.bind(this, data, ws),
@@ -1141,91 +1146,103 @@ Bot.adapter.push(
         getCsrfToken() {
           return this.bkn
         },
+        
+        _ready: false,
+        _initializing: false
       }
-      data.bot = Bot[data.self_id]
+      
+      data.bot = Bot[self_id]
 
-      if (!Bot.uin.includes(data.self_id)) Bot.uin.push(data.self_id)
+      if (!Bot.uin.includes(self_id)) Bot.uin.push(self_id)
 
-      data.bot
-        .sendApi("_set_model_show", {
-          model: data.bot.model,
-          model_show: data.bot.model,
+      data.bot.sendApi("_set_model_show", {
+        model: data.bot.model,
+        model_show: data.bot.model,
+      }).catch(() => {})
+
+      try {
+        data.bot.info = (await data.bot.sendApi("get_login_info").catch(i => i.error)).data || {}
+        data.bot.version = {
+          ...(await data.bot.sendApi("get_version_info").catch(i => i.error)).data,
+          id: this.id,
+          name: this.name,
+          get version() {
+            return this.app_full_name || `${this.app_name} v${this.app_version}`
+          },
+        }
+
+        // 立即触发connect事件，让上层应用知道Bot已可用
+        Bot.makeLog("mark", `${this.name}(${this.id}) ${data.bot.version.version} 已连接`, self_id)
+        Bot.em(`connect.${self_id}`, data)
+        
+        data.bot._initializing = true
+        setImmediate(async () => {
+          try {
+            data.bot.guild_info = (
+              await data.bot.sendApi("get_guild_service_profile").catch(i => i.error)
+            ).data
+            data.bot.clients = (await data.bot.sendApi("get_online_clients").catch(i => i.error)).clients
+
+            // 获取cookies
+            if ((data.bot.cookies["qun.qq.com"] = (
+              await data.bot.sendApi("get_cookies", { domain: "qun.qq.com" }).catch(i => i.error)
+            ).cookies)) {
+              for (const i of [
+                "aq", "connect", "docs", "game", "gamecenter", "haoma", "id", "kg", 
+                "mail", "mma", "office", "openmobile", "qqweb", "qzone", "ti", "v", "vip", "y",
+              ]) {
+                const domain = `${i}.qq.com`
+                data.bot.cookies[domain] = await data.bot
+                  .sendApi("get_cookies", { domain })
+                  .then(i => i.cookies)
+                  .catch(i => i.error)
+              }
+            }
+            data.bot.bkn = (await data.bot.sendApi("get_csrf_token").catch(i => i.error)).token
+
+            // 加载好友列表
+            try {
+              await data.bot.getFriendMap()
+              Bot.makeLog("debug", `好友列表加载完成`, self_id)
+            } catch (err) {
+              Bot.makeLog("warn", `获取好友列表失败: ${err.message}`, self_id)
+              if (!(data.bot.fl instanceof Map)) {
+                data.bot.fl = new Map()
+              }
+            }
+
+            // 加载群和群成员列表
+            try {
+              await data.bot.getGroupMemberMap()
+              Bot.makeLog("debug", `群列表和成员列表加载完成`, self_id)
+            } catch (err) {
+              Bot.makeLog("warn", `获取群成员列表失败: ${err.message}`, self_id)
+              if (!(data.bot.gml instanceof Map)) {
+                data.bot.gml = new Map()
+              }
+            }
+
+            // 标记Bot完全就绪
+            data.bot._ready = true
+            data.bot._initializing = false
+            Bot.makeLog("mark", `${this.name}(${this.id}) 数据加载完成`, self_id)
+            
+            // 触发ready事件
+            Bot.em(`ready.${self_id}`, data)
+            
+          } catch (err) {
+            Bot.makeLog("error", `后台数据加载失败: ${err.message}`, self_id)
+            data.bot._ready = true
+            data.bot._initializing = false
+          }
         })
-        .catch(() => { })
-
-      // 获取账号信息
-      data.bot.info = (await data.bot.sendApi("get_login_info").catch(i => i.error)).data || {}
-      data.bot.guild_info = (
-        await data.bot.sendApi("get_guild_service_profile").catch(i => i.error)
-      ).data
-      data.bot.clients = (await data.bot.sendApi("get_online_clients").catch(i => i.error)).clients
-      data.bot.version = {
-        ...(await data.bot.sendApi("get_version_info").catch(i => i.error)).data,
-        id: this.id,
-        name: this.name,
-        get version() {
-          return this.app_full_name || `${this.app_name} v${this.app_version}`
-        },
-      }
-
-      // 获取cookies
-      if (
-        (data.bot.cookies["qun.qq.com"] = (
-          await data.bot.sendApi("get_cookies", { domain: "qun.qq.com" }).catch(i => i.error)
-        ).cookies)
-      )
-        for (const i of [
-          "aq",
-          "connect",
-          "docs",
-          "game",
-          "gamecenter",
-          "haoma",
-          "id",
-          "kg",
-          "mail",
-          "mma",
-          "office",
-          "openmobile",
-          "qqweb",
-          "qzone",
-          "ti",
-          "v",
-          "vip",
-          "y",
-        ]) {
-          const domain = `${i}.qq.com`
-          data.bot.cookies[domain] = await data.bot
-            .sendApi("get_cookies", { domain })
-            .then(i => i.cookies)
-            .catch(i => i.error)
-        }
-      data.bot.bkn = (await data.bot.sendApi("get_csrf_token").catch(i => i.error)).token
-
-      try {
-        await data.bot.getFriendMap()
+        
       } catch (err) {
-        BotUtil.makeLog("warn", `获取好友列表失败: ${err.message}`, data.self_id)
-        if (!(data.bot.fl instanceof Map)) {
-          data.bot.fl = new Map()
-        }
+        Bot.makeLog("error", `Bot初始化失败: ${err.message}`, self_id)
+        data.bot._ready = true
+        data.bot._initializing = false
+        Bot.em(`connect.${self_id}`, data)
       }
-
-      try {
-        await data.bot.getGroupMemberMap()
-      } catch (err) {
-        BotUtil.makeLog("warn", `获取群成员列表失败: ${err.message}`, data.self_id)
-        if (!(data.bot.gml instanceof Map)) {
-          data.bot.gml = new Map()
-        }
-      }
-
-      Bot.makeLog(
-        "mark",
-        `${this.name}(${this.id}) ${data.bot.version.version} 已连接`,
-        data.self_id,
-      )
-      Bot.em(`connect.${data.self_id}`, data)
     }
 
     /**
