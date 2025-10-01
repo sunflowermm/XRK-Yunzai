@@ -59,3 +59,6 @@ file_to_url_time: 60
 
 # 文件 URL 访问次数限制
 file_to_url_times: 5
+
+# 缓存群成员列表
+cache_group_member: true
