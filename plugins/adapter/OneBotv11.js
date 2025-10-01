@@ -1225,7 +1225,6 @@ Bot.adapter.push(
             // 标记Bot完全就绪
             data.bot._ready = true
             data.bot._initializing = false
-            Bot.makeLog("mark", `${this.name}(${this.id}) 数据加载完成`, self_id)
             
             // 触发ready事件
             Bot.em(`ready.${self_id}`, data)

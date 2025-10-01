@@ -131,7 +131,6 @@ dist
 
 # Yunzai data
 dump.rdb
-data/
 config/test/*
 !config/test/default.yaml
 logs/
@@ -141,7 +140,6 @@ resources/
 redis
 yunzai
 /.idea/
-/data/
 /temp/
 /pnpm-lock.yaml
 
