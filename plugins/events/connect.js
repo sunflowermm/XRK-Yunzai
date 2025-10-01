@@ -39,7 +39,6 @@ export default class connectEvent extends EventListener {
     if (!cfg.bot.online_msg_exp) return
     
     const key = `Yz:XRKMsg:${e.self_id}`
-    
     await this.sendWelcomeMessage()
   }
 
@@ -55,7 +54,7 @@ export default class connectEvent extends EventListener {
   async sendWelcomeMessage() {
     const htmlPath = await this.generateHTML('welcome', this.getWelcomeHTML())
     const screenshotPath = await takeScreenshot(htmlPath, 'welcome_message', {
-      width: 600, deviceScaleFactor: 3
+      width: 520, height: 780, deviceScaleFactor: 3
     })
     
     Bot.sendMasterMsg([segment.image(screenshotPath)])
