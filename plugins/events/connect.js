@@ -113,7 +113,6 @@ export default class connectEvent extends EventListener {
     body {
       font-family: 'Genshin', -apple-system, 'Segoe UI', system-ui, sans-serif;
       width: 600px;
-      height: 420px;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       display: flex;
       align-items: center;
