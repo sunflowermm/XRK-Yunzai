@@ -101,6 +101,13 @@ export default class connectEvent extends EventListener {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Welcome</title>
   <style>
+    @font-face {
+      font-family: 'Genshin';
+      src: url('./fonts/Genshin.ttf') format('truetype');
+      font-weight: normal;
+      font-style: normal;
+    }
+
     * {
       margin: 0;
       padding: 0;
@@ -108,7 +115,7 @@ export default class connectEvent extends EventListener {
     }
 
     body {
-      font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+      font-family: 'Genshin', -apple-system, 'Segoe UI', system-ui, sans-serif;
       width: 600px;
       height: 420px;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -279,6 +286,13 @@ export default class connectEvent extends EventListener {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Plugin Load Report</title>
   <style>
+    @font-face {
+      font-family: 'Genshin';
+      src: url('./fonts/Genshin.ttf') format('truetype');
+      font-weight: normal;
+      font-style: normal;
+    }
+
     * {
       margin: 0;
       padding: 0;
@@ -286,7 +300,7 @@ export default class connectEvent extends EventListener {
     }
 
     body {
-      font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+      font-family: 'Genshin', -apple-system, 'Segoe UI', system-ui, sans-serif;
       background: #0a0a0a;
       width: 800px;
       color: #fff;
