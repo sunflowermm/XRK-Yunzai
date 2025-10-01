@@ -40,7 +40,7 @@ export default class connectEvent extends EventListener {
   async handleNormalStart(e) {
     if (!cfg.bot.online_msg_exp) return
     
-    const key = `Yz:OnlineMsg:${e.self_id}`
+    const key = `Yz:connectMsg:${e.self_id}`
     if (await redis.get(key)) return
     
     redis.set(key, "1", { EX: cfg.bot.online_msg_exp * 60 })
@@ -63,7 +63,6 @@ export default class connectEvent extends EventListener {
     })
     
     Bot.sendMasterMsg([segment.image(screenshotPath)])
-    logger.mark('欢迎消息发送成功')
     this.cleanupFile(htmlPath)
   }
 
@@ -77,7 +76,6 @@ export default class connectEvent extends EventListener {
     })
     
     await target.sendMsg([segment.image(screenshotPath)])
-    logger.mark('插件加载报告发送成功')
     this.cleanupFile(htmlPath)
   }
 
@@ -646,7 +644,7 @@ export default class connectEvent extends EventListener {
     ${single.length > 0 ? `
       <div class="section">
         <div class="section-header">
-          <h2 class="section-title">📄 单文件插件</h2>
+          <h2 class="section-title">📄 插件包</h2>
           <span class="section-count">${single.length} 个</span>
         </div>
         <div class="plugin-list">
