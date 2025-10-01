@@ -4,7 +4,7 @@ import { takeScreenshot } from "../../lib/common/takeScreenshot.js"
 import fs from 'fs/promises'
 import { existsSync } from 'fs'
 import path from 'path'
-import loader from '../plugins/loader.js'
+import loader from '../../lib/plugins/loader.js'
 
 /**
  * 监听连接事件（理论上属于各类适配器的上线的事件）
