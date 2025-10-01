@@ -27,6 +27,50 @@ export class Restart extends plugin {
   }
 
   /**
+   * 初始化方法
+   * 监听机器人上线事件，用于重启后发送提示消息
+   */
+  init() {
+    Bot.once('online', this.restartMsg.bind(this));
+  }
+
+  /**
+   * 重启后发送提示消息
+   * 从Redis读取重启信息并发送到原会话
+   */
+  async restartMsg(e) {
+    const currentUin = e?.self_id || Bot.uin[0];
+    if (!currentUin) {
+      logger.debug('无法获取机器人QQ号，跳过重启消息发送');
+      return;
+    }
+    
+    let restart = await redis.get(`${this.key}:${currentUin}`);
+    if (!restart) {
+      logger.debug('没有检测到重启信息，机器人正常启动');
+      return;
+    }
+    
+    try {
+      restart = JSON.parse(restart);
+      let time = restart.time || new Date().getTime();
+      time = (new Date().getTime() - time) / 1000;
+      
+      let msg = `重启成功，耗时${time.toFixed(2)}秒`;
+      
+      if (restart.isGroup) {
+        await Bot[currentUin].pickGroup(restart.id).sendMsg(msg);
+      } else {
+        await Bot[currentUin].pickUser(restart.id).sendMsg(msg);
+      }
+      await redis.del(`${this.key}:${currentUin}`);
+      logger.mark(`[重启消息][${currentUin}] 重启消息发送成功`);
+    } catch (error) {
+      logger.error(`发送重启消息失败：${error}`);
+    }
+  }
+
+  /**
    * 执行重启操作
    * 保存当前会话信息并重启进程
    * @returns {Promise<boolean>} 操作是否成功
