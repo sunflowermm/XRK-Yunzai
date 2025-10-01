@@ -11,7 +11,7 @@ export default class onlineEvent extends EventListener {
     })
   }
 
-  async execute() {
+  async execute(e) {
     const currentUin = e?.self_id || Bot.uin[0]
     if (!currentUin) {
       logger.debug('无法获取机器人QQ号，跳过重启消息发送')
