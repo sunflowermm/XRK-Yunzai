@@ -18,39 +18,16 @@ export default class connectEvent extends EventListener {
   async execute(e) {
     if (!Bot.uin.includes(e.self_id))
       Bot.uin.push(e.self_id)
-    
-    const currentUin = e?.self_id || Bot.uin[0]
-    if (!currentUin) {
-      logger.debug('无法获取机器人QQ号，跳过重启消息发送')
-      return
-    }
-    
-    let restart = await redis.get(`${this.key}:${currentUin}`)
-    if (!restart) {
-      logger.debug('没有检测到重启信息，机器人正常启动')
-      return
-    }
-    
-    try {
-      restart = JSON.parse(restart)
-      let time = restart.time || new Date().getTime()
-      time = (new Date().getTime() - time) / 1000
-      
-      let msg = `重启成功，耗时${time.toFixed(2)}秒`
-      
-      if (restart.isGroup) {
-        await Bot[currentUin].pickGroup(restart.id).sendMsg(msg)
-      } else {
-        await Bot[currentUin].pickUser(restart.id).sendMsg(msg)
-      }
-      await redis.del(`${this.key}:${currentUin}`)
-    } catch (error) {
-      logger.error(`发送重启消息失败：${error}`)
-    }
-
     if (!cfg.bot.online_msg_exp) return
     const key = `Yz:loginMsg:${e.self_id}`
     if (await redis.get(key)) return
     redis.set(key, "1", { EX: cfg.bot.online_msg_exp * 60 })
+    for (const i of cfg.master[e.self_id] || [])
+      e.bot
+        .pickFriend(i)
+        .sendMsg(
+          `欢迎使用【XRK-MultiBot v${cfg.package.version}】\n【向日葵妈咪妈咪哄】安装原神适配器和向日葵插件\n【#状态】查看运行状态\n【#日志】查看运行日志\n【#重启】重新启动\n【#更新】拉取 Git 更新\n【#全部更新】更新全部插件\n【#更新日志】查看更新日志`,
+        )
   }
 }
+    
