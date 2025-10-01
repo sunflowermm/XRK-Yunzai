@@ -41,11 +41,16 @@ export class Restart extends plugin {
       uin: currentUin,
       isGroup: !!this.e.isGroup,
       id: this.e.isGroup ? this.e.group_id : this.e.user_id,
-      time: new Date().getTime(),
+      time: Date.now(),
+      user_id: this.e.user_id,
+      sender: {
+        card: this.e.sender?.card || this.e.sender?.nickname,
+        nickname: this.e.sender?.nickname
+      }
     });
 
     // 设置5分钟过期时间，防止重启失败后残留数据
-    await redis.set(`${this.key}:${currentUin}`, data, { EX: 300 });
+    await redis.set(this.key, data, { EX: 300 });
     
     // 延迟1秒后退出进程，让消息发送完成
     setTimeout(() => process.exit(1), 1000);
