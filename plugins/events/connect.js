@@ -38,7 +38,7 @@ export default class connectEvent extends EventListener {
   async handleNormalStart(e) {
     if (!cfg.bot.online_msg_exp) return
     
-    const key = `Yz:connectMsg:${e.self_id}`
+    const key = `Yz:XRKconnectMsg:${e.self_id}`
     if (await redis.get(key)) return
     
     redis.set(key, "1", { EX: cfg.bot.online_msg_exp * 60 })
@@ -57,7 +57,7 @@ export default class connectEvent extends EventListener {
   async sendWelcomeMessage() {
     const htmlPath = await this.generateHTML('welcome', this.getWelcomeHTML())
     const screenshotPath = await takeScreenshot(htmlPath, 'welcome_message', {
-      width: 600, height: 420, deviceScaleFactor: 2
+      width: 600, deviceScaleFactor: 3
     })
     
     Bot.sendMasterMsg([segment.image(screenshotPath)])
