@@ -19,8 +19,7 @@ export default class connectEvent extends EventListener {
     if (!currentUin) return logger.debug('无法获取机器人QQ号')
 
     const restart = await this.getRestartInfo(currentUin)
-    
-    await this.handleRestart(currentUin, restart)
+    if (restart) await this.handleRestart(currentUin, restart)
     await this.handleNormalStart(e)
     
   }
