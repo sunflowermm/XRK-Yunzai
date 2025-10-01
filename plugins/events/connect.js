@@ -11,8 +11,8 @@ export default class onlineEvent extends EventListener {
       event: "connect",
     });
     this.key = 'Yz:restart';
-    this.maxRetries = 5; // 最大重试次数
-    this.retryDelay = 500; // 重试延迟(毫秒)
+    this.maxRetries = 100; // 最大重试次数
+    this.retryDelay = 200; // 重试延迟(毫秒)
   }
 
   async execute(e) {
@@ -28,9 +28,6 @@ export default class onlineEvent extends EventListener {
     try {
       const restartData = JSON.parse(restart);
       const botUin = restartData.uin || Bot.uin[0];
-      
-      // 等待Bot完全就绪
-      logger.info('检测到重启信息，等待Bot完全就绪...');
       const isReady = await this.waitForBotReady(botUin);
       
       if (!isReady) {
@@ -40,12 +37,10 @@ export default class onlineEvent extends EventListener {
         return;
       }
       
-      // Bot已就绪，等待2秒后发送详细消息
       const restartCompleteTime = Date.now();
       const restartTime = ((restartCompleteTime - restartData.time) / 1000).toFixed(4);
       
       logger.info(`Bot已就绪，重启耗时${restartTime}秒，准备发送通知...`);
-      await this.delay(2000);
       
       // 发送详细的重启消息
       await this.sendDetailedMessage(restartData, restartTime, botUin);
@@ -62,7 +57,6 @@ export default class onlineEvent extends EventListener {
       try {
         const restartData = JSON.parse(await redis.get(this.key));
         if (restartData) {
-          await this.delay(1000);
           await this.sendSimpleMessage(restartData);
           await redis.del(this.key);
         }
@@ -84,7 +78,6 @@ export default class onlineEvent extends EventListener {
       const bot = Bot[botUin];
       
       if (!bot) {
-        logger.warn(`第${retries + 1}次检查：Bot[${botUin}]不存在`);
         retries++;
         await this.delay(this.retryDelay);
         continue;
