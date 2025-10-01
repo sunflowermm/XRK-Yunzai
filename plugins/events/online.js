@@ -58,10 +58,8 @@ export default class onlineEvent extends EventListener {
       
       // 添加插件详细加载信息
       if (pluginStats.plugins && pluginStats.plugins.length > 0) {
-        // 按加载时间排序
         const sortedPlugins = pluginStats.plugins.sort((a, b) => b.loadTime - a.loadTime);
         
-        // 构建插件列表消息
         let pluginListMsg = ['📦 插件加载详情', '━━━━━━━━━━━━━━'];
         
         sortedPlugins.forEach((plugin, index) => {
@@ -88,7 +86,6 @@ export default class onlineEvent extends EventListener {
         });
       }
       
-      // 添加性能优化建议
       const suggestions = [];
       if (pluginStats.plugins.some(p => p.loadTime > 200)) {
         suggestions.push('• 部分插件加载缓慢，建议检查初始化逻辑');
@@ -122,9 +119,9 @@ export default class onlineEvent extends EventListener {
       
       const simpleMsg = `✅ 重启成功，耗时${restartTime}秒`;
       if (restart.isGroup) {
-        await Bot.pickGroup(restart.id).sendMsg(simpleMsg);
+        await e.bot.pickGroup(restart.id).sendMsg(simpleMsg);
       } else {
-        await Bot.pickUser(restart.id).sendMsg(simpleMsg);
+        await e.bot.pickUser(restart.id).sendMsg(simpleMsg);
       }
       
       // 删除重启信息
