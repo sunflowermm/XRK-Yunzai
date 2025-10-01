@@ -15,13 +15,13 @@ export default class onlineEvent extends EventListener {
     Bot.makeLog("info", `尽情享受吧QaQ`, 'event')
     const currentUin = e?.self_id || Bot.uin[0]
     if (!currentUin) {
-      logger.debug('无法获取机器人QQ号，跳过重启消息发送')
+      logger.info('无法获取机器人QQ号，跳过重启消息发送')
       return
     }
     
     let restart = await redis.get(`${this.key}:${currentUin}`)
     if (!restart) {
-      logger.debug('没有检测到重启信息，机器人正常启动')
+      logger.info('没有检测到重启信息，机器人正常启动')
       return
     }
     
