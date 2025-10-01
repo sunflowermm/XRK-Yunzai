@@ -11,7 +11,7 @@ export default class onlineEvent extends EventListener {
     })
   }
 
-  async execute() {
+  async execute(e) {
     Bot.makeLog("info", `尽情享受吧QaQ`, 'event')
     const currentUin = e?.self_id || Bot.uin[0]
     if (!currentUin) {
