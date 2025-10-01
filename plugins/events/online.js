@@ -16,7 +16,6 @@ export default class onlineEvent extends EventListener {
   async execute(e) {
     Bot.makeLog("info", `尽情享受吧QaQ`, 'event');
     
-    // 获取重启信息（不指定具体uin）
     let restart = await redis.get(this.key);
     if (!restart) {
       logger.info('没有检测到重启信息，机器人正常启动');
@@ -26,18 +25,22 @@ export default class onlineEvent extends EventListener {
     try {
       restart = JSON.parse(restart);
       
-      // 计算重启耗时（精确到小数点后四位）
-      const restartTime = ((Date.now() - restart.time) / 1000).toFixed(4);
+      // 立即记录重启完成时间
+      const restartCompleteTime = Date.now();
+      const restartTime = ((restartCompleteTime - restart.time) / 1000).toFixed(4);
       
-      // 获取插件加载统计信息
+      // 获取插件统计信息
       const pluginStats = loader.getPluginStats();
       const startupTime = (pluginStats.totalLoadTime / 1000).toFixed(4);
       
-      // 构建插件加载信息消息列表
+      // 延迟2秒后发送消息
+      logger.info(`重启成功，耗时${restartTime}秒，2秒后发送通知...`);
+      await this.delay(2000);
+      
+      // 构建消息
       const msgs = [];
       const botUin = restart.uin || Bot.uin[0];
       
-      // 添加启动统计消息
       msgs.push({
         message: [
           `📊 启动统计`,
@@ -117,7 +120,6 @@ export default class onlineEvent extends EventListener {
         await target.sendMsg(forwardMsg);
       }
       
-      // 发送重启成功的简单消息
       const simpleMsg = `✅ 重启成功，耗时${restartTime}秒`;
       if (restart.isGroup) {
         await Bot[botUin].pickGroup(restart.id).sendMsg(simpleMsg);
@@ -136,6 +138,8 @@ export default class onlineEvent extends EventListener {
       try {
         const restart = JSON.parse(await redis.get(this.key));
         if (restart) {
+          // 延迟后重试
+          await this.delay(1000);
           const target = restart.isGroup ? 
             Bot[restart.uin].pickGroup(restart.id) : 
             Bot[restart.uin].pickUser(restart.id);
@@ -146,5 +150,14 @@ export default class onlineEvent extends EventListener {
         logger.error('发送简单重启消息也失败了');
       }
     }
+  }
+  
+  /**
+   * 延迟函数
+   * @param {number} ms 延迟毫秒数
+   * @returns {Promise}
+   */
+  delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
