@@ -33,8 +33,15 @@ export default class connectEvent extends EventListener {
     let restart = await redis.get(`${this.key}:${currentUin}`)
     if (!restart) {
       logger.debug('没有检测到重启信息，机器人正常启动')
-      // 发送欢迎消息
-      await this.sendWelcomeMessage(currentUin, e)
+      
+      // 发送启动消息
+      if (cfg.bot.online_msg_exp) {
+        const key = `Yz:OnlineMsg:${e.self_id}`
+        if (!(await redis.get(key))) {
+          redis.set(key, "1", { EX: cfg.bot.online_msg_exp * 60 })
+          await this.sendWelcomeMessage(currentUin)
+        }
+      }
       return
     }
 
@@ -43,8 +50,17 @@ export default class connectEvent extends EventListener {
       let time = restart.time || new Date().getTime()
       time = (new Date().getTime() - time) / 1000
 
-      // 生成并发送重启报告（包含插件加载信息）
-      await this.sendRestartReport(currentUin, restart, time)
+      // 发送简单的重启成功消息
+      let restartMsg = `重启成功，耗时 ${time.toFixed(4)} 秒`
+      
+      if (restart.isGroup) {
+        await Bot[currentUin].pickGroup(restart.id).sendMsg(restartMsg)
+      } else {
+        await Bot[currentUin].pickUser(restart.id).sendMsg(restartMsg)
+      }
+
+      // 生成并发送插件加载报告
+      await this.sendPluginLoadReport(currentUin, restart)
 
       await redis.del(`${this.key}:${currentUin}`)
     } catch (error) {
@@ -56,83 +72,48 @@ export default class connectEvent extends EventListener {
   }
 
   /**
-   * 发送欢迎消息（HTML格式）
+   * 发送欢迎消息（使用HTML）
    */
-  async sendWelcomeMessage(currentUin, e) {
-    if (!cfg.bot.online_msg_exp) return
-    const key = `Yz:OnlineMsg:${e.self_id}`
-    if (await redis.get(key)) return
-    redis.set(key, "1", { EX: cfg.bot.online_msg_exp * 60 })
-
+  async sendWelcomeMessage(currentUin) {
     try {
       const htmlPath = await this.generateWelcomeHTML()
+      
       if (!htmlPath || !existsSync(htmlPath)) {
-        // 降级到文本消息
+        // 如果HTML生成失败，发送文本消息
         Bot.sendMasterMsg(`欢迎使用【XRK-MultiBot v${cfg.package.version}】\n【向日葵妈咪妈咪哄】安装原神适配器和向日葵插件\n【#状态】查看运行状态\n【#日志】查看运行日志\n【#重启】重新启动\n【#更新】拉取 Git 更新\n【#全部更新】更新全部插件\n【#更新日志】查看更新日志`)
         return
       }
 
-      const screenshotPath = await takeScreenshot(htmlPath, 'welcome_message')
-      if (screenshotPath && existsSync(screenshotPath)) {
-        Bot.sendMasterMsg([segment.image(screenshotPath)])
-        logger.mark('欢迎消息发送成功')
-      }
-
-      // 清理临时文件
-      setTimeout(async () => {
-        try {
-          await fs.unlink(htmlPath)
-        } catch (err) {}
-      }, 5000)
-    } catch (error) {
-      logger.error(`发送欢迎消息失败：${error}`)
-    }
-  }
-
-  /**
-   * 发送重启报告
-   */
-  async sendRestartReport(currentUin, restart, time) {
-    try {
-      const stats = loader.getPluginStats()
-      const htmlPath = await this.generateRestartReportHTML(time, stats)
-      
-      if (!htmlPath || !existsSync(htmlPath)) {
-        // 降级到文本消息
-        let restartMsg = `重启成功，耗时 ${time.toFixed(4)} 秒`
-        if (restart.isGroup) {
-          await Bot[currentUin].pickGroup(restart.id).sendMsg(restartMsg)
-        } else {
-          await Bot[currentUin].pickUser(restart.id).sendMsg(restartMsg)
-        }
-        return
-      }
-
-      const screenshotPath = await takeScreenshot(htmlPath, 'restart_report')
+      // 截图
+      const screenshotPath = await takeScreenshot(htmlPath, 'welcome_message', {
+        width: 600,
+        height: 420,
+        deviceScaleFactor: 2,
+        fullPage: false
+      })
       
       if (!screenshotPath || !existsSync(screenshotPath)) {
-        logger.error('生成截图失败')
+        // 截图失败，发送文本消息
+        Bot.sendMasterMsg(`欢迎使用【XRK-MultiBot v${cfg.package.version}】\n【向日葵妈咪妈咪哄】安装原神适配器和向日葵插件\n【#状态】查看运行状态\n【#日志】查看运行日志\n【#重启】重新启动\n【#更新】拉取 Git 更新\n【#全部更新】更新全部插件\n【#更新日志】查看更新日志`)
         return
       }
 
-      // 发送截图
-      if (restart.isGroup) {
-        await Bot[currentUin].pickGroup(restart.id).sendMsg([segment.image(screenshotPath)])
-      } else {
-        await Bot[currentUin].pickUser(restart.id).sendMsg([segment.image(screenshotPath)])
-      }
-
-      logger.mark('重启报告发送成功')
+      Bot.sendMasterMsg([segment.image(screenshotPath)])
+      logger.mark('欢迎消息发送成功')
       
-      // 清理临时文件
+      // 清理临时HTML文件
       setTimeout(async () => {
         try {
           await fs.unlink(htmlPath)
-        } catch (err) {}
+        } catch (err) {
+          // 忽略删除错误
+        }
       }, 5000)
       
     } catch (error) {
-      logger.error(`发送重启报告失败：${error}`)
+      logger.error(`发送欢迎消息失败：${error}`)
+      // 发送文本消息作为备用
+      Bot.sendMasterMsg(`欢迎使用【XRK-MultiBot v${cfg.package.version}】\n【#状态】查看运行状态\n【#日志】查看运行日志\n【#重启】重新启动`)
     }
   }
 
@@ -141,7 +122,7 @@ export default class connectEvent extends EventListener {
    */
   async generateWelcomeHTML() {
     try {
-      const dataDir = path.join(process.cwd(), 'temp')
+      const dataDir = path.join(process.cwd(), 'data')
       if (!existsSync(dataDir)) {
         await fs.mkdir(dataDir, { recursive: true })
       }
@@ -155,11 +136,11 @@ export default class connectEvent extends EventListener {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>欢迎使用 XRK-MultiBot</title>
+  <title>Welcome</title>
   <style>
     @font-face {
       font-family: 'CustomFont';
-      src: url('file:///${path.join(process.cwd(), 'data/fonts/font.ttf').replace(/\\/g, '/')}');
+      src: url('./fonts/font.ttf') format('truetype');
     }
 
     * {
@@ -169,289 +150,230 @@ export default class connectEvent extends EventListener {
     }
 
     body {
-      font-family: 'CustomFont', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
-      min-height: 100vh;
+      font-family: 'CustomFont', -apple-system, 'Microsoft YaHei', sans-serif;
+      width: 600px;
+      height: 420px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 40px 20px;
       position: relative;
       overflow: hidden;
     }
 
-    body::before {
-      content: '';
-      position: absolute;
-      width: 200%;
-      height: 200%;
-      background: radial-gradient(circle, rgba(255,255,255,0.1) 1px, transparent 1px);
-      background-size: 50px 50px;
-      animation: moveBackground 20s linear infinite;
-    }
-
-    @keyframes moveBackground {
-      0% { transform: translate(0, 0); }
-      100% { transform: translate(50px, 50px); }
-    }
-
     .container {
-      max-width: 800px;
       width: 100%;
-      background: rgba(255, 255, 255, 0.98);
-      border-radius: 24px;
-      padding: 50px 40px;
-      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.2);
+      height: 100%;
+      background: rgba(255, 255, 255, 0.95);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 30px;
       position: relative;
-      z-index: 1;
-      backdrop-filter: blur(20px);
+      backdrop-filter: blur(10px);
     }
 
-    .header {
-      text-align: center;
-      margin-bottom: 40px;
-      position: relative;
+    .particles {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      top: 0;
+      left: 0;
+      pointer-events: none;
     }
 
-    .logo {
-      font-size: 72px;
-      margin-bottom: 20px;
-      animation: float 3s ease-in-out infinite;
+    .particle {
+      position: absolute;
+      width: 4px;
+      height: 4px;
+      background: rgba(102, 126, 234, 0.3);
+      border-radius: 50%;
+      animation: float 15s infinite;
     }
 
     @keyframes float {
-      0%, 100% { transform: translateY(0px); }
-      50% { transform: translateY(-10px); }
+      0%, 100% {
+        transform: translateY(0) translateX(0);
+        opacity: 0;
+      }
+      10% {
+        opacity: 1;
+      }
+      90% {
+        opacity: 1;
+      }
+      100% {
+        transform: translateY(-100vh) translateX(50px);
+        opacity: 0;
+      }
     }
 
-    .header h1 {
+    .logo {
+      width: 80px;
+      height: 80px;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 20px;
+      box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.05);
+      }
+    }
+
+    .logo-text {
+      color: white;
       font-size: 36px;
+      font-weight: bold;
+    }
+
+    .title {
+      font-size: 24px;
+      color: #2c3e50;
+      margin-bottom: 8px;
+      font-weight: 600;
+      text-align: center;
       background: linear-gradient(135deg, #667eea, #764ba2);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
-      margin-bottom: 12px;
-      font-weight: 700;
-      letter-spacing: 1px;
     }
 
     .version {
-      display: inline-block;
-      padding: 6px 16px;
-      background: linear-gradient(135deg, #667eea, #764ba2);
-      color: white;
-      border-radius: 20px;
       font-size: 14px;
-      font-weight: 600;
-      letter-spacing: 0.5px;
-      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
-    }
-
-    .welcome-text {
-      text-align: center;
-      font-size: 18px;
-      color: #555;
-      margin-bottom: 35px;
-      line-height: 1.6;
+      color: #7f8c8d;
+      margin-bottom: 25px;
+      font-weight: 400;
     }
 
     .commands {
-      display: grid;
-      gap: 16px;
-      margin-bottom: 30px;
-    }
-
-    .command-item {
-      display: flex;
-      align-items: center;
-      padding: 20px 24px;
-      background: linear-gradient(135deg, #f8f9ff, #fff);
-      border-radius: 16px;
-      border: 2px solid transparent;
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      cursor: pointer;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .command-item::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 0;
-      height: 100%;
-      background: linear-gradient(90deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
-      transition: width 0.4s ease;
-    }
-
-    .command-item:hover {
-      transform: translateX(8px);
-      border-color: #667eea;
-      box-shadow: 0 8px 25px rgba(102, 126, 234, 0.2);
-    }
-
-    .command-item:hover::before {
       width: 100%;
+      max-width: 400px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
     }
 
-    .command-icon {
-      font-size: 32px;
-      margin-right: 20px;
-      min-width: 40px;
-      text-align: center;
-      position: relative;
-      z-index: 1;
+    .command {
+      background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+      padding: 12px 16px;
+      border-radius: 10px;
+      border: 1px solid rgba(102, 126, 234, 0.2);
+      transition: all 0.3s;
+      cursor: pointer;
     }
 
-    .command-content {
-      flex: 1;
-      position: relative;
-      z-index: 1;
+    .command:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(102, 126, 234, 0.2);
+      background: linear-gradient(135deg, rgba(102, 126, 234, 0.15), rgba(118, 75, 162, 0.15));
     }
 
-    .command-name {
-      font-size: 18px;
+    .command-tag {
+      font-size: 13px;
+      color: #667eea;
       font-weight: 600;
-      color: #2c3e50;
-      margin-bottom: 4px;
+      margin-bottom: 2px;
     }
 
     .command-desc {
-      font-size: 14px;
+      font-size: 11px;
       color: #7f8c8d;
+      font-weight: 400;
     }
 
     .footer {
-      text-align: center;
-      padding-top: 25px;
-      border-top: 2px solid #f0f0f0;
-    }
-
-    .footer-text {
-      font-size: 14px;
-      color: #95a5a6;
-      margin-bottom: 12px;
-    }
-
-    .social-links {
-      display: flex;
-      justify-content: center;
-      gap: 15px;
-    }
-
-    .social-link {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #667eea, #764ba2);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 20px;
-      transition: transform 0.3s ease;
-      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-    }
-
-    .social-link:hover {
-      transform: translateY(-3px) scale(1.1);
-    }
-
-    .decorative-circle {
       position: absolute;
-      border-radius: 50%;
-      background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
-      z-index: 0;
+      bottom: 15px;
+      font-size: 11px;
+      color: #95a5a6;
+      text-align: center;
     }
 
-    .circle-1 {
-      width: 150px;
-      height: 150px;
-      top: -50px;
-      right: -50px;
+    .special {
+      grid-column: span 2;
+      background: linear-gradient(135deg, #f093fb, #f5576c);
+      border: none;
     }
 
-    .circle-2 {
-      width: 100px;
-      height: 100px;
-      bottom: -30px;
-      left: -30px;
+    .special .command-tag {
+      color: white;
+    }
+
+    .special .command-desc {
+      color: rgba(255, 255, 255, 0.9);
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="decorative-circle circle-1"></div>
-    <div class="decorative-circle circle-2"></div>
-    
-    <div class="header">
-      <div class="logo">🚀</div>
-      <h1>XRK-MultiBot</h1>
-      <span class="version">v${cfg.package.version}</span>
+    <div class="particles">
+      ${Array(20).fill().map((_, i) => `
+        <div class="particle" style="
+          left: ${Math.random() * 100}%;
+          animation-delay: ${Math.random() * 15}s;
+          animation-duration: ${15 + Math.random() * 10}s;
+        "></div>
+      `).join('')}
     </div>
 
-    <div class="welcome-text">
-      欢迎使用向日葵多功能机器人框架<br>
-      以下是常用命令，助您快速上手
+    <div class="logo">
+      <div class="logo-text">XK</div>
     </div>
+
+    <h1 class="title">XRK-MultiBot</h1>
+    <div class="version">Version ${cfg.package.version}</div>
 
     <div class="commands">
-      <div class="command-item">
-        <div class="command-icon">📊</div>
-        <div class="command-content">
-          <div class="command-name">#状态</div>
-          <div class="command-desc">查看机器人运行状态和系统信息</div>
-        </div>
+      <div class="command special">
+        <div class="command-tag">向日葵妈咪妈咪哄</div>
+        <div class="command-desc">安装原神适配器和向日葵插件</div>
       </div>
-
-      <div class="command-item">
-        <div class="command-icon">📝</div>
-        <div class="command-content">
-          <div class="command-name">#日志</div>
-          <div class="command-desc">查看最近的运行日志和错误信息</div>
-        </div>
+      
+      <div class="command">
+        <div class="command-tag">#状态</div>
+        <div class="command-desc">查看运行状态</div>
       </div>
-
-      <div class="command-item">
-        <div class="command-icon">🔄</div>
-        <div class="command-content">
-          <div class="command-name">#重启</div>
-          <div class="command-desc">重新启动机器人服务</div>
-        </div>
+      
+      <div class="command">
+        <div class="command-tag">#日志</div>
+        <div class="command-desc">查看运行日志</div>
       </div>
-
-      <div class="command-item">
-        <div class="command-icon">⬆️</div>
-        <div class="command-content">
-          <div class="command-name">#更新</div>
-          <div class="command-desc">拉取最新的 Git 更新</div>
-        </div>
+      
+      <div class="command">
+        <div class="command-tag">#重启</div>
+        <div class="command-desc">重新启动</div>
       </div>
-
-      <div class="command-item">
-        <div class="command-icon">🔧</div>
-        <div class="command-content">
-          <div class="command-name">#全部更新</div>
-          <div class="command-desc">更新所有已安装的插件</div>
-        </div>
+      
+      <div class="command">
+        <div class="command-tag">#更新</div>
+        <div class="command-desc">拉取Git更新</div>
       </div>
-
-      <div class="command-item">
-        <div class="command-icon">📋</div>
-        <div class="command-content">
-          <div class="command-name">#更新日志</div>
-          <div class="command-desc">查看版本更新记录</div>
-        </div>
+      
+      <div class="command">
+        <div class="command-tag">#全部更新</div>
+        <div class="command-desc">更新全部插件</div>
+      </div>
+      
+      <div class="command">
+        <div class="command-tag">#更新日志</div>
+        <div class="command-desc">查看更新记录</div>
       </div>
     </div>
 
     <div class="footer">
-      <div class="footer-text">✨ 向日葵妈咪妈咪哄 · 原神适配器 · 多功能插件 ✨</div>
-      <div class="social-links">
-        <div class="social-link">💬</div>
-        <div class="social-link">🌟</div>
-        <div class="social-link">📦</div>
-      </div>
+      Powered by XRK-Yunzai
     </div>
   </div>
 </body>
@@ -459,34 +381,84 @@ export default class connectEvent extends EventListener {
       `
 
       await fs.writeFile(htmlPath, html, 'utf-8')
-      logger.mark(`欢迎消息HTML已生成: ${htmlPath}`)
-      
       return htmlPath
     } catch (error) {
-      logger.error(`生成欢迎消息HTML失败: ${error}`)
+      logger.error(`生成欢迎HTML失败: ${error}`)
       return null
     }
   }
 
   /**
-   * 生成重启报告HTML（整合插件加载信息）
+   * 发送插件加载报告
    */
-  async generateRestartReportHTML(restartTime, stats) {
+  async sendPluginLoadReport(currentUin, restart) {
     try {
-      const dataDir = path.join(process.cwd(), 'temp')
+      // 获取插件加载统计信息
+      const stats = loader.getPluginStats()
+      
+      if (!stats || !stats.plugins || stats.plugins.length === 0) {
+        logger.debug('没有插件加载统计信息')
+        return
+      }
+
+      // 生成HTML报告
+      const htmlPath = await this.generatePluginLoadHTML(stats)
+      
+      if (!htmlPath || !existsSync(htmlPath)) {
+        logger.error('生成HTML报告失败')
+        return
+      }
+
+      // 截图 - 优化分辨率设置
+      const screenshotPath = await takeScreenshot(htmlPath, 'plugin_load_report', {
+        width: 800,
+        height: 1200,
+        deviceScaleFactor: 1.5, // 降低缩放比例以减少资源占用
+        fullPage: false,
+        type: 'jpeg',
+        quality: 90 // 稍微降低图片质量以减小文件大小
+      })
+      
+      if (!screenshotPath || !existsSync(screenshotPath)) {
+        logger.error('生成截图失败')
+        return
+      }
+
+      // 发送截图
+      if (restart.isGroup) {
+        await Bot[currentUin].pickGroup(restart.id).sendMsg([segment.image(screenshotPath)])
+      } else {
+        await Bot[currentUin].pickUser(restart.id).sendMsg([segment.image(screenshotPath)])
+      }
+
+      logger.mark('插件加载报告发送成功')
+      
+      // 清理临时HTML文件
+      setTimeout(async () => {
+        try {
+          await fs.unlink(htmlPath)
+        } catch (err) {
+          // 忽略删除错误
+        }
+      }, 5000)
+      
+    } catch (error) {
+      logger.error(`发送插件加载报告失败：${error}`)
+    }
+  }
+
+  /**
+   * 生成插件加载HTML报告
+   */
+  async generatePluginLoadHTML(stats) {
+    try {
+      const dataDir = path.join(process.cwd(), 'data')
       if (!existsSync(dataDir)) {
         await fs.mkdir(dataDir, { recursive: true })
       }
 
       const timestamp = Date.now()
-      const htmlPath = path.join(dataDir, `restart_report_${timestamp}.html`)
-
-      if (!stats || !stats.plugins || stats.plugins.length === 0) {
-        // 简化版本，只显示重启信息
-        const html = this.generateSimpleRestartHTML(restartTime)
-        await fs.writeFile(htmlPath, html, 'utf-8')
-        return htmlPath
-      }
+      const htmlPath = path.join(dataDir, `plugin_load_${timestamp}.html`)
 
       // 按加载时间排序
       const sortedPlugins = [...stats.plugins].sort((a, b) => b.loadTime - a.loadTime)
@@ -517,17 +489,21 @@ export default class connectEvent extends EventListener {
         count: plugins.length
       })).sort((a, b) => b.totalTime - a.totalTime)
 
+      // 找出最快和最慢的插件
+      const fastestPlugin = successPlugins[successPlugins.length - 1]
+      const slowestPlugin = successPlugins[0]
+
       const html = `
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>重启报告</title>
+  <title>插件加载报告</title>
   <style>
     @font-face {
       font-family: 'CustomFont';
-      src: url('file:///${path.join(process.cwd(), 'data/fonts/font.ttf').replace(/\\/g, '/')}');
+      src: url('./fonts/font.ttf') format('truetype');
     }
 
     * {
@@ -537,118 +513,142 @@ export default class connectEvent extends EventListener {
     }
 
     body {
-      font-family: 'CustomFont', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
-      min-height: 100vh;
-      padding: 30px 20px;
+      font-family: 'CustomFont', -apple-system, 'Microsoft YaHei', sans-serif;
+      background: #0f0f1e;
+      width: 800px;
+      padding: 0;
       position: relative;
       overflow-x: hidden;
     }
 
-    body::before {
-      content: '';
-      position: absolute;
+    /* 动态背景效果 */
+    .bg-animation {
+      position: fixed;
       top: 0;
       left: 0;
       width: 100%;
       height: 100%;
-      background: 
-        radial-gradient(circle at 20% 50%, rgba(255, 255, 255, 0.1) 0%, transparent 50%),
-        radial-gradient(circle at 80% 80%, rgba(255, 255, 255, 0.1) 0%, transparent 50%);
-      pointer-events: none;
+      overflow: hidden;
+      z-index: -1;
+    }
+
+    .bg-gradient {
+      position: absolute;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(circle at 20% 50%, rgba(120, 119, 198, 0.3), transparent 50%),
+                  radial-gradient(circle at 80% 80%, rgba(255, 119, 198, 0.2), transparent 50%),
+                  radial-gradient(circle at 40% 20%, rgba(119, 198, 255, 0.2), transparent 50%);
+      animation: rotate 20s linear infinite;
+    }
+
+    @keyframes rotate {
+      from {
+        transform: rotate(0deg) translate(-50%, -50%);
+      }
+      to {
+        transform: rotate(360deg) translate(-50%, -50%);
+      }
     }
 
     .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      background: rgba(255, 255, 255, 0.98);
-      border-radius: 28px;
-      padding: 45px 40px;
-      box-shadow: 
-        0 40px 100px rgba(0, 0, 0, 0.3),
-        0 0 0 1px rgba(255, 255, 255, 0.3),
-        inset 0 1px 0 rgba(255, 255, 255, 0.6);
+      background: rgba(17, 17, 35, 0.85);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
       position: relative;
-      backdrop-filter: blur(30px);
+      z-index: 1;
+      min-height: 100vh;
+    }
+
+    /* 光效动画 */
+    .glow-line {
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 2px;
+      background: linear-gradient(90deg, 
+        transparent, 
+        rgba(120, 119, 198, 0.8), 
+        rgba(255, 119, 198, 0.8),
+        transparent);
+      animation: glow-move 3s linear infinite;
+    }
+
+    @keyframes glow-move {
+      0% {
+        left: -100%;
+      }
+      100% {
+        left: 100%;
+      }
     }
 
     .header {
+      padding: 40px 30px;
       text-align: center;
-      margin-bottom: 40px;
-      padding-bottom: 30px;
-      border-bottom: 3px solid transparent;
-      background: linear-gradient(white, white) padding-box,
-                  linear-gradient(90deg, #667eea, #764ba2, #f093fb) border-box;
-      border-image-slice: 1;
       position: relative;
+      background: linear-gradient(135deg, rgba(120, 119, 198, 0.1), rgba(255, 119, 198, 0.1));
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     }
 
-    .header::after {
+    .header::before {
       content: '';
       position: absolute;
-      bottom: -3px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 100px;
-      height: 3px;
-      background: linear-gradient(90deg, #667eea, #764ba2);
-      border-radius: 2px;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, #7877c6, #ff77c6, transparent);
+      animation: shimmer 2s infinite;
     }
 
-    .success-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 56px;
-      margin-bottom: 20px;
-      animation: successPulse 2s ease-in-out infinite;
-    }
-
-    @keyframes successPulse {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.05); }
+    @keyframes shimmer {
+      0%, 100% {
+        opacity: 0.5;
+      }
+      50% {
+        opacity: 1;
+      }
     }
 
     .header h1 {
-      font-size: 38px;
-      background: linear-gradient(135deg, #667eea, #764ba2, #f093fb);
+      font-size: 32px;
+      font-weight: 800;
+      background: linear-gradient(135deg, #7877c6, #ff77c6, #77c6ff);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
-      margin-bottom: 15px;
-      font-weight: 800;
-      letter-spacing: 1px;
+      margin-bottom: 10px;
+      text-shadow: 0 0 30px rgba(120, 119, 198, 0.5);
+      letter-spacing: 2px;
     }
 
-    .restart-time {
-      display: inline-block;
-      padding: 10px 24px;
-      background: linear-gradient(135deg, #56ab2f, #a8e063);
-      color: white;
-      border-radius: 25px;
-      font-size: 20px;
-      font-weight: 700;
-      letter-spacing: 0.5px;
-      box-shadow: 0 6px 20px rgba(86, 171, 47, 0.4);
+    .header .subtitle {
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.6);
+      font-weight: 300;
+      letter-spacing: 3px;
+      text-transform: uppercase;
     }
 
+    /* 统计卡片网格 */
     .stats-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 20px;
-      margin-bottom: 40px;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 15px;
+      padding: 30px;
     }
 
     .stat-card {
-      background: linear-gradient(135deg, #667eea, #764ba2);
-      padding: 28px 24px;
-      border-radius: 20px;
-      color: white;
+      background: linear-gradient(135deg, rgba(120, 119, 198, 0.1), rgba(255, 255, 255, 0.05));
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 20px;
       text-align: center;
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       position: relative;
       overflow: hidden;
-      box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+      transition: all 0.3s;
     }
 
     .stat-card::before {
@@ -658,221 +658,260 @@ export default class connectEvent extends EventListener {
       left: -50%;
       width: 200%;
       height: 200%;
-      background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
-      animation: rotate 10s linear infinite;
+      background: radial-gradient(circle, rgba(120, 119, 198, 0.3), transparent 70%);
+      opacity: 0;
+      transition: opacity 0.3s;
     }
 
-    @keyframes rotate {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
+    .stat-card:hover::before {
+      opacity: 1;
     }
 
     .stat-card:hover {
-      transform: translateY(-8px) scale(1.02);
-      box-shadow: 0 15px 40px rgba(102, 126, 234, 0.5);
+      transform: translateY(-5px);
+      border-color: rgba(120, 119, 198, 0.5);
     }
 
-    .stat-card .icon {
-      font-size: 40px;
-      margin-bottom: 12px;
-      position: relative;
-      z-index: 1;
+    .stat-icon {
+      width: 40px;
+      height: 40px;
+      margin: 0 auto 10px;
+      background: linear-gradient(135deg, #7877c6, #ff77c6);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
     }
 
     .stat-card .label {
-      font-size: 14px;
-      opacity: 0.95;
-      margin-bottom: 8px;
-      font-weight: 500;
-      position: relative;
-      z-index: 1;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.5);
+      margin-bottom: 5px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
     }
 
     .stat-card .value {
-      font-size: 32px;
-      font-weight: 800;
-      margin-bottom: 4px;
-      position: relative;
-      z-index: 1;
-      text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      font-size: 28px;
+      font-weight: bold;
+      background: linear-gradient(135deg, #7877c6, #ff77c6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 2px;
     }
 
     .stat-card .unit {
-      font-size: 13px;
-      opacity: 0.9;
-      position: relative;
-      z-index: 1;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.4);
     }
 
+    /* 高亮卡片 */
     .highlight-section {
+      padding: 0 30px 30px;
+    }
+
+    .highlight-cards {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 20px;
-      margin-bottom: 40px;
     }
 
     .highlight-card {
-      padding: 25px 30px;
+      background: linear-gradient(135deg, #1a1a3e, #2a2a4e);
+      border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 20px;
-      color: white;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+      padding: 25px;
       position: relative;
       overflow: hidden;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-      transition: transform 0.3s ease;
     }
 
-    .highlight-card:hover {
-      transform: translateY(-5px);
-    }
-
-    .highlight-card::before {
+    .highlight-card::after {
       content: '';
       position: absolute;
       top: 0;
+      left: 0;
       right: 0;
-      width: 150px;
-      height: 150px;
-      background: radial-gradient(circle, rgba(255,255,255,0.2) 0%, transparent 70%);
-      border-radius: 50%;
-      transform: translate(50%, -50%);
+      bottom: 0;
+      background: linear-gradient(135deg, transparent, rgba(255, 255, 255, 0.05));
+      pointer-events: none;
     }
 
     .fastest {
-      background: linear-gradient(135deg, #56ab2f, #a8e063);
+      background: linear-gradient(135deg, #1a3e1a, #2a4e2a);
+      border-color: rgba(86, 171, 47, 0.3);
     }
 
     .slowest {
-      background: linear-gradient(135deg, #ff6b6b, #ee5a6f);
+      background: linear-gradient(135deg, #3e1a1a, #4e2a2a);
+      border-color: rgba(238, 90, 111, 0.3);
     }
 
-    .highlight-card .content {
-      position: relative;
-      z-index: 1;
-    }
-
-    .highlight-card h3 {
-      font-size: 16px;
-      margin-bottom: 8px;
-      opacity: 0.95;
-      font-weight: 600;
-    }
-
-    .highlight-card .plugin-name {
-      font-size: 20px;
-      font-weight: 700;
-      text-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-
-    .highlight-card .time {
-      font-size: 28px;
-      font-weight: 800;
-      position: relative;
-      z-index: 1;
-      text-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-
-    .section {
-      margin-bottom: 35px;
-    }
-
-    .section-title {
-      font-size: 24px;
-      color: #2c3e50;
-      margin-bottom: 20px;
-      padding-left: 20px;
-      border-left: 6px solid #667eea;
-      font-weight: 700;
+    .highlight-header {
       display: flex;
       align-items: center;
       gap: 12px;
+      margin-bottom: 12px;
     }
 
-    .section-title .icon {
-      font-size: 28px;
-    }
-
-    .plugin-package {
-      background: linear-gradient(135deg, #f8f9ff, #ffffff);
-      border-radius: 18px;
-      padding: 25px;
-      margin-bottom: 20px;
-      border: 2px solid #e8ecf4;
-      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
-      transition: all 0.3s ease;
-    }
-
-    .plugin-package:hover {
-      transform: translateX(5px);
-      border-color: #667eea;
-      box-shadow: 0 8px 25px rgba(102, 126, 234, 0.15);
-    }
-
-    .package-header {
+    .highlight-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
       display: flex;
-      justify-content: space-between;
       align-items: center;
-      margin-bottom: 18px;
-      padding-bottom: 15px;
-      border-bottom: 2px dashed #dee5ed;
+      justify-content: center;
+      font-size: 18px;
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05));
     }
 
-    .package-name {
-      font-size: 20px;
-      font-weight: 700;
-      color: #2c3e50;
+    .fastest .highlight-icon {
+      background: linear-gradient(135deg, #56ab2f, #a8e063);
+    }
+
+    .slowest .highlight-icon {
+      background: linear-gradient(135deg, #ee5a6f, #ff6b6b);
+    }
+
+    .highlight-card h3 {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.6);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+
+    .highlight-card .plugin-name {
+      font-size: 18px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .highlight-card .time {
+      font-size: 24px;
+      font-weight: bold;
+      margin-top: 8px;
+    }
+
+    .fastest .time {
+      color: #a8e063;
+    }
+
+    .slowest .time {
+      color: #ff6b6b;
+    }
+
+    /* 内容区域 */
+    .content {
+      padding: 30px;
+    }
+
+    .section {
+      margin-bottom: 30px;
+    }
+
+    .section-header {
       display: flex;
       align-items: center;
       gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .section-icon {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, rgba(120, 119, 198, 0.2), rgba(255, 119, 198, 0.2));
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+
+    .section-title {
+      font-size: 20px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.9);
+      flex: 1;
+    }
+
+    .section-count {
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.5);
+      background: rgba(255, 255, 255, 0.05);
+      padding: 4px 12px;
+      border-radius: 20px;
+    }
+
+    /* 插件包样式 */
+    .plugin-package {
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      margin-bottom: 16px;
+      overflow: hidden;
+      transition: all 0.3s;
+    }
+
+    .plugin-package:hover {
+      border-color: rgba(120, 119, 198, 0.3);
+      background: linear-gradient(135deg, rgba(120, 119, 198, 0.05), rgba(255, 255, 255, 0.02));
+    }
+
+    .package-header {
+      padding: 18px 20px;
+      background: rgba(255, 255, 255, 0.02);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .package-name {
+      font-size: 16px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.9);
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
 
     .package-name::before {
       content: '📦';
-      font-size: 24px;
+      font-size: 18px;
     }
 
     .package-stats {
       display: flex;
-      gap: 12px;
-      font-size: 13px;
-      flex-wrap: wrap;
+      gap: 8px;
     }
 
     .package-stats span {
-      padding: 6px 14px;
-      background: white;
-      border-radius: 16px;
-      color: #667eea;
-      border: 2px solid #667eea;
-      font-weight: 600;
-      box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
-      transition: all 0.2s ease;
-    }
-
-    .package-stats span:hover {
-      background: #667eea;
-      color: white;
-      transform: translateY(-2px);
+      font-size: 11px;
+      padding: 4px 10px;
+      background: rgba(120, 119, 198, 0.15);
+      color: rgba(255, 255, 255, 0.7);
+      border-radius: 12px;
+      border: 1px solid rgba(120, 119, 198, 0.3);
     }
 
     .plugin-list {
-      display: grid;
-      gap: 10px;
+      padding: 12px;
     }
 
+    /* 插件项样式 */
     .plugin-item {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 16px 20px;
-      background: white;
-      border-radius: 14px;
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      border-left: 4px solid transparent;
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      margin-bottom: 8px;
+      transition: all 0.3s;
       position: relative;
-      overflow: hidden;
     }
 
     .plugin-item::before {
@@ -880,109 +919,87 @@ export default class connectEvent extends EventListener {
       position: absolute;
       left: 0;
       top: 0;
-      width: 0;
-      height: 100%;
-      background: linear-gradient(90deg, rgba(102, 126, 234, 0.08), rgba(118, 75, 162, 0.08));
-      transition: width 0.4s ease;
+      bottom: 0;
+      width: 3px;
+      background: linear-gradient(to bottom, #7877c6, #ff77c6);
+      border-radius: 3px 0 0 3px;
+      opacity: 0;
+      transition: opacity 0.3s;
     }
 
     .plugin-item:hover {
-      transform: translateX(8px);
-      border-left-color: #667eea;
-      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.15);
+      background: rgba(255, 255, 255, 0.04);
+      transform: translateX(4px);
+      border-color: rgba(120, 119, 198, 0.3);
     }
 
     .plugin-item:hover::before {
-      width: 100%;
-    }
-
-    .plugin-item.failed {
-      background: linear-gradient(135deg, #fff5f5, #ffe8e8);
-      border-left-color: #e74c3c;
-    }
-
-    .plugin-item.failed:hover {
-      border-left-color: #c0392b;
-    }
-
-    .plugin-name {
-      font-size: 15px;
-      color: #2c3e50;
-      flex: 1;
-      font-weight: 600;
-      position: relative;
-      z-index: 1;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .plugin-name::before {
-      content: '⚡';
-      font-size: 16px;
-      opacity: 0;
-      transition: opacity 0.3s ease;
-    }
-
-    .plugin-item:hover .plugin-name::before {
       opacity: 1;
     }
 
-    .plugin-time {
-      font-size: 15px;
-      font-weight: 700;
-      padding: 6px 16px;
-      border-radius: 18px;
-      min-width: 90px;
-      text-align: center;
-      position: relative;
-      z-index: 1;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-      transition: all 0.3s ease;
+    .plugin-item:last-child {
+      margin-bottom: 0;
     }
 
-    .plugin-item:hover .plugin-time {
-      transform: scale(1.05);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    .plugin-item.failed {
+      background: rgba(238, 90, 111, 0.1);
+      border-color: rgba(238, 90, 111, 0.3);
+    }
+
+    .plugin-name {
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.8);
+      flex: 1;
+    }
+
+    .plugin-time {
+      font-size: 13px;
+      font-weight: 600;
+      padding: 5px 12px;
+      border-radius: 20px;
+      min-width: 80px;
+      text-align: center;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid;
     }
 
     .time-fast {
-      color: #27ae60;
-      background: linear-gradient(135deg, #e8f8f5, #d5f4e6);
-      border: 2px solid #27ae60;
+      color: #a8e063;
+      border-color: rgba(168, 224, 99, 0.3);
+      background: rgba(168, 224, 99, 0.1);
     }
 
     .time-medium {
-      color: #f39c12;
-      background: linear-gradient(135deg, #fef5e7, #fdebd0);
-      border: 2px solid #f39c12;
+      color: #ffd93d;
+      border-color: rgba(255, 217, 61, 0.3);
+      background: rgba(255, 217, 61, 0.1);
     }
 
     .time-slow {
-      color: #e74c3c;
-      background: linear-gradient(135deg, #fadbd8, #f5b7b1);
-      border: 2px solid #e74c3c;
+      color: #ff6b6b;
+      border-color: rgba(255, 107, 107, 0.3);
+      background: rgba(255, 107, 107, 0.1);
     }
 
+    /* 错误信息样式 */
     .error-msg {
-      font-size: 12px;
-      color: #e74c3c;
+      font-size: 11px;
+      color: #ff6b6b;
       margin-top: 6px;
-      padding: 6px 12px;
-      background: linear-gradient(135deg, #ffe8e8, #ffd4d4);
-      border-radius: 8px;
+      padding: 4px 10px;
+      background: rgba(255, 107, 107, 0.1);
+      border: 1px solid rgba(255, 107, 107, 0.2);
+      border-radius: 6px;
       display: inline-block;
-      border-left: 3px solid #e74c3c;
-      font-weight: 500;
     }
 
+    /* 摘要部分 */
     .summary {
-      background: linear-gradient(135deg, #f093fb, #f5576c);
-      color: white;
-      padding: 35px 30px;
+      margin: 30px;
+      background: linear-gradient(135deg, #7877c6, #ff77c6);
       border-radius: 20px;
-      margin-top: 35px;
-      box-shadow: 0 15px 40px rgba(245, 87, 108, 0.3);
+      padding: 30px;
+      text-align: center;
       position: relative;
       overflow: hidden;
     }
@@ -991,116 +1008,128 @@ export default class connectEvent extends EventListener {
       content: '';
       position: absolute;
       top: -50%;
-      right: -50%;
+      left: -50%;
       width: 200%;
       height: 200%;
-      background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
-      animation: rotate 15s linear infinite;
+      background: radial-gradient(circle, rgba(255, 255, 255, 0.1), transparent);
+      animation: rotate 10s linear infinite;
     }
 
     .summary-title {
-      font-size: 24px;
-      margin-bottom: 25px;
-      font-weight: 700;
-      text-align: center;
+      font-size: 18px;
+      margin-bottom: 20px;
+      font-weight: 600;
+      color: white;
+      text-transform: uppercase;
+      letter-spacing: 2px;
       position: relative;
-      z-index: 1;
-      text-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
 
     .summary-content {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      grid-template-columns: repeat(3, 1fr);
       gap: 20px;
       position: relative;
-      z-index: 1;
     }
 
     .summary-item {
-      text-align: center;
-      padding: 20px;
       background: rgba(255, 255, 255, 0.15);
-      border-radius: 16px;
       backdrop-filter: blur(10px);
+      border-radius: 12px;
+      padding: 15px;
       border: 1px solid rgba(255, 255, 255, 0.2);
-      transition: all 0.3s ease;
-    }
-
-    .summary-item:hover {
-      transform: translateY(-5px);
-      background: rgba(255, 255, 255, 0.25);
-    }
-
-    .summary-item .icon {
-      font-size: 36px;
-      margin-bottom: 10px;
     }
 
     .summary-item .label {
-      font-size: 13px;
-      opacity: 0.95;
-      margin-bottom: 8px;
-      font-weight: 500;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.8);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
     }
 
     .summary-item .value {
-      font-size: 28px;
-      font-weight: 800;
-      text-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-
-    .footer-badge {
-      margin-top: 30px;
-      padding: 20px;
-      background: linear-gradient(135deg, #667eea, #764ba2);
-      border-radius: 16px;
-      text-align: center;
+      font-size: 24px;
+      font-weight: bold;
       color: white;
-      font-size: 14px;
-      font-weight: 600;
-      box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
     }
 
-    @media (max-width: 768px) {
-      .highlight-section {
-        grid-template-columns: 1fr;
+    /* 进度条 */
+    .progress-bar {
+      width: 100%;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #7877c6, #ff77c6);
+      border-radius: 4px;
+      animation: progress-animation 2s ease-out;
+    }
+
+    @keyframes progress-animation {
+      from {
+        width: 0;
       }
-      
-      .stats-grid {
-        grid-template-columns: repeat(2, 1fr);
-      }
+    }
+
+    /* 响应式滚动条美化 */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: linear-gradient(135deg, #7877c6, #ff77c6);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: linear-gradient(135deg, #9897d6, #ff97d6);
     }
   </style>
 </head>
 <body>
+  <div class="bg-animation">
+    <div class="bg-gradient"></div>
+  </div>
+  
   <div class="container">
+    <div class="glow-line"></div>
+    
     <div class="header">
-      <div class="success-badge">✅ 🎉</div>
-      <h1>重启成功</h1>
-      <span class="restart-time">⚡ ${restartTime.toFixed(4)} 秒</span>
+      <h1>🚀 插件加载报告</h1>
+      <div class="subtitle">Plugin Performance Analytics</div>
     </div>
 
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="icon">⏱️</div>
-        <div class="label">插件加载耗时</div>
+        <div class="stat-icon">⏱️</div>
+        <div class="label">总加载耗时</div>
         <div class="value">${(stats.totalLoadTime / 1000).toFixed(3)}</div>
         <div class="unit">秒</div>
       </div>
       <div class="stat-card">
-        <div class="icon">✨</div>
+        <div class="stat-icon">✅</div>
         <div class="label">成功加载</div>
         <div class="value">${successPlugins.length}</div>
         <div class="unit">个插件</div>
       </div>
       <div class="stat-card">
-        <div class="icon">❌</div>
+        <div class="stat-icon">❌</div>
         <div class="label">失败数量</div>
         <div class="value">${failedPlugins.length}</div>
         <div class="unit">个插件</div>
       </div>
       <div class="stat-card">
-        <div class="icon">⏰</div>
+        <div class="stat-icon">📊</div>
         <div class="label">定时任务</div>
         <div class="value">${stats.taskCount || 0}</div>
         <div class="unit">个任务</div>
@@ -1109,125 +1138,133 @@ export default class connectEvent extends EventListener {
 
     ${successPlugins.length > 0 ? `
       <div class="highlight-section">
-        <div class="highlight-card fastest">
-          <div class="content">
-            <h3>⚡ 最快加载</h3>
-            <div class="plugin-name">${successPlugins[successPlugins.length - 1].name}</div>
-          </div>
-          <div class="time">${successPlugins[successPlugins.length - 1].loadTime.toFixed(2)} ms</div>
-        </div>
-        <div class="highlight-card slowest">
-          <div class="content">
-            <h3>🐌 最慢加载</h3>
-            <div class="plugin-name">${successPlugins[0].name}</div>
-          </div>
-          <div class="time">${successPlugins[0].loadTime.toFixed(2)} ms</div>
-        </div>
-      </div>
-    ` : ''}
-
-    ${packageStats.length > 0 ? `
-      <div class="section">
-        <h2 class="section-title">
-          <span class="icon">📦</span>
-          插件包加载详情 (${packageStats.length})
-        </h2>
-        ${packageStats.map(pkg => `
-          <div class="plugin-package">
-            <div class="package-header">
-              <div class="package-name">${pkg.name}</div>
-              <div class="package-stats">
-                <span>📊 ${pkg.count} 个</span>
-                <span>⏱️ ${pkg.totalTime.toFixed(1)} ms</span>
-                <span>📈 均值 ${(pkg.totalTime / pkg.count).toFixed(1)} ms</span>
-              </div>
-            </div>
-            <div class="plugin-list">
-              ${pkg.plugins.map(plugin => {
-                const timeClass = plugin.loadTime < 10 ? 'time-fast' : 
-                                 plugin.loadTime < 50 ? 'time-medium' : 'time-slow'
-                return `
-                  <div class="plugin-item">
-                    <div class="plugin-name">${plugin.name.split('/').pop()}</div>
-                    <div class="plugin-time ${timeClass}">${plugin.loadTime.toFixed(2)} ms</div>
-                  </div>
-                `
-              }).join('')}
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    ` : ''}
-
-    ${singleFilePlugins.length > 0 ? `
-      <div class="section">
-        <h2 class="section-title">
-          <span class="icon">📄</span>
-          单文件插件 (${singleFilePlugins.length})
-        </h2>
-        <div class="plugin-list">
-          ${singleFilePlugins.map(plugin => {
-            const timeClass = plugin.loadTime < 10 ? 'time-fast' : 
-                             plugin.loadTime < 50 ? 'time-medium' : 'time-slow'
-            return `
-              <div class="plugin-item">
-                <div class="plugin-name">${plugin.name}</div>
-                <div class="plugin-time ${timeClass}">${plugin.loadTime.toFixed(2)} ms</div>
-              </div>
-            `
-          }).join('')}
-        </div>
-      </div>
-    ` : ''}
-
-    ${failedPlugins.length > 0 ? `
-      <div class="section">
-        <h2 class="section-title">
-          <span class="icon">❌</span>
-          加载失败 (${failedPlugins.length})
-        </h2>
-        <div class="plugin-list">
-          ${failedPlugins.map(plugin => `
-            <div class="plugin-item failed">
+        <div class="highlight-cards">
+          <div class="highlight-card fastest">
+            <div class="highlight-header">
+              <div class="highlight-icon">⚡</div>
               <div>
-                <div class="plugin-name">${plugin.name}</div>
-                ${plugin.error ? `<div class="error-msg">⚠️ ${plugin.error}</div>` : ''}
+                <h3>最快加载</h3>
+                <div class="plugin-name">${fastestPlugin?.name || 'N/A'}</div>
               </div>
-              <div class="plugin-time time-slow">${plugin.loadTime.toFixed(2)} ms</div>
+            </div>
+            <div class="time">${fastestPlugin?.loadTime.toFixed(2) || '0'} ms</div>
+          </div>
+          
+          <div class="highlight-card slowest">
+            <div class="highlight-header">
+              <div class="highlight-icon">🐌</div>
+              <div>
+                <h3>最慢加载</h3>
+                <div class="plugin-name">${slowestPlugin?.name || 'N/A'}</div>
+              </div>
+            </div>
+            <div class="time">${slowestPlugin?.loadTime.toFixed(2) || '0'} ms</div>
+          </div>
+        </div>
+      </div>
+    ` : ''}
+
+    <div class="content">
+      ${packageStats.length > 0 ? `
+        <div class="section">
+          <div class="section-header">
+            <div class="section-icon">📦</div>
+            <h2 class="section-title">插件包</h2>
+            <span class="section-count">${packageStats.length} 个</span>
+          </div>
+          
+          ${packageStats.map(pkg => `
+            <div class="plugin-package">
+              <div class="package-header">
+                <div class="package-name">${pkg.name}</div>
+                <div class="package-stats">
+                  <span>📋 ${pkg.count} 个</span>
+                  <span>⏱️ ${pkg.totalTime.toFixed(1)} ms</span>
+                  <span>📊 均值 ${(pkg.totalTime / pkg.count).toFixed(1)} ms</span>
+                </div>
+              </div>
+              <div class="plugin-list">
+                ${pkg.plugins.map(plugin => {
+                  const timeClass = plugin.loadTime < 10 ? 'time-fast' : 
+                                   plugin.loadTime < 50 ? 'time-medium' : 'time-slow'
+                  return `
+                    <div class="plugin-item">
+                      <div class="plugin-name">${plugin.name.split('/').pop()}</div>
+                      <div class="plugin-time ${timeClass}">${plugin.loadTime.toFixed(2)} ms</div>
+                    </div>
+                  `
+                }).join('')}
+              </div>
             </div>
           `).join('')}
         </div>
-      </div>
-    ` : ''}
+      ` : ''}
+
+      ${singleFilePlugins.length > 0 ? `
+        <div class="section">
+          <div class="section-header">
+            <div class="section-icon">📄</div>
+            <h2 class="section-title">单文件插件</h2>
+            <span class="section-count">${singleFilePlugins.length} 个</span>
+          </div>
+          
+          <div class="plugin-list">
+            ${singleFilePlugins.map(plugin => {
+              const timeClass = plugin.loadTime < 10 ? 'time-fast' : 
+                               plugin.loadTime < 50 ? 'time-medium' : 'time-slow'
+              return `
+                <div class="plugin-item">
+                  <div class="plugin-name">${plugin.name}</div>
+                  <div class="plugin-time ${timeClass}">${plugin.loadTime.toFixed(2)} ms</div>
+                </div>
+              `
+            }).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      ${failedPlugins.length > 0 ? `
+        <div class="section">
+          <div class="section-header">
+            <div class="section-icon">❌</div>
+            <h2 class="section-title">加载失败</h2>
+            <span class="section-count">${failedPlugins.length} 个</span>
+          </div>
+          
+          <div class="plugin-list">
+            ${failedPlugins.map(plugin => `
+              <div class="plugin-item failed">
+                <div>
+                  <div class="plugin-name">${plugin.name}</div>
+                  ${plugin.error ? `<div class="error-msg">${plugin.error}</div>` : ''}
+                </div>
+                <div class="plugin-time time-slow">${plugin.loadTime.toFixed(2)} ms</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+    </div>
 
     <div class="summary">
       <div class="summary-title">📊 统计摘要</div>
       <div class="summary-content">
         <div class="summary-item">
-          <div class="icon">📈</div>
           <div class="label">平均耗时</div>
-          <div class="value">${(stats.totalLoadTime / stats.plugins.length).toFixed(1)} ms</div>
+          <div class="value">${stats.plugins.length > 0 ? (stats.totalLoadTime / stats.plugins.length).toFixed(1) : '0'} ms</div>
         </div>
         <div class="summary-item">
-          <div class="icon">✅</div>
           <div class="label">成功率</div>
-          <div class="value">${((successPlugins.length / stats.plugins.length) * 100).toFixed(1)}%</div>
+          <div class="value">${stats.plugins.length > 0 ? ((successPlugins.length / stats.plugins.length) * 100).toFixed(1) : '0'}%</div>
+          <div class="progress-bar">
+            <div class="progress-fill" style="width: ${stats.plugins.length > 0 ? ((successPlugins.length / stats.plugins.length) * 100) : 0}%"></div>
+          </div>
         </div>
         <div class="summary-item">
-          <div class="icon">🐢</div>
           <div class="label">慢速插件</div>
-          <div class="value">${successPlugins.filter(p => p.loadTime > 100).length}</div>
-        </div>
-        <div class="summary-item">
-          <div class="icon">⚡</div>
-          <div class="label">极速插件</div>
-          <div class="value">${successPlugins.filter(p => p.loadTime < 10).length}</div>
+          <div class="value">${successPlugins.filter(p => p.loadTime > 100).length} 个</div>
         </div>
       </div>
-    </div>
-
-    <div class="footer-badge">
-      🎯 XRK-MultiBot · 重启完成 · 所有服务已就绪
     </div>
   </div>
 </body>
@@ -1235,144 +1272,12 @@ export default class connectEvent extends EventListener {
       `
 
       await fs.writeFile(htmlPath, html, 'utf-8')
-      logger.mark(`重启报告HTML已生成: ${htmlPath}`)
+      logger.mark(`插件加载报告HTML已生成: ${htmlPath}`)
       
       return htmlPath
     } catch (error) {
-      logger.error(`生成重启报告HTML失败: ${error}`)
+      logger.error(`生成HTML报告失败: ${error}`)
       return null
     }
-  }
-
-  /**
-   * 生成简化版重启HTML（无插件信息）
-   */
-  generateSimpleRestartHTML(restartTime) {
-    return `
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>重启成功</title>
-  <style>
-    @font-face {
-      font-family: 'CustomFont';
-      src: url('file:///${path.join(process.cwd(), 'data/fonts/font.ttf').replace(/\\/g, '/')}');
-    }
-
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    body {
-      font-family: 'CustomFont', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 40px 20px;
-      position: relative;
-      overflow: hidden;
-    }
-
-    body::before {
-      content: '';
-      position: absolute;
-      width: 200%;
-      height: 200%;
-      background: radial-gradient(circle, rgba(255,255,255,0.1) 1px, transparent 1px);
-      background-size: 50px 50px;
-      animation: moveBackground 20s linear infinite;
-    }
-
-    @keyframes moveBackground {
-      0% { transform: translate(0, 0); }
-      100% { transform: translate(50px, 50px); }
-    }
-
-    .container {
-      max-width: 600px;
-      width: 100%;
-      background: rgba(255, 255, 255, 0.98);
-      border-radius: 28px;
-      padding: 60px 40px;
-      box-shadow: 0 40px 100px rgba(0, 0, 0, 0.3);
-      text-align: center;
-      position: relative;
-      z-index: 1;
-      backdrop-filter: blur(30px);
-    }
-
-    .success-icon {
-      font-size: 100px;
-      margin-bottom: 30px;
-      animation: bounce 2s ease-in-out infinite;
-    }
-
-    @keyframes bounce {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-20px); }
-    }
-
-    h1 {
-      font-size: 42px;
-      background: linear-gradient(135deg, #667eea, #764ba2);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      margin-bottom: 25px;
-      font-weight: 800;
-    }
-
-    .time-display {
-      display: inline-block;
-      padding: 20px 40px;
-      background: linear-gradient(135deg, #56ab2f, #a8e063);
-      color: white;
-      border-radius: 30px;
-      font-size: 32px;
-      font-weight: 800;
-      box-shadow: 0 10px 30px rgba(86, 171, 47, 0.4);
-      margin-bottom: 30px;
-    }
-
-    .message {
-      font-size: 18px;
-      color: #555;
-      line-height: 1.8;
-      margin-bottom: 30px;
-    }
-
-    .footer {
-      padding: 20px;
-      background: linear-gradient(135deg, #667eea, #764ba2);
-      border-radius: 16px;
-      color: white;
-      font-size: 16px;
-      font-weight: 600;
-      box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="success-icon">✅</div>
-    <h1>重启成功</h1>
-    <div class="time-display">⚡ ${restartTime.toFixed(4)} 秒</div>
-    <div class="message">
-      机器人已成功重启，所有服务运行正常<br>
-      随时准备为您服务
-    </div>
-    <div class="footer">
-      🎯 XRK-MultiBot · 重启完成
-    </div>
-  </div>
-</body>
-</html>
-    `
   }
 }
