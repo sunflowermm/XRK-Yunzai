@@ -37,7 +37,7 @@ export default class ChatStream extends AIStream {
     super({
       name: 'chat',
       description: '智能聊天互动工作流',
-      version: '2.0.0',
+      version: '2.0.1',
       author: 'XRK',
       priority: 10,
       config: {
@@ -158,6 +158,7 @@ export default class ChatStream extends AIStream {
         if (context.e?.isGroup) {
           try {
             await context.e.group.pokeMember(params.qq);
+            await BotUtil.sleep(300);
           } catch (error) {
             // 静默处理错误
           }
@@ -206,6 +207,7 @@ export default class ChatStream extends AIStream {
           const emojiId = emojiIds[Math.floor(Math.random() * emojiIds.length)];
           try {
             await context.e.group.setEmojiLike(params.msgId, emojiId);
+            await BotUtil.sleep(200);
           } catch (error) {
             // 静默处理
           }
@@ -243,6 +245,7 @@ export default class ChatStream extends AIStream {
           try {
             const member = context.e.group.pickMember(params.qq);
             await member.thumbUp(thumbCount);
+            await BotUtil.sleep(300);
           } catch (error) {
             // 静默处理
           }
@@ -270,6 +273,7 @@ export default class ChatStream extends AIStream {
         if (context.e?.isGroup) {
           try {
             await context.e.group.sign();
+            await BotUtil.sleep(300);
           } catch (error) {
             // 静默处理
           }
@@ -306,6 +310,7 @@ export default class ChatStream extends AIStream {
           try {
             const member = context.e.group.pickMember(params.qq);
             await member.mute(parseInt(params.duration));
+            await BotUtil.sleep(300);
           } catch (error) {
             BotUtil.makeLog('debug', `禁言失败: ${error.message}`, 'ChatStream');
           }
@@ -343,6 +348,7 @@ export default class ChatStream extends AIStream {
           try {
             const member = context.e.group.pickMember(params.qq);
             await member.mute(0);
+            await BotUtil.sleep(300);
           } catch (error) {
             BotUtil.makeLog('debug', `解禁失败: ${error.message}`, 'ChatStream');
           }
@@ -379,6 +385,7 @@ export default class ChatStream extends AIStream {
         if (context.e?.isGroup) {
           try {
             await context.e.group.setEssence(params.msgId);
+            await BotUtil.sleep(300);
           } catch (error) {
             BotUtil.makeLog('debug', `设置精华失败: ${error.message}`, 'ChatStream');
           }
@@ -415,6 +422,7 @@ export default class ChatStream extends AIStream {
         if (context.e?.isGroup) {
           try {
             await context.e.group.sendNotice(params.content);
+            await BotUtil.sleep(300);
           } catch (error) {
             BotUtil.makeLog('debug', `发布公告失败: ${error.message}`, 'ChatStream');
           }
@@ -818,6 +826,33 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
   }
 
   /**
+   * 清理文本中的所有功能标记
+   */
+  cleanFunctionMarkers(text) {
+    let cleanText = text;
+    
+    // 移除所有功能标记
+    const markers = [
+      /\[(开心|惊讶|伤心|大笑|害怕|生气)\]/g,  // 表情包
+      /\[CQ:poke,qq=\d+\]/g,  // 戳一戳
+      /\[回应:[^:]+:[^\]]+\]/g,  // 表情回应
+      /\[点赞:\d+:\d+\]/g,  // 点赞
+      /\[签到\]/g,  // 签到
+      /\[禁言:\d+:\d+\]/g,  // 禁言
+      /\[解禁:\d+\]/g,  // 解禁
+      /\[精华:[^\]]+\]/g,  // 精华
+      /\[公告:[^\]]+\]/g,  // 公告
+      /\[提醒:[^:]+:[^:]+:[^\]]+\]/g  // 提醒
+    ];
+    
+    markers.forEach(marker => {
+      cleanText = cleanText.replace(marker, '');
+    });
+    
+    return cleanText.trim();
+  }
+
+  /**
    * 解析CQ码
    */
   async parseCQCodes(text, e) {
@@ -876,6 +911,71 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
     }
     
     return segments;
+  }
+
+  /**
+   * 执行工作流 - 重写基类方法以添加功能标记清理
+   */
+  async execute(e, question, config) {
+    try {
+      // 构建上下文
+      const context = { e, question, config };
+      
+      // 构建消息
+      const messages = await this.buildChatContext(e, question);
+      
+      // 调用AI
+      let response = await this.callAI(messages, config);
+      
+      if (!response) {
+        return null;
+      }
+      
+      // 解析并执行功能
+      const { functions, cleanText } = await this.parseFunctions(response, context);
+      
+      // 清理所有功能标记
+      let finalText = this.cleanFunctionMarkers(cleanText);
+      
+      // 执行功能
+      for (const func of functions) {
+        await this.executeFunction(func.type, func.params, context);
+      }
+      
+      // 处理多条消息（用 | 分隔）
+      if (finalText.includes('|')) {
+        const messages = finalText.split('|').map(m => m.trim()).filter(m => m);
+        
+        for (let i = 0; i < messages.length; i++) {
+          const msg = messages[i];
+          
+          // 解析CQ码
+          const segments = await this.parseCQCodes(msg, e);
+          
+          if (segments.length > 0) {
+            await e.reply(segments);
+            
+            // 消息之间延迟
+            if (i < messages.length - 1) {
+              await BotUtil.sleep(randomRange(800, 1500));
+            }
+          }
+        }
+      } else if (finalText) {
+        // 单条消息
+        const segments = await this.parseCQCodes(finalText, e);
+        
+        if (segments.length > 0) {
+          await e.reply(segments);
+        }
+      }
+      
+      return finalText;
+      
+    } catch (error) {
+      BotUtil.makeLog('error', `ChatStream执行失败: ${error.message}`, 'ChatStream');
+      throw error;
+    }
   }
 
   /**
