@@ -174,7 +174,7 @@ export default class ChatStream extends AIStream {
           }
         }
       },
-      enabled: true
+      enabled: false
     });
 
     // 回复功能
