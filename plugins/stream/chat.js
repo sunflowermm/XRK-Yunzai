@@ -1,11 +1,11 @@
-import BaseStream from '../../lib/aistream/base.js';
 import path from 'path';
 import fs from 'fs';
+import BaseStream from '../../lib/aistream/base.js';
+import BotUtil from '../../lib/common/util.js';
 
 const PERSONAS_DIR = path.join(process.cwd(), 'plugins/XRK/config/ai-assistant/personas');
 const EMOTIONS_DIR = path.join(process.cwd(), 'plugins/XRK/config/ai-assistant');
 
-// 表情回应映射
 const EMOJI_REACTIONS = {
   '开心': ['4', '14', '21', '28', '76', '79', '99', '182', '201', '290'],
   '惊讶': ['26', '32', '97', '180', '268', '289'],
@@ -32,7 +32,6 @@ export default class ChatStream extends BaseStream {
   }
 
   init() {
-    // 注册表情功能
     this.registerFeature('emotion', {
       name: '表情包',
       description: '发送表情包图片',
@@ -45,7 +44,6 @@ export default class ChatStream extends BaseStream {
       priority: 200
     });
 
-    // 注册@功能
     this.registerFeature('at', {
       name: '@提及',
       description: '@某人',
@@ -55,7 +53,6 @@ export default class ChatStream extends BaseStream {
       priority: 150
     });
 
-    // 注册戳一戳
     this.registerFeature('poke', {
       name: '戳一戳',
       description: '戳一戳某人',
@@ -65,7 +62,6 @@ export default class ChatStream extends BaseStream {
       priority: 140
     });
 
-    // 注册回复功能
     this.registerFeature('reply', {
       name: '消息回复',
       description: '回复某条消息',
@@ -75,7 +71,6 @@ export default class ChatStream extends BaseStream {
       priority: 160
     });
 
-    // 注册表情回应
     this.registerFeature('emojiReaction', {
       name: '表情回应',
       description: '给消息添加表情回应',
@@ -85,7 +80,6 @@ export default class ChatStream extends BaseStream {
       priority: 130
     });
 
-    // 注册点赞
     this.registerFeature('thumbUp', {
       name: '点赞',
       description: '给某人点赞',
@@ -95,7 +89,6 @@ export default class ChatStream extends BaseStream {
       priority: 120
     });
 
-    // 注册签到
     this.registerFeature('sign', {
       name: '签到',
       description: '群签到',
@@ -105,7 +98,6 @@ export default class ChatStream extends BaseStream {
       priority: 110
     });
 
-    // 注册禁言
     this.registerFeature('mute', {
       name: '禁言',
       description: '禁言群成员',
@@ -115,7 +107,6 @@ export default class ChatStream extends BaseStream {
       priority: 100
     });
 
-    // 注册解禁
     this.registerFeature('unmute', {
       name: '解禁',
       description: '解除禁言',
@@ -125,7 +116,6 @@ export default class ChatStream extends BaseStream {
       priority: 100
     });
 
-    // 注册提醒
     this.registerFeature('reminder', {
       name: '定时提醒',
       description: '设置定时提醒',
@@ -135,14 +125,11 @@ export default class ChatStream extends BaseStream {
       priority: 90
     });
 
-    // 加载资源
     this.loadResources();
   }
 
   async loadResources() {
-    // 加载表情包
     await this.loadEmotionImages();
-    // 加载人设
     await this.loadPersonas();
   }
 
@@ -151,41 +138,32 @@ export default class ChatStream extends BaseStream {
     
     for (const emotion of emotions) {
       const emotionDir = path.join(EMOTIONS_DIR, emotion);
-      try {
-        const files = await fs.promises.readdir(emotionDir);
-        const imageFiles = files.filter(file => 
-          /\.(jpg|jpeg|png|gif)$/i.test(file)
-        );
-        this.emotionImages[emotion] = imageFiles.map(file => 
-          path.join(emotionDir, file)
-        );
-      } catch {
-        this.emotionImages[emotion] = [];
-      }
+      const files = await fs.promises.readdir(emotionDir);
+      const imageFiles = files.filter(file => 
+        /\.(jpg|jpeg|png|gif)$/i.test(file)
+      );
+      this.emotionImages[emotion] = imageFiles.map(file => 
+        path.join(emotionDir, file)
+      );
     }
   }
 
   async loadPersonas() {
-    try {
-      await Bot.mkdir(PERSONAS_DIR);
-      
-      // 创建默认人设
-      const defaultPersonaPath = path.join(PERSONAS_DIR, 'assistant.txt');
-      if (!fs.existsSync(defaultPersonaPath)) {
-        await fs.promises.writeFile(defaultPersonaPath, `我是${Bot.nickname}，一个智能AI助手。
+    await BotUtil.mkdir(PERSONAS_DIR);
+    
+    const defaultPersonaPath = path.join(PERSONAS_DIR, 'assistant.txt');
+    if (!fs.existsSync(defaultPersonaPath)) {
+      await fs.promises.writeFile(defaultPersonaPath, `我是${Bot.nickname}，一个智能AI助手。
 我会认真观察群聊，适时发表评论和互动。
 喜欢用表情回应别人的消息，也会戳一戳活跃气氛。
 对不同的人有不同的态度，记得每个人的名字。
 会根据聊天氛围选择合适的表情和互动方式。`);
-      }
-      
-      const files = await Bot.glob(path.join(PERSONAS_DIR, '*.txt'));
-      for (const file of files) {
-        const name = path.basename(file, '.txt');
-        this.personas[name] = await fs.promises.readFile(file, 'utf8');
-      }
-    } catch (error) {
-      logger.error(`加载人设失败：${error.message}`);
+    }
+    
+    const files = await BotUtil.glob(path.join(PERSONAS_DIR, '*.txt'));
+    for (const file of files) {
+      const name = path.basename(file, '.txt');
+      this.personas[name] = await fs.promises.readFile(file, 'utf8');
     }
   }
 
@@ -198,14 +176,12 @@ export default class ChatStream extends BaseStream {
     const now = new Date();
     const dateStr = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日 ${now.getHours()}:${now.getMinutes().toString().padStart(2, '0')}`;
     
-    // 获取启用的功能提示
     const enabledFeatures = this.getEnabledFeatures();
     const featurePrompts = enabledFeatures
       .filter(f => f.prompt)
       .map(f => f.prompt)
       .join('\n');
     
-    // 根据角色过滤管理功能
     const adminFeatures = botRole !== '成员' ? `[禁言:QQ号:秒数] - 禁言
 [解禁:QQ号] - 解除禁言
 [精华:消息ID] - 设置精华消息
@@ -255,14 +231,10 @@ ${e.isMaster ? '5. 对主人要特别友好和尊重' : ''}`;
   async getBotRole(e) {
     if (!e.isGroup) return '';
     
-    try {
-      const member = e.group.pickMember(e.self_id);
-      const info = await member.getInfo();
-      return info.role === 'owner' ? '群主' : 
-             info.role === 'admin' ? '管理员' : '成员';
-    } catch {
-      return '成员';
-    }
+    const member = e.group.pickMember(e.self_id);
+    const info = await member.getInfo();
+    return info.role === 'owner' ? '群主' : 
+           info.role === 'admin' ? '管理员' : '成员';
   }
 
   async buildMessages(context, options = {}) {
@@ -270,7 +242,6 @@ ${e.isMaster ? '5. 对主人要特别友好和尊重' : ''}`;
     const systemPrompt = await this.buildSystemPrompt(context, options);
     const messages = [{ role: 'system', content: systemPrompt }];
     
-    // 添加历史消息和当前消息
     if (e.isGroup && context.history) {
       const historyText = context.history.map(msg => 
         `${msg.nickname}(${msg.user_id})[${msg.message_id}]: ${msg.message}`
@@ -300,17 +271,14 @@ ${e.isMaster ? '5. 对主人要特别友好和尊重' : ''}`;
       emotions: []
     };
 
-    // 分割响应
     const segments = response.split('|').map(s => s.trim()).filter(s => s).slice(0, 2);
     results.segments = segments;
     
     let emotionFound = false;
     
     for (const segment of segments) {
-      // 提取功能
       const functions = await this.extractFunctions(segment, context);
       
-      // 提取表情（只保留第一个）
       let cleanText = segment;
       for (const func of functions) {
         if (func.name === 'emotion' && !emotionFound) {
@@ -320,7 +288,6 @@ ${e.isMaster ? '5. 对主人要特别友好和尊重' : ''}`;
         cleanText = cleanText.replace(func.raw, '');
       }
       
-      // 其他功能
       results.functions.push(...functions.filter(f => f.name !== 'emotion'));
       
       if (cleanText.trim()) {
@@ -334,7 +301,6 @@ ${e.isMaster ? '5. 对主人要特别友好和尊重' : ''}`;
   async sendResponse(context, parsed) {
     const e = context.e;
     
-    // 发送表情包
     if (parsed.emotions.length > 0) {
       const emotionImage = this.getRandomEmotionImage(parsed.emotions[0]);
       if (emotionImage) {
@@ -343,7 +309,6 @@ ${e.isMaster ? '5. 对主人要特别友好和尊重' : ''}`;
       }
     }
     
-    // 发送文本消息
     for (let i = 0; i < parsed.text.length; i++) {
       const msgSegments = await this.parseCQCodes(parsed.text[i], e);
       if (msgSegments.length > 0) {
@@ -355,7 +320,6 @@ ${e.isMaster ? '5. 对主人要特别友好和尊重' : ''}`;
       }
     }
     
-    // 执行其他功能
     for (const func of parsed.functions) {
       if (func.name !== 'emotion') {
         await this.executeFunction(func);
@@ -413,7 +377,6 @@ ${e.isMaster ? '5. 对主人要特别友好和尊重' : ''}`;
     }
   }
 
-  // 功能处理器
   async handleemotion(params, context) {
     // 表情包已在sendResponse中处理
   }
@@ -421,9 +384,7 @@ ${e.isMaster ? '5. 对主人要特别友好和尊重' : ''}`;
   async handlepoke(params, context) {
     const [qq] = params;
     if (context.e.isGroup) {
-      try {
-        await context.e.group.pokeMember(qq);
-      } catch {}
+      await context.e.group.pokeMember(qq);
     }
   }
 
@@ -432,9 +393,7 @@ ${e.isMaster ? '5. 对主人要特别友好和尊重' : ''}`;
     if (msgId && EMOJI_REACTIONS[emojiType]) {
       const emojiIds = EMOJI_REACTIONS[emojiType];
       const emojiId = emojiIds[Math.floor(Math.random() * emojiIds.length)];
-      try {
-        await context.e.group.setEmojiLike(msgId, emojiId);
-      } catch {}
+      await context.e.group.setEmojiLike(msgId, emojiId);
     }
   }
 
@@ -442,17 +401,13 @@ ${e.isMaster ? '5. 对主人要特别友好和尊重' : ''}`;
     const [qq, count] = params;
     if (context.e.isGroup) {
       const thumbCount = Math.min(parseInt(count) || 1, 50);
-      try {
-        await context.e.group.pickMember(qq).thumbUp(thumbCount);
-      } catch {}
+      await context.e.group.pickMember(qq).thumbUp(thumbCount);
     }
   }
 
   async handlesign(params, context) {
     if (context.e.isGroup) {
-      try {
-        await context.e.group.sign();
-      } catch {}
+      await context.e.group.sign();
     }
   }
 
@@ -460,9 +415,7 @@ ${e.isMaster ? '5. 对主人要特别友好和尊重' : ''}`;
     const [qq, seconds] = params;
     const botRole = await this.getBotRole(context.e);
     if ((botRole === '群主' || botRole === '管理员') && context.e.isGroup) {
-      try {
-        await context.e.group.muteMember(qq, parseInt(seconds));
-      } catch {}
+      await context.e.group.muteMember(qq, parseInt(seconds));
     }
   }
 
@@ -470,9 +423,7 @@ ${e.isMaster ? '5. 对主人要特别友好和尊重' : ''}`;
     const [qq] = params;
     const botRole = await this.getBotRole(context.e);
     if ((botRole === '群主' || botRole === '管理员') && context.e.isGroup) {
-      try {
-        await context.e.group.muteMember(qq, 0);
-      } catch {}
+      await context.e.group.muteMember(qq, 0);
     }
   }
 }
