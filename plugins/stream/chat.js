@@ -31,13 +31,14 @@ function randomRange(min, max) {
 
 /**
  * 聊天工作流 - 提供完整的群聊互动功能
+ * 继承自AIStream基类
  */
 export default class ChatStream extends AIStream {
   constructor() {
     super({
       name: 'chat',
       description: '智能聊天互动工作流',
-      version: '2.0.1',
+      version: '2.0.2',
       author: 'XRK',
       priority: 10,
       config: {
@@ -57,6 +58,9 @@ export default class ChatStream extends AIStream {
     this.init();
   }
 
+  /**
+   * 初始化工作流
+   */
   async init() {
     await BotUtil.mkdir(TEMP_IMAGE_DIR);
     await this.loadEmotionImages();
@@ -66,6 +70,9 @@ export default class ChatStream extends AIStream {
     setInterval(() => this.cleanupCache(), 300000); // 5分钟
   }
 
+  /**
+   * 加载表情包图片
+   */
   async loadEmotionImages() {
     for (const emotion of EMOTION_TYPES) {
       const emotionDir = path.join(EMOTIONS_DIR, emotion);
@@ -84,6 +91,9 @@ export default class ChatStream extends AIStream {
     }
   }
 
+  /**
+   * 注册所有功能
+   */
   registerAllFunctions() {
     // 表情包功能
     this.registerFunction('emotion', {
@@ -467,6 +477,8 @@ export default class ChatStream extends AIStream {
 
   /**
    * 获取随机表情图片
+   * @param {string} emotion - 表情类型
+   * @returns {string|null} 图片路径
    */
   getRandomEmotionImage(emotion) {
     const images = this.emotionImages[emotion];
@@ -476,6 +488,7 @@ export default class ChatStream extends AIStream {
 
   /**
    * 记录消息历史
+   * @param {object} e - 消息事件
    */
   recordMessage(e) {
     if (!e.isGroup) return;
@@ -522,6 +535,8 @@ export default class ChatStream extends AIStream {
 
   /**
    * 获取Bot角色
+   * @param {object} e - 消息事件
+   * @returns {string} 角色名称
    */
   async getBotRole(e) {
     if (!e.isGroup) return '成员';
@@ -548,28 +563,10 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 检查权限 - 重写基类方法
-   */
-  async checkPermission(permission, context) {
-    const { e } = context;
-    if (!e?.isGroup) return false;
-    if (e.isMaster) return true;
-
-    const botRole = await this.getBotRole(e);
-    
-    switch (permission) {
-      case 'admin':
-      case 'mute':
-        return botRole === '群主' || botRole === '管理员';
-      case 'owner':
-        return botRole === '群主';
-      default:
-        return true;
-    }
-  }
-
-  /**
    * 处理图片识别
+   * @param {string} imageUrl - 图片URL
+   * @param {object} config - 配置
+   * @returns {string} 图片描述
    */
   async processImage(imageUrl, config) {
     if (!imageUrl || !config?.visionModel) {
@@ -622,6 +619,8 @@ export default class ChatStream extends AIStream {
 
   /**
    * 下载图片
+   * @param {string} url - 图片URL
+   * @returns {string} 本地文件路径
    */
   async downloadImage(url) {
     try {
@@ -631,7 +630,8 @@ export default class ChatStream extends AIStream {
       const filename = `temp_${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
       const filePath = path.join(TEMP_IMAGE_DIR, filename);
       
-      await promisify(pipeline)(response.body, fs.createWriteStream(filePath));
+      const streamPipeline = promisify(pipeline);
+      await streamPipeline(response.body, fs.createWriteStream(filePath));
       return filePath;
     } catch (error) {
       throw new Error(`图片下载失败: ${error.message}`);
@@ -640,6 +640,9 @@ export default class ChatStream extends AIStream {
 
   /**
    * 上传图片到API
+   * @param {string} filePath - 本地文件路径
+   * @param {object} config - 配置
+   * @returns {string} 上传后的URL
    */
   async uploadImageToAPI(filePath, config) {
     if (!config?.fileUploadUrl) {
@@ -675,7 +678,9 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 构建系统提示
+   * 构建系统提示 - 重写基类方法
+   * @param {object} context - 上下文信息
+   * @returns {string} 系统提示
    */
   buildSystemPrompt(context) {
     const { e, question } = context;
@@ -740,7 +745,10 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
   }
 
   /**
-   * 构建聊天上下文
+   * 构建聊天上下文 - 重写基类方法
+   * @param {object} e - 消息事件
+   * @param {object} question - 用户问题
+   * @returns {Array} 消息数组
    */
   async buildChatContext(e, question) {
     const messages = [];
@@ -826,34 +834,10 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
   }
 
   /**
-   * 清理文本中的所有功能标记
-   */
-  cleanFunctionMarkers(text) {
-    let cleanText = text;
-    
-    // 移除所有功能标记
-    const markers = [
-      /\[(开心|惊讶|伤心|大笑|害怕|生气)\]/g,  // 表情包
-      /\[CQ:poke,qq=\d+\]/g,  // 戳一戳
-      /\[回应:[^:]+:[^\]]+\]/g,  // 表情回应
-      /\[点赞:\d+:\d+\]/g,  // 点赞
-      /\[签到\]/g,  // 签到
-      /\[禁言:\d+:\d+\]/g,  // 禁言
-      /\[解禁:\d+\]/g,  // 解禁
-      /\[精华:[^\]]+\]/g,  // 精华
-      /\[公告:[^\]]+\]/g,  // 公告
-      /\[提醒:[^:]+:[^:]+:[^\]]+\]/g  // 提醒
-    ];
-    
-    markers.forEach(marker => {
-      cleanText = cleanText.replace(marker, '');
-    });
-    
-    return cleanText.trim();
-  }
-
-  /**
    * 解析CQ码
+   * @param {string} text - 包含CQ码的文本
+   * @param {object} e - 消息事件
+   * @returns {Array} 消息段数组
    */
   async parseCQCodes(text, e) {
     const segments = [];
@@ -914,7 +898,11 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
   }
 
   /**
-   * 执行工作流 - 重写基类方法以添加功能标记清理
+   * 执行工作流 - 重写基类方法
+   * @param {object} e - 消息事件
+   * @param {object} question - 用户问题
+   * @param {object} config - API配置
+   * @returns {string|null} 处理结果
    */
   async execute(e, question, config) {
     try {
@@ -931,11 +919,8 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
         return null;
       }
       
-      // 解析并执行功能
-      const { functions, cleanText } = await this.parseFunctions(response, context);
-      
-      // 清理所有功能标记
-      let finalText = this.cleanFunctionMarkers(cleanText);
+      // 使用基类的parseFunctions方法解析并清理功能标记
+      const { functions, cleanText } = this.parseFunctions(response, context);
       
       // 执行功能
       for (const func of functions) {
@@ -943,8 +928,8 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
       }
       
       // 处理多条消息（用 | 分隔）
-      if (finalText.includes('|')) {
-        const messages = finalText.split('|').map(m => m.trim()).filter(m => m);
+      if (cleanText.includes('|')) {
+        const messages = cleanText.split('|').map(m => m.trim()).filter(m => m);
         
         for (let i = 0; i < messages.length; i++) {
           const msg = messages[i];
@@ -961,16 +946,16 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
             }
           }
         }
-      } else if (finalText) {
+      } else if (cleanText) {
         // 单条消息
-        const segments = await this.parseCQCodes(finalText, e);
+        const segments = await this.parseCQCodes(cleanText, e);
         
         if (segments.length > 0) {
           await e.reply(segments);
         }
       }
       
-      return finalText;
+      return cleanText;
       
     } catch (error) {
       BotUtil.makeLog('error', `ChatStream执行失败: ${error.message}`, 'ChatStream');
