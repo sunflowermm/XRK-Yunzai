@@ -1,10 +1,15 @@
 import path from 'path';
 import fs from 'fs';
+import fetch from 'node-fetch';
+import FormData from 'form-data';
+import { promisify } from 'util';
+import { pipeline } from 'stream';
 import AIStream from '../../lib/aistream/base.js';
 import BotUtil from '../../lib/common/util.js';
 
 const _path = process.cwd();
 const EMOTIONS_DIR = path.join(_path, 'plugins/XRK/config/ai-assistant');
+const TEMP_IMAGE_DIR = path.join(_path, 'data/temp/ai_images');
 const EMOTION_TYPES = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
 
 // 表情回应映射
@@ -18,6 +23,11 @@ const EMOJI_REACTIONS = {
   '爱心': ['66', '122', '319'],
   '生气': ['8', '23', '39', '86', '179', '265']
 };
+
+// 工具函数：生成随机范围数字
+function randomRange(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
 
 /**
  * 聊天工作流 - 提供完整的群聊互动功能
@@ -48,8 +58,12 @@ export default class ChatStream extends AIStream {
   }
 
   async init() {
+    await BotUtil.mkdir(TEMP_IMAGE_DIR);
     await this.loadEmotionImages();
     this.registerAllFunctions();
+    
+    // 定期清理缓存
+    setInterval(() => this.cleanupCache(), 300000); // 5分钟
   }
 
   async loadEmotionImages() {
@@ -91,10 +105,10 @@ export default class ChatStream extends AIStream {
             params: { emotion: match[1] }
           });
           // 删除所有表情标记
-          cleanText = text.replace(/\[(开心|惊讶|伤心|大笑|害怕|生气)\]/g, '');
+          cleanText = text.replace(/\[(开心|惊讶|伤心|大笑|害怕|生气)\]/g, '').trim();
         }
         
-        return { functions, cleanText: cleanText.trim() };
+        return { functions, cleanText };
       },
       handler: async (params, context) => {
         const image = this.getRandomEmotionImage(params.emotion);
@@ -135,10 +149,10 @@ export default class ChatStream extends AIStream {
         }
         
         if (functions.length > 0) {
-          cleanText = text.replace(pokeRegex, '');
+          cleanText = text.replace(pokeRegex, '').trim();
         }
         
-        return { functions, cleanText: cleanText.trim() };
+        return { functions, cleanText };
       },
       handler: async (params, context) => {
         if (context.e?.isGroup) {
@@ -181,10 +195,10 @@ export default class ChatStream extends AIStream {
         }
         
         if (functions.length > 0) {
-          cleanText = text.replace(regex, '');
+          cleanText = text.replace(regex, '').trim();
         }
         
-        return { functions, cleanText: cleanText.trim() };
+        return { functions, cleanText };
       },
       handler: async (params, context) => {
         if (context.e?.isGroup && EMOJI_REACTIONS[params.emojiType]) {
@@ -218,10 +232,10 @@ export default class ChatStream extends AIStream {
         }
         
         if (functions.length > 0) {
-          cleanText = text.replace(regex, '');
+          cleanText = text.replace(regex, '').trim();
         }
         
-        return { functions, cleanText: cleanText.trim() };
+        return { functions, cleanText };
       },
       handler: async (params, context) => {
         if (context.e?.isGroup) {
@@ -247,10 +261,10 @@ export default class ChatStream extends AIStream {
         
         if (text.includes('[签到]')) {
           functions.push({ type: 'sign', params: {} });
-          cleanText = text.replace(/\[签到\]/g, '');
+          cleanText = text.replace(/\[签到\]/g, '').trim();
         }
         
-        return { functions, cleanText: cleanText.trim() };
+        return { functions, cleanText };
       },
       handler: async (params, context) => {
         if (context.e?.isGroup) {
@@ -282,10 +296,10 @@ export default class ChatStream extends AIStream {
         }
         
         if (functions.length > 0) {
-          cleanText = text.replace(regex, '');
+          cleanText = text.replace(regex, '').trim();
         }
         
-        return { functions, cleanText: cleanText.trim() };
+        return { functions, cleanText };
       },
       handler: async (params, context) => {
         if (context.e?.isGroup) {
@@ -319,10 +333,10 @@ export default class ChatStream extends AIStream {
         }
         
         if (functions.length > 0) {
-          cleanText = text.replace(regex, '');
+          cleanText = text.replace(regex, '').trim();
         }
         
-        return { functions, cleanText: cleanText.trim() };
+        return { functions, cleanText };
       },
       handler: async (params, context) => {
         if (context.e?.isGroup) {
@@ -356,10 +370,10 @@ export default class ChatStream extends AIStream {
         }
         
         if (functions.length > 0) {
-          cleanText = text.replace(regex, '');
+          cleanText = text.replace(regex, '').trim();
         }
         
-        return { functions, cleanText: cleanText.trim() };
+        return { functions, cleanText };
       },
       handler: async (params, context) => {
         if (context.e?.isGroup) {
@@ -392,10 +406,10 @@ export default class ChatStream extends AIStream {
         }
         
         if (functions.length > 0) {
-          cleanText = text.replace(regex, '');
+          cleanText = text.replace(regex, '').trim();
         }
         
-        return { functions, cleanText: cleanText.trim() };
+        return { functions, cleanText };
       },
       handler: async (params, context) => {
         if (context.e?.isGroup) {
@@ -408,6 +422,38 @@ export default class ChatStream extends AIStream {
       },
       enabled: true,
       permission: 'admin'
+    });
+
+    // 提醒功能
+    this.registerFunction('reminder', {
+      description: '设置定时提醒',
+      prompt: `[提醒:年-月-日 时:分:内容] - 设置定时提醒`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[提醒:([^:]+):([^:]+):([^\]]+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ 
+            type: 'reminder', 
+            params: { dateStr: match[1], timeStr: match[2], content: match[3] }
+          });
+        }
+        
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        // 提醒功能需要在插件层面实现
+        if (context.onReminder) {
+          await context.onReminder(params, context);
+        }
+      },
+      enabled: true
     });
   }
 
@@ -453,7 +499,8 @@ export default class ChatStream extends AIStream {
         nickname: e.sender?.card || e.sender?.nickname || '未知',
         message: message,
         message_id: e.message_id,
-        time: Date.now()
+        time: Date.now(),
+        hasImage: e.img?.length > 0
       });
       
       // 保持历史记录在30条以内
@@ -510,6 +557,112 @@ export default class ChatStream extends AIStream {
         return botRole === '群主';
       default:
         return true;
+    }
+  }
+
+  /**
+   * 处理图片识别
+   */
+  async processImage(imageUrl, config) {
+    if (!imageUrl || !config?.visionModel) {
+      return '无法识别';
+    }
+    
+    let tempFilePath = null;
+    try {
+      // 下载图片
+      tempFilePath = await this.downloadImage(imageUrl);
+      
+      // 上传到API
+      const uploadedUrl = await this.uploadImageToAPI(tempFilePath, config);
+      
+      // 识图
+      const messages = [
+        {
+          role: 'system',
+          content: '请详细描述这张图片的内容，包括主要对象、场景、颜色、氛围等'
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image_url',
+              image_url: { url: uploadedUrl }
+            }
+          ]
+        }
+      ];
+      
+      const result = await this.callAI(messages, {
+        ...config,
+        model: config.visionModel
+      });
+      
+      return result || '识图失败';
+      
+    } catch (error) {
+      BotUtil.makeLog('error', `图片处理失败: ${error.message}`, 'ChatStream');
+      return '图片处理失败';
+    } finally {
+      if (tempFilePath && fs.existsSync(tempFilePath)) {
+        try {
+          fs.unlinkSync(tempFilePath);
+        } catch {}
+      }
+    }
+  }
+
+  /**
+   * 下载图片
+   */
+  async downloadImage(url) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`下载失败: ${response.statusText}`);
+      
+      const filename = `temp_${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
+      const filePath = path.join(TEMP_IMAGE_DIR, filename);
+      
+      await promisify(pipeline)(response.body, fs.createWriteStream(filePath));
+      return filePath;
+    } catch (error) {
+      throw new Error(`图片下载失败: ${error.message}`);
+    }
+  }
+
+  /**
+   * 上传图片到API
+   */
+  async uploadImageToAPI(filePath, config) {
+    if (!config?.fileUploadUrl) {
+      throw new Error('未配置文件上传URL');
+    }
+    
+    try {
+      const form = new FormData();
+      const fileBuffer = await fs.promises.readFile(filePath);
+      form.append('file', fileBuffer, {
+        filename: path.basename(filePath),
+        contentType: 'image/png'
+      });
+      
+      const response = await fetch(config.fileUploadUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${config.apiKey}`,
+          ...form.getHeaders()
+        },
+        body: form
+      });
+      
+      if (!response.ok) {
+        throw new Error(`上传失败: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      return result.data?.url || result.url;
+    } catch (error) {
+      throw new Error(`图片上传失败: ${error.message}`);
     }
   }
 
@@ -629,10 +782,16 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
           });
         }
         
-        // 当前消息
+        // 当前消息（包含图片识别结果）
         const userInfo = e.sender?.card || e.sender?.nickname || '未知';
-        const actualQuestion = typeof question === 'string' ? question : 
-                              (question?.content || question?.text || '');
+        let actualQuestion = typeof question === 'string' ? question : 
+                            (question?.content || question?.text || '');
+        
+        // 如果有图片，添加图片描述
+        if (question?.imageDescriptions?.length > 0) {
+          actualQuestion += ' ' + question.imageDescriptions.join(' ');
+        }
+        
         messages.push({
           role: 'user',
           content: `[当前消息]\n${userInfo}(${e.user_id})[${e.message_id}]: ${actualQuestion}`
@@ -641,8 +800,14 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
     } else {
       // 私聊
       const userInfo = e.sender?.nickname || '未知';
-      const actualQuestion = typeof question === 'string' ? question : 
-                            (question?.content || question?.text || '');
+      let actualQuestion = typeof question === 'string' ? question : 
+                          (question?.content || question?.text || '');
+      
+      // 如果有图片，添加图片描述
+      if (question?.imageDescriptions?.length > 0) {
+        actualQuestion += ' ' + question.imageDescriptions.join(' ');
+      }
+      
       messages.push({
         role: 'user',
         content: `${userInfo}(${e.user_id}): ${actualQuestion}`
@@ -676,6 +841,7 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
           switch (type) {
             case 'at':
               if (e.isGroup && paramObj.qq) {
+                // 验证QQ号是否在历史记录中
                 const history = this.messageHistory.get(e.group_id) || [];
                 const userExists = history.some(msg => 
                   String(msg.user_id) === String(paramObj.qq)
@@ -696,7 +862,11 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
                 segments.push(segment.image(paramObj.file));
               }
               break;
+            case 'poke':
+              // 戳一戳在handler中处理
+              break;
             default:
+              // 忽略未知CQ码
               break;
           }
         }
@@ -706,5 +876,29 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
     }
     
     return segments;
+  }
+
+  /**
+   * 清理缓存
+   */
+  cleanupCache() {
+    const now = Date.now();
+    
+    // 清理消息历史
+    for (const [groupId, messages] of this.messageHistory.entries()) {
+      const filtered = messages.filter(msg => now - msg.time < 1800000); // 保留30分钟
+      if (filtered.length === 0) {
+        this.messageHistory.delete(groupId);
+      } else {
+        this.messageHistory.set(groupId, filtered);
+      }
+    }
+    
+    // 清理用户缓存
+    for (const [key, data] of this.userCache.entries()) {
+      if (now - data.time > 300000) { // 5分钟
+        this.userCache.delete(key);
+      }
+    }
   }
 }
