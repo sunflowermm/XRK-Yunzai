@@ -1,11 +1,13 @@
 import path from 'path';
 import fs from 'fs';
-import BaseStream from '../../lib/aistream/base.js';
+import AIStream from '../../lib/aistream/base.js';
 import BotUtil from '../../lib/common/util.js';
 
-const PERSONAS_DIR = path.join(process.cwd(), 'plugins/XRK/config/ai-assistant/personas');
-const EMOTIONS_DIR = path.join(process.cwd(), 'plugins/XRK/config/ai-assistant');
+const _path = process.cwd();
+const EMOTIONS_DIR = path.join(_path, 'plugins/XRK/config/ai-assistant');
+const EMOTION_TYPES = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
 
+// 表情回应映射
 const EMOJI_REACTIONS = {
   '开心': ['4', '14', '21', '28', '76', '79', '99', '182', '201', '290'],
   '惊讶': ['26', '32', '97', '180', '268', '289'],
@@ -17,175 +19,384 @@ const EMOJI_REACTIONS = {
   '生气': ['8', '23', '39', '86', '179', '265']
 };
 
-export default class ChatStream extends BaseStream {
+/**
+ * 聊天工作流
+ * 提供群聊互动、表情包、各种群功能
+ */
+export default class ChatStream extends AIStream {
   constructor() {
     super({
       name: 'chat',
-      description: '智能聊天工作流，支持表情、互动、群管理等功能',
-      version: '2.0.0',
-      author: 'XRK'
+      description: '群聊互动工作流',
+      version: '1.0.0',
+      author: 'XRK',
+      priority: 10,
+      config: {
+        enabled: true
+      }
     });
-    
+
     this.emotionImages = {};
-    this.personas = {};
-    this.currentPersona = 'assistant';
+    this.messageHistory = new Map();
+    
+    this.init();
   }
 
-  init() {
-    this.registerFeature('emotion', {
-      name: '表情包',
-      description: '发送表情包图片',
-      enabled: true,
+  async init() {
+    // 加载表情包
+    await this.loadEmotionImages();
+    
+    // 注册所有功能
+    this.registerAllFunctions();
+  }
+
+  /**
+   * 加载表情包
+   */
+  async loadEmotionImages() {
+    for (const emotion of EMOTION_TYPES) {
+      const emotionDir = path.join(EMOTIONS_DIR, emotion);
+      try {
+        await BotUtil.mkdir(emotionDir);
+        const files = await fs.promises.readdir(emotionDir);
+        const imageFiles = files.filter(file => 
+          /\.(jpg|jpeg|png|gif)$/i.test(file)
+        );
+        this.emotionImages[emotion] = imageFiles.map(file => 
+          path.join(emotionDir, file)
+        );
+      } catch {
+        this.emotionImages[emotion] = [];
+      }
+    }
+  }
+
+  /**
+   * 注册所有功能
+   */
+  registerAllFunctions() {
+    // 表情包功能
+    this.registerFunction('emotion', {
       prompt: `【表情包系统】
 在文字中插入以下标记来发送表情包（一次对话只能使用一个表情包）：
 [开心] [惊讶] [伤心] [大笑] [害怕] [生气]
 重要：每次回复最多只能使用一个表情包标记！`,
-      pattern: '\\[(开心|惊讶|伤心|大笑|害怕|生气)\\]',
-      priority: 200
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        
+        const emotionRegex = /\[(开心|惊讶|伤心|大笑|害怕|生气)\]/g;
+        const match = emotionRegex.exec(text);
+        if (match) {
+          functions.push({ type: 'emotion', params: [match[1]] });
+          cleanText = text.replace(emotionRegex, '');
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async ([emotion], context) => {
+        const image = this.getRandomEmotionImage(emotion);
+        if (image && context.e) {
+          await context.e.reply(segment.image(image));
+          await BotUtil.sleep(300);
+        }
+      },
+      enabled: true
     });
 
-    this.registerFeature('at', {
-      name: '@提及',
-      description: '@某人',
+    // @功能
+    this.registerFunction('at', {
+      prompt: `[CQ:at,qq=QQ号] - @某人（确保QQ号存在）`,
+      parser: (text, context) => {
+        const functions = [];
+        const atRegex = /\[CQ:at,qq=(\d+)\]/g;
+        let match;
+        
+        while ((match = atRegex.exec(text))) {
+          functions.push({ type: 'at', params: [match[1]] });
+        }
+        
+        return { functions };
+      },
+      handler: async ([qq], context) => {
+        // @功能在文本中处理
+      },
+      enabled: true
+    });
+
+    // 戳一戳功能
+    this.registerFunction('poke', {
+      prompt: `[CQ:poke,qq=QQ号] - 戳一戳某人`,
+      parser: (text, context) => {
+        const functions = [];
+        const pokeRegex = /\[CQ:poke,qq=(\d+)\]/g;
+        let match;
+        
+        while ((match = pokeRegex.exec(text))) {
+          functions.push({ type: 'poke', params: [match[1]] });
+        }
+        
+        return { functions, cleanText: text.replace(pokeRegex, '') };
+      },
+      handler: async ([qq], context) => {
+        if (context.e?.isGroup) {
+          try {
+            await context.e.group.pokeMember(qq);
+          } catch (error) {
+            BotUtil.makeLog('debug', `戳一戳失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
+      enabled: true
+    });
+
+    // 回复功能
+    this.registerFunction('reply', {
+      prompt: `[CQ:reply,id=消息ID] - 回复某条消息`,
+      parser: (text, context) => {
+        const functions = [];
+        const replyRegex = /\[CQ:reply,id=([^\]]+)\]/g;
+        let match;
+        
+        while ((match = replyRegex.exec(text))) {
+          functions.push({ type: 'reply', params: [match[1]] });
+        }
+        
+        return { functions };
+      },
+      handler: async ([msgId], context) => {
+        // 回复功能在文本中处理
+      },
+      enabled: true
+    });
+
+    // 表情回应功能
+    this.registerFunction('emojiReaction', {
+      prompt: `[回应:消息ID:表情类型] - 给消息添加表情回应`,
+      parser: (text, context) => {
+        const functions = [];
+        const regex = /\[回应:([^:]+):([^\]]+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ type: 'emojiReaction', params: [match[1], match[2]] });
+        }
+        
+        return { functions, cleanText: text.replace(regex, '') };
+      },
+      handler: async ([msgId, emojiType], context) => {
+        if (context.e?.isGroup && EMOJI_REACTIONS[emojiType]) {
+          const emojiIds = EMOJI_REACTIONS[emojiType];
+          const emojiId = emojiIds[Math.floor(Math.random() * emojiIds.length)];
+          try {
+            await context.e.group.setEmojiLike(msgId, emojiId);
+          } catch (error) {
+            BotUtil.makeLog('debug', `表情回应失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
+      enabled: true
+    });
+
+    // 点赞功能
+    this.registerFunction('thumbUp', {
+      prompt: `[点赞:QQ号:次数] - 给某人点赞（1-50次）`,
+      parser: (text, context) => {
+        const functions = [];
+        const regex = /\[点赞:(\d+):(\d+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ type: 'thumbUp', params: [match[1], match[2]] });
+        }
+        
+        return { functions, cleanText: text.replace(regex, '') };
+      },
+      handler: async ([qq, count], context) => {
+        if (context.e?.isGroup) {
+          const thumbCount = Math.min(parseInt(count) || 1, 50);
+          try {
+            await context.e.group.pickMember(qq).thumbUp(thumbCount);
+          } catch (error) {
+            BotUtil.makeLog('debug', `点赞失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
+      enabled: true
+    });
+
+    // 签到功能
+    this.registerFunction('sign', {
+      prompt: `[签到] - 执行群签到`,
+      parser: (text, context) => {
+        const functions = [];
+        if (text.includes('[签到]')) {
+          functions.push({ type: 'sign', params: [] });
+        }
+        return { functions, cleanText: text.replace(/\[签到\]/g, '') };
+      },
+      handler: async (params, context) => {
+        if (context.e?.isGroup) {
+          try {
+            await context.e.group.sign();
+          } catch (error) {
+            BotUtil.makeLog('debug', `签到失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
+      enabled: true
+    });
+
+    // 禁言功能
+    this.registerFunction('mute', {
+      prompt: `[禁言:QQ号:秒数] - 禁言`,
+      parser: (text, context) => {
+        const functions = [];
+        const regex = /\[禁言:(\d+):(\d+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ type: 'mute', params: [match[1], match[2]] });
+        }
+        
+        return { functions, cleanText: text.replace(regex, '') };
+      },
+      handler: async ([qq, duration], context) => {
+        if (context.e?.isGroup) {
+          try {
+            await context.e.group.muteMember(qq, parseInt(duration));
+          } catch (error) {
+            BotUtil.makeLog('debug', `禁言失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
       enabled: true,
-      prompt: '[CQ:at,qq=QQ号] - @某人（确保QQ号存在）',
-      pattern: '\\[CQ:at,qq=(\\d+)\\]',
-      priority: 150
+      permission: 'admin'
     });
 
-    this.registerFeature('poke', {
-      name: '戳一戳',
-      description: '戳一戳某人',
+    // 解禁功能
+    this.registerFunction('unmute', {
+      prompt: `[解禁:QQ号] - 解除禁言`,
+      parser: (text, context) => {
+        const functions = [];
+        const regex = /\[解禁:(\d+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ type: 'unmute', params: [match[1]] });
+        }
+        
+        return { functions, cleanText: text.replace(regex, '') };
+      },
+      handler: async ([qq], context) => {
+        if (context.e?.isGroup) {
+          try {
+            await context.e.group.muteMember(qq, 0);
+          } catch (error) {
+            BotUtil.makeLog('debug', `解禁失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
       enabled: true,
-      prompt: '[CQ:poke,qq=QQ号] - 戳一戳某人',
-      pattern: '\\[CQ:poke,qq=(\\d+)\\]',
-      priority: 140
+      permission: 'admin'
     });
 
-    this.registerFeature('reply', {
-      name: '消息回复',
-      description: '回复某条消息',
+    // 精华功能
+    this.registerFunction('essence', {
+      prompt: `[精华:消息ID] - 设置精华消息`,
+      parser: (text, context) => {
+        const functions = [];
+        const regex = /\[精华:([^\]]+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ type: 'essence', params: [match[1]] });
+        }
+        
+        return { functions, cleanText: text.replace(regex, '') };
+      },
+      handler: async ([msgId], context) => {
+        if (context.e?.isGroup) {
+          try {
+            await context.e.group.setEssence(msgId);
+          } catch (error) {
+            BotUtil.makeLog('debug', `设置精华失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
       enabled: true,
-      prompt: '[CQ:reply,id=消息ID] - 回复某条消息',
-      pattern: '\\[CQ:reply,id=([^\\]]+)\\]',
-      priority: 160
+      permission: 'admin'
     });
 
-    this.registerFeature('emojiReaction', {
-      name: '表情回应',
-      description: '给消息添加表情回应',
+    // 公告功能
+    this.registerFunction('notice', {
+      prompt: `[公告:内容] - 发布群公告`,
+      parser: (text, context) => {
+        const functions = [];
+        const regex = /\[公告:([^\]]+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ type: 'notice', params: [match[1]] });
+        }
+        
+        return { functions, cleanText: text.replace(regex, '') };
+      },
+      handler: async ([content], context) => {
+        if (context.e?.isGroup) {
+          try {
+            await context.e.group.sendNotice(content);
+          } catch (error) {
+            BotUtil.makeLog('debug', `发布公告失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
       enabled: true,
-      prompt: '[回应:消息ID:表情类型] - 给消息添加表情回应',
-      pattern: '\\[回应:([^:]+):([^\\]]+)\\]',
-      priority: 130
+      permission: 'admin'
     });
-
-    this.registerFeature('thumbUp', {
-      name: '点赞',
-      description: '给某人点赞',
-      enabled: true,
-      prompt: '[点赞:QQ号:次数] - 给某人点赞（1-50次）',
-      pattern: '\\[点赞:(\\d+):(\\d+)\\]',
-      priority: 120
-    });
-
-    this.registerFeature('sign', {
-      name: '签到',
-      description: '群签到',
-      enabled: true,
-      prompt: '[签到] - 执行群签到',
-      pattern: '\\[签到\\]',
-      priority: 110
-    });
-
-    this.registerFeature('mute', {
-      name: '禁言',
-      description: '禁言群成员',
-      enabled: true,
-      prompt: '[禁言:QQ号:秒数] - 禁言',
-      pattern: '\\[禁言:(\\d+):(\\d+)\\]',
-      priority: 100
-    });
-
-    this.registerFeature('unmute', {
-      name: '解禁',
-      description: '解除禁言',
-      enabled: true,
-      prompt: '[解禁:QQ号] - 解除禁言',
-      pattern: '\\[解禁:(\\d+)\\]',
-      priority: 100
-    });
-
-    this.registerFeature('reminder', {
-      name: '定时提醒',
-      description: '设置定时提醒',
-      enabled: true,
-      prompt: '[提醒:年-月-日 时:分:内容] - 设置定时提醒',
-      pattern: '\\[提醒:([^:]+):([^:]+):([^\\]]+)\\]',
-      priority: 90
-    });
-
-    this.loadResources();
   }
 
-  async loadResources() {
-    await this.loadEmotionImages();
-    await this.loadPersonas();
+  /**
+   * 获取随机表情图片
+   */
+  getRandomEmotionImage(emotion) {
+    const images = this.emotionImages[emotion];
+    if (!images || images.length === 0) return null;
+    return images[Math.floor(Math.random() * images.length)];
   }
 
-  async loadEmotionImages() {
-    const emotions = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
+  /**
+   * 记录消息历史
+   */
+  recordMessage(e) {
+    if (!e.isGroup) return;
     
-    for (const emotion of emotions) {
-      const emotionDir = path.join(EMOTIONS_DIR, emotion);
-      const files = await fs.promises.readdir(emotionDir);
-      const imageFiles = files.filter(file => 
-        /\.(jpg|jpeg|png|gif)$/i.test(file)
-      );
-      this.emotionImages[emotion] = imageFiles.map(file => 
-        path.join(emotionDir, file)
-      );
+    const groupId = e.group_id;
+    if (!this.messageHistory.has(groupId)) {
+      this.messageHistory.set(groupId, []);
+    }
+    
+    const history = this.messageHistory.get(groupId);
+    history.push({
+      user_id: e.user_id,
+      nickname: e.sender?.card || e.sender?.nickname || '未知',
+      message: e.raw_message || e.msg,
+      message_id: e.message_id,
+      time: Date.now()
+    });
+    
+    if (history.length > 30) {
+      history.shift();
     }
   }
 
-  async loadPersonas() {
-    await BotUtil.mkdir(PERSONAS_DIR);
+  /**
+   * 构建系统提示
+   */
+  buildSystemPrompt(context) {
+    const { e, persona, dateStr, isGlobalTrigger, botRole } = context;
     
-    const defaultPersonaPath = path.join(PERSONAS_DIR, 'assistant.txt');
-    if (!fs.existsSync(defaultPersonaPath)) {
-      await fs.promises.writeFile(defaultPersonaPath, `我是${Bot.nickname}，一个智能AI助手。
-我会认真观察群聊，适时发表评论和互动。
-喜欢用表情回应别人的消息，也会戳一戳活跃气氛。
-对不同的人有不同的态度，记得每个人的名字。
-会根据聊天氛围选择合适的表情和互动方式。`);
-    }
-    
-    const files = await BotUtil.glob(path.join(PERSONAS_DIR, '*.txt'));
-    for (const file of files) {
-      const name = path.basename(file, '.txt');
-      this.personas[name] = await fs.promises.readFile(file, 'utf8');
-    }
-  }
-
-  async buildSystemPrompt(context, options = {}) {
-    const e = context.e;
-    const persona = this.personas[this.currentPersona] || this.personas.assistant || '我是AI助手';
-    const isGlobalTrigger = context.isGlobalTrigger || false;
-    const botRole = await this.getBotRole(e);
-    
-    const now = new Date();
-    const dateStr = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日 ${now.getHours()}:${now.getMinutes().toString().padStart(2, '0')}`;
-    
-    const enabledFeatures = this.getEnabledFeatures();
-    const featurePrompts = enabledFeatures
-      .filter(f => f.prompt)
-      .map(f => f.prompt)
-      .join('\n');
-    
-    const adminFeatures = botRole !== '成员' ? `[禁言:QQ号:秒数] - 禁言
-[解禁:QQ号] - 解除禁言
-[精华:消息ID] - 设置精华消息
-[公告:内容] - 发布群公告` : '';
+    const functionsPrompt = this.buildFunctionsPrompt();
     
     return `【人设设定】
 ${persona}
@@ -209,11 +420,7 @@ ${isGlobalTrigger ? '观察群聊后主动发言' : '被召唤回复'}
 3. 最多使用一个竖线分隔符(|)，也就是最多发送两条消息
 4. 每条消息不要太长，像正常聊天一样
 5. 适当使用表情包和互动功能
-
-${featurePrompts}
-
-【互动功能】
-${adminFeatures}
+${functionsPrompt}
 
 【重要限制】
 1. 每次回复最多只能发一个表情包
@@ -228,120 +435,107 @@ ${isGlobalTrigger ? '1. 主动发言要有新意，不要重复他人观点\n2. 
 ${e.isMaster ? '5. 对主人要特别友好和尊重' : ''}`;
   }
 
-  async getBotRole(e) {
-    if (!e.isGroup) return '';
+  /**
+   * 构建聊天上下文
+   */
+  async buildChatContext(e, question) {
+    const messages = [];
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日 ${now.getHours()}:${now.getMinutes().toString().padStart(2, '0')}`;
     
-    const member = e.group.pickMember(e.self_id);
-    const info = await member.getInfo();
-    return info.role === 'owner' ? '群主' : 
-           info.role === 'admin' ? '管理员' : '成员';
-  }
-
-  async buildMessages(context, options = {}) {
-    const e = context.e;
-    const systemPrompt = await this.buildSystemPrompt(context, options);
-    const messages = [{ role: 'system', content: systemPrompt }];
+    // 获取Bot角色
+    let botRole = '成员';
+    if (e.isGroup) {
+      try {
+        const member = e.group.pickMember(e.self_id);
+        const info = await member.getInfo();
+        botRole = info.role === 'owner' ? '群主' : 
+                 info.role === 'admin' ? '管理员' : '成员';
+      } catch {}
+    }
     
-    if (e.isGroup && context.history) {
-      const historyText = context.history.map(msg => 
-        `${msg.nickname}(${msg.user_id})[${msg.message_id}]: ${msg.message}`
-      ).join('\n');
-      
+    // 判断是否全局触发
+    const isGlobalTrigger = !question || question === '[全局触发]';
+    
+    messages.push({
+      role: 'system',
+      content: this.buildSystemPrompt({
+        e,
+        persona: question.persona || '我是AI助手',
+        dateStr,
+        isGlobalTrigger,
+        botRole
+      })
+    });
+    
+    // 添加群聊历史
+    if (e.isGroup) {
+      const history = this.messageHistory.get(e.group_id) || [];
+      if (history.length > 0) {
+        const recentMessages = isGlobalTrigger ? 
+          history.slice(-15) : 
+          history.slice(-10);
+        
+        messages.push({
+          role: 'user',
+          content: `[群聊记录]\n${recentMessages.map(msg => 
+            `${msg.nickname}(${msg.user_id})[${msg.message_id}]: ${msg.message}`
+          ).join('\n')}`
+        });
+      }
+    }
+    
+    // 添加当前问题
+    if (!isGlobalTrigger) {
+      const userInfo = e.sender?.card || e.sender?.nickname || '未知';
       messages.push({
         role: 'user',
-        content: context.isGlobalTrigger ? 
-          `[群聊记录]\n${historyText}\n\n请对当前话题发表你的看法，要自然且有自己的观点。` :
-          `[群聊记录]\n${historyText}\n\n[当前消息]\n${context.question}`
+        content: `[当前消息]\n${userInfo}(${e.user_id})[${e.message_id}]: ${question}`
       });
     } else {
       messages.push({
         role: 'user',
-        content: context.question || ''
+        content: '请对当前话题发表你的看法，要自然且有自己的观点。'
       });
     }
     
     return messages;
   }
 
-  async parseResponse(response, context) {
-    const results = {
-      text: [],
-      functions: [],
-      segments: [],
-      emotions: []
-    };
-
-    const segments = response.split('|').map(s => s.trim()).filter(s => s).slice(0, 2);
-    results.segments = segments;
-    
-    let emotionFound = false;
-    
-    for (const segment of segments) {
-      const functions = await this.extractFunctions(segment, context);
-      
-      let cleanText = segment;
-      for (const func of functions) {
-        if (func.name === 'emotion' && !emotionFound) {
-          results.emotions.push(func.params[0]);
-          emotionFound = true;
-        }
-        cleanText = cleanText.replace(func.raw, '');
-      }
-      
-      results.functions.push(...functions.filter(f => f.name !== 'emotion'));
-      
-      if (cleanText.trim()) {
-        results.text.push(cleanText.trim());
-      }
-    }
-    
-    return results;
-  }
-
-  async sendResponse(context, parsed) {
-    const e = context.e;
-    
-    if (parsed.emotions.length > 0) {
-      const emotionImage = this.getRandomEmotionImage(parsed.emotions[0]);
-      if (emotionImage) {
-        await e.reply(segment.image(emotionImage));
-        await Bot.sleep(300);
-      }
-    }
-    
-    for (let i = 0; i < parsed.text.length; i++) {
-      const msgSegments = await this.parseCQCodes(parsed.text[i], e);
-      if (msgSegments.length > 0) {
-        await e.reply(msgSegments, Math.random() > 0.5);
-      }
-      
-      if (i < parsed.text.length - 1) {
-        await Bot.sleep(Math.random() * 1000 + 500);
-      }
-    }
-    
-    for (const func of parsed.functions) {
-      if (func.name !== 'emotion') {
-        await this.executeFunction(func);
-      }
-    }
-  }
-
-  getRandomEmotionImage(emotion) {
-    const images = this.emotionImages[emotion];
-    if (!images || images.length === 0) return null;
-    return images[Math.floor(Math.random() * images.length)];
-  }
-
+  /**
+   * 处理CQ码
+   */
   async parseCQCodes(text, e) {
     const segments = [];
     const parts = text.split(/(\[CQ:[^\]]+\])/);
     
     for (const part of parts) {
       if (part.startsWith('[CQ:')) {
-        const cqSegment = await this.parseSingleCQCode(part, e);
-        if (cqSegment) {
-          segments.push(cqSegment);
+        const match = part.match(/\[CQ:(\w+)(?:,([^\]]+))?\]/);
+        if (match) {
+          const [, type, params] = match;
+          const paramObj = {};
+          
+          if (params) {
+            params.split(',').forEach(p => {
+              const [key, value] = p.split('=');
+              paramObj[key] = value;
+            });
+          }
+          
+          switch (type) {
+            case 'at':
+              if (e.isGroup && paramObj.qq) {
+                segments.push(segment.at(paramObj.qq));
+              }
+              break;
+            case 'reply':
+              segments.push(segment.reply(paramObj.id));
+              break;
+            case 'image':
+              segments.push(segment.image(paramObj.file));
+              break;
+          }
         }
       } else if (part) {
         segments.push(part);
@@ -349,81 +543,5 @@ ${e.isMaster ? '5. 对主人要特别友好和尊重' : ''}`;
     }
     
     return segments;
-  }
-
-  async parseSingleCQCode(cqCode, e) {
-    const match = cqCode.match(/\[CQ:(\w+)(?:,([^\]]+))?\]/);
-    if (!match) return null;
-    
-    const [, type, params] = match;
-    const paramObj = {};
-    
-    if (params) {
-      params.split(',').forEach(p => {
-        const [key, value] = p.split('=');
-        paramObj[key] = value;
-      });
-    }
-    
-    switch (type) {
-      case 'at':
-        return segment.at(paramObj.qq);
-      case 'reply':
-        return segment.reply(paramObj.id);
-      case 'image':
-        return segment.image(paramObj.file);
-      default:
-        return null;
-    }
-  }
-
-  async handleemotion(params, context) {
-    // 表情包已在sendResponse中处理
-  }
-
-  async handlepoke(params, context) {
-    const [qq] = params;
-    if (context.e.isGroup) {
-      await context.e.group.pokeMember(qq);
-    }
-  }
-
-  async handleemojiReaction(params, context) {
-    const [msgId, emojiType] = params;
-    if (msgId && EMOJI_REACTIONS[emojiType]) {
-      const emojiIds = EMOJI_REACTIONS[emojiType];
-      const emojiId = emojiIds[Math.floor(Math.random() * emojiIds.length)];
-      await context.e.group.setEmojiLike(msgId, emojiId);
-    }
-  }
-
-  async handlethumbUp(params, context) {
-    const [qq, count] = params;
-    if (context.e.isGroup) {
-      const thumbCount = Math.min(parseInt(count) || 1, 50);
-      await context.e.group.pickMember(qq).thumbUp(thumbCount);
-    }
-  }
-
-  async handlesign(params, context) {
-    if (context.e.isGroup) {
-      await context.e.group.sign();
-    }
-  }
-
-  async handlemute(params, context) {
-    const [qq, seconds] = params;
-    const botRole = await this.getBotRole(context.e);
-    if ((botRole === '群主' || botRole === '管理员') && context.e.isGroup) {
-      await context.e.group.muteMember(qq, parseInt(seconds));
-    }
-  }
-
-  async handleunmute(params, context) {
-    const [qq] = params;
-    const botRole = await this.getBotRole(context.e);
-    if ((botRole === '群主' || botRole === '管理员') && context.e.isGroup) {
-      await context.e.group.muteMember(qq, 0);
-    }
   }
 }
