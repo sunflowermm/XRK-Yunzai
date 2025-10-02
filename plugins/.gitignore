@@ -54,7 +54,8 @@ events/**
 
 !stream
 stream/**
-!stream/XRKchat.js
+!stream/chat.js
+!stream/clean.js
 
 *.psd
 *.map
