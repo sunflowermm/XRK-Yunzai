@@ -1,38 +1,29 @@
+// device.js - 设备管理 API（优化版）
 import cfg from '../../lib/config/config.js';
 import WebSocket from 'ws';
 import BotUtil from '../../lib/common/util.js';
 
-// 数据存储结构
-const devices = new Map(); // 存储设备信息
-const deviceCommands = new Map(); // 存储设备待执行命令队列
-const deviceData = new Map(); // 存储设备数据
-const deviceWebSockets = new Map(); // 存储设备 WebSocket 连接
-const deviceLogs = new Map(); // 存储设备日志
-const commandCallbacks = new Map(); // 存储命令回调函数
+// 数据存储
+const devices = new Map();
+const deviceCommands = new Map();
+const deviceWebSockets = new Map();
+const deviceLogs = new Map();
+const commandCallbacks = new Map();
 
 /**
- * 设备管理器类
- * 负责设备注册、命令发送、事件处理、心跳监测等核心功能，提供扩展性架构。
- * 单片机端可通过 WebSocket 或 API 注册事件、发送日志和数据。
+ * 设备管理器
  */
 class DeviceManager {
-  /**
-   * 构造函数，初始化配置参数。
-   */
   constructor() {
-    this.heartbeatInterval = cfg.device?.heartbeat_interval || 30; // 心跳间隔（秒）
-    this.heartbeatTimeout = cfg.device?.heartbeat_timeout || 120; // 心跳超时（秒）
-    this.maxDevices = cfg.device?.max_devices || 100; // 最大设备数
-    this.commandTimeout = cfg.device?.command_timeout || 5000; // 命令超时（毫秒）
-    this.maxLogsPerDevice = cfg.device?.max_logs_per_device || 100; // 每设备最大日志条数
-    this.maxDataPerDevice = cfg.device?.max_data_per_device || 50; // 每设备最大数据条数
-    this.batchSize = cfg.device?.batch_size || 10; // 命令批量发送大小
+    this.heartbeatInterval = cfg.device?.heartbeat_interval || 30;
+    this.heartbeatTimeout = cfg.device?.heartbeat_timeout || 120;
+    this.maxDevices = cfg.device?.max_devices || 100;
+    this.commandTimeout = cfg.device?.command_timeout || 5000;
+    this.maxLogsPerDevice = cfg.device?.max_logs_per_device || 100;
   }
 
   /**
-   * Unicode 编码（用于发送到设备的数据）。
-   * @param {string} str - 要编码的字符串。
-   * @returns {string} 编码后的字符串。
+   * Unicode编码
    */
   encodeUnicode(str) {
     if (typeof str !== 'string') return str;
@@ -43,9 +34,7 @@ class DeviceManager {
   }
 
   /**
-   * Unicode 解码（用于从设备接收的数据）。
-   * @param {string} str - 要解码的字符串。
-   * @returns {string} 解码后的字符串。
+   * Unicode解码
    */
   decodeUnicode(str) {
     if (typeof str !== 'string') return str;
@@ -55,9 +44,7 @@ class DeviceManager {
   }
 
   /**
-   * 递归编码数据，支持字符串、数组和对象。
-   * @param {*} data - 要编码的数据。
-   * @returns {*} 编码后的数据。
+   * 递归编码
    */
   encodeData(data) {
     if (typeof data === 'string') {
@@ -75,9 +62,7 @@ class DeviceManager {
   }
 
   /**
-   * 递归解码数据，支持字符串、数组和对象。
-   * @param {*} data - 要解码的数据。
-   * @returns {*} 解码后的数据。
+   * 递归解码
    */
   decodeData(data) {
     if (typeof data === 'string') {
@@ -95,11 +80,7 @@ class DeviceManager {
   }
 
   /**
-   * 创建设备 Bot 实例，提供核心方法如发送命令、显示文本等。
-   * @param {string} deviceId - 设备 ID。
-   * @param {Object} deviceInfo - 设备信息。
-   * @param {WebSocket} ws - WebSocket 连接。
-   * @returns {Object} 设备 Bot 实例。
+   * 创建设备Bot实例
    */
   createDeviceBot(deviceId, deviceInfo, ws) {
     Bot[deviceId] = {
@@ -120,7 +101,8 @@ class DeviceManager {
         commands_executed: 0,
         errors: 0
       },
-      logs: [],
+      
+      // 日志管理
       addLog: (level, message, data = {}) => {
         return this.addDeviceLog(deviceId, level, message, data);
       },
@@ -130,24 +112,21 @@ class DeviceManager {
       clearLogs: () => {
         deviceLogs.set(deviceId, []);
       },
-      data: [],
-      getData: () => {
-        return deviceData.get(deviceId) || [];
-      },
-      setData: (key, value) => {
-        const data = deviceData.get(deviceId) || [];
-        data.push({ key, value, timestamp: Date.now() });
-        if (data.length > this.maxDataPerDevice) {
-          data.shift();
-        }
-        deviceData.set(deviceId, data);
-      },
+      
+      // 发送消息（调用display命令）
       sendMsg: async (msg) => {
-        return await this.sendMessage(deviceId, msg);
+        return await this.sendCommand(deviceId, 'display', {
+          text: this.encodeData(msg),
+          clear: true
+        }, 1);
       },
+      
+      // 发送命令
       sendCommand: async (cmd, params = {}, priority = 0) => {
         return await this.sendCommand(deviceId, cmd, params, priority);
       },
+      
+      // 显示文本
       display: async (text, options = {}) => {
         return await this.sendCommand(deviceId, 'display', {
           text: this.encodeData(text),
@@ -155,30 +134,22 @@ class DeviceManager {
           y: options.y || 0,
           clear: options.clear !== false,
           color: options.color || 1,
-          size: options.size || 1,
           wrap: options.wrap !== false,
-          spacing: options.spacing || 2,
-          align: options.align || 'left'
+          spacing: options.spacing || 2
         }, 1);
       },
-      sendData: async (dataType, data) => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'data',
-            data_type: dataType,
-            data: this.encodeData(data),
-            timestamp: Date.now()
-          }));
-          return true;
-        }
-        return false;
-      },
+      
+      // 重启
       reboot: async () => {
         return await this.sendCommand(deviceId, 'reboot', {}, 99);
       },
+      
+      // 检查能力
       hasCapability: (cap) => {
         return deviceInfo.capabilities?.includes(cap);
       },
+      
+      // 获取状态
       getStatus: () => {
         return {
           device_id: deviceId,
@@ -190,35 +161,27 @@ class DeviceManager {
           metadata: deviceInfo.metadata,
           stats: devices.get(deviceId)?.stats
         };
-      },
-      updateStatus: (status) => {
-        const device = devices.get(deviceId);
-        if (device) {
-          device.status = { ...device.status, ...status };
-          device.last_seen = Date.now();
-        }
       }
     };
     return Bot[deviceId];
   }
 
   /**
-   * 注册新设备，支持通过 WebSocket 或 API。
-   * @param {Object} deviceData - 设备注册数据。
-   * @param {Object} Bot - Bot 实例。
-   * @param {WebSocket} [ws] - 可选 WebSocket 连接。
-   * @returns {Object} 注册后的设备信息。
+   * 注册设备
    */
   async registerDevice(deviceData, Bot, ws) {
     try {
       deviceData = this.decodeData(deviceData);
       const { device_id, device_type, device_name, capabilities = [], metadata = {}, ip_address, firmware_version } = deviceData;
+      
       if (!device_id || !device_type) {
         throw new Error('缺少必需参数');
       }
+      
       if (devices.size >= this.maxDevices && !devices.has(device_id)) {
-        throw new Error(`设备数量已达上限`);
+        throw new Error('设备数量已达上限');
       }
+      
       const existingDevice = devices.get(device_id);
       const device = {
         device_id,
@@ -238,10 +201,13 @@ class DeviceManager {
           errors: 0
         }
       };
+      
       devices.set(device_id, device);
+      
       if (!deviceLogs.has(device_id)) {
         deviceLogs.set(device_id, []);
       }
+      
       if (ws) {
         deviceWebSockets.set(device_id, ws);
         ws.device_id = device_id;
@@ -251,11 +217,15 @@ class DeviceManager {
           }
         }, this.heartbeatInterval * 1000);
       }
+      
       if (!Bot.uin.includes(device_id)) {
         Bot.uin.push(device_id);
       }
+      
       this.createDeviceBot(device_id, device, ws);
-      BotUtil.makeLog('info', `[设备注册] ${device.device_name} (${device_id}) - IP: ${ip_address}, 固件: v${firmware_version}, 能力: ${capabilities.join(', ')}`, device.device_name);
+      
+      BotUtil.makeLog('info', `[设备注册] ${device.device_name} (${device_id}) - IP: ${ip_address}, 固件: v${firmware_version}`, device.device_name);
+      
       Bot.em('device.online', {
         post_type: 'device',
         event_type: 'online',
@@ -266,6 +236,7 @@ class DeviceManager {
         self_id: device_id,
         time: Math.floor(Date.now() / 1000)
       });
+      
       return device;
     } catch (error) {
       BotUtil.makeLog('error', `[设备注册失败] ${error.message}`, 'DeviceManager');
@@ -274,12 +245,7 @@ class DeviceManager {
   }
 
   /**
-   * 添加设备日志，记录简洁信息。
-   * @param {string} deviceId - 设备 ID。
-   * @param {string} level - 日志级别 (info, warn, error 等)。
-   * @param {string} message - 日志消息。
-   * @param {Object} [data={}] - 附加数据。
-   * @returns {Object} 日志条目。
+   * 添加设备日志
    */
   addDeviceLog(deviceId, level, message, data = {}) {
     message = this.decodeUnicode(String(message)).substring(0, 200);
@@ -289,48 +255,50 @@ class DeviceManager {
       message,
       data: this.decodeData(data)
     };
+    
     const logs = deviceLogs.get(deviceId) || [];
     logs.unshift(logEntry);
     if (logs.length > this.maxLogsPerDevice) {
       logs.length = this.maxLogsPerDevice;
     }
     deviceLogs.set(deviceId, logs);
+    
     const device = devices.get(deviceId);
     if (device?.stats && level === 'error') {
       device.stats.errors++;
     }
+    
     BotUtil.makeLog(level, `[${device?.device_name || deviceId}] ${message}`, device?.device_name || deviceId);
     return logEntry;
   }
 
   /**
-   * 处理设备事件，支持扩展自定义事件。
-   * 单片机端可发送自定义 event_type 进行注册和处理。
-   * @param {string} deviceId - 设备 ID。
-   * @param {string} eventType - 事件类型。
-   * @param {Object} [eventData={}] - 事件数据。
-   * @param {Object} Bot - Bot 实例。
-   * @returns {Object} 处理结果。
+   * 处理设备事件
    */
   async processDeviceEvent(deviceId, eventType, eventData = {}, Bot) {
     try {
       eventData = this.decodeData(eventData);
+      
       if (!devices.has(deviceId)) {
         if (eventType === 'register') {
           return await this.registerDevice({ device_id: deviceId, ...eventData }, Bot);
         }
         return { success: false, error: '设备未注册' };
       }
+      
       const device = devices.get(deviceId);
       device.last_seen = Date.now();
       device.online = true;
       device.stats.messages_received++;
+      
       BotUtil.makeLog('info', `[设备事件] [${device.device_name}] [${eventType}]`, device.device_name);
+      
       switch (eventType) {
         case 'log':
           const { level = 'info', message, data: logData } = eventData;
           this.addDeviceLog(deviceId, level, message, logData);
           break;
+          
         case 'command_result':
           const { command_id } = eventData;
           const callback = commandCallbacks.get(command_id);
@@ -339,8 +307,9 @@ class DeviceManager {
             commandCallbacks.delete(command_id);
           }
           break;
+          
         default:
-          // 支持自定义事件扩展，触发 Bot 事件系统
+          // 触发自定义事件
           Bot.em(`device.${eventType}`, {
             post_type: 'device',
             event_type: eventType,
@@ -352,54 +321,23 @@ class DeviceManager {
             time: Math.floor(Date.now() / 1000)
           });
       }
+      
       return { success: true };
     } catch (error) {
-      BotUtil.makeLog('error', `[设备事件处理失败] ${error.message}`, 'DeviceManager');
+      BotUtil.makeLog('error', `[设备事件失败] ${error.message}`, 'DeviceManager');
       return { success: false, error: error.message };
     }
   }
 
   /**
-   * 更新设备心跳，并检查命令队列。
-   * @param {string} deviceId - 设备 ID。
-   * @param {Object} [status={}] - 状态更新。
-   * @returns {Object} 包含命令批次的响应。
-   */
-  async updateHeartbeat(deviceId, status = {}) {
-    const device = devices.get(deviceId);
-    if (!device) return { commands: [] };
-    device.last_seen = Date.now();
-    device.online = true;
-    status = this.decodeData(status);
-    if (status) {
-      device.status = { ...device.status, ...status };
-    }
-    const commands = deviceCommands.get(deviceId) || [];
-    if (commands.length > 0) {
-      const batch = commands.splice(0, this.batchSize);
-      batch.forEach(cmd => {
-        if (cmd.parameters) {
-          cmd.parameters = this.encodeData(cmd.parameters);
-        }
-      });
-      return { commands: batch };
-    }
-    return { commands: [] };
-  }
-
-  /**
-   * 发送命令到设备，支持实时或队列模式。
-   * @param {string} deviceId - 设备 ID。
-   * @param {string} command - 命令名称。
-   * @param {Object} [parameters={}] - 参数。
-   * @param {number} [priority=0] - 优先级。
-   * @returns {Promise<Object>} 命令发送结果。
+   * 发送命令
    */
   async sendCommand(deviceId, command, parameters = {}, priority = 0) {
     const device = devices.get(deviceId);
     if (!device) {
       throw new Error('设备未找到');
     }
+    
     const cmd = {
       id: Date.now().toString(),
       command,
@@ -407,26 +345,32 @@ class DeviceManager {
       priority,
       timestamp: Date.now()
     };
+    
     BotUtil.makeLog('info', `[发送命令] [${device.device_name}] [${command}]`, device.device_name);
+    
     const ws = deviceWebSockets.get(deviceId);
     if (ws && ws.readyState === WebSocket.OPEN) {
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve) => {
         const timeout = setTimeout(() => {
           commandCallbacks.delete(cmd.id);
           resolve({ success: true, command_id: cmd.id, timeout: true });
         }, this.commandTimeout);
+        
         commandCallbacks.set(cmd.id, (result) => {
           clearTimeout(timeout);
-          BotUtil.makeLog('info', `[命令结果] [${device.device_name}] [${command}]`, device.device_name);
           resolve({ success: true, command_id: cmd.id, result });
         });
+        
         ws.send(JSON.stringify({
           type: 'command',
           command: cmd
         }));
+        
         device.stats.commands_executed++;
       });
     }
+    
+    // 命令队列
     const commands = deviceCommands.get(deviceId) || [];
     if (priority > 0) {
       commands.unshift(cmd);
@@ -438,6 +382,7 @@ class DeviceManager {
     }
     deviceCommands.set(deviceId, commands);
     device.stats.commands_executed++;
+    
     return {
       success: true,
       command_id: cmd.id,
@@ -447,34 +392,23 @@ class DeviceManager {
   }
 
   /**
-   * 发送消息到设备，使用 display 命令。
-   * @param {string} deviceId - 设备 ID。
-   * @param {string} msg - 消息内容。
-   * @returns {Promise<Object>} 发送结果。
-   */
-  async sendMessage(deviceId, msg) {
-    return await this.sendCommand(deviceId, 'display', {
-      text: typeof msg === 'string' ? msg : '设备消息',
-      clear: true
-    }, 1);
-  }
-
-  /**
-   * 检查离线设备并触发事件。
-   * @param {Object} Bot - Bot 实例。
+   * 检查离线设备
    */
   checkOfflineDevices(Bot) {
     const timeout = this.heartbeatTimeout * 1000;
     const now = Date.now();
+    
     for (const [id, device] of devices) {
       if (device.online && now - device.last_seen > timeout) {
         device.online = false;
+        
         const ws = deviceWebSockets.get(id);
         if (ws) {
           clearInterval(ws.heartbeat);
           ws.close();
           deviceWebSockets.delete(id);
         }
+        
         Bot.em('device.offline', {
           post_type: 'device',
           event_type: 'offline',
@@ -484,14 +418,14 @@ class DeviceManager {
           self_id: id,
           time: Math.floor(Date.now() / 1000)
         });
+        
         BotUtil.makeLog('warn', `[设备离线] [${device.device_name}]`, device.device_name);
       }
     }
   }
 
   /**
-   * 获取设备列表。
-   * @returns {Array<Object>} 设备信息列表。
+   * 获取设备列表
    */
   getDeviceList() {
     return Array.from(devices.values()).map(d => ({
@@ -506,22 +440,18 @@ class DeviceManager {
   }
 
   /**
-   * 获取特定设备信息。
-   * @param {string} deviceId - 设备 ID。
-   * @returns {Object|null} 设备信息。
+   * 获取设备信息
    */
   getDevice(deviceId) {
     return devices.get(deviceId);
   }
 
   /**
-   * 获取设备日志，支持过滤。
-   * @param {string} deviceId - 设备 ID。
-   * @param {Object} [filter={}] - 过滤条件。
-   * @returns {Array<Object>} 日志列表。
+   * 获取设备日志
    */
   getDeviceLogs(deviceId, filter = {}) {
     let logs = deviceLogs.get(deviceId) || [];
+    
     if (filter.level) {
       logs = logs.filter(log => log.level === filter.level);
     }
@@ -532,25 +462,26 @@ class DeviceManager {
     if (filter.limit) {
       logs = logs.slice(0, filter.limit);
     }
+    
     return logs;
   }
 
   /**
-   * 处理 WebSocket 消息，支持事件扩展。
-   * @param {WebSocket} ws - WebSocket 连接。
-   * @param {Object} data - 消息数据。
-   * @param {Object} Bot - Bot 实例。
+   * 处理WebSocket消息
    */
   async processWebSocketMessage(ws, data, Bot) {
     try {
       data = this.decodeData(data);
       const { type, device_id, ...payload } = data;
-      BotUtil.makeLog('info', `[WebSocket 接收] [${device_id || ws.device_id}] [${type}]`, 'DeviceManager');
+      
+      BotUtil.makeLog('info', `[WS接收] [${device_id || ws.device_id}] [${type}]`, 'DeviceManager');
+      
       switch (type) {
         case 'register':
           const device = await this.registerDevice({ device_id, ...payload }, Bot, ws);
           ws.send(JSON.stringify({ type: 'register_response', success: true, device }));
           break;
+          
         case 'event':
         case 'data':
           const eventType = payload.data_type || payload.event_type || type;
@@ -558,11 +489,13 @@ class DeviceManager {
           await this.processDeviceEvent(device_id || ws.device_id, eventType, eventData, Bot);
           ws.send(JSON.stringify({ type: 'event_response', success: true }));
           break;
+          
         case 'log':
           const { level = 'info', message, data: logData } = payload;
           this.addDeviceLog(device_id || ws.device_id, level, message, logData);
           ws.send(JSON.stringify({ type: 'log_response', success: true }));
           break;
+          
         case 'heartbeat':
           const dev = devices.get(device_id || ws.device_id);
           if (dev) {
@@ -572,15 +505,9 @@ class DeviceManager {
               dev.status = payload.status;
             }
           }
-          const commands = deviceCommands.get(device_id || ws.device_id);
-          if (commands && commands.length > 0) {
-            const batch = commands.splice(0, this.batchSize);
-            for (const cmd of batch) {
-              ws.send(JSON.stringify({ type: 'command', command: cmd }));
-            }
-          }
           ws.send(JSON.stringify({ type: 'heartbeat_response', commands: [] }));
           break;
+          
         case 'command_result':
           const callback = commandCallbacks.get(payload.command_id);
           if (callback) {
@@ -588,11 +515,12 @@ class DeviceManager {
             commandCallbacks.delete(payload.command_id);
           }
           break;
+          
         default:
           ws.send(JSON.stringify({ type: 'error', message: `未知类型: ${type}` }));
       }
     } catch (error) {
-      BotUtil.makeLog('error', `[WebSocket 处理失败] ${error.message}`, 'DeviceManager');
+      BotUtil.makeLog('error', `[WS处理失败] ${error.message}`, 'DeviceManager');
       ws.send(JSON.stringify({ type: 'error', message: error.message }));
     }
   }
@@ -601,14 +529,15 @@ class DeviceManager {
 const deviceManager = new DeviceManager();
 
 /**
- * 设备管理 API，提供 REST 和 WebSocket 接口。
+ * 设备管理API
  */
 export default {
   name: 'device',
-  dsc: '设备管理 API',
+  dsc: '设备管理API',
   priority: 90,
 
   routes: [
+    // 注册设备
     {
       method: 'POST',
       path: '/api/device/register',
@@ -624,32 +553,8 @@ export default {
         }
       }
     },
-    {
-      method: 'POST',
-      path: '/api/device/heartbeat',
-      handler: async (req, res) => {
-        try {
-          const { device_id, status } = req.body;
-          const result = await deviceManager.updateHeartbeat(device_id, status);
-          res.json({ success: true, commands: result.commands });
-        } catch (error) {
-          res.status(404).json({ success: false, message: error.message });
-        }
-      }
-    },
-    {
-      method: 'POST',
-      path: '/api/device/event',
-      handler: async (req, res, Bot) => {
-        try {
-          const { device_id, event_type, event_data } = req.body;
-          const result = await deviceManager.processDeviceEvent(device_id, event_type, event_data, Bot);
-          res.json(result);
-        } catch (error) {
-          res.status(404).json({ success: false, message: error.message });
-        }
-      }
-    },
+    
+    // 获取设备列表
     {
       method: 'GET',
       path: '/api/devices',
@@ -658,6 +563,8 @@ export default {
         res.json({ success: true, devices, count: devices.length });
       }
     },
+    
+    // 获取设备信息
     {
       method: 'GET',
       path: '/api/device/:deviceId',
@@ -670,6 +577,8 @@ export default {
         }
       }
     },
+    
+    // 获取设备日志
     {
       method: 'GET',
       path: '/api/device/:deviceId/logs',
@@ -684,6 +593,8 @@ export default {
         res.json({ success: true, logs, count: logs.length });
       }
     },
+    
+    // 发送命令
     {
       method: 'POST',
       path: '/api/device/:deviceId/command',
@@ -698,6 +609,8 @@ export default {
         }
       }
     },
+    
+    // 显示文本
     {
       method: 'POST',
       path: '/api/device/:deviceId/display',
@@ -711,65 +624,48 @@ export default {
           res.status(400).json({ success: false, message: error.message });
         }
       }
-    },
-    {
-      method: 'DELETE',
-      path: '/api/device/:deviceId',
-      handler: async (req, res, Bot) => {
-        const { deviceId } = req.params;
-        const device = devices.get(deviceId);
-        if (device) {
-          devices.delete(deviceId);
-          deviceCommands.delete(deviceId);
-          deviceData.delete(deviceId);
-          deviceLogs.delete(deviceId);
-          const ws = deviceWebSockets.get(deviceId);
-          if (ws) {
-            clearInterval(ws.heartbeat);
-            ws.close();
-            deviceWebSockets.delete(deviceId);
-          }
-          delete Bot[deviceId];
-          BotUtil.makeLog('info', `[设备删除] ${device.device_name} (${deviceId})`, device.device_name);
-          res.json({ success: true, message: '设备已删除' });
-        } else {
-          res.status(404).json({ success: false, message: '设备未找到' });
-        }
-      }
     }
   ],
 
+  // WebSocket路由
   ws: {
     device: [(ws, req, Bot) => {
-      BotUtil.makeLog('info', `[WebSocket] 新设备连接来自 ${req.socket.remoteAddress}`, 'DeviceManager');
+      BotUtil.makeLog('info', `[WebSocket] 新连接 ${req.socket.remoteAddress}`, 'DeviceManager');
+      
       ws.on('message', msg => {
         try {
           const data = JSON.parse(msg);
           deviceManager.processWebSocketMessage(ws, data, Bot);
         } catch (error) {
-          BotUtil.makeLog('error', `[WebSocket 解析失败] ${error.message}`, 'DeviceManager');
+          BotUtil.makeLog('error', `[WS解析失败] ${error.message}`, 'DeviceManager');
         }
       });
+      
       ws.on('close', () => {
         if (ws.device_id) {
           clearInterval(ws.heartbeat);
           deviceWebSockets.delete(ws.device_id);
           const device = devices.get(ws.device_id);
           if (device) {
-            BotUtil.makeLog('info', `[WebSocket] 设备 ${device.device_name} 断开连接`, device.device_name);
+            BotUtil.makeLog('info', `[WS断开] ${device.device_name}`, device.device_name);
           }
         }
       });
+      
       ws.on('error', (error) => {
-        BotUtil.makeLog('error', `[WebSocket 错误] ${error.message}`, 'DeviceManager');
+        BotUtil.makeLog('error', `[WS错误] ${error.message}`, 'DeviceManager');
       });
     }]
   },
 
+  // 初始化
   init(app, Bot) {
+    // 检查离线设备
     setInterval(() => {
       deviceManager.checkOfflineDevices(Bot);
     }, 30000);
+    
+    // 清理过期数据
     setInterval(() => {
       const now = Date.now();
       for (const [id, callback] of commandCallbacks) {
@@ -777,13 +673,6 @@ export default {
           commandCallbacks.delete(id);
         }
       }
-      for (const [deviceId, logs] of deviceLogs) {
-        if (logs.length > deviceManager.maxLogsPerDevice) {
-          logs.length = deviceManager.maxLogsPerDevice;
-        }
-      }
-      const onlineCount = [...devices.values()].filter(d => d.online).length;
-      BotUtil.makeLog('debug', `[设备管理器] 在线设备: ${onlineCount}/${devices.size}`, 'DeviceManager');
     }, 60000);
   }
 };
