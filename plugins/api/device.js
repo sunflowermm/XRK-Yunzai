@@ -1,4 +1,4 @@
-// device.js - 设备管理 API（优化版）
+// device.js - 设备管理 API（扩展图传支持）
 import cfg from '../../lib/config/config.js';
 import WebSocket from 'ws';
 import BotUtil from '../../lib/common/util.js';
@@ -9,6 +9,7 @@ const deviceCommands = new Map();
 const deviceWebSockets = new Map();
 const deviceLogs = new Map();
 const commandCallbacks = new Map();
+const cameraStreams = new Map(); // 摄像头流
 
 /**
  * 设备管理器
@@ -20,6 +21,7 @@ class DeviceManager {
     this.maxDevices = cfg.device?.max_devices || 100;
     this.commandTimeout = cfg.device?.command_timeout || 5000;
     this.maxLogsPerDevice = cfg.device?.max_logs_per_device || 100;
+    this.maxFrameSize = 500 * 1024; // 最大帧大小 500KB
   }
 
   /**
@@ -137,6 +139,29 @@ class DeviceManager {
           wrap: options.wrap !== false,
           spacing: options.spacing || 2
         }, 1);
+      },
+      
+      // 摄像头控制
+      camera: {
+        startStream: async (options = {}) => {
+          return await this.sendCommand(deviceId, 'camera_start_stream', {
+            fps: options.fps || 10,
+            quality: options.quality || 12,
+            resolution: options.resolution || 'VGA'
+          }, 1);
+        },
+        stopStream: async () => {
+          return await this.sendCommand(deviceId, 'camera_stop_stream', {}, 1);
+        },
+        capture: async () => {
+          return await this.sendCommand(deviceId, 'camera_capture', {}, 1);
+        },
+        getStats: async () => {
+          return await this.sendCommand(deviceId, 'camera_stats', {}, 0);
+        },
+        config: async (params) => {
+          return await this.sendCommand(deviceId, 'camera_config', params, 1);
+        }
       },
       
       // 重启
@@ -307,6 +332,30 @@ class DeviceManager {
             commandCallbacks.delete(command_id);
           }
           break;
+        
+        // 摄像头帧数据  
+        case 'camera_frame':
+          const stream = cameraStreams.get(deviceId);
+          if (stream && stream.clients.size > 0) {
+            const frameData = {
+              device_id: deviceId,
+              ...eventData
+            };
+            
+            // 广播给所有订阅的客户端
+            stream.clients.forEach(client => {
+              if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({
+                  type: 'camera_frame',
+                  data: frameData
+                }));
+              }
+            });
+            
+            stream.frame_count++;
+            stream.last_frame = Date.now();
+          }
+          break;
           
         default:
           // 触发自定义事件
@@ -407,6 +456,13 @@ class DeviceManager {
           clearInterval(ws.heartbeat);
           ws.close();
           deviceWebSockets.delete(id);
+        }
+        
+        // 停止摄像头流
+        const stream = cameraStreams.get(id);
+        if (stream) {
+          stream.clients.forEach(client => client.close());
+          cameraStreams.delete(id);
         }
         
         Bot.em('device.offline', {
@@ -624,6 +680,66 @@ export default {
           res.status(400).json({ success: false, message: error.message });
         }
       }
+    },
+    
+    // 摄像头控制 - 开始流
+    {
+      method: 'POST',
+      path: '/api/device/:deviceId/camera/start',
+      handler: async (req, res, Bot) => {
+        try {
+          const { deviceId } = req.params;
+          const result = await Bot[deviceId].camera.startStream(req.body);
+          res.json(result);
+        } catch (error) {
+          res.status(400).json({ success: false, message: error.message });
+        }
+      }
+    },
+    
+    // 摄像头控制 - 停止流
+    {
+      method: 'POST',
+      path: '/api/device/:deviceId/camera/stop',
+      handler: async (req, res, Bot) => {
+        try {
+          const { deviceId } = req.params;
+          const result = await Bot[deviceId].camera.stopStream();
+          res.json(result);
+        } catch (error) {
+          res.status(400).json({ success: false, message: error.message });
+        }
+      }
+    },
+    
+    // 摄像头控制 - 捕获
+    {
+      method: 'POST',
+      path: '/api/device/:deviceId/camera/capture',
+      handler: async (req, res, Bot) => {
+        try {
+          const { deviceId } = req.params;
+          const result = await Bot[deviceId].camera.capture();
+          res.json(result);
+        } catch (error) {
+          res.status(400).json({ success: false, message: error.message });
+        }
+      }
+    },
+    
+    // 摄像头统计
+    {
+      method: 'GET',
+      path: '/api/device/:deviceId/camera/stats',
+      handler: async (req, res, Bot) => {
+        try {
+          const { deviceId } = req.params;
+          const result = await Bot[deviceId].camera.getStats();
+          res.json(result);
+        } catch (error) {
+          res.status(400).json({ success: false, message: error.message });
+        }
+      }
     }
   ],
 
@@ -655,6 +771,65 @@ export default {
       ws.on('error', (error) => {
         BotUtil.makeLog('error', `[WS错误] ${error.message}`, 'DeviceManager');
       });
+    }],
+    
+    // 摄像头流WebSocket
+    'camera-stream': [(ws, req, Bot) => {
+      const deviceId = req.query.device_id;
+      const apiKey = req.query.api_key || req.headers['x-api-key'];
+      
+      // 验证API密钥（可选）
+      if (cfg.api?.key && apiKey !== cfg.api.key) {
+        ws.close(1008, '无效的API密钥');
+        return;
+      }
+      
+      if (!deviceId) {
+        ws.close(1008, '缺少device_id参数');
+        return;
+      }
+      
+      const device = devices.get(deviceId);
+      if (!device) {
+        ws.close(1008, '设备未找到');
+        return;
+      }
+      
+      // 创建或获取流
+      if (!cameraStreams.has(deviceId)) {
+        cameraStreams.set(deviceId, {
+          device_id: deviceId,
+          clients: new Set(),
+          frame_count: 0,
+          last_frame: Date.now()
+        });
+      }
+      
+      const stream = cameraStreams.get(deviceId);
+      stream.clients.add(ws);
+      
+      BotUtil.makeLog('info', `[摄像头流] 新客户端连接 ${deviceId}`, device.device_name);
+      
+      ws.on('close', () => {
+        stream.clients.delete(ws);
+        if (stream.clients.size === 0) {
+          // 没有客户端时停止流
+          Bot[deviceId].camera.stopStream().catch(() => {});
+          cameraStreams.delete(deviceId);
+        }
+        BotUtil.makeLog('info', `[摄像头流] 客户端断开 ${deviceId}`, device.device_name);
+      });
+      
+      ws.on('error', (error) => {
+        BotUtil.makeLog('error', `[摄像头流错误] ${error.message}`, device.device_name);
+      });
+      
+      // 发送欢迎消息
+      ws.send(JSON.stringify({
+        type: 'connected',
+        device_id: deviceId,
+        device_name: device.device_name
+      }));
     }]
   },
 
