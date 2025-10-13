@@ -9,6 +9,10 @@ import BotUtil from "../../../lib/common/util.js";
 
 const _path = process.cwd();
 
+/**
+ * Playwright-based browser renderer for screenshot generation
+ * Supports browser instance reuse, memory management, and health monitoring
+ */
 export default class PlaywrightRenderer extends Renderer {
   constructor(config = {}) {
     super({
@@ -25,21 +29,20 @@ export default class PlaywrightRenderer extends Renderer {
     this.browserMacKey = null;
 
     const rendererCfg = cfg.renderer?.playwright || {};
-    this.restartNum = config.restartNum !== undefined ? config.restartNum : (rendererCfg.restartNum !== undefined ? rendererCfg.restartNum : 100);
-    this.renderNum = 0;
-    this.browserType = config.browser !== undefined ? config.browser : (rendererCfg.browserType !== undefined ? rendererCfg.browserType : "chromium");
-    this.playwrightTimeout = config.playwrightTimeout !== undefined ? config.playwrightTimeout : (rendererCfg.playwrightTimeout !== undefined ? rendererCfg.playwrightTimeout : 120000);
-    this.healthCheckInterval = config.healthCheckInterval !== undefined ? config.healthCheckInterval : (rendererCfg.healthCheckInterval !== undefined ? rendererCfg.healthCheckInterval : 120000); // 增加到120s
-    this.maxRetries = config.maxRetries !== undefined ? config.maxRetries : (rendererCfg.maxRetries !== undefined ? rendererCfg.maxRetries : 3);
-    this.retryDelay = config.retryDelay !== undefined ? config.retryDelay : (rendererCfg.retryDelay !== undefined ? rendererCfg.retryDelay : 2000);
     
-    // 内存管理配置
-    this.memoryThreshold = config.memoryThreshold !== undefined ? config.memoryThreshold : (rendererCfg.memoryThreshold !== undefined ? rendererCfg.memoryThreshold : 1024); // MB
-    this.maxConcurrent = config.maxConcurrent !== undefined ? config.maxConcurrent : (rendererCfg.maxConcurrent !== undefined ? rendererCfg.maxConcurrent : 3);
+    this.restartNum = config.restartNum ?? rendererCfg.restartNum ?? 100;
+    this.renderNum = 0;
+    this.browserType = config.browser ?? rendererCfg.browserType ?? "chromium";
+    this.playwrightTimeout = config.playwrightTimeout ?? rendererCfg.playwrightTimeout ?? 120000;
+    this.healthCheckInterval = config.healthCheckInterval ?? rendererCfg.healthCheckInterval ?? 120000;
+    this.maxRetries = config.maxRetries ?? rendererCfg.maxRetries ?? 3;
+    this.retryDelay = config.retryDelay ?? rendererCfg.retryDelay ?? 2000;
+    this.memoryThreshold = config.memoryThreshold ?? rendererCfg.memoryThreshold ?? 1024;
+    this.maxConcurrent = config.maxConcurrent ?? rendererCfg.maxConcurrent ?? 3;
 
     this.config = {
-      headless: config.headless !== undefined ? config.headless : (rendererCfg.headless !== undefined ? rendererCfg.headless : true),
-      args: config.args !== undefined ? config.args : (rendererCfg.args !== undefined ? rendererCfg.args : [
+      headless: config.headless ?? rendererCfg.headless ?? true,
+      args: config.args ?? rendererCfg.args ?? [
         "--disable-gpu",
         "--disable-software-rasterizer",
         "--disable-dev-shm-usage",
@@ -62,39 +65,37 @@ export default class PlaywrightRenderer extends Renderer {
         "--password-store=basic",
         "--use-mock-keychain",
         "--disable-blink-features=AutomationControlled",
-        // 移除 --single-process 避免内存累积
-        // "--single-process",
-        // "--disable-features=site-per-process",
-        // 添加内存优化参数
         "--js-flags=--max-old-space-size=512",
         "--disable-accelerated-2d-canvas",
         "--disable-accelerated-jpeg-decoding",
         "--disable-accelerated-mjpeg-decode",
         "--disable-accelerated-video-decode",
-      ]),
-      channel: config.channel !== undefined ? config.channel : rendererCfg.channel,
-      executablePath: config.chromiumPath !== undefined ? config.chromiumPath : rendererCfg.chromiumPath,
-      wsEndpoint: config.playwrightWS !== undefined ? config.playwrightWS : rendererCfg.wsEndpoint,
+      ],
+      channel: config.channel ?? rendererCfg.channel,
+      executablePath: config.chromiumPath ?? rendererCfg.chromiumPath,
+      wsEndpoint: config.playwrightWS ?? rendererCfg.wsEndpoint,
     };
 
-    this.contextOptions = config.contextOptions !== undefined ? config.contextOptions : (rendererCfg.contextOptions !== undefined ? rendererCfg.contextOptions : {
+    this.contextOptions = config.contextOptions ?? rendererCfg.contextOptions ?? {
       viewport: { 
-        width: rendererCfg.viewport?.width !== undefined ? rendererCfg.viewport.width : 1280, 
-        height: rendererCfg.viewport?.height !== undefined ? rendererCfg.viewport.height : 720 
+        width: rendererCfg.viewport?.width ?? 1280, 
+        height: rendererCfg.viewport?.height ?? 720 
       },
-      deviceScaleFactor: rendererCfg.viewport?.deviceScaleFactor !== undefined ? rendererCfg.viewport.deviceScaleFactor : 1,
-      bypassCSP: rendererCfg.contextOptions?.bypassCSP !== undefined ? rendererCfg.contextOptions.bypassCSP : true,
-      reducedMotion: rendererCfg.contextOptions?.reducedMotion !== undefined ? rendererCfg.contextOptions.reducedMotion : "reduce",
-    });
+      deviceScaleFactor: rendererCfg.viewport?.deviceScaleFactor ?? 1,
+      bypassCSP: rendererCfg.contextOptions?.bypassCSP ?? true,
+      reducedMotion: rendererCfg.contextOptions?.reducedMotion ?? "reduce",
+    };
 
     this.healthCheckTimer = null;
-    this.memoryCheckTimer = null;
 
     process.on("exit", () => this.cleanup());
     process.on("SIGINT", () => this.cleanup());
     process.on("SIGTERM", () => this.cleanup());
   }
 
+  /**
+   * Retrieve system MAC address for browser instance identification
+   */
   async getMac() {
     let macAddr = "000000000000";
     try {
@@ -102,54 +103,61 @@ export default class PlaywrightRenderer extends Renderer {
       for (const key in network) {
         for (const iface of network[key]) {
           if (iface.mac && iface.mac !== "00:00:00:00:00:00") {
-            macAddr = iface.mac.replace(/:/g, "");
-            return macAddr;
+            return iface.mac.replace(/:/g, "");
           }
         }
       }
     } catch (e) {
-      BotUtil.makeLog(`获取MAC地址失败: ${e.message}`, "error");
+      BotUtil.makeLog("error", `Failed to get MAC address: ${e.message}`, "PlaywrightRenderer");
     }
     return macAddr;
   }
 
+  /**
+   * Attempt to connect to existing browser instance with retry logic
+   */
   async connectToExisting(wsEndpoint, retries = 0) {
     const delay = this.retryDelay * Math.pow(2, retries);
     try {
-      BotUtil.makeLog(`尝试连接现有${this.browserType}实例 (重试${retries + 1}/${this.maxRetries})`, "info");
+      BotUtil.makeLog("info", `Connecting to existing ${this.browserType} instance (attempt ${retries + 1}/${this.maxRetries})`, "PlaywrightRenderer");
+      
       const browser = await playwright[this.browserType].connect(wsEndpoint, { timeout: 10000 });
-
       const context = await browser.newContext();
       const page = await context.newPage();
       await page.goto("about:blank", { timeout: 5000 });
       await page.close();
       await context.close();
 
-      BotUtil.makeLog(`成功连接到现有${this.browserType}实例`, "info");
+      BotUtil.makeLog("info", `Successfully connected to existing ${this.browserType} instance`, "PlaywrightRenderer");
       return browser;
     } catch (e) {
-      BotUtil.makeLog(`连接失败: ${e.message}`, "warn");
+      BotUtil.makeLog("warn", `Connection failed: ${e.message}`, "PlaywrightRenderer");
+      
       if (retries < this.maxRetries - 1) {
         await new Promise(r => setTimeout(r, delay));
         return this.connectToExisting(wsEndpoint, retries + 1);
       }
+      
       if (this.browserMacKey) {
         try {
           await redis.del(this.browserMacKey);
-          BotUtil.makeLog(`已清理失效的浏览器实例记录`, "info");
+          BotUtil.makeLog("info", "Cleaned up invalid browser instance record", "PlaywrightRenderer");
         } catch (e) {}
       }
       return null;
     }
   }
 
+  /**
+   * Initialize browser instance with connection reuse and health monitoring
+   */
   async browserInit() {
     if (this.browser) {
       try {
         this.browser.contexts();
         return this.browser;
       } catch (e) {
-        BotUtil.makeLog(`现有浏览器实例失效: ${e.message}`, "warn");
+        BotUtil.makeLog("warn", `Existing browser instance invalid: ${e.message}`, "PlaywrightRenderer");
         this.browser = null;
       }
     }
@@ -166,7 +174,7 @@ export default class PlaywrightRenderer extends Renderer {
 
     this.lock = true;
     try {
-      BotUtil.makeLog(`playwright ${this.browserType} 启动中...`, "info");
+      BotUtil.makeLog("info", `Starting playwright ${this.browserType}...`, "PlaywrightRenderer");
 
       if (!this.mac) {
         this.mac = await this.getMac();
@@ -188,35 +196,39 @@ export default class PlaywrightRenderer extends Renderer {
       }
 
       if (!this.browser) {
-        BotUtil.makeLog(`启动新${this.browserType}实例...`, "info");
+        BotUtil.makeLog("info", `Launching new ${this.browserType} instance...`, "PlaywrightRenderer");
         this.browser = await playwright[this.browserType].launch(this.config);
+        
         if (this.browser) {
-          BotUtil.makeLog(`playwright ${this.browserType} 启动成功`, "info");
+          BotUtil.makeLog("info", `Playwright ${this.browserType} started successfully`, "PlaywrightRenderer");
           const endpoint = this.browser.wsEndpoint();
+          
           if (endpoint && this.browserMacKey) {
             try {
               await redis.set(this.browserMacKey, endpoint, { EX: 60 * 60 * 24 * 30 });
-              BotUtil.makeLog(`浏览器实例已保存到Redis`, "debug");
+              BotUtil.makeLog("debug", "Browser instance saved to Redis", "PlaywrightRenderer");
             } catch (e) {
-              BotUtil.makeLog(`保存浏览器实例失败: ${e.message}`, "warn");
+              BotUtil.makeLog("warn", `Failed to save browser instance: ${e.message}`, "PlaywrightRenderer");
             }
           }
         }
       }
 
       if (!this.browser) {
-        BotUtil.makeLog(`playwright ${this.browserType} 启动失败`, "error");
+        BotUtil.makeLog("error", `Playwright ${this.browserType} failed to start`, "PlaywrightRenderer");
         return false;
       }
 
       this.browser.on("disconnected", async () => {
-        BotUtil.makeLog(`${this.browserType}实例断开连接`, "warn");
+        BotUtil.makeLog("warn", `${this.browserType} instance disconnected`, "PlaywrightRenderer");
         this.browser = null;
+        
         if (this.browserMacKey) {
           try {
             await redis.del(this.browserMacKey);
           } catch (e) {}
         }
+        
         if (!this.isClosing) {
           await this.restart(true);
         }
@@ -224,7 +236,7 @@ export default class PlaywrightRenderer extends Renderer {
 
       this.startHealthCheck();
     } catch (e) {
-      BotUtil.makeLog(`浏览器初始化失败: ${e.message}`, "error");
+      BotUtil.makeLog("error", `Browser initialization failed: ${e.message}`, "PlaywrightRenderer");
       this.browser = null;
     } finally {
       this.lock = false;
@@ -233,34 +245,41 @@ export default class PlaywrightRenderer extends Renderer {
     return this.browser;
   }
 
+  /**
+   * Start periodic health check for browser instance
+   */
   startHealthCheck() {
     if (this.healthCheckTimer) return;
+    
     this.healthCheckTimer = setInterval(async () => {
       if (!this.browser || this.shoting.length > 0 || this.isClosing) return;
+      
       try {
         this.browser.contexts();
       } catch (e) {
-        BotUtil.makeLog(`健康检查失败: ${e.message}, 准备重启`, "warn");
+        BotUtil.makeLog("warn", `Health check failed: ${e.message}, restarting...`, "PlaywrightRenderer");
         await this.restart(true);
       }
     }, this.healthCheckInterval);
   }
 
+  /**
+   * Generate screenshot with optimized resource management
+   */
   async screenshot(name, data = {}) {
-    // 并发控制
     while (this.shoting.length >= this.maxConcurrent) {
       await new Promise(r => setTimeout(r, 100));
     }
 
     if (!await this.browserInit()) return false;
 
-    const pageHeight = data.multiPageHeight !== undefined ? data.multiPageHeight : 4000;
+    const pageHeight = data.multiPageHeight ?? 4000;
     const savePath = this.dealTpl(name, data);
     if (!savePath) return false;
 
     const filePath = path.join(_path, savePath);
     if (!fs.existsSync(filePath)) {
-      BotUtil.makeLog(`HTML文件不存在: ${filePath}`, "error");
+      BotUtil.makeLog("error", `HTML file does not exist: ${filePath}`, "PlaywrightRenderer");
       return false;
     }
 
@@ -271,12 +290,10 @@ export default class PlaywrightRenderer extends Renderer {
     const start = Date.now();
 
     try {
-      // 创建独立上下文，资源隔离
       context = await this.browser.newContext(this.contextOptions);
       page = await context.newPage();
-      if (!page) throw new Error("无法创建页面");
+      if (!page) throw new Error("Failed to create page");
 
-      // 禁用不必要的资源加载
       await page.route('**/*', (route) => {
         const resourceType = route.request().resourceType();
         if (['font', 'media'].includes(resourceType)) {
@@ -287,21 +304,21 @@ export default class PlaywrightRenderer extends Renderer {
       });
 
       const pageGotoParams = lodash.extend(
-        { timeout: this.playwrightTimeout, waitUntil: "domcontentloaded" }, // 改用domcontentloaded减少等待
+        { timeout: this.playwrightTimeout, waitUntil: "domcontentloaded" },
         data.pageGotoParams || {}
       );
 
-      const fileUrl = `file://${filePath}`;
-      await page.goto(fileUrl, pageGotoParams);
+      await page.goto(`file://${filePath}`, pageGotoParams);
 
-      // 优化图片等待逻辑
       await page.evaluate(() => new Promise(resolve => {
-        const timeout = setTimeout(resolve, 800); // 减少超时时间
+        const timeout = setTimeout(resolve, 800);
         const images = Array.from(document.querySelectorAll("img"));
+        
         if (images.length === 0) {
           clearTimeout(timeout);
           return resolve();
         }
+        
         let loaded = 0;
         const checkComplete = () => {
           loaded++;
@@ -310,6 +327,7 @@ export default class PlaywrightRenderer extends Renderer {
             resolve();
           }
         };
+        
         images.forEach(img => {
           if (img.complete) checkComplete();
           else {
@@ -320,16 +338,16 @@ export default class PlaywrightRenderer extends Renderer {
       }));
 
       const body = (await page.locator("#container").first()) || (await page.locator("body"));
-      if (!body) throw new Error("找不到内容元素");
+      if (!body) throw new Error("Content element not found");
 
       const boundingBox = await body.boundingBox();
 
       const screenshotOptions = {
-        type: data.imgType !== undefined ? data.imgType : "jpeg",
+        type: data.imgType ?? "jpeg",
         fullPage: !data.multiPage,
-        omitBackground: data.omitBackground !== undefined ? data.omitBackground : false,
-        quality: data.quality !== undefined ? data.quality : 85, // 降低质量减少内存
-        path: data.path !== undefined ? data.path : "",
+        omitBackground: data.omitBackground ?? false,
+        quality: data.quality ?? 85,
+        path: data.path ?? "",
       };
 
       if (data.imgType === "png") delete screenshotOptions.quality;
@@ -345,13 +363,13 @@ export default class PlaywrightRenderer extends Renderer {
         const buff = await body.screenshot(screenshotOptions);
         this.renderNum++;
         const kb = (buff.length / 1024).toFixed(2) + "KB";
-        BotUtil.makeLog(`[${name}][${this.renderNum}次] ${kb} ${Date.now() - start}ms`, "info");
+        BotUtil.makeLog("info", `[${name}][${this.renderNum}] ${kb} ${Date.now() - start}ms`, "PlaywrightRenderer");
         ret.push(buff);
       } else {
         if (num > 1) {
           await page.setViewportSize({
             width: Math.ceil(boundingBox.width),
-            height: Math.min(pageHeight + 100, 2000), // 限制最大视口
+            height: Math.min(pageHeight + 100, 2000),
           });
         }
 
@@ -366,7 +384,7 @@ export default class PlaywrightRenderer extends Renderer {
 
           if (i !== 1) {
             await page.evaluate(scrollY => window.scrollTo(0, scrollY), pageHeight * (i - 1));
-            await page.waitForTimeout(100); // 减少等待时间
+            await page.waitForTimeout(100);
           }
 
           const clip = (i === num && num > 1) ? {
@@ -376,10 +394,13 @@ export default class PlaywrightRenderer extends Renderer {
             height: Math.min(boundingBox.height - pageHeight * (i - 1), pageHeight),
           } : null;
 
-          const buff = clip ? await page.screenshot({ ...screenshotOptions, clip }) : await body.screenshot(screenshotOptions);
+          const buff = clip 
+            ? await page.screenshot({ ...screenshotOptions, clip }) 
+            : await body.screenshot(screenshotOptions);
+            
           this.renderNum++;
           const kb = (buff.length / 1024).toFixed(2) + "KB";
-          BotUtil.makeLog(`[${name}][${i}/${num}] ${kb}`, "debug");
+          BotUtil.makeLog("debug", `[${name}][${i}/${num}] ${kb}`, "PlaywrightRenderer");
           ret.push(buff);
 
           if (i < num && num > 2) {
@@ -388,14 +409,13 @@ export default class PlaywrightRenderer extends Renderer {
         }
 
         if (num > 1) {
-          BotUtil.makeLog(`[${name}] 处理完成 ${Date.now() - start}ms`, "info");
+          BotUtil.makeLog("info", `[${name}] Completed in ${Date.now() - start}ms`, "PlaywrightRenderer");
         }
       }
     } catch (error) {
-      BotUtil.makeLog(`[${name}] 截图失败: ${error.message}`, "error");
+      BotUtil.makeLog("error", `[${name}] Screenshot failed: ${error.message}`, "PlaywrightRenderer");
       ret = [];
     } finally {
-      // 确保资源清理
       if (page) {
         try {
           await page.close({ runBeforeUnload: false });
@@ -409,26 +429,27 @@ export default class PlaywrightRenderer extends Renderer {
       this.shoting = this.shoting.filter(item => item !== name);
     }
 
-    // 定期重启
     if (this.renderNum % this.restartNum === 0 && this.renderNum > 0 && this.shoting.length === 0) {
-      BotUtil.makeLog(`已完成${this.renderNum}次截图, 准备重启浏览器`, "info");
+      BotUtil.makeLog("info", `Completed ${this.renderNum} screenshots, restarting browser...`, "PlaywrightRenderer");
       setTimeout(() => this.restart(), 2000);
     }
 
     if (ret.length === 0 || !ret[0]) {
-      BotUtil.makeLog(`[${name}] 截图结果为空`, "error");
+      BotUtil.makeLog("error", `[${name}] Screenshot result is empty`, "PlaywrightRenderer");
       return false;
     }
 
     return data.multiPage ? ret : ret[0];
   }
 
+  /**
+   * Restart browser instance with cleanup
+   */
   async restart(force = false) {
     if (!this.browser || this.lock || this.isClosing) return;
-
     if (!force && (this.renderNum % this.restartNum !== 0 || this.shoting.length > 0)) return;
 
-    BotUtil.makeLog(`${this.browserType} ${force ? "强制" : "计划"}重启...`, "warn");
+    BotUtil.makeLog("warn", `${this.browserType} ${force ? "forced" : "scheduled"} restart...`, "PlaywrightRenderer");
     this.isClosing = true;
 
     try {
@@ -449,20 +470,14 @@ export default class PlaywrightRenderer extends Renderer {
         clearInterval(this.healthCheckTimer);
         this.healthCheckTimer = null;
       }
-      
-      if (this.memoryCheckTimer) {
-        clearInterval(this.memoryCheckTimer);
-        this.memoryCheckTimer = null;
-      }
 
-      // 触发GC
       if (global.gc) {
         global.gc();
       }
 
-      BotUtil.makeLog(`${this.browserType}重启完成`, "info");
+      BotUtil.makeLog("info", `${this.browserType} restart completed`, "PlaywrightRenderer");
     } catch (err) {
-      BotUtil.makeLog(`重启失败: ${err.message}`, "error");
+      BotUtil.makeLog("error", `Restart failed: ${err.message}`, "PlaywrightRenderer");
     } finally {
       this.isClosing = false;
     }
@@ -470,17 +485,15 @@ export default class PlaywrightRenderer extends Renderer {
     return true;
   }
 
+  /**
+   * Clean up all resources on process exit
+   */
   async cleanup() {
     this.isClosing = true;
 
     if (this.healthCheckTimer) {
       clearInterval(this.healthCheckTimer);
       this.healthCheckTimer = null;
-    }
-    
-    if (this.memoryCheckTimer) {
-      clearInterval(this.memoryCheckTimer);
-      this.memoryCheckTimer = null;
     }
 
     if (this.browser) {
@@ -496,6 +509,6 @@ export default class PlaywrightRenderer extends Renderer {
       await redis.del(this.browserMacKey).catch(() => {});
     }
 
-    BotUtil.makeLog("Playwright资源已清理", "info");
+    BotUtil.makeLog("info", "Playwright resources cleaned up", "PlaywrightRenderer");
   }
 }
