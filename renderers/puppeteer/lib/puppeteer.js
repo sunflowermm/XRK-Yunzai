@@ -20,14 +20,17 @@ export default class PuppeteerRenderer extends Renderer {
     this.browser = null;
     this.lock = false;
     this.shoting = [];
-    this.mac = ""; // 实例属性
+    this.mac = "";
     this.browserMacKey = null;
 
-    // 从专属配置加载
     const rendererCfg = cfg.renderer?.puppeteer || {};
     this.restartNum = config.restartNum !== undefined ? config.restartNum : (rendererCfg.restartNum !== undefined ? rendererCfg.restartNum : 100);
     this.renderNum = 0;
     this.puppeteerTimeout = config.puppeteerTimeout !== undefined ? config.puppeteerTimeout : (rendererCfg.puppeteerTimeout !== undefined ? rendererCfg.puppeteerTimeout : 120000);
+    
+    // 内存管理配置
+    this.memoryThreshold = config.memoryThreshold !== undefined ? config.memoryThreshold : (rendererCfg.memoryThreshold !== undefined ? rendererCfg.memoryThreshold : 1024);
+    this.maxConcurrent = config.maxConcurrent !== undefined ? config.maxConcurrent : (rendererCfg.maxConcurrent !== undefined ? rendererCfg.maxConcurrent : 3);
 
     this.config = {
       headless: config.headless !== undefined ? config.headless : (rendererCfg.headless !== undefined ? rendererCfg.headless : "new"),
@@ -36,33 +39,38 @@ export default class PuppeteerRenderer extends Renderer {
         '--no-sandbox',
         '--disable-dev-shm-usage',
         '--disable-setuid-sandbox',
-        '--no-zygote',
         '--disable-web-security',
         '--allow-file-access-from-files',
-        '--disable-features=site-per-process',
+        // 移除会导致内存问题的参数
+        // '--no-zygote',
+        // '--single-process',
+        // '--disable-features=site-per-process',
         '--disable-infobars',
         '--disable-notifications',
         '--window-size=1920,1080',
         '--disable-blink-features=AutomationControlled',
-        '--single-process',
         '--disable-extensions',
         '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows',
         '--disable-renderer-backgrounding',
+        // 添加内存优化参数
+        '--js-flags=--max-old-space-size=512',
+        '--disable-accelerated-2d-canvas',
+        '--disable-accelerated-jpeg-decoding',
+        '--disable-accelerated-mjpeg-decode',
+        '--disable-accelerated-video-decode',
+        '--disable-software-rasterizer',
       ]),
       executablePath: config.chromiumPath !== undefined ? config.chromiumPath : rendererCfg.chromiumPath,
       wsEndpoint: config.puppeteerWS !== undefined ? config.puppeteerWS : rendererCfg.wsEndpoint,
     };
 
     this.healthCheckTimer = null;
+    this.memoryCheckTimer = null;
 
-    // 进程信号清理
     process.on("exit", () => this.cleanup());
   }
 
-  /**
-   * 获取MAC地址
-   */
   async getMac() {
     let macAddr = "000000000000";
     try {
@@ -81,9 +89,6 @@ export default class PuppeteerRenderer extends Renderer {
     return macAddr;
   }
 
-  /**
-   * 浏览器初始化
-   */
   async browserInit() {
     if (this.browser) return this.browser;
 
@@ -188,28 +193,26 @@ export default class PuppeteerRenderer extends Renderer {
     return this.browser;
   }
 
-  /**
-   * 启动健康检查
-   */
   startHealthCheck() {
     if (this.healthCheckTimer) return;
     this.healthCheckTimer = setInterval(async () => {
       if (!this.browser || this.shoting.length > 0) return;
       try {
-        const page = await this.browser.newPage();
-        await page.goto("about:blank", { timeout: 8000 });
-        await page.close();
+        // 轻量级检查
+        await this.browser.pages();
       } catch (e) {
         BotUtil.makeLog(`健康检查失败: ${e.message}, 准备重启`, "warn");
         await this.restart(true);
       }
-    }, 60000); // 默认60s
+    }, 120000); // 120秒
   }
 
-  /**
-   * 截图
-   */
   async screenshot(name, data = {}) {
+    // 并发控制
+    while (this.shoting.length >= this.maxConcurrent) {
+      await new Promise(r => setTimeout(r, 100));
+    }
+
     if (!await this.browserInit()) return false;
 
     const pageHeight = data.multiPageHeight !== undefined ? data.multiPageHeight : 4000;
@@ -231,6 +234,17 @@ export default class PuppeteerRenderer extends Renderer {
       page = await this.browser.newPage();
       if (!page) throw new Error("无法创建页面");
 
+      // 禁用不必要的资源
+      await page.setRequestInterception(true);
+      page.on('request', (request) => {
+        const resourceType = request.resourceType();
+        if (['font', 'media'].includes(resourceType)) {
+          request.abort();
+        } else {
+          request.continue();
+        }
+      });
+
       await page.setViewport({
         width: 1280,
         height: 720,
@@ -238,7 +252,7 @@ export default class PuppeteerRenderer extends Renderer {
       });
 
       const pageGotoParams = lodash.extend(
-        { timeout: this.puppeteerTimeout, waitUntil: "networkidle2" },
+        { timeout: this.puppeteerTimeout, waitUntil: "domcontentloaded" }, // 改用domcontentloaded
         data.pageGotoParams || {}
       );
 
@@ -246,16 +260,16 @@ export default class PuppeteerRenderer extends Renderer {
       BotUtil.makeLog(`[图片生成][${name}] 加载文件: ${fileUrl}`, "debug");
       await page.goto(fileUrl, pageGotoParams);
 
-      // 等待图片加载
+      // 优化图片等待
       await page.evaluate(() => new Promise(resolve => {
-        const timeout = setTimeout(resolve, 1000);
+        const timeout = setTimeout(resolve, 800);
         const images = document.querySelectorAll("img");
         if (images.length === 0) {
           clearTimeout(timeout);
           return resolve();
         }
         let loaded = 0;
-        const onLoad = () => {
+        const checkComplete = () => {
           loaded++;
           if (loaded === images.length) {
             clearTimeout(timeout);
@@ -263,10 +277,10 @@ export default class PuppeteerRenderer extends Renderer {
           }
         };
         images.forEach(img => {
-          if (img.complete) onLoad();
+          if (img.complete) checkComplete();
           else {
-            img.onload = onLoad;
-            img.onerror = onLoad;
+            img.onload = checkComplete;
+            img.onerror = checkComplete;
           }
         });
       }));
@@ -279,7 +293,7 @@ export default class PuppeteerRenderer extends Renderer {
       const screenshotOptions = {
         type: data.imgType !== undefined ? data.imgType : "jpeg",
         omitBackground: data.omitBackground !== undefined ? data.omitBackground : false,
-        quality: data.quality !== undefined ? data.quality : 90,
+        quality: data.quality !== undefined ? data.quality : 85, // 降低质量
         path: data.path !== undefined ? data.path : "",
       };
 
@@ -302,13 +316,13 @@ export default class PuppeteerRenderer extends Renderer {
         if (num > 1) {
           await page.setViewport({
             width: Math.ceil(boundingBox.width),
-            height: pageHeight + 100,
+            height: Math.min(pageHeight + 100, 2000),
           });
         }
 
         for (let i = 1; i <= num; i++) {
           if (i !== 1 && i === num) {
-            const remainingHeight = parseInt(boundingBox.height) - pageHeight * (num - 1);
+            const remainingHeight = Math.min(parseInt(boundingBox.height) - pageHeight * (num - 1), 2000);
             await page.setViewport({
               width: Math.ceil(boundingBox.width),
               height: remainingHeight > 0 ? remainingHeight : 100,
@@ -317,7 +331,7 @@ export default class PuppeteerRenderer extends Renderer {
 
           if (i !== 1) {
             await page.evaluate(scrollY => window.scrollTo(0, scrollY), pageHeight * (i - 1));
-            await new Promise(resolve => setTimeout(resolve, 300));
+            await new Promise(resolve => setTimeout(resolve, 100));
           }
 
           const buff = num === 1 ? await body.screenshot(screenshotOptions) : await page.screenshot(screenshotOptions);
@@ -328,7 +342,7 @@ export default class PuppeteerRenderer extends Renderer {
           ret.push(buffer);
 
           if (i < num && num > 2) {
-            await new Promise(resolve => setTimeout(resolve, 200));
+            await new Promise(resolve => setTimeout(resolve, 100));
           }
         }
 
@@ -340,14 +354,18 @@ export default class PuppeteerRenderer extends Renderer {
       BotUtil.makeLog(`[图片生成][${name}] 图片生成失败: ${error.message}`, "error");
       ret = [];
     } finally {
-      if (page) await page.close().catch(() => {});
+      if (page) {
+        // 移除监听器
+        page.removeAllListeners('request');
+        await page.close().catch(() => {});
+      }
       this.shoting = this.shoting.filter(item => item !== name);
     }
 
     // 定期重启
     if (this.renderNum % this.restartNum === 0 && this.renderNum > 0 && this.shoting.length === 0) {
       BotUtil.makeLog(`puppeteer已完成${this.renderNum}次截图，准备重启`, "info");
-      this.restart();
+      setTimeout(() => this.restart(), 2000);
     }
 
     if (ret.length === 0 || !ret[0]) {
@@ -358,9 +376,6 @@ export default class PuppeteerRenderer extends Renderer {
     return data.multiPage ? ret : ret[0];
   }
 
-  /**
-   * 重启浏览器
-   */
   async restart(force = false) {
     if (!this.browser || this.lock) return;
 
@@ -370,6 +385,13 @@ export default class PuppeteerRenderer extends Renderer {
 
     try {
       const currentEndpoint = this.browser.wsEndpoint();
+      
+      // 关闭所有页面
+      const pages = await this.browser.pages();
+      for (const page of pages) {
+        await page.close().catch(() => {});
+      }
+      
       await this.browser.close().catch(err => BotUtil.makeLog(`关闭浏览器实例失败: ${err.message}`, "error"));
       this.browser = null;
 
@@ -386,6 +408,16 @@ export default class PuppeteerRenderer extends Renderer {
         clearInterval(this.healthCheckTimer);
         this.healthCheckTimer = null;
       }
+      
+      if (this.memoryCheckTimer) {
+        clearInterval(this.memoryCheckTimer);
+        this.memoryCheckTimer = null;
+      }
+
+      // 触发GC
+      if (global.gc) {
+        global.gc();
+      }
     } catch (err) {
       BotUtil.makeLog(`重启浏览器出错: ${err.message}`, "error");
     }
@@ -393,16 +425,22 @@ export default class PuppeteerRenderer extends Renderer {
     return true;
   }
 
-  /**
-   * 清理资源
-   */
   async cleanup() {
     if (this.healthCheckTimer) {
       clearInterval(this.healthCheckTimer);
       this.healthCheckTimer = null;
     }
+    
+    if (this.memoryCheckTimer) {
+      clearInterval(this.memoryCheckTimer);
+      this.memoryCheckTimer = null;
+    }
 
     if (this.browser) {
+      const pages = await this.browser.pages().catch(() => []);
+      for (const page of pages) {
+        await page.close().catch(() => {});
+      }
       await this.browser.close().catch(() => {});
       this.browser = null;
     }
