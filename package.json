@@ -11,7 +11,7 @@
     "art-template": "^4.13.2",
     "sequelize": "^6.37.5",
     "figures": "^4.0.0",
-    "https-proxy-agent": "7.0.6",
+    "https-proxy": "7.0.6",
     "image-size": "^1.2.0",
     "fastify": "^5.2.0",
     "@fastify/static": "^8.0.2",
@@ -51,8 +51,7 @@
     "cheerio": "^1.0.0",
     "compression": "^1.8.1",
     "helmet": "^8.1.0",
-    "express-rate-limit": "^8.1.0",
-    "http-proxy-middleware": "^3.0.5"
+    "express-rate-limit": "^8.1.0"
   },
   "devDependencies": {
     "eslint": "^9.18.0",
