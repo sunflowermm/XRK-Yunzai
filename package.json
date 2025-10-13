@@ -21,6 +21,7 @@
     "lodash": "^4.17.21",
     "log4js": "^6.9.1",
     "pino": "^9.7.0",
+    "rotating-file-stream": "^3.2.7",
     "md5": "link:node_modules/modules/md5",
     "moment": "^2.30.1",
     "node-fetch": "^3.3.2",
