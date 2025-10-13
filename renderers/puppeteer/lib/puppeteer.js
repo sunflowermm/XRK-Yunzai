@@ -4,81 +4,93 @@ import lodash from "lodash";
 import puppeteer from "puppeteer";
 import cfg from "../../../lib/config/config.js";
 import fs from "node:fs";
+import path from "node:path";
+import BotUtil from "../../../lib/common/util.js";
 
 const _path = process.cwd();
-let mac = "";
 
-export default class Puppeteer extends Renderer {
+export default class PuppeteerRenderer extends Renderer {
   constructor(config = {}) {
     super({
       id: "puppeteer",
       type: "image",
       render: "screenshot",
     });
+
     this.browser = null;
     this.lock = false;
     this.shoting = [];
-    this.pagePool = new Map();
-
-    // 截图次数和重启阈值
-    this.restartNum = config.restartNum || 100;
-    this.renderNum = 0;
-
-    // 浏览器配置
-    this.config = {
-      headless: config.headless || "new",
-      args: config.args || [
-        "--disable-gpu",
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-setuid-sandbox",
-        "--no-zygote",
-      ],
-    };
-
-    // 兼容旧配置
-    if (config.chromiumPath || cfg?.bot?.chromium_path)
-      this.config.executablePath = config.chromiumPath || cfg?.bot?.chromium_path;
-    if (config.puppeteerWS || cfg?.bot?.puppeteer_ws)
-      this.config.wsEndpoint = config.puppeteerWS || cfg?.bot?.puppeteer_ws;
-
-    // 超时设置
-    this.puppeteerTimeout = config.puppeteerTimeout || cfg?.bot?.puppeteer_timeout || 0;
-
-    // 浏览器健康监控
-    this.healthCheckTimer = null;
+    this.mac = ""; // 实例属性
     this.browserMacKey = null;
 
-    // 退出时清理资源
+    // 从专属配置加载
+    const rendererCfg = cfg.renderer?.puppeteer || {};
+    this.restartNum = config.restartNum !== undefined ? config.restartNum : (rendererCfg.restartNum !== undefined ? rendererCfg.restartNum : 100);
+    this.renderNum = 0;
+    this.puppeteerTimeout = config.puppeteerTimeout !== undefined ? config.puppeteerTimeout : (rendererCfg.puppeteerTimeout !== undefined ? rendererCfg.puppeteerTimeout : 120000);
+
+    this.config = {
+      headless: config.headless !== undefined ? config.headless : (rendererCfg.headless !== undefined ? rendererCfg.headless : "new"),
+      args: config.args !== undefined ? config.args : (rendererCfg.args !== undefined ? rendererCfg.args : [
+        '--disable-gpu',
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-setuid-sandbox',
+        '--no-zygote',
+        '--disable-web-security',
+        '--allow-file-access-from-files',
+        '--disable-features=site-per-process',
+        '--disable-infobars',
+        '--disable-notifications',
+        '--window-size=1920,1080',
+        '--disable-blink-features=AutomationControlled',
+        '--single-process',
+        '--disable-extensions',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+      ]),
+      executablePath: config.chromiumPath !== undefined ? config.chromiumPath : rendererCfg.chromiumPath,
+      wsEndpoint: config.puppeteerWS !== undefined ? config.puppeteerWS : rendererCfg.wsEndpoint,
+    };
+
+    this.healthCheckTimer = null;
+
+    // 进程信号清理
     process.on("exit", () => this.cleanup());
   }
 
-  // 获取Mac地址作为唯一标识
+  /**
+   * 获取MAC地址
+   */
   async getMac() {
-    let mac = "00:00:00:00:00:00";
+    let macAddr = "000000000000";
     try {
       const network = os.networkInterfaces();
       for (const key in network) {
         for (const iface of network[key]) {
           if (iface.mac && iface.mac !== "00:00:00:00:00:00") {
-            mac = iface.mac;
-            return mac.replace(/:/g, "");
+            macAddr = iface.mac.replace(/:/g, "");
+            return macAddr;
           }
         }
       }
     } catch (e) {
-      logger.debug("获取MAC地址失败:", e);
+      BotUtil.makeLog(`获取MAC地址失败: ${e.message}`, "error");
     }
-    return mac.replace(/:/g, "");
+    return macAddr;
   }
 
-  // 浏览器初始化
+  /**
+   * 浏览器初始化
+   */
   async browserInit() {
     if (this.browser) return this.browser;
+
     if (this.lock) {
       let waitTime = 0;
       while (this.lock && waitTime < 30000) {
-        await new Promise((r) => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 100));
         waitTime += 100;
       }
       if (this.browser) return this.browser;
@@ -86,29 +98,27 @@ export default class Puppeteer extends Renderer {
     }
 
     this.lock = true;
-
     try {
-      logger.info("puppeteer Chromium 启动中...");
+      BotUtil.makeLog("puppeteer Chromium 启动中...", "info");
 
-      if (!mac) {
-        mac = await this.getMac();
-        this.browserMacKey = `Yz:chromium:browserWSEndpoint:${mac}`;
+      if (!this.mac) {
+        this.mac = await this.getMac();
+        this.browserMacKey = `Yz:chromium:browserWSEndpoint:${this.mac}`;
       }
 
       let browserWSEndpoint = null;
-      try {
-        if (this.browserMacKey) {
+      if (this.browserMacKey) {
+        try {
           browserWSEndpoint = await redis.get(this.browserMacKey);
-        }
-      } catch (e) {}
-
+        } catch (e) {}
+      }
       if (!browserWSEndpoint && this.config.wsEndpoint) {
         browserWSEndpoint = this.config.wsEndpoint;
       }
 
       if (browserWSEndpoint) {
         try {
-          logger.info(`尝试连接到现有Chromium实例: ${browserWSEndpoint}`);
+          BotUtil.makeLog(`尝试连接到现有Chromium实例: ${browserWSEndpoint}`, "info");
           this.browser = await puppeteer.connect({
             browserWSEndpoint,
             defaultViewport: null,
@@ -116,68 +126,60 @@ export default class Puppeteer extends Renderer {
 
           const pages = await this.browser.pages().catch(() => null);
           if (pages) {
-            logger.info(`成功连接到现有Chromium实例`);
+            BotUtil.makeLog(`成功连接到现有Chromium实例`, "info");
           } else {
-            logger.info(`连接的Chromium实例不可用，将启动新实例`);
-            try {
-              await this.browser.close().catch(() => {});
-            } catch (e) {}
+            BotUtil.makeLog(`连接的Chromium实例不可用，将启动新实例`, "warn");
+            await this.browser.close().catch(() => {});
             this.browser = null;
-
-            try {
-              if (this.browserMacKey) {
-                await redis.del(this.browserMacKey);
-              }
-            } catch (e) {}
+            if (this.browserMacKey) {
+              await redis.del(this.browserMacKey).catch(() => {});
+            }
           }
         } catch (e) {
-          logger.info(`连接到现有Chromium实例失败: ${e.message}`);
-          try {
-            if (this.browserMacKey) {
-              await redis.del(this.browserMacKey);
-            }
-          } catch (e) {}
+          BotUtil.makeLog(`连接到现有Chromium实例失败: ${e.message}`, "warn");
+          if (this.browserMacKey) {
+            await redis.del(this.browserMacKey).catch(() => {});
+          }
         }
       }
 
       if (!this.browser) {
-        this.browser = await puppeteer.launch(this.config).catch((err) => {
-          logger.error(`启动Chromium失败: ${err.message}`);
+        this.browser = await puppeteer.launch(this.config).catch(err => {
+          BotUtil.makeLog(`启动Chromium失败: ${err.message}`, "error");
           if (err.message.includes("Could not find Chromium")) {
-            logger.error("没有正确安装 Chromium，可以尝试执行安装命令：node node_modules/puppeteer/install.js");
+            BotUtil.makeLog("没有正确安装 Chromium，可以尝试执行安装命令：node node_modules/puppeteer/install.js", "error");
           } else if (err.message.includes("cannot open shared object file")) {
-            logger.error("没有正确安装 Chromium 运行库");
+            BotUtil.makeLog("没有正确安装 Chromium 运行库", "error");
           }
           return null;
         });
 
         if (this.browser) {
-          logger.info(`puppeteer Chromium 启动成功 ${this.browser.wsEndpoint()}`);
-          try {
-            if (this.browserMacKey) {
-              await redis.set(this.browserMacKey, this.browser.wsEndpoint(), {
-                EX: 60 * 60 * 24 * 30, // 30天过期
-              });
+          BotUtil.makeLog(`puppeteer Chromium 启动成功 ${this.browser.wsEndpoint()}`, "info");
+          if (this.browserMacKey) {
+            try {
+              await redis.set(this.browserMacKey, this.browser.wsEndpoint(), { EX: 60 * 60 * 24 * 30 });
+            } catch (e) {
+              BotUtil.makeLog(`保存浏览器实例信息失败: ${e.message}`, "error");
             }
-          } catch (e) {
-            logger.error(`保存浏览器实例信息失败: ${e.message}`);
           }
         }
       }
 
       if (!this.browser) {
-        logger.error("puppeteer Chromium 启动失败");
-        this.lock = false;
+        BotUtil.makeLog("puppeteer Chromium 启动失败", "error");
         return false;
       }
 
       this.browser.on("disconnected", () => {
-        logger.warn("Chromium实例断开连接，将重启");
+        BotUtil.makeLog("Chromium实例断开连接，将重启", "warn");
         this.browser = null;
         this.restart(true);
       });
+
+      this.startHealthCheck();
     } catch (e) {
-      logger.error(`浏览器初始化失败: ${e.message}`);
+      BotUtil.makeLog(`浏览器初始化失败: ${e.message}`, "error");
       this.browser = null;
     } finally {
       this.lock = false;
@@ -187,30 +189,36 @@ export default class Puppeteer extends Renderer {
   }
 
   /**
-   * `chromium` 截图
-   * @param name
-   * @param data 模板参数
-   * @param data.tplFile 模板路径，必传
-   * @param data.saveId  生成html名称，为空name代替
-   * @param data.imgType  screenshot参数，生成图片类型：jpeg，png
-   * @param data.quality  screenshot参数，图片质量 0-100，jpeg是可传，默认90
-   * @param data.omitBackground  screenshot参数，隐藏默认的白色背景，背景透明。默认不透明
-   * @param data.path   screenshot参数，截图保存路径。截图图片类型将从文件扩展名推断出来。如果是相对路径，则从当前路径解析。如果没有指定路径，图片将不会保存到硬盘。
-   * @param data.multiPage 是否分页截图，默认false
-   * @param data.multiPageHeight 分页状态下页面高度，默认4000
-   * @param data.pageGotoParams 页面goto时的参数
-   * @return img 不做segment包裹
+   * 启动健康检查
+   */
+  startHealthCheck() {
+    if (this.healthCheckTimer) return;
+    this.healthCheckTimer = setInterval(async () => {
+      if (!this.browser || this.shoting.length > 0) return;
+      try {
+        const page = await this.browser.newPage();
+        await page.goto("about:blank", { timeout: 8000 });
+        await page.close();
+      } catch (e) {
+        BotUtil.makeLog(`健康检查失败: ${e.message}, 准备重启`, "warn");
+        await this.restart(true);
+      }
+    }, 60000); // 默认60s
+  }
+
+  /**
+   * 截图
    */
   async screenshot(name, data = {}) {
     if (!await this.browserInit()) return false;
 
-    const pageHeight = data.multiPageHeight || 4000;
+    const pageHeight = data.multiPageHeight !== undefined ? data.multiPageHeight : 4000;
     const savePath = this.dealTpl(name, data);
     if (!savePath) return false;
 
-    const filePath = `${_path}${lodash.trim(savePath, ".")}`;
+    const filePath = path.join(_path, lodash.trim(savePath, "."));
     if (!fs.existsSync(filePath)) {
-      logger.error(`HTML文件不存在: ${filePath}`);
+      BotUtil.makeLog(`HTML文件不存在: ${filePath}`, "error");
       return false;
     }
 
@@ -230,39 +238,38 @@ export default class Puppeteer extends Renderer {
       });
 
       const pageGotoParams = lodash.extend(
-        { timeout: 120000, waitUntil: "networkidle2" },
+        { timeout: this.puppeteerTimeout, waitUntil: "networkidle2" },
         data.pageGotoParams || {}
       );
 
       const fileUrl = `file://${filePath}`;
-      logger.debug(`[图片生成][${name}] 加载文件: ${fileUrl}`);
+      BotUtil.makeLog(`[图片生成][${name}] 加载文件: ${fileUrl}`, "debug");
       await page.goto(fileUrl, pageGotoParams);
 
-      await page.evaluate(() => {
-        return new Promise((resolve) => {
-          const timeout = setTimeout(resolve, 1000);
-          const images = document.querySelectorAll("img");
-          if (images.length === 0) {
+      // 等待图片加载
+      await page.evaluate(() => new Promise(resolve => {
+        const timeout = setTimeout(resolve, 1000);
+        const images = document.querySelectorAll("img");
+        if (images.length === 0) {
+          clearTimeout(timeout);
+          return resolve();
+        }
+        let loaded = 0;
+        const onLoad = () => {
+          loaded++;
+          if (loaded === images.length) {
             clearTimeout(timeout);
-            return resolve();
+            resolve();
           }
-          let loaded = 0;
-          const onLoad = () => {
-            loaded++;
-            if (loaded === images.length) {
-              clearTimeout(timeout);
-              resolve();
-            }
-          };
-          images.forEach((img) => {
-            if (img.complete) onLoad();
-            else {
-              img.onload = onLoad;
-              img.onerror = onLoad;
-            }
-          });
+        };
+        images.forEach(img => {
+          if (img.complete) onLoad();
+          else {
+            img.onload = onLoad;
+            img.onerror = onLoad;
+          }
         });
-      });
+      }));
 
       const body = (await page.$("#container")) || (await page.$("body"));
       if (!body) throw new Error("找不到内容元素");
@@ -270,10 +277,10 @@ export default class Puppeteer extends Renderer {
       const boundingBox = await body.boundingBox();
 
       const screenshotOptions = {
-        type: data.imgType || "jpeg",
-        omitBackground: data.omitBackground || false,
-        quality: data.quality || 90,
-        path: data.path || "",
+        type: data.imgType !== undefined ? data.imgType : "jpeg",
+        omitBackground: data.omitBackground !== undefined ? data.omitBackground : false,
+        quality: data.quality !== undefined ? data.quality : 90,
+        path: data.path !== undefined ? data.path : "",
       };
 
       if (data.imgType === "png") delete screenshotOptions.quality;
@@ -289,7 +296,7 @@ export default class Puppeteer extends Renderer {
         const buffer = Buffer.isBuffer(buff) ? buff : Buffer.from(buff);
         this.renderNum++;
         const kb = (buffer.length / 1024).toFixed(2) + "KB";
-        logger.mark(`[图片生成][${name}][${this.renderNum}次] ${kb} ${logger.green(`${Date.now() - start}ms`)}`);
+        BotUtil.makeLog(`[图片生成][${name}][${this.renderNum}次] ${kb} ${Date.now() - start}ms`, "info");
         ret.push(buffer);
       } else {
         if (num > 1) {
@@ -309,72 +316,68 @@ export default class Puppeteer extends Renderer {
           }
 
           if (i !== 1) {
-            await page.evaluate((scrollY) => {
-              window.scrollTo(0, scrollY);
-            }, pageHeight * (i - 1));
-            await new Promise((resolve) => setTimeout(resolve, 300));
+            await page.evaluate(scrollY => window.scrollTo(0, scrollY), pageHeight * (i - 1));
+            await new Promise(resolve => setTimeout(resolve, 300));
           }
 
           const buff = num === 1 ? await body.screenshot(screenshotOptions) : await page.screenshot(screenshotOptions);
           const buffer = Buffer.isBuffer(buff) ? buff : Buffer.from(buff);
           this.renderNum++;
           const kb = (buffer.length / 1024).toFixed(2) + "KB";
-          logger.mark(`[图片生成][${name}][${i}/${num}] ${kb}`);
+          BotUtil.makeLog(`[图片生成][${name}][${i}/${num}] ${kb}`, "debug");
           ret.push(buffer);
 
           if (i < num && num > 2) {
-            await new Promise((resolve) => setTimeout(resolve, 200));
+            await new Promise(resolve => setTimeout(resolve, 200));
           }
         }
 
         if (num > 1) {
-          logger.mark(`[图片生成][${name}] 处理完成 ${logger.green(`${Date.now() - start}ms`)}`);
+          BotUtil.makeLog(`[图片生成][${name}] 处理完成 ${Date.now() - start}ms`, "info");
         }
       }
     } catch (error) {
-      logger.error(`[图片生成][${name}] 图片生成失败:`, error);
+      BotUtil.makeLog(`[图片生成][${name}] 图片生成失败: ${error.message}`, "error");
       ret = [];
     } finally {
-      if (page) page.close().catch(() => {});
-      this.shoting = this.shoting.filter((item) => item !== name);
+      if (page) await page.close().catch(() => {});
+      this.shoting = this.shoting.filter(item => item !== name);
     }
 
+    // 定期重启
     if (this.renderNum % this.restartNum === 0 && this.renderNum > 0 && this.shoting.length === 0) {
-      logger.info(`puppeteer已完成${this.renderNum}次截图，准备重启`);
+      BotUtil.makeLog(`puppeteer已完成${this.renderNum}次截图，准备重启`, "info");
       this.restart();
     }
 
     if (ret.length === 0 || !ret[0]) {
-      logger.error(`[图片生成][${name}] 图片生成为空`);
+      BotUtil.makeLog(`[图片生成][${name}] 图片生成为空`, "error");
       return false;
     }
 
     return data.multiPage ? ret : ret[0];
   }
 
-  /** 
+  /**
    * 重启浏览器
-   * @param {boolean} force - 是否强制重启
    */
   async restart(force = false) {
     if (!this.browser || this.lock) return;
 
     if (!force && (this.renderNum % this.restartNum !== 0 || this.shoting.length > 0)) return;
 
-    logger.info(`puppeteer Chromium ${force ? "强制" : "计划"}重启...`);
+    BotUtil.makeLog(`puppeteer Chromium ${force ? "强制" : "计划"}重启...`, "warn");
 
     try {
       const currentEndpoint = this.browser.wsEndpoint();
-      await this.browser.close().catch((err) => logger.error("关闭浏览器实例失败:", err));
+      await this.browser.close().catch(err => BotUtil.makeLog(`关闭浏览器实例失败: ${err.message}`, "error"));
       this.browser = null;
 
-      try {
-        if (this.browserMacKey) {
-          const storedEndpoint = await redis.get(this.browserMacKey);
-          if (storedEndpoint === currentEndpoint) await redis.del(this.browserMacKey);
+      if (this.browserMacKey) {
+        const storedEndpoint = await redis.get(this.browserMacKey).catch(() => null);
+        if (storedEndpoint === currentEndpoint) {
+          await redis.del(this.browserMacKey).catch(() => {});
         }
-      } catch (e) {
-        logger.error(`Redis删除浏览器实例失败:`, e);
       }
 
       this.renderNum = 0;
@@ -384,7 +387,7 @@ export default class Puppeteer extends Renderer {
         this.healthCheckTimer = null;
       }
     } catch (err) {
-      logger.error("重启浏览器出错:", err);
+      BotUtil.makeLog(`重启浏览器出错: ${err.message}`, "error");
     }
 
     return true;
@@ -400,12 +403,10 @@ export default class Puppeteer extends Renderer {
     }
 
     if (this.browser) {
-      try {
-        await this.browser.close().catch(() => {});
-      } catch (e) {}
+      await this.browser.close().catch(() => {});
       this.browser = null;
     }
 
-    logger.info("Puppeteer资源已清理完成");
+    BotUtil.makeLog("Puppeteer资源已清理完成", "info");
   }
 }

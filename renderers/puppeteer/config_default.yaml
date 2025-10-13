@@ -1,23 +1,42 @@
 # 如需自定义，复制此文件为 config.yaml 进行配置
 # 更新配置后需要重启
 
-# chromium 地址，可填写系统的edge/chromium路径，例如（根据实际情况调整）：
-# chromiumPath: C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
-chromiumPath:
-
-# puppeteer websocket 地址。连接单独存在的 chromium。
-# puppeteerWS: 'ws://browserless:3000'
-puppeteerWS:
-
-# headless
+# 无头模式 ("new" 为新 headless 模式)
 headless: "new"
 
-# puppeteer启动args，注意args的--前缀
-args:
-  - --disable-gpu
-  - --disable-setuid-sandbox
-  - --no-sandbox
-  - --no-zygote
+# Chromium 路径（可选）
+chromiumPath:
 
-# puppeteer截图超时时间
-puppeteerTimeout:
+# 连接到远程浏览器（可选）
+wsEndpoint:
+
+# 浏览器启动参数
+args:
+    - --disable-gpu
+    - --no-sandbox
+    - --disable-dev-shm-usage
+    - --disable-setuid-sandbox
+    - --no-zygote
+    - --disable-web-security
+    - --allow-file-access-from-files
+    - --disable-features=site-per-process
+    - --disable-infobars
+    - --disable-notifications
+    - --window-size=1920,1080
+    - --disable-blink-features=AutomationControlled
+    - --single-process  // 避免多进程问题
+    - --disable-extensions
+    - --disable-background-timer-throttling
+    - --disable-backgrounding-occluded-windows
+    - --disable-renderer-backgrounding
+
+# 截图超时时间（毫秒）
+puppeteerTimeout: 120000
+
+# 截图重启阈值
+restartNum: 150
+
+viewport:
+  width: 1280
+  height: 720
+  deviceScaleFactor: 1

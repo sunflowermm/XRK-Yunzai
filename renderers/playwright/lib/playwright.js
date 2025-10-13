@@ -1,25 +1,13 @@
-// Path: lib/renderer/playwright.js
-// Note: Main implementation of the Playwright renderer. Optimized over Puppeteer:
-// - Uses Playwright's modern API for better performance and cross-browser support.
-// - Better error handling and logging.
-// - Supports multiple browser types (chromium, firefox, webkit).
-// - Automatic context management for isolation.
-// - Improved health check: periodically checks if browser is responsive.
-// - Faster image loading wait using page.waitForSelector and evaluate.
-// - Optimized multi-page screenshot with smoother scrolling.
-// - Reduced memory usage by closing pages immediately.
-// - Added support for custom browser type from config.
-
 import Renderer from "../../../lib/renderer/Renderer.js";
 import os from "node:os";
 import lodash from "lodash";
-import playwright from "playwright";  // Import playwright
+import playwright from "playwright";
 import cfg from "../../../lib/config/config.js";
 import fs from "node:fs";
 import path from "node:path";
+import BotUtil from "../../../lib/common/util.js";
 
 const _path = process.cwd();
-let mac = "";
 
 export default class PlaywrightRenderer extends Renderer {
   constructor(config = {}) {
@@ -28,81 +16,146 @@ export default class PlaywrightRenderer extends Renderer {
       type: "image",
       render: "screenshot",
     });
+
     this.browser = null;
     this.lock = false;
     this.shoting = [];
-    this.pagePool = new Map();
-
-    // 截图次数和重启阈值
-    this.restartNum = config.restartNum || 100;
-    this.renderNum = 0;
-
-    // 浏览器配置
-    this.browserType = config.browser || "chromium";  // Default to chromium
-    this.config = {
-      headless: config.headless ?? true,
-      args: config.args || [
-        "--disable-gpu",
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-      ],
-      channel: config.channel,  // e.g., 'chrome' for system Chrome
-      ...config,  // Merge other configs
-    };
-
-    // 兼容旧配置 (if migrating from Puppeteer)
-    if (config.chromiumPath || cfg?.bot?.chromium_path)
-      this.config.executablePath = config.chromiumPath || cfg?.bot?.chromium_path;
-    if (config.playwrightWS || cfg?.bot?.playwright_ws)
-      this.config.browserURL = config.playwrightWS || cfg?.bot?.playwright_ws;  // Playwright uses browserURL for WS
-
-    // 超时设置
-    this.playwrightTimeout = config.playwrightTimeout || cfg?.bot?.playwright_timeout || 120000;
-
-    // 上下文选项
-    this.contextOptions = config.contextOptions || {
-      viewport: { width: 1280, height: 720 },
-      deviceScaleFactor: 1,
-      bypassCSP: true,
-      reducedMotion: "reduce",
-    };
-
-    // 浏览器健康监控
-    this.healthCheckTimer = null;
-    this.healthCheckInterval = config.healthCheckInterval || 60000;  // 1 minute
+    this.isClosing = false;
+    this.mac = ""; // 实例属性，避免全局
     this.browserMacKey = null;
 
-    // 退出时清理资源
+    // 从专属配置加载
+    const rendererCfg = cfg.renderer?.playwright || {};
+    this.restartNum = config.restartNum !== undefined ? config.restartNum : (rendererCfg.restartNum !== undefined ? rendererCfg.restartNum : 100);
+    this.renderNum = 0;
+    this.browserType = config.browser !== undefined ? config.browser : (rendererCfg.browserType !== undefined ? rendererCfg.browserType : "chromium");
+    this.playwrightTimeout = config.playwrightTimeout !== undefined ? config.playwrightTimeout : (rendererCfg.playwrightTimeout !== undefined ? rendererCfg.playwrightTimeout : 120000);
+    this.healthCheckInterval = config.healthCheckInterval !== undefined ? config.healthCheckInterval : (rendererCfg.healthCheckInterval !== undefined ? rendererCfg.healthCheckInterval : 60000);
+    this.maxRetries = config.maxRetries !== undefined ? config.maxRetries : (rendererCfg.maxRetries !== undefined ? rendererCfg.maxRetries : 3);
+    this.retryDelay = config.retryDelay !== undefined ? config.retryDelay : (rendererCfg.retryDelay !== undefined ? rendererCfg.retryDelay : 2000);
+
+    this.config = {
+      headless: config.headless !== undefined ? config.headless : (rendererCfg.headless !== undefined ? rendererCfg.headless : true),
+      args: config.args !== undefined ? config.args : (rendererCfg.args !== undefined ? rendererCfg.args : [
+        "--disable-gpu",
+        "--disable-software-rasterizer",
+        "--disable-dev-shm-usage",
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-extensions",
+        "--disable-background-networking",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-breakpad",
+        "--disable-component-extensions-with-background-pages",
+        "--disable-features=TranslateUI,BlinkGenPropertyTrees",
+        "--disable-ipc-flooding-protection",
+        "--disable-renderer-backgrounding",
+        "--force-color-profile=srgb",
+        "--metrics-recording-only",
+        "--mute-audio",
+        "--no-first-run",
+        "--enable-automation",
+        "--password-store=basic",
+        "--use-mock-keychain",
+        "--disable-blink-features=AutomationControlled",
+        "--single-process",
+        "--disable-features=site-per-process",
+      ]),
+      channel: config.channel !== undefined ? config.channel : rendererCfg.channel,
+      executablePath: config.chromiumPath !== undefined ? config.chromiumPath : rendererCfg.chromiumPath,
+      wsEndpoint: config.playwrightWS !== undefined ? config.playwrightWS : rendererCfg.wsEndpoint,
+    };
+
+    this.contextOptions = config.contextOptions !== undefined ? config.contextOptions : (rendererCfg.contextOptions !== undefined ? rendererCfg.contextOptions : {
+      viewport: { width: rendererCfg.viewport?.width !== undefined ? rendererCfg.viewport.width : 1280, height: rendererCfg.viewport?.height !== undefined ? rendererCfg.viewport.height : 720 },
+      deviceScaleFactor: rendererCfg.viewport?.deviceScaleFactor !== undefined ? rendererCfg.viewport.deviceScaleFactor : 1,
+      bypassCSP: rendererCfg.contextOptions?.bypassCSP !== undefined ? rendererCfg.contextOptions.bypassCSP : true,
+      reducedMotion: rendererCfg.contextOptions?.reducedMotion !== undefined ? rendererCfg.contextOptions.reducedMotion : "reduce",
+    });
+
+    this.healthCheckTimer = null;
+
+    // 进程信号清理
     process.on("exit", () => this.cleanup());
+    process.on("SIGINT", () => this.cleanup());
+    process.on("SIGTERM", () => this.cleanup());
   }
 
-  // 获取Mac地址作为唯一标识 (same as Puppeteer)
+  /**
+   * 获取MAC地址
+   */
   async getMac() {
-    let mac = "00:00:00:00:00:00";
+    let macAddr = "000000000000";
     try {
       const network = os.networkInterfaces();
       for (const key in network) {
         for (const iface of network[key]) {
           if (iface.mac && iface.mac !== "00:00:00:00:00:00") {
-            mac = iface.mac;
-            return mac.replace(/:/g, "");
+            macAddr = iface.mac.replace(/:/g, "");
+            return macAddr;
           }
         }
       }
     } catch (e) {
-      console.error("获取MAC地址失败:", e);
+      BotUtil.makeLog(`获取MAC地址失败: ${e.message}`, "error");
     }
-    return mac.replace(/:/g, "");
+    return macAddr;
   }
 
-  // 浏览器初始化 (optimized: uses playwright.launch with browserType)
+  /**
+   * 连接到现有浏览器实例（带指数退避重试）
+   */
+  async connectToExisting(wsEndpoint, retries = 0) {
+    const delay = this.retryDelay * Math.pow(2, retries); // 指数退避
+    try {
+      BotUtil.makeLog(`尝试连接现有${this.browserType}实例 (重试${retries + 1}/${this.maxRetries})`, "info");
+      const browser = await playwright[this.browserType].connect(wsEndpoint, { timeout: 10000 });
+
+      // 测试连接
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      await page.goto("about:blank", { timeout: 5000 });
+      await page.close();
+      await context.close();
+
+      BotUtil.makeLog(`成功连接到现有${this.browserType}实例`, "info");
+      return browser;
+    } catch (e) {
+      BotUtil.makeLog(`连接失败: ${e.message}`, "warn");
+      if (retries < this.maxRetries - 1) {
+        await new Promise(r => setTimeout(r, delay));
+        return this.connectToExisting(wsEndpoint, retries + 1);
+      }
+      // 清理失效记录
+      if (this.browserMacKey) {
+        try {
+          await redis.del(this.browserMacKey);
+          BotUtil.makeLog(`已清理失效的浏览器实例记录`, "info");
+        } catch (e) {}
+      }
+      return null;
+    }
+  }
+
+  /**
+   * 浏览器初始化
+   */
   async browserInit() {
-    if (this.browser) return this.browser;
+    if (this.browser) {
+      try {
+        this.browser.contexts(); // 简单验证
+        return this.browser;
+      } catch (e) {
+        BotUtil.makeLog(`现有浏览器实例失效: ${e.message}`, "warn");
+        this.browser = null;
+      }
+    }
+
     if (this.lock) {
       let waitTime = 0;
       while (this.lock && waitTime < 30000) {
-        await new Promise((r) => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 100));
         waitTime += 100;
       }
       if (this.browser) return this.browser;
@@ -110,81 +163,66 @@ export default class PlaywrightRenderer extends Renderer {
     }
 
     this.lock = true;
-
     try {
-      console.log(`playwright ${this.browserType} 启动中...`);
+      BotUtil.makeLog(`playwright ${this.browserType} 启动中...`, "info");
 
-      if (!mac) {
-        mac = await this.getMac();
-        this.browserMacKey = `Yz:${this.browserType}:browserURL:${mac}`;
+      if (!this.mac) {
+        this.mac = await this.getMac();
+        this.browserMacKey = `Yz:${this.browserType}:browserURL:${this.mac}`;
       }
 
-      let browserURL = null;
-      try {
-        if (this.browserMacKey) {
-          browserURL = await redis.get(this.browserMacKey);  // Assuming redis is available, as in reference
-        }
-      } catch (e) {}
-
-      if (!browserURL && this.config.browserURL) {
-        browserURL = this.config.browserURL;
-      }
-
-      if (browserURL) {
+      let wsEndpoint = null;
+      if (this.browserMacKey) {
         try {
-          console.log(`尝试连接到现有${this.browserType}实例: ${browserURL}`);
-          this.browser = await playwright[this.browserType].connect(browserURL);
+          wsEndpoint = await redis.get(this.browserMacKey);
+        } catch (e) {}
+      }
+      if (!wsEndpoint && this.config.wsEndpoint) {
+        wsEndpoint = this.config.wsEndpoint;
+      }
 
-          // Test connection with a quick new page
-          const testContext = await this.browser.newContext();
-          const testPage = await testContext.newPage();
-          await testPage.close();
-          await testContext.close();
-          console.log(`成功连接到现有${this.browserType}实例`);
-        } catch (e) {
-          console.log(`连接到现有${this.browserType}实例失败: ${e.message}`);
-          try {
-            if (this.browserMacKey) {
-              await redis.del(this.browserMacKey);
-            }
-          } catch (e) {}
-          this.browser = null;
-        }
+      if (wsEndpoint) {
+        this.browser = await this.connectToExisting(wsEndpoint);
       }
 
       if (!this.browser) {
+        BotUtil.makeLog(`启动新${this.browserType}实例...`, "info");
         this.browser = await playwright[this.browserType].launch(this.config);
-
         if (this.browser) {
-          console.log(`playwright ${this.browserType} 启动成功`);
-          try {
-            if (this.browserMacKey) {
-              await redis.set(this.browserMacKey, this.browser.wsEndpoint(), {  // Playwright has wsEndpoint()
-                EX: 60 * 60 * 24 * 30, // 30天过期
-              });
+          BotUtil.makeLog(`playwright ${this.browserType} 启动成功`, "info");
+          const endpoint = this.browser.wsEndpoint();
+          if (endpoint && this.browserMacKey) {
+            try {
+              await redis.set(this.browserMacKey, endpoint, { EX: 60 * 60 * 24 * 30 });
+              BotUtil.makeLog(`浏览器实例已保存到Redis`, "debug");
+            } catch (e) {
+              BotUtil.makeLog(`保存浏览器实例失败: ${e.message}`, "warn");
             }
-          } catch (e) {
-            console.error(`保存浏览器实例信息失败: ${e.message}`);
           }
         }
       }
 
       if (!this.browser) {
-        console.error(`playwright ${this.browserType} 启动失败`);
-        this.lock = false;
+        BotUtil.makeLog(`playwright ${this.browserType} 启动失败`, "error");
         return false;
       }
 
-      this.browser.on("disconnected", () => {
-        console.warn(`${this.browserType}实例断开连接，将重启`);
+      this.browser.on("disconnected", async () => {
+        BotUtil.makeLog(`${this.browserType}实例断开连接`, "warn");
         this.browser = null;
-        this.restart(true);
+        if (this.browserMacKey) {
+          try {
+            await redis.del(this.browserMacKey);
+          } catch (e) {}
+        }
+        if (!this.isClosing) {
+          await this.restart(true);
+        }
       });
 
-      // Start health check timer
       this.startHealthCheck();
     } catch (e) {
-      console.error(`浏览器初始化失败: ${e.message}`);
+      BotUtil.makeLog(`浏览器初始化失败: ${e.message}`, "error");
       this.browser = null;
     } finally {
       this.lock = false;
@@ -193,42 +231,39 @@ export default class PlaywrightRenderer extends Renderer {
     return this.browser;
   }
 
-  // Start periodic health check (optimization: ensures browser responsiveness)
+  /**
+   * 启动健康检查
+   */
   startHealthCheck() {
     if (this.healthCheckTimer) return;
-
     this.healthCheckTimer = setInterval(async () => {
-      if (!this.browser || this.shoting.length > 0) return;
-
+      if (!this.browser || this.shoting.length > 0 || this.isClosing) return;
       try {
         const context = await this.browser.newContext();
         const page = await context.newPage();
-        await page.goto("about:blank", { timeout: 10000 });
+        await page.goto("about:blank", { timeout: 8000 });
         await page.close();
         await context.close();
       } catch (e) {
-        console.warn(`浏览器健康检查失败: ${e.message}，将重启`);
+        BotUtil.makeLog(`健康检查失败: ${e.message}, 准备重启`, "warn");
         await this.restart(true);
       }
     }, this.healthCheckInterval);
   }
 
   /**
-   * `playwright` 截图 (optimized: uses page.waitForLoadState for better waiting, smoother multi-page handling)
-   * @param name
-   * @param data 模板参数 (same as reference)
-   * @return img 不做segment包裹
+   * 截图
    */
   async screenshot(name, data = {}) {
     if (!await this.browserInit()) return false;
 
-    const pageHeight = data.multiPageHeight || 4000;
+    const pageHeight = data.multiPageHeight !== undefined ? data.multiPageHeight : 4000;
     const savePath = this.dealTpl(name, data);
     if (!savePath) return false;
 
     const filePath = path.join(_path, savePath);
     if (!fs.existsSync(filePath)) {
-      console.error(`HTML文件不存在: ${filePath}`);
+      BotUtil.makeLog(`HTML文件不存在: ${filePath}`, "error");
       return false;
     }
 
@@ -241,7 +276,6 @@ export default class PlaywrightRenderer extends Renderer {
     try {
       context = await this.browser.newContext(this.contextOptions);
       page = await context.newPage();
-
       if (!page) throw new Error("无法创建页面");
 
       const pageGotoParams = lodash.extend(
@@ -250,48 +284,45 @@ export default class PlaywrightRenderer extends Renderer {
       );
 
       const fileUrl = `file://${filePath}`;
-      console.log(`[图片生成][${name}] 加载文件: ${fileUrl}`);
       await page.goto(fileUrl, pageGotoParams);
-
-      // Optimized image loading wait
       await page.waitForLoadState("networkidle");
-      await page.evaluate(() => {
-        return new Promise((resolve) => {
-          const timeout = setTimeout(resolve, 1000);
-          const images = Array.from(document.querySelectorAll("img"));
-          if (images.length === 0) {
-            clearTimeout(timeout);
-            return resolve();
-          }
-          let loaded = 0;
-          const onLoad = () => {
-            loaded++;
-            if (loaded === images.length) {
-              clearTimeout(timeout);
-              resolve();
-            }
-          };
-          images.forEach((img) => {
-            if (img.complete) onLoad();
-            else {
-              img.onload = onLoad;
-              img.onerror = onLoad;
-            }
-          });
-        });
-      });
 
-      const body = await page.locator("#container").first() || await page.locator("body");
+      // 等待图片加载
+      await page.evaluate(() => new Promise(resolve => {
+        const timeout = setTimeout(resolve, 1000);
+        const images = Array.from(document.querySelectorAll("img"));
+        if (images.length === 0) {
+          clearTimeout(timeout);
+          return resolve();
+        }
+        let loaded = 0;
+        const onLoad = () => {
+          loaded++;
+          if (loaded === images.length) {
+            clearTimeout(timeout);
+            resolve();
+          }
+        };
+        images.forEach(img => {
+          if (img.complete) onLoad();
+          else {
+            img.onload = onLoad;
+            img.onerror = onLoad;
+          }
+        });
+      }));
+
+      const body = (await page.locator("#container").first()) || (await page.locator("body"));
       if (!body) throw new Error("找不到内容元素");
 
       const boundingBox = await body.boundingBox();
 
       const screenshotOptions = {
-        type: data.imgType || "jpeg",
+        type: data.imgType !== undefined ? data.imgType : "jpeg",
         fullPage: !data.multiPage,
-        omitBackground: data.omitBackground || false,
-        quality: data.quality || 90,
-        path: data.path || "",
+        omitBackground: data.omitBackground !== undefined ? data.omitBackground : false,
+        quality: data.quality !== undefined ? data.quality : 90,
+        path: data.path !== undefined ? data.path : "",
       };
 
       if (data.imgType === "png") delete screenshotOptions.quality;
@@ -299,7 +330,7 @@ export default class PlaywrightRenderer extends Renderer {
       let num = 1;
       if (data.multiPage) {
         screenshotOptions.type = "jpeg";
-        screenshotOptions.fullPage = false;  // For multi-page, we clip
+        screenshotOptions.fullPage = false;
         num = Math.ceil(boundingBox.height / pageHeight) || 1;
       }
 
@@ -307,7 +338,7 @@ export default class PlaywrightRenderer extends Renderer {
         const buff = await body.screenshot(screenshotOptions);
         this.renderNum++;
         const kb = (buff.length / 1024).toFixed(2) + "KB";
-        console.log(`[图片生成][${name}][${this.renderNum}次] ${kb} ${Date.now() - start}ms`);
+        BotUtil.makeLog(`[${name}][${this.renderNum}次] ${kb} ${Date.now() - start}ms`, "info");
         ret.push(buff);
       } else {
         if (num > 1) {
@@ -327,13 +358,10 @@ export default class PlaywrightRenderer extends Renderer {
           }
 
           if (i !== 1) {
-            await page.evaluate((scrollY) => {
-              window.scrollTo(0, scrollY);
-            }, pageHeight * (i - 1));
-            await page.waitForTimeout(300);  // Playwright's waitForTimeout
+            await page.evaluate(scrollY => window.scrollTo(0, scrollY), pageHeight * (i - 1));
+            await page.waitForTimeout(200);
           }
 
-          // For multi-page, use clip to avoid fullPage issues
           const clip = (i === num && num > 1) ? {
             x: boundingBox.x,
             y: 0,
@@ -341,70 +369,65 @@ export default class PlaywrightRenderer extends Renderer {
             height: boundingBox.height - pageHeight * (i - 1),
           } : null;
 
-          const buff = await (clip ? page.screenshot({ ...screenshotOptions, clip }) : body.screenshot(screenshotOptions));
+          const buff = clip ? await page.screenshot({ ...screenshotOptions, clip }) : await body.screenshot(screenshotOptions);
           this.renderNum++;
           const kb = (buff.length / 1024).toFixed(2) + "KB";
-          console.log(`[图片生成][${name}][${i}/${num}] ${kb}`);
+          BotUtil.makeLog(`[${name}][${i}/${num}] ${kb}`, "debug");
           ret.push(buff);
 
           if (i < num && num > 2) {
-            await page.waitForTimeout(200);
+            await page.waitForTimeout(150);
           }
         }
 
         if (num > 1) {
-          console.log(`[图片生成][${name}] 处理完成 ${Date.now() - start}ms`);
+          BotUtil.makeLog(`[${name}] 处理完成 ${Date.now() - start}ms`, "info");
         }
       }
     } catch (error) {
-      console.error(`[图片生成][${name}] 图片生成失败:`, error);
+      BotUtil.makeLog(`[${name}] 截图失败: ${error.message}`, "error");
       ret = [];
     } finally {
-      if (page) await page.close().catch(() => {});
+      if (page) await page.close({ runBeforeUnload: false }).catch(() => {});
       if (context) await context.close().catch(() => {});
-      this.shoting = this.shoting.filter((item) => item !== name);
+      this.shoting = this.shoting.filter(item => item !== name);
     }
 
+    // 定期重启
     if (this.renderNum % this.restartNum === 0 && this.renderNum > 0 && this.shoting.length === 0) {
-      console.log(`playwright已完成${this.renderNum}次截图，准备重启`);
-      this.restart();
+      BotUtil.makeLog(`已完成${this.renderNum}次截图, 准备重启浏览器`, "info");
+      setTimeout(() => this.restart(), 1000);
     }
 
     if (ret.length === 0 || !ret[0]) {
-      console.error(`[图片生成][${name}] 图片生成为空`);
+      BotUtil.makeLog(`[${name}] 截图结果为空`, "error");
       return false;
     }
 
     return data.multiPage ? ret : ret[0];
   }
 
-  /** 
-   * 重启浏览器 (optimized: closes contexts first for cleaner restart)
-   * @param {boolean} force - 是否强制重启
+  /**
+   * 重启浏览器
    */
   async restart(force = false) {
-    if (!this.browser || this.lock) return;
+    if (!this.browser || this.lock || this.isClosing) return;
 
     if (!force && (this.renderNum % this.restartNum !== 0 || this.shoting.length > 0)) return;
 
-    console.log(`playwright ${this.browserType} ${force ? "强制" : "计划"}重启...`);
+    BotUtil.makeLog(`${this.browserType} ${force ? "强制" : "计划"}重启...`, "warn");
+    this.isClosing = true;
 
     try {
-      // Close all contexts first
       const contexts = this.browser.contexts();
       for (const ctx of contexts) {
-        await ctx.close().catch((err) => console.error("关闭上下文失败:", err));
+        await ctx.close().catch(() => {});
       }
-
-      await this.browser.close().catch((err) => console.error("关闭浏览器实例失败:", err));
+      await this.browser.close();
       this.browser = null;
 
-      try {
-        if (this.browserMacKey) {
-          await redis.del(this.browserMacKey);
-        }
-      } catch (e) {
-        console.error(`Redis删除浏览器实例失败:`, e);
+      if (this.browserMacKey) {
+        await redis.del(this.browserMacKey).catch(() => {});
       }
 
       this.renderNum = 0;
@@ -413,29 +436,41 @@ export default class PlaywrightRenderer extends Renderer {
         clearInterval(this.healthCheckTimer);
         this.healthCheckTimer = null;
       }
+
+      BotUtil.makeLog(`${this.browserType}重启完成`, "info");
     } catch (err) {
-      console.error("重启浏览器出错:", err);
+      BotUtil.makeLog(`重启失败: ${err.message}`, "error");
+    } finally {
+      this.isClosing = false;
     }
 
     return true;
   }
 
   /**
-   * 清理资源 (optimized: clears health timer and closes browser safely)
+   * 清理资源
    */
   async cleanup() {
+    this.isClosing = true;
+
     if (this.healthCheckTimer) {
       clearInterval(this.healthCheckTimer);
       this.healthCheckTimer = null;
     }
 
     if (this.browser) {
-      try {
-        await this.browser.close().catch(() => {});
-      } catch (e) {}
+      const contexts = this.browser.contexts();
+      for (const ctx of contexts) {
+        await ctx.close().catch(() => {});
+      }
+      await this.browser.close().catch(() => {});
       this.browser = null;
     }
 
-    console.log("Playwright资源已清理完成");
+    if (this.browserMacKey) {
+      await redis.del(this.browserMacKey).catch(() => {});
+    }
+
+    BotUtil.makeLog("Playwright资源已清理", "info");
   }
 }
