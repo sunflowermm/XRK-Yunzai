@@ -1,0 +1,57 @@
+# 如需自定化，复制此文件为 config.yaml 进行配置
+# 更新配置后需要重启
+
+# 浏览器类型: chromium, firefox, webkit
+browserType: chromium
+
+# Chromium 路径（可选）
+# chromiumPath: C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
+chromiumPath:
+
+# 连接到远程浏览器（可选）
+# wsEndpoint: 'ws://localhost:3000'
+wsEndpoint:
+
+# 无头模式
+headless: true
+
+# 浏览器启动参数
+args:
+  - --disable-gpu
+  - --disable-setuid-sandbox
+  - --no-sandbox
+  - --no-zygote
+  - --disable-dev-shm-usage
+
+# 截图超时时间（毫秒）
+screenshotTimeout: 120000
+
+# 页面导航超时时间（毫秒）
+navigationTimeout: 60000
+
+# 截图重启阈值
+restartNum: 150
+
+# 页面池大小（并发页面数）
+pagePoolSize: 3
+
+# 启用持久化上下文（性能优化）
+persistentContext: false
+
+# 用户数据目录（启用持久化上下文时使用）
+userDataDir: ./temp/playwright-data
+
+# 设备仿真（可选）
+# device: "iPhone 12"
+
+# 视口设置
+viewport:
+  width: 1280
+  height: 720
+  deviceScaleFactor: 2
+
+# 截图默认质量
+defaultQuality: 90
+
+# 启用跟踪（调试用）
+enableTracing: false
