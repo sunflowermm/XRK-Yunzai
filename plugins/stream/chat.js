@@ -41,7 +41,7 @@ export default class ChatStream extends AIStream {
     super({
       name: 'chat',
       description: '智能聊天互动工作流',
-      version: '3.0.0',
+      version: '3.1.0',
       author: 'XRK',
       priority: 10,
       config: {
@@ -688,7 +688,7 @@ export default class ChatStream extends AIStream {
         while ((match = regex.exec(text))) {
           functions.push({ 
             type: 'setEssence', 
-            params: { msgId: match[1] }
+            params: { msgId: String(match[1]) }
           });
         }
         
@@ -701,10 +701,9 @@ export default class ChatStream extends AIStream {
       handler: async (params, context) => {
         if (context.e?.isGroup && context.e.bot) {
           try {
-            await context.e.bot.setEssenceMessage(
-              { group_id: context.e.group_id }, 
-              params.msgId
-            );
+            await context.e.bot.sendApi('set_essence_msg', {
+              message_id: String(params.msgId)
+            });
             await BotUtil.sleep(300);
           } catch (error) {
             BotUtil.makeLog('warn', `设置精华失败: ${error.message}`, 'ChatStream');
@@ -728,7 +727,7 @@ export default class ChatStream extends AIStream {
         while ((match = regex.exec(text))) {
           functions.push({ 
             type: 'removeEssence', 
-            params: { msgId: match[1] }
+            params: { msgId: String(match[1]) }
           });
         }
         
@@ -741,10 +740,9 @@ export default class ChatStream extends AIStream {
       handler: async (params, context) => {
         if (context.e?.isGroup && context.e.bot) {
           try {
-            await context.e.bot.removeEssenceMessage(
-              { group_id: context.e.group_id }, 
-              params.msgId
-            );
+            await context.e.bot.sendApi('delete_essence_msg', {
+              message_id: String(params.msgId)
+            });
             await BotUtil.sleep(300);
           } catch (error) {
             BotUtil.makeLog('warn', `取消精华失败: ${error.message}`, 'ChatStream');
@@ -794,6 +792,119 @@ export default class ChatStream extends AIStream {
       },
       enabled: true,
       requireAdmin: true
+    });
+
+    // 21. 撤回消息
+    this.registerFunction('recall', {
+      description: '撤回消息',
+      prompt: `[撤回:消息ID] - 撤回指定消息
+注意：
+- 撤回别人的消息需要管理员权限
+- 撤回自己的消息需要在3分钟内
+示例：[撤回:1234567890]`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[撤回:([^\]]+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ 
+            type: 'recall', 
+            params: { msgId: String(match[1]) }
+          });
+        }
+        
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (!context.e) return;
+        
+        try {
+          let canRecall = false;
+          let messageInfo = null;
+          
+          try {
+            if (context.e.bot && context.e.bot.sendApi) {
+              messageInfo = await context.e.bot.sendApi('get_msg', {
+                message_id: params.msgId
+              });
+            }
+          } catch (error) {
+          }
+          
+          if (context.e.isGroup) {
+            // 群聊消息撤回逻辑
+            const botRole = await this.getBotRole(context.e);
+            const isAdmin = botRole === '管理员' || botRole === '群主';
+            
+            if (messageInfo && messageInfo.data) {
+              const msgData = messageInfo.data;
+              const isSelfMsg = String(msgData.sender?.user_id) === String(context.e.self_id);
+              const msgTime = msgData.time || 0;
+              const currentTime = Math.floor(Date.now() / 1000);
+              const timeDiff = currentTime - msgTime;
+              
+              // 判断是否可以撤回
+              if (isSelfMsg && timeDiff <= 180) {
+                // 自己的消息，3分钟内
+                canRecall = true;
+              } else if (isAdmin) {
+                // 管理员可以撤回任何消息
+                canRecall = true;
+              } else {
+                BotUtil.makeLog('warn', 
+                  `无法撤回: ${isSelfMsg ? '消息已超过3分钟' : '需要管理员权限'}`, 
+                  'ChatStream'
+                );
+                return;
+              }
+            } else if (isAdmin) {
+              canRecall = true;
+            }
+          } else {
+            if (messageInfo && messageInfo.data) {
+              const msgData = messageInfo.data;
+              const isSelfMsg = String(msgData.sender?.user_id) === String(context.e.self_id);
+              const msgTime = msgData.time || 0;
+              const currentTime = Math.floor(Date.now() / 1000);
+              const timeDiff = currentTime - msgTime;
+              
+              if (isSelfMsg && timeDiff <= 180) {
+                canRecall = true;
+              } else {
+                BotUtil.makeLog('warn', 
+                  `无法撤回私聊消息: ${isSelfMsg ? '已超过3分钟' : '不是自己的消息'}`, 
+                  'ChatStream'
+                );
+                return;
+              }
+            } else {
+              // 尝试撤回
+              canRecall = true;
+            }
+          }
+          
+          if (canRecall) {
+            if (context.e.isGroup && context.e.group) {
+              await context.e.group.recallMsg(params.msgId);
+            } else if (context.e.bot) {
+              await context.e.bot.sendApi('delete_msg', {
+                message_id: params.msgId
+              });
+            }
+            await BotUtil.sleep(300);
+          }
+        } catch (error) {
+          BotUtil.makeLog('warn', `撤回消息失败: ${error.message}`, 'ChatStream');
+        }
+      },
+      enabled: true,
+      requirePermissionCheck: true
     });
   }
 
@@ -1002,6 +1113,7 @@ export default class ChatStream extends AIStream {
             '禁言', '解禁', '全员禁言', '改名片', '改群名', 
             '设管', '取管', '头衔', '踢人', '精华', '公告'
           ];
+          // 成员只能撤回自己3分钟内的消息，保留撤回功能提示
           return !restrictedKeywords.some(keyword => line.includes(keyword));
         })
         .join('\n');
