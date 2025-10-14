@@ -1,4 +1,3 @@
-// ========== 第一部分：OneBot适配器优化 ==========
 import path from "node:path"
 import { ulid } from "ulid"
 

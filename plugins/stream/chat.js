@@ -28,8 +28,7 @@ function randomRange(min, max) {
 }
 
 /**
- * 聊天工作流（优化版）
- * 使用静态变量，防止重复初始化
+ * 聊天工作流（完整增强版）
  */
 export default class ChatStream extends AIStream {
   static emotionImages = {};
@@ -42,7 +41,7 @@ export default class ChatStream extends AIStream {
     super({
       name: 'chat',
       description: '智能聊天互动工作流',
-      version: '2.2.0',
+      version: '3.0.0',
       author: 'XRK',
       priority: 10,
       config: {
@@ -61,28 +60,20 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 初始化工作流（只执行一次）
+   * 初始化工作流
    */
   async init() {
-    // 调用父类init
     await super.init();
     
-    // 避免重复初始化
     if (ChatStream.initialized) {
       return;
     }
     
     try {
-      // 创建目录
       await BotUtil.mkdir(TEMP_IMAGE_DIR);
-      
-      // 加载表情包
       await this.loadEmotionImages();
-      
-      // 注册功能
       this.registerAllFunctions();
       
-      // 启动定时清理（只启动一次）
       if (!ChatStream.cleanupTimer) {
         ChatStream.cleanupTimer = setInterval(() => this.cleanupCache(), 300000);
       }
@@ -119,15 +110,14 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 注册所有功能
+   * 注册所有功能（大幅扩展版）
    */
   registerAllFunctions() {
-    // 表情包
+    // 1. 表情包
     this.registerFunction('emotion', {
       description: '发送表情包',
-      prompt: `【表情包系统】
-在文字中插入以下标记来发送表情包（一次对话只能使用一个表情包）：
-[开心] [惊讶] [伤心] [大笑] [害怕] [生气]`,
+      prompt: `【表情包】
+[开心] [惊讶] [伤心] [大笑] [害怕] [生气] - 发送对应表情包（一次只能用一个）`,
       parser: (text, context) => {
         const functions = [];
         let cleanText = text;
@@ -154,7 +144,7 @@ export default class ChatStream extends AIStream {
       enabled: true
     });
 
-    // @功能
+    // 2. @功能
     this.registerFunction('at', {
       description: '@某人',
       prompt: `[CQ:at,qq=QQ号] - @某人`,
@@ -164,7 +154,7 @@ export default class ChatStream extends AIStream {
       enabled: true
     });
 
-    // 戳一戳
+    // 3. 戳一戳
     this.registerFunction('poke', {
       description: '戳一戳',
       prompt: `[CQ:poke,qq=QQ号] - 戳一戳某人`,
@@ -197,10 +187,10 @@ export default class ChatStream extends AIStream {
           }
         }
       },
-      enabled: false
+      enabled: true
     });
 
-    // 回复
+    // 4. 回复
     this.registerFunction('reply', {
       description: '回复消息',
       prompt: `[CQ:reply,id=消息ID] - 回复某条消息`,
@@ -210,10 +200,11 @@ export default class ChatStream extends AIStream {
       enabled: true
     });
 
-    // 表情回应
+    // 5. 表情回应
     this.registerFunction('emojiReaction', {
       description: '表情回应',
-      prompt: `[回应:消息ID:表情类型] - 给消息添加表情回应`,
+      prompt: `[回应:消息ID:表情类型] - 给消息添加表情回应
+表情类型: 开心/惊讶/伤心/大笑/害怕/喜欢/爱心/生气`,
       parser: (text, context) => {
         const functions = [];
         let cleanText = text;
@@ -248,7 +239,7 @@ export default class ChatStream extends AIStream {
       enabled: true
     });
 
-    // 点赞
+    // 6. 点赞
     this.registerFunction('thumbUp', {
       description: '点赞',
       prompt: `[点赞:QQ号:次数] - 给某人点赞（1-50次）`,
@@ -286,7 +277,7 @@ export default class ChatStream extends AIStream {
       enabled: true
     });
 
-    // 签到
+    // 7. 签到
     this.registerFunction('sign', {
       description: '群签到',
       prompt: `[签到] - 执行群签到`,
@@ -312,6 +303,497 @@ export default class ChatStream extends AIStream {
         }
       },
       enabled: true
+    });
+
+    // ============ 新增管理功能 ============
+
+    // 8. 禁言
+    this.registerFunction('mute', {
+      description: '禁言群成员',
+      prompt: `[禁言:QQ号:时长] - 禁言某人（时长单位：秒，最大2592000秒/30天）
+示例：[禁言:123456:600] 禁言10分钟`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[禁言:(\d+):(\d+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          const duration = Math.min(parseInt(match[2]), 2592000);
+          functions.push({ 
+            type: 'mute', 
+            params: { qq: match[1], duration }
+          });
+        }
+        
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (context.e?.isGroup) {
+          try {
+            await context.e.group.muteMember(params.qq, params.duration);
+            await BotUtil.sleep(300);
+          } catch (error) {
+            BotUtil.makeLog('warn', `禁言失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
+      enabled: true,
+      requireAdmin: true
+    });
+
+    // 9. 解禁
+    this.registerFunction('unmute', {
+      description: '解除禁言',
+      prompt: `[解禁:QQ号] - 解除某人的禁言`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[解禁:(\d+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ 
+            type: 'unmute', 
+            params: { qq: match[1] }
+          });
+        }
+        
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (context.e?.isGroup) {
+          try {
+            await context.e.group.muteMember(params.qq, 0);
+            await BotUtil.sleep(300);
+          } catch (error) {
+            BotUtil.makeLog('warn', `解禁失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
+      enabled: true,
+      requireAdmin: true
+    });
+
+    // 10. 全员禁言
+    this.registerFunction('muteAll', {
+      description: '全员禁言',
+      prompt: `[全员禁言] - 开启全员禁言`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        
+        if (text.includes('[全员禁言]')) {
+          functions.push({ type: 'muteAll', params: { enable: true } });
+          cleanText = text.replace(/\[全员禁言\]/g, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (context.e?.isGroup) {
+          try {
+            await context.e.group.muteAll(true);
+            await BotUtil.sleep(300);
+          } catch (error) {
+            BotUtil.makeLog('warn', `全员禁言失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
+      enabled: true,
+      requireAdmin: true
+    });
+
+    // 11. 解除全员禁言
+    this.registerFunction('unmuteAll', {
+      description: '解除全员禁言',
+      prompt: `[解除全员禁言] - 关闭全员禁言`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        
+        if (text.includes('[解除全员禁言]')) {
+          functions.push({ type: 'unmuteAll', params: { enable: false } });
+          cleanText = text.replace(/\[解除全员禁言\]/g, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (context.e?.isGroup) {
+          try {
+            await context.e.group.muteAll(false);
+            await BotUtil.sleep(300);
+          } catch (error) {
+            BotUtil.makeLog('warn', `解除全员禁言失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
+      enabled: true,
+      requireAdmin: true
+    });
+
+    // 12. 改群名片
+    this.registerFunction('setCard', {
+      description: '修改群名片',
+      prompt: `[改名片:QQ号:新名片] - 修改某人的群名片
+示例：[改名片:123456:小明]`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[改名片:(\d+):([^\]]+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ 
+            type: 'setCard', 
+            params: { qq: match[1], card: match[2] }
+          });
+        }
+        
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (context.e?.isGroup) {
+          try {
+            await context.e.group.setCard(params.qq, params.card);
+            await BotUtil.sleep(300);
+          } catch (error) {
+            BotUtil.makeLog('warn', `改名片失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
+      enabled: true,
+      requireAdmin: true
+    });
+
+    // 13. 改群名
+    this.registerFunction('setGroupName', {
+      description: '修改群名',
+      prompt: `[改群名:新群名] - 修改当前群的群名
+示例：[改群名:快乐大家庭]`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[改群名:([^\]]+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ 
+            type: 'setGroupName', 
+            params: { name: match[1] }
+          });
+        }
+        
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (context.e?.isGroup) {
+          try {
+            await context.e.group.setName(params.name);
+            await BotUtil.sleep(300);
+          } catch (error) {
+            BotUtil.makeLog('warn', `改群名失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
+      enabled: true,
+      requireAdmin: true
+    });
+
+    // 14. 设置管理员
+    this.registerFunction('setAdmin', {
+      description: '设置管理员',
+      prompt: `[设管:QQ号] - 设置某人为管理员`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[设管:(\d+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ 
+            type: 'setAdmin', 
+            params: { qq: match[1], enable: true }
+          });
+        }
+        
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (context.e?.isGroup) {
+          try {
+            await context.e.group.setAdmin(params.qq, true);
+            await BotUtil.sleep(300);
+          } catch (error) {
+            BotUtil.makeLog('warn', `设置管理员失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
+      enabled: true,
+      requireOwner: true
+    });
+
+    // 15. 取消管理员
+    this.registerFunction('unsetAdmin', {
+      description: '取消管理员',
+      prompt: `[取管:QQ号] - 取消某人的管理员`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[取管:(\d+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ 
+            type: 'unsetAdmin', 
+            params: { qq: match[1], enable: false }
+          });
+        }
+        
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (context.e?.isGroup) {
+          try {
+            await context.e.group.setAdmin(params.qq, false);
+            await BotUtil.sleep(300);
+          } catch (error) {
+            BotUtil.makeLog('warn', `取消管理员失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
+      enabled: true,
+      requireOwner: true
+    });
+
+    // 16. 设置头衔
+    this.registerFunction('setTitle', {
+      description: '设置专属头衔',
+      prompt: `[头衔:QQ号:头衔名:时长] - 设置某人的专属头衔
+时长：-1为永久，单位秒
+示例：[头衔:123456:大佬:-1]`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[头衔:(\d+):([^:]+):(-?\d+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ 
+            type: 'setTitle', 
+            params: { 
+              qq: match[1], 
+              title: match[2],
+              duration: parseInt(match[3])
+            }
+          });
+        }
+        
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (context.e?.isGroup) {
+          try {
+            await context.e.group.setTitle(params.qq, params.title, params.duration);
+            await BotUtil.sleep(300);
+          } catch (error) {
+            BotUtil.makeLog('warn', `设置头衔失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
+      enabled: true,
+      requireOwner: true
+    });
+
+    // 17. 踢人
+    this.registerFunction('kick', {
+      description: '踢出群成员',
+      prompt: `[踢人:QQ号] - 踢出某人
+[踢人:QQ号:拒绝] - 踢出某人并拒绝再次加群`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[踢人:(\d+)(?::([^\]]+))?\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ 
+            type: 'kick', 
+            params: { 
+              qq: match[1],
+              reject: match[2] === '拒绝'
+            }
+          });
+        }
+        
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (context.e?.isGroup) {
+          try {
+            await context.e.group.kickMember(params.qq, params.reject);
+            await BotUtil.sleep(300);
+          } catch (error) {
+            BotUtil.makeLog('warn', `踢人失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
+      enabled: true,
+      requireAdmin: true
+    });
+
+    // 18. 设置精华消息
+    this.registerFunction('setEssence', {
+      description: '设置精华消息',
+      prompt: `[设精华:消息ID] - 将某条消息设为精华`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[设精华:([^\]]+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ 
+            type: 'setEssence', 
+            params: { msgId: match[1] }
+          });
+        }
+        
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (context.e?.isGroup && context.e.bot) {
+          try {
+            await context.e.bot.setEssenceMessage(
+              { group_id: context.e.group_id }, 
+              params.msgId
+            );
+            await BotUtil.sleep(300);
+          } catch (error) {
+            BotUtil.makeLog('warn', `设置精华失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
+      enabled: true,
+      requireAdmin: true
+    });
+
+    // 19. 取消精华消息
+    this.registerFunction('removeEssence', {
+      description: '取消精华消息',
+      prompt: `[取消精华:消息ID] - 取消某条精华消息`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[取消精华:([^\]]+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ 
+            type: 'removeEssence', 
+            params: { msgId: match[1] }
+          });
+        }
+        
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (context.e?.isGroup && context.e.bot) {
+          try {
+            await context.e.bot.removeEssenceMessage(
+              { group_id: context.e.group_id }, 
+              params.msgId
+            );
+            await BotUtil.sleep(300);
+          } catch (error) {
+            BotUtil.makeLog('warn', `取消精华失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
+      enabled: true,
+      requireAdmin: true
+    });
+
+    // 20. 发送群公告
+    this.registerFunction('announce', {
+      description: '发送群公告',
+      prompt: `[公告:公告内容] - 发送群公告
+示例：[公告:明天晚上8点开会]`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[公告:([^\]]+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ 
+            type: 'announce', 
+            params: { content: match[1] }
+          });
+        }
+        
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (context.e?.isGroup && context.e.bot) {
+          try {
+            await context.e.bot.sendApi('_send_group_notice', {
+              group_id: context.e.group_id,
+              content: params.content
+            });
+            await BotUtil.sleep(300);
+          } catch (error) {
+            BotUtil.makeLog('warn', `发送公告失败: ${error.message}`, 'ChatStream');
+          }
+        }
+      },
+      enabled: true,
+      requireAdmin: true
     });
   }
 
@@ -511,11 +993,22 @@ export default class ChatStream extends AIStream {
     
     let functionsPrompt = this.buildFunctionsPrompt();
     
+    // 根据权限过滤功能
     if (botRole === '成员') {
       functionsPrompt = functionsPrompt
         .split('\n')
-        .filter(line => !line.includes('[禁言') && !line.includes('[解禁') && 
-                       !line.includes('[精华') && !line.includes('[公告'))
+        .filter(line => {
+          const restrictedKeywords = [
+            '禁言', '解禁', '全员禁言', '改名片', '改群名', 
+            '设管', '取管', '头衔', '踢人', '精华', '公告'
+          ];
+          return !restrictedKeywords.some(keyword => line.includes(keyword));
+        })
+        .join('\n');
+    } else if (botRole === '管理员') {
+      functionsPrompt = functionsPrompt
+        .split('\n')
+        .filter(line => !line.includes('[设管') && !line.includes('[取管') && !line.includes('[头衔'))
         .join('\n');
     }
 
@@ -545,6 +1038,7 @@ ${embeddingHint}
 2. 说话要自然、简洁、有个性
 3. 最多使用一个竖线分隔符(|)
 4. 适当使用表情包和互动功能
+5. 管理功能需谨慎使用，避免滥用
 
 ${functionsPrompt}
 
@@ -553,6 +1047,7 @@ ${functionsPrompt}
 2. 最多一个竖线(|)分隔
 3. @人前确认QQ号在群聊记录中
 4. 不要重复使用相同功能
+5. 管理操作要有正当理由
 
 【注意事项】
 ${isGlobalTrigger ? 
@@ -563,7 +1058,8 @@ ${isGlobalTrigger ?
 2. 积极互动`}
 3. 多使用戳一戳和表情回应
 4. 适当使用表情包
-${e.isMaster ? '5. 对主人友好和尊重' : ''}`;
+5. 管理功能仅在必要时使用
+${e.isMaster ? '6. 对主人友好和尊重' : ''}`;
   }
 
   /**
