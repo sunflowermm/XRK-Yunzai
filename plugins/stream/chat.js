@@ -56,7 +56,7 @@ export default class ChatStream extends AIStream {
       },
       embedding: {
         enabled: true,
-        provider: 'transformers',
+        provider: 'onnx',
       }
     });
   }
