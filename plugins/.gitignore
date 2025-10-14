@@ -55,7 +55,6 @@ events/**
 !stream
 stream/**
 !stream/chat.js
-!stream/clean.js
 
 *.psd
 *.map
