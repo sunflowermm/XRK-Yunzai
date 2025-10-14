@@ -29,10 +29,16 @@ function randomRange(min, max) {
 }
 
 /**
- * 聊天工作流（优化版，支持Embedding）
- * 继承自AIStream基类
+ * 聊天工作流（优化版）
+ * 使用静态变量存储共享状态，避免重复初始化
  */
 export default class ChatStream extends AIStream {
+  static emotionImages = {};
+  static messageHistory = new Map();
+  static userCache = new Map();
+  static cleanupTimer = null;
+  static initialized = false;
+
   constructor() {
     super({
       name: 'chat',
@@ -53,26 +59,41 @@ export default class ChatStream extends AIStream {
         provider: 'none'
       }
     });
-
-    this.emotionImages = {};
-    this.messageHistory = new Map();
-    this.userCache = new Map();
-    
-    this.init();
   }
 
   /**
-   * 初始化工作流
+   * 初始化工作流（只执行一次）
    */
   async init() {
-    await BotUtil.mkdir(TEMP_IMAGE_DIR);
-    await this.loadEmotionImages();
-    this.registerAllFunctions();
+    // 调用父类init
+    await super.init();
     
-    // 定期清理缓存
-    setInterval(() => this.cleanupCache(), 300000); // 5分钟
+    // 避免重复初始化
+    if (ChatStream.initialized) {
+      return;
+    }
     
-    BotUtil.makeLog('success', `[${this.name}] 聊天工作流初始化完成`, 'ChatStream');
+    try {
+      // 创建临时目录
+      await BotUtil.mkdir(TEMP_IMAGE_DIR);
+      
+      // 加载表情包
+      await this.loadEmotionImages();
+      
+      // 注册所有功能
+      this.registerAllFunctions();
+      
+      // 启动定时清理（只启动一次）
+      if (!ChatStream.cleanupTimer) {
+        ChatStream.cleanupTimer = setInterval(() => this.cleanupCache(), 300000);
+      }
+      
+      ChatStream.initialized = true;
+      BotUtil.makeLog('success', `[${this.name}] 聊天工作流初始化完成`, 'ChatStream');
+    } catch (error) {
+      BotUtil.makeLog('error', `[${this.name}] 初始化失败: ${error.message}`, 'ChatStream');
+      throw error;
+    }
   }
 
   /**
@@ -87,11 +108,11 @@ export default class ChatStream extends AIStream {
         const imageFiles = files.filter(file => 
           /\.(jpg|jpeg|png|gif)$/i.test(file)
         );
-        this.emotionImages[emotion] = imageFiles.map(file => 
+        ChatStream.emotionImages[emotion] = imageFiles.map(file => 
           path.join(emotionDir, file)
         );
       } catch {
-        this.emotionImages[emotion] = [];
+        ChatStream.emotionImages[emotion] = [];
       }
     }
   }
@@ -227,7 +248,7 @@ export default class ChatStream extends AIStream {
       enabled: true
     });
 
-    // 点赞、签到、禁言等功能（保持原有实现）
+    // 点赞功能
     this.registerFunction('thumbUp', {
       description: '给某人点赞',
       prompt: `[点赞:QQ号:次数] - 给某人点赞（1-50次）`,
@@ -265,6 +286,7 @@ export default class ChatStream extends AIStream {
       enabled: true
     });
 
+    // 签到功能
     this.registerFunction('sign', {
       description: '执行群签到',
       prompt: `[签到] - 执行群签到`,
@@ -291,33 +313,30 @@ export default class ChatStream extends AIStream {
       },
       enabled: true
     });
-
-    // 其他功能（禁言、解禁、精华、公告、提醒）保持原样
-    // ... 省略以节省空间，实际使用时保留完整代码
   }
 
   /**
    * 获取随机表情图片
    */
   getRandomEmotionImage(emotion) {
-    const images = this.emotionImages[emotion];
+    const images = ChatStream.emotionImages[emotion];
     if (!images || images.length === 0) return null;
     return images[Math.floor(Math.random() * images.length)];
   }
 
   /**
-   * 记录消息历史（增强版，自动存储Embedding）
+   * 记录消息历史
    */
   recordMessage(e) {
     if (!e.isGroup) return;
     
     try {
       const groupId = e.group_id;
-      if (!this.messageHistory.has(groupId)) {
-        this.messageHistory.set(groupId, []);
+      if (!ChatStream.messageHistory.has(groupId)) {
+        ChatStream.messageHistory.set(groupId, []);
       }
       
-      const history = this.messageHistory.get(groupId);
+      const history = ChatStream.messageHistory.get(groupId);
       
       let message = e.raw_message || e.msg || '';
       if (e.message && Array.isArray(e.message)) {
@@ -343,12 +362,10 @@ export default class ChatStream extends AIStream {
       
       history.push(msgData);
       
-      // 保持历史记录在30条以内
       if (history.length > 30) {
         history.shift();
       }
       
-      // 异步存储到Embedding缓存
       if (this.embeddingConfig?.enabled && message && message.length > 5) {
         this.storeMessageWithEmbedding(groupId, msgData).catch(err => {
           BotUtil.makeLog('debug', 
@@ -369,7 +386,7 @@ export default class ChatStream extends AIStream {
     if (!e.isGroup) return '成员';
     
     const cacheKey = `bot_role_${e.group_id}`;
-    const cached = this.userCache.get(cacheKey);
+    const cached = ChatStream.userCache.get(cacheKey);
     
     if (cached && Date.now() - cached.time < 300000) {
       return cached.role;
@@ -381,7 +398,7 @@ export default class ChatStream extends AIStream {
       const role = info.role === 'owner' ? '群主' : 
                    info.role === 'admin' ? '管理员' : '成员';
       
-      this.userCache.set(cacheKey, { role, time: Date.now() });
+      ChatStream.userCache.set(cacheKey, { role, time: Date.now() });
       return role;
     } catch {
       return '成员';
@@ -510,7 +527,6 @@ export default class ChatStream extends AIStream {
         .join('\n');
     }
 
-    // 添加Embedding提示
     let embeddingHint = '';
     if (this.embeddingConfig?.enabled) {
       embeddingHint = '\n💡 系统会自动检索相关历史对话，帮助你更好地理解上下文。\n';
@@ -561,7 +577,7 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
   }
 
   /**
-   * 构建聊天上下文（基础版本）
+   * 构建聊天上下文
    */
   async buildChatContext(e, question) {
     const messages = [];
@@ -582,7 +598,7 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
     });
     
     if (e.isGroup) {
-      const history = this.messageHistory.get(e.group_id) || [];
+      const history = ChatStream.messageHistory.get(e.group_id) || [];
       
       if (question?.isGlobalTrigger) {
         const recentMessages = history.slice(-15);
@@ -660,7 +676,7 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
           switch (type) {
             case 'at':
               if (e.isGroup && paramObj.qq) {
-                const history = this.messageHistory.get(e.group_id) || [];
+                const history = ChatStream.messageHistory.get(e.group_id) || [];
                 const userExists = history.some(msg => 
                   String(msg.user_id) === String(paramObj.qq)
                 );
@@ -693,7 +709,7 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
   }
 
   /**
-   * 执行工作流（使用基类的增强execute）
+   * 执行工作流
    */
   async execute(e, question, config) {
     try {
@@ -738,19 +754,34 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
   cleanupCache() {
     const now = Date.now();
     
-    for (const [groupId, messages] of this.messageHistory.entries()) {
+    for (const [groupId, messages] of ChatStream.messageHistory.entries()) {
       const filtered = messages.filter(msg => now - msg.time < 1800000);
       if (filtered.length === 0) {
-        this.messageHistory.delete(groupId);
+        ChatStream.messageHistory.delete(groupId);
       } else {
-        this.messageHistory.set(groupId, filtered);
+        ChatStream.messageHistory.set(groupId, filtered);
       }
     }
     
-    for (const [key, data] of this.userCache.entries()) {
+    for (const [key, data] of ChatStream.userCache.entries()) {
       if (now - data.time > 300000) {
-        this.userCache.delete(key);
+        ChatStream.userCache.delete(key);
       }
     }
+  }
+
+  /**
+   * 清理资源
+   */
+  async cleanup() {
+    await super.cleanup();
+    
+    // 清理定时器
+    if (ChatStream.cleanupTimer) {
+      clearInterval(ChatStream.cleanupTimer);
+      ChatStream.cleanupTimer = null;
+    }
+    
+    ChatStream.initialized = false;
   }
 }
