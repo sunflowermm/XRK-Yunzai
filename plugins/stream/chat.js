@@ -12,7 +12,6 @@ const EMOTIONS_DIR = path.join(_path, 'plugins/XRK/config/ai-assistant');
 const TEMP_IMAGE_DIR = path.join(_path, 'data/temp/ai_images');
 const EMOTION_TYPES = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
 
-// 表情回应映射
 const EMOJI_REACTIONS = {
   '开心': ['4', '14', '21', '28', '76', '79', '99', '182', '201', '290'],
   '惊讶': ['26', '32', '97', '180', '268', '289'],
@@ -30,7 +29,7 @@ function randomRange(min, max) {
 
 /**
  * 聊天工作流（优化版）
- * 使用静态变量存储共享状态，避免重复初始化
+ * 使用静态变量，防止重复初始化
  */
 export default class ChatStream extends AIStream {
   static emotionImages = {};
@@ -42,8 +41,8 @@ export default class ChatStream extends AIStream {
   constructor() {
     super({
       name: 'chat',
-      description: '智能聊天互动工作流（含语义检索）',
-      version: '2.1.0',
+      description: '智能聊天互动工作流',
+      version: '2.2.0',
       author: 'XRK',
       priority: 10,
       config: {
@@ -56,7 +55,7 @@ export default class ChatStream extends AIStream {
       },
       embedding: {
         enabled: true,
-        provider: 'onnx',
+        provider: 'lightweight',
       }
     });
   }
@@ -74,13 +73,13 @@ export default class ChatStream extends AIStream {
     }
     
     try {
-      // 创建临时目录
+      // 创建目录
       await BotUtil.mkdir(TEMP_IMAGE_DIR);
       
       // 加载表情包
       await this.loadEmotionImages();
       
-      // 注册所有功能
+      // 注册功能
       this.registerAllFunctions();
       
       // 启动定时清理（只启动一次）
@@ -89,15 +88,17 @@ export default class ChatStream extends AIStream {
       }
       
       ChatStream.initialized = true;
-      BotUtil.makeLog('success', `[${this.name}] 聊天工作流初始化完成`, 'ChatStream');
     } catch (error) {
-      BotUtil.makeLog('error', `[${this.name}] 初始化失败: ${error.message}`, 'ChatStream');
+      BotUtil.makeLog('error', 
+        `[${this.name}] 初始化失败: ${error.message}`, 
+        'ChatStream'
+      );
       throw error;
     }
   }
 
   /**
-   * 加载表情包图片
+   * 加载表情包
    */
   async loadEmotionImages() {
     for (const emotion of EMOTION_TYPES) {
@@ -121,13 +122,12 @@ export default class ChatStream extends AIStream {
    * 注册所有功能
    */
   registerAllFunctions() {
-    // 表情包功能
+    // 表情包
     this.registerFunction('emotion', {
       description: '发送表情包',
       prompt: `【表情包系统】
 在文字中插入以下标记来发送表情包（一次对话只能使用一个表情包）：
-[开心] [惊讶] [伤心] [大笑] [害怕] [生气]
-重要：每次回复最多只能使用一个表情包标记！`,
+[开心] [惊讶] [伤心] [大笑] [害怕] [生气]`,
       parser: (text, context) => {
         const functions = [];
         let cleanText = text;
@@ -157,16 +157,16 @@ export default class ChatStream extends AIStream {
     // @功能
     this.registerFunction('at', {
       description: '@某人',
-      prompt: `[CQ:at,qq=QQ号] - @某人（确保QQ号存在于群聊记录中）`,
+      prompt: `[CQ:at,qq=QQ号] - @某人`,
       parser: (text, context) => {
         return { functions: [], cleanText: text };
       },
       enabled: true
     });
 
-    // 戳一戳功能
+    // 戳一戳
     this.registerFunction('poke', {
-      description: '戳一戳某人',
+      description: '戳一戳',
       prompt: `[CQ:poke,qq=QQ号] - 戳一戳某人`,
       parser: (text, context) => {
         const functions = [];
@@ -193,14 +193,14 @@ export default class ChatStream extends AIStream {
             await context.e.group.pokeMember(params.qq);
             await BotUtil.sleep(300);
           } catch (error) {
-            // 静默处理
+            // 静默
           }
         }
       },
       enabled: false
     });
 
-    // 回复功能
+    // 回复
     this.registerFunction('reply', {
       description: '回复消息',
       prompt: `[CQ:reply,id=消息ID] - 回复某条消息`,
@@ -210,10 +210,10 @@ export default class ChatStream extends AIStream {
       enabled: true
     });
 
-    // 表情回应功能
+    // 表情回应
     this.registerFunction('emojiReaction', {
-      description: '给消息添加表情回应',
-      prompt: `[回应:消息ID:表情类型] - 给消息添加表情回应（表情类型：开心/惊讶/伤心/大笑/害怕/喜欢/爱心/生气）`,
+      description: '表情回应',
+      prompt: `[回应:消息ID:表情类型] - 给消息添加表情回应`,
       parser: (text, context) => {
         const functions = [];
         let cleanText = text;
@@ -241,16 +241,16 @@ export default class ChatStream extends AIStream {
             await context.e.group.setEmojiLike(params.msgId, emojiId);
             await BotUtil.sleep(200);
           } catch (error) {
-            // 静默处理
+            // 静默
           }
         }
       },
       enabled: true
     });
 
-    // 点赞功能
+    // 点赞
     this.registerFunction('thumbUp', {
-      description: '给某人点赞',
+      description: '点赞',
       prompt: `[点赞:QQ号:次数] - 给某人点赞（1-50次）`,
       parser: (text, context) => {
         const functions = [];
@@ -279,16 +279,16 @@ export default class ChatStream extends AIStream {
             await member.thumbUp(thumbCount);
             await BotUtil.sleep(300);
           } catch (error) {
-            // 静默处理
+            // 静默
           }
         }
       },
       enabled: true
     });
 
-    // 签到功能
+    // 签到
     this.registerFunction('sign', {
-      description: '执行群签到',
+      description: '群签到',
       prompt: `[签到] - 执行群签到`,
       parser: (text, context) => {
         const functions = [];
@@ -307,7 +307,7 @@ export default class ChatStream extends AIStream {
             await context.e.group.sign();
             await BotUtil.sleep(300);
           } catch (error) {
-            // 静默处理
+            // 静默
           }
         }
       },
@@ -316,7 +316,7 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 获取随机表情图片
+   * 获取随机表情
    */
   getRandomEmotionImage(emotion) {
     const images = ChatStream.emotionImages[emotion];
@@ -325,7 +325,7 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 记录消息历史
+   * 记录消息
    */
   recordMessage(e) {
     if (!e.isGroup) return;
@@ -367,15 +367,10 @@ export default class ChatStream extends AIStream {
       }
       
       if (this.embeddingConfig?.enabled && message && message.length > 5) {
-        this.storeMessageWithEmbedding(groupId, msgData).catch(err => {
-          BotUtil.makeLog('debug', 
-            `存储Embedding失败: ${err.message}`,
-            'ChatStream'
-          );
-        });
+        this.storeMessageWithEmbedding(groupId, msgData).catch(() => {});
       }
     } catch (error) {
-      // 静默处理错误
+      // 静默
     }
   }
 
@@ -406,7 +401,7 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 处理图片识别
+   * 处理图片
    */
   async processImage(imageUrl, config) {
     if (!imageUrl || !config?.visionModel) {
@@ -421,7 +416,7 @@ export default class ChatStream extends AIStream {
       const messages = [
         {
           role: 'system',
-          content: '请详细描述这张图片的内容，包括主要对象、场景、颜色、氛围等'
+          content: '请详细描述这张图片的内容'
         },
         {
           role: 'user',
@@ -441,7 +436,10 @@ export default class ChatStream extends AIStream {
       
       return result || '识图失败';
     } catch (error) {
-      BotUtil.makeLog('error', `图片处理失败: ${error.message}`, 'ChatStream');
+      BotUtil.makeLog('error', 
+        `图片处理失败: ${error.message}`, 
+        'ChatStream'
+      );
       return '图片处理失败';
     } finally {
       if (tempFilePath && fs.existsSync(tempFilePath)) {
@@ -452,9 +450,6 @@ export default class ChatStream extends AIStream {
     }
   }
 
-  /**
-   * 下载图片
-   */
   async downloadImage(url) {
     try {
       const response = await fetch(url);
@@ -471,9 +466,6 @@ export default class ChatStream extends AIStream {
     }
   }
 
-  /**
-   * 上传图片到API
-   */
   async uploadImageToAPI(filePath, config) {
     if (!config?.fileUploadUrl) {
       throw new Error('未配置文件上传URL');
@@ -528,8 +520,8 @@ export default class ChatStream extends AIStream {
     }
 
     let embeddingHint = '';
-    if (this.embeddingConfig?.enabled) {
-      embeddingHint = '\n💡 系统会自动检索相关历史对话，帮助你更好地理解上下文。\n';
+    if (this.embeddingConfig?.enabled && this.embeddingReady) {
+      embeddingHint = '\n💡 系统会自动检索相关历史对话\n';
     }
 
     return `【人设设定】
@@ -550,30 +542,28 @@ ${isGlobalTrigger ? '观察群聊后主动发言' : '被召唤回复'}
 ${embeddingHint}
 【基础规则】
 1. 你是一个真实的QQ用户，不是AI助手
-2. 说话要自然、简洁、有个性，符合人设
-3. 最多使用一个竖线分隔符(|)，也就是最多发送两条消息
-4. 每条消息不要太长，像正常聊天一样
-5. 适当使用表情包和互动功能增加趣味性
+2. 说话要自然、简洁、有个性
+3. 最多使用一个竖线分隔符(|)
+4. 适当使用表情包和互动功能
 
 ${functionsPrompt}
 
 【重要限制】
-1. 每次回复最多只能发一个表情包
-2. 最多使用一个竖线(|)分隔，也就是最多两条消息
-3. @人之前要确认QQ号是否在群聊记录中出现过
-4. 不要重复使用相同的功能
+1. 每次回复最多一个表情包
+2. 最多一个竖线(|)分隔
+3. @人前确认QQ号在群聊记录中
+4. 不要重复使用相同功能
 
 【注意事项】
 ${isGlobalTrigger ? 
-`1. 主动发言要有新意，不要重复他人观点
-2. 可以随机戳一戳活跃的成员增加互动
-3. 语气要自然，像普通群员一样参与讨论` : 
-`1. 回复要针对性强，不要答非所问
-2. 被召唤时更要积极互动，体现出活力`}
-3. @人时只使用出现在群聊记录中的QQ号
-4. 多使用戳一戳和表情回应来增加互动性
-5. 适当使用表情包来表达情绪
-${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
+`1. 主动发言要有新意
+2. 可以戳一戳活跃成员
+3. 语气自然` : 
+`1. 回复要有针对性
+2. 积极互动`}
+3. 多使用戳一戳和表情回应
+4. 适当使用表情包
+${e.isMaster ? '5. 对主人友好和尊重' : ''}`;
   }
 
   /**
@@ -607,7 +597,7 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
             role: 'user',
             content: `[群聊记录]\n${recentMessages.map(msg => 
               `${msg.nickname}(${msg.user_id})[${msg.message_id}]: ${msg.message}`
-            ).join('\n')}\n\n请对当前话题发表你的看法，要自然且有自己的观点。`
+            ).join('\n')}\n\n请对当前话题发表你的看法。`
           });
         }
       } else {
@@ -709,19 +699,7 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
   }
 
   /**
-   * 执行工作流
-   */
-  async execute(e, question, config) {
-    try {
-      return await super.execute(e, question, config);
-    } catch (error) {
-      BotUtil.makeLog('error', `ChatStream执行失败: ${error.message}`, 'ChatStream');
-      throw error;
-    }
-  }
-
-  /**
-   * 处理完整的消息发送
+   * 发送消息
    */
   async sendMessages(e, cleanText) {
     if (cleanText.includes('|')) {
@@ -776,7 +754,6 @@ ${e.isMaster ? '6. 对主人要特别友好和尊重' : ''}`;
   async cleanup() {
     await super.cleanup();
     
-    // 清理定时器
     if (ChatStream.cleanupTimer) {
       clearInterval(ChatStream.cleanupTimer);
       ChatStream.cleanupTimer = null;
