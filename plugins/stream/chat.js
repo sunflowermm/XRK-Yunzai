@@ -55,8 +55,8 @@ export default class ChatStream extends AIStream {
         frequencyPenalty: 0.6
       },
       embedding: {
-        enabled: false,
-        provider: 'none'
+        enabled: true,
+        provider: 'tensorflow',
       }
     });
   }
