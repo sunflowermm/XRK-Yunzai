@@ -1,17 +1,13 @@
 import path from 'path';
 import fs from 'fs';
-import fetch from 'node-fetch';
-import FormData from 'form-data';
-import { promisify } from 'util';
-import { pipeline } from 'stream';
 import AIStream from '../../lib/aistream/base.js';
 import BotUtil from '../../lib/common/util.js';
 
 const _path = process.cwd();
-const EMOTIONS_DIR = path.join(_path, 'plugins/XRK/config/ai-assistant');
-const TEMP_IMAGE_DIR = path.join(_path, 'data/temp/ai_images');
+const EMOTIONS_DIR = path.join(_path, 'resources/aiimages');
 const EMOTION_TYPES = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
 
+// 表情回应映射
 const EMOJI_REACTIONS = {
   '开心': ['4', '14', '21', '28', '76', '79', '99', '182', '201', '290'],
   '惊讶': ['26', '32', '97', '180', '268', '289'],
@@ -28,7 +24,8 @@ function randomRange(min, max) {
 }
 
 /**
- * 聊天工作流（完整增强版）
+ * 聊天工作流
+ * 支持表情包、群管理、戳一戳、表情回应等功能
  */
 export default class ChatStream extends AIStream {
   static emotionImages = {};
@@ -41,7 +38,7 @@ export default class ChatStream extends AIStream {
     super({
       name: 'chat',
       description: '智能聊天互动工作流',
-      version: '3.1.0',
+      version: '3.2.0',
       author: 'XRK',
       priority: 10,
       config: {
@@ -70,7 +67,7 @@ export default class ChatStream extends AIStream {
     }
     
     try {
-      await BotUtil.mkdir(TEMP_IMAGE_DIR);
+      await BotUtil.mkdir(EMOTIONS_DIR);
       await this.loadEmotionImages();
       this.registerAllFunctions();
       
@@ -110,7 +107,7 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 注册所有功能（大幅扩展版）
+   * 注册所有功能
    */
   registerAllFunctions() {
     // 1. 表情包
@@ -183,7 +180,7 @@ export default class ChatStream extends AIStream {
             await context.e.group.pokeMember(params.qq);
             await BotUtil.sleep(300);
           } catch (error) {
-            // 静默
+            // 静默失败
           }
         }
       },
@@ -232,7 +229,7 @@ export default class ChatStream extends AIStream {
             await context.e.group.setEmojiLike(params.msgId, emojiId);
             await BotUtil.sleep(200);
           } catch (error) {
-            // 静默
+            // 静默失败
           }
         }
       },
@@ -270,7 +267,7 @@ export default class ChatStream extends AIStream {
             await member.thumbUp(thumbCount);
             await BotUtil.sleep(300);
           } catch (error) {
-            // 静默
+            // 静默失败
           }
         }
       },
@@ -298,14 +295,12 @@ export default class ChatStream extends AIStream {
             await context.e.group.sign();
             await BotUtil.sleep(300);
           } catch (error) {
-            // 静默
+            // 静默失败
           }
         }
       },
       enabled: true
     });
-
-    // ============ 新增管理功能 ============
 
     // 8. 禁言
     this.registerFunction('mute', {
@@ -835,6 +830,7 @@ export default class ChatStream extends AIStream {
               });
             }
           } catch (error) {
+            // 忽略获取消息信息失败
           }
           
           if (context.e.isGroup) {
@@ -849,12 +845,9 @@ export default class ChatStream extends AIStream {
               const currentTime = Math.floor(Date.now() / 1000);
               const timeDiff = currentTime - msgTime;
               
-              // 判断是否可以撤回
               if (isSelfMsg && timeDiff <= 180) {
-                // 自己的消息，3分钟内
                 canRecall = true;
               } else if (isAdmin) {
-                // 管理员可以撤回任何消息
                 canRecall = true;
               } else {
                 BotUtil.makeLog('warn', 
@@ -867,6 +860,7 @@ export default class ChatStream extends AIStream {
               canRecall = true;
             }
           } else {
+            // 私聊消息撤回逻辑
             if (messageInfo && messageInfo.data) {
               const msgData = messageInfo.data;
               const isSelfMsg = String(msgData.sender?.user_id) === String(context.e.self_id);
@@ -884,7 +878,6 @@ export default class ChatStream extends AIStream {
                 return;
               }
             } else {
-              // 尝试撤回
               canRecall = true;
             }
           }
@@ -963,7 +956,7 @@ export default class ChatStream extends AIStream {
         this.storeMessageWithEmbedding(groupId, msgData).catch(() => {});
       }
     } catch (error) {
-      // 静默
+      // 静默失败
     }
   }
 
@@ -994,105 +987,6 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 处理图片
-   */
-  async processImage(imageUrl, config) {
-    if (!imageUrl || !config?.visionModel) {
-      return '无法识别';
-    }
-    
-    let tempFilePath = null;
-    try {
-      tempFilePath = await this.downloadImage(imageUrl);
-      const uploadedUrl = await this.uploadImageToAPI(tempFilePath, config);
-      
-      const messages = [
-        {
-          role: 'system',
-          content: '请详细描述这张图片的内容'
-        },
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image_url',
-              image_url: { url: uploadedUrl }
-            }
-          ]
-        }
-      ];
-      
-      const result = await this.callAI(messages, {
-        ...config,
-        model: config.visionModel
-      });
-      
-      return result || '识图失败';
-    } catch (error) {
-      BotUtil.makeLog('error', 
-        `图片处理失败: ${error.message}`, 
-        'ChatStream'
-      );
-      return '图片处理失败';
-    } finally {
-      if (tempFilePath && fs.existsSync(tempFilePath)) {
-        try {
-          fs.unlinkSync(tempFilePath);
-        } catch {}
-      }
-    }
-  }
-
-  async downloadImage(url) {
-    try {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`下载失败: ${response.statusText}`);
-      
-      const filename = `temp_${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
-      const filePath = path.join(TEMP_IMAGE_DIR, filename);
-      
-      const streamPipeline = promisify(pipeline);
-      await streamPipeline(response.body, fs.createWriteStream(filePath));
-      return filePath;
-    } catch (error) {
-      throw new Error(`图片下载失败: ${error.message}`);
-    }
-  }
-
-  async uploadImageToAPI(filePath, config) {
-    if (!config?.fileUploadUrl) {
-      throw new Error('未配置文件上传URL');
-    }
-    
-    try {
-      const form = new FormData();
-      const fileBuffer = await fs.promises.readFile(filePath);
-      form.append('file', fileBuffer, {
-        filename: path.basename(filePath),
-        contentType: 'image/png'
-      });
-      
-      const response = await fetch(config.fileUploadUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${config.apiKey}`,
-          ...form.getHeaders()
-        },
-        body: form
-      });
-      
-      if (!response.ok) {
-        throw new Error(`上传失败: ${response.statusText}`);
-      }
-      
-      const result = await response.json();
-      return result.data?.url || result.url;
-    } catch (error) {
-      throw new Error(`图片上传失败: ${error.message}`);
-    }
-  }
-
-  /**
    * 构建系统提示
    */
   buildSystemPrompt(context) {
@@ -1113,7 +1007,6 @@ export default class ChatStream extends AIStream {
             '禁言', '解禁', '全员禁言', '改名片', '改群名', 
             '设管', '取管', '头衔', '踢人', '精华', '公告'
           ];
-          // 成员只能撤回自己3分钟内的消息，保留撤回功能提示
           return !restrictedKeywords.some(keyword => line.includes(keyword));
         })
         .join('\n');
