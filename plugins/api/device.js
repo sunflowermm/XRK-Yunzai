@@ -141,21 +141,22 @@ class DeviceManager {
       const buffer = this.audioBuffers.get(filename);
       buffer.last_chunk_time = Date.now();
       
+      // 更新总块数估算（使用最大值）
+      if (chunks_total > buffer.total) {
+        buffer.total = chunks_total;
+      }
+      
+      // 计算进度（在外层作用域）
+      const progress = buffer.total > 0 
+        ? ((buffer.chunks.size / buffer.total) * 100).toFixed(1) 
+        : '0.0';
+      const sizeMB = (buffer.bytes_received / 1024 / 1024).toFixed(2);
+      
       // 存储数据块
       if (data) {
         const audioData = Buffer.from(data, 'base64');
         buffer.chunks.set(chunk_index, audioData);
         buffer.bytes_received += audioData.length;
-        
-        // 更新总块数估算（使用最大值）
-        if (chunks_total > buffer.total) {
-          buffer.total = chunks_total;
-        }
-        
-        const progress = buffer.total > 0 
-          ? ((buffer.chunks.size / buffer.total) * 100).toFixed(1) 
-          : '0.0';
-        const sizeMB = (buffer.bytes_received / 1024 / 1024).toFixed(2);
         
         // 每10块输出一次日志
         if (chunk_index % 10 === 0) {
