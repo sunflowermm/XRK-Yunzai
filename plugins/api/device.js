@@ -1,4 +1,4 @@
-// device.js - 设备管理API（v3.1 - 流式WAV合成 + 掉帧统计 + 稳定性优化）
+// device.js - 设备管理API（优化版 v3.1 - 流式录音保存 + 批量帧）
 import cfg from '../../lib/config/config.js';
 import WebSocket from 'ws';
 import BotUtil from '../../lib/common/util.js';
@@ -21,11 +21,11 @@ const deviceStats = new Map();
 // ============================================================
 const CONFIG = {
   heartbeatInterval: cfg.device?.heartbeat_interval || 30,
-  heartbeatTimeout: cfg.device?.heartbeat_timeout || 180,
-  maxDevices: cfg.device?.max_devices || 100,
-  commandTimeout: cfg.device?.command_timeout || 10000,
-  maxLogsPerDevice: cfg.device?.max_logs_per_device || 100,
-  messageQueueSize: cfg.device?.message_queue_size || 100
+  heartbeatTimeout:  cfg.device?.heartbeat_timeout || 180,
+  maxDevices:        cfg.device?.max_devices || 100,
+  commandTimeout:    cfg.device?.command_timeout || 10000,
+  maxLogsPerDevice:  cfg.device?.max_logs_per_device || 100,
+  messageQueueSize:  cfg.device?.message_queue_size || 100
 };
 
 // ============================================================
@@ -34,10 +34,11 @@ const CONFIG = {
 class DeviceManager {
   constructor() {
     this.cleanupInterval = null;
-    this.audioSessions = new Map(); // { filename -> session }
+    this.audioSessions = new Map(); // filename -> session
     this.AUDIO_SAVE_DIR = './data/wav';
     this.AUDIO_TEMP_DIR = './data/wav/temp';
 
+    // 创建目录
     [this.AUDIO_SAVE_DIR, this.AUDIO_TEMP_DIR].forEach(dir => {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
@@ -81,7 +82,7 @@ class DeviceManager {
     return data;
   }
 
-  // ========== WAV头创建 ==========
+  // ========== WAV头 ==========
   createWavHeader(dataSize, sampleRate, bitsPerSample, channels) {
     const buffer = Buffer.alloc(44);
     buffer.write('RIFF', 0);
@@ -100,7 +101,7 @@ class DeviceManager {
     return buffer;
   }
 
-  // ========== 录音会话管理 ==========
+  // ========== 录音会话 ==========
   createAudioSession(filename, deviceId, config) {
     const { sample_rate = 32000, bits_per_sample = 16, channels = 1 } = config;
 
@@ -118,11 +119,7 @@ class DeviceManager {
       started_at: Date.now(),
       chunks_received: 0,
       total_bytes: 0,
-      last_chunk_time: Date.now(),
-      // 下面用于丢帧/乱序统计
-      expected_chunk_index: 0,
-      out_of_order: 0,
-      dropped: 0
+      last_chunk_time: Date.now()
     };
 
     this.audioSessions.set(filename, session);
@@ -147,51 +144,34 @@ class DeviceManager {
     }
   }
 
+  async _appendAudio(deviceId, session, audioData) {
+    session.chunks_received++;
+    session.total_bytes += audioData.length;
+    session.last_chunk_time = Date.now();
+    await new Promise((resolve, reject) => {
+      session.write_stream.write(audioData, err => (err ? reject(err) : resolve()));
+    });
+  }
+
   async handleAudioChunk(deviceId, chunkData) {
     try {
       const { filename, chunk_index, data } = chunkData;
-
       let session = this.audioSessions.get(filename);
       if (!session) {
         BotUtil.makeLog('warn', `[录音接收] ${filename} 会话不存在，自动创建`, deviceId);
         session = this.createAudioSession(filename, deviceId, {});
       }
-
       const audioData = Buffer.from(data, 'base64');
+      await this._appendAudio(deviceId, session, audioData);
 
-      // 乱序/缺块统计
-      if (typeof chunk_index === 'number') {
-        if (chunk_index !== session.expected_chunk_index) {
-          if (chunk_index > session.expected_chunk_index) {
-            session.dropped += (chunk_index - session.expected_chunk_index);
-          } else {
-            session.out_of_order += 1;
-          }
-          session.expected_chunk_index = chunk_index;
-        }
-        session.expected_chunk_index += 1;
-      }
-
-      session.chunks_received++;
-      session.total_bytes += audioData.length;
-      session.last_chunk_time = Date.now();
-
-      await new Promise((resolve, reject) => {
-        session.write_stream.write(audioData, (err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
-
-      if (session.chunks_received % 10 === 0) {
+      if (chunk_index % 20 === 0) {
         const elapsed = ((Date.now() - session.started_at) / 1000).toFixed(1);
         BotUtil.makeLog(
           'info',
-          `[录音接收] ${filename} #${session.chunks_received} 块, ${(session.total_bytes / 1024).toFixed(1)}KB, ${elapsed}s`,
+          `[录音接收] ${filename} 块#${chunk_index} (${session.chunks_received}块, ${(session.total_bytes/1024).toFixed(1)}KB, ${elapsed}s)`,
           deviceId
         );
       }
-
       return { success: true, chunk_index, received: session.chunks_received };
     } catch (error) {
       BotUtil.makeLog('error', `[录音接收] 失败: ${error.message}`, deviceId);
@@ -199,10 +179,45 @@ class DeviceManager {
     }
   }
 
+  // 新增：批量帧处理（audio_chunk_batch）
+  async handleAudioChunkBatch(deviceId, payload) {
+    try {
+      const { filename, frames } = payload;
+      if (!frames || frames.length === 0) return { success: true, received: 0 };
+
+      let session = this.audioSessions.get(filename);
+      if (!session) {
+        BotUtil.makeLog('warn', `[批量接收] ${filename} 会话不存在，自动创建`, deviceId);
+        session = this.createAudioSession(filename, deviceId, {});
+      }
+
+      // 顺序写入，尽量减少同步日志
+      for (let i = 0; i < frames.length; i++) {
+        const f = frames[i];
+        const audioData = Buffer.from(f.data, 'base64');
+        await this._appendAudio(deviceId, session, audioData);
+      }
+
+      const lastIdx = frames[frames.length - 1].chunk_index ?? session.chunks_received;
+      if (lastIdx % 20 === 0) {
+        const elapsed = ((Date.now() - session.started_at) / 1000).toFixed(1);
+        BotUtil.makeLog(
+          'info',
+          `[批量接收] ${filename} +${frames.length}块 -> 共${session.chunks_received}块, ${(session.total_bytes/1024).toFixed(1)}KB, ${elapsed}s`,
+          deviceId
+        );
+      }
+
+      return { success: true, received: frames.length, total: session.chunks_received };
+    } catch (error) {
+      BotUtil.makeLog('error', `[批量接收] 失败: ${error.message}`, deviceId);
+      return { success: false, error: error.message };
+    }
+  }
+
   async handleAudioStop(deviceId, stopData) {
     try {
       const { filename, duration } = stopData;
-
       const session = this.audioSessions.get(filename);
       if (!session) {
         BotUtil.makeLog('warn', `[录音停止] ${filename} 会话不存在`, deviceId);
@@ -211,28 +226,21 @@ class DeviceManager {
 
       BotUtil.makeLog(
         'info',
-        `[录音停止] ${filename} 开始最终保存 (${session.chunks_received}块, ${(session.total_bytes / 1024).toFixed(1)}KB)`,
+        `[录音停止] ${filename} 开始最终保存 (${session.chunks_received}块, ${(session.total_bytes/1024).toFixed(1)}KB)`,
         deviceId
       );
 
-      // 关闭临时写入流
-      await new Promise((resolve) => {
-        session.write_stream.end(() => resolve());
-      });
+      await new Promise(resolve => session.write_stream.end(() => resolve()));
 
-      // 生成WAV（流式，不整段读内存）
       const filepath = await this.finalizeAudioFile(session);
-
-      // 清理会话
       this.audioSessions.delete(filename);
 
       BotUtil.makeLog(
         'info',
-        `[录音完成] ✓ ${path.basename(filepath)}
- 时长: ${Number(duration || 0).toFixed(2)}秒
- 大小: ${(session.total_bytes / 1024).toFixed(1)}KB
- 块数: ${session.chunks_received}
- 缺块: ${session.dropped} 乱序: ${session.out_of_order}`,
+        `[录音完成] ✓ ${path.basename(filepath)}\n` +
+        ` 时长: ${Number(duration).toFixed(2)}秒\n` +
+        ` 大小: ${(session.total_bytes/1024).toFixed(1)}KB\n` +
+        ` 块数: ${session.chunks_received}`,
         deviceId
       );
 
@@ -243,14 +251,12 @@ class DeviceManager {
           device_id: deviceId,
           filename: path.basename(filepath),
           filepath,
-          duration: parseFloat(Number(duration || 0).toFixed(2)),
+          duration: parseFloat(Number(duration).toFixed(2)),
           size: session.total_bytes,
           sample_rate: session.sample_rate,
           bits_per_sample: session.bits_per_sample,
           channels: session.channels,
           chunks: session.chunks_received,
-          dropped: session.dropped,
-          out_of_order: session.out_of_order,
           self_id: deviceId,
           time: Math.floor(Date.now() / 1000)
         });
@@ -266,28 +272,15 @@ class DeviceManager {
   async finalizeAudioFile(session) {
     try {
       const { temp_path, filename, sample_rate, bits_per_sample, channels } = session;
-
-      const stat = fs.statSync(temp_path);
-      const dataSize = stat.size;
+      const audioData = fs.readFileSync(temp_path);
+      const dataSize = audioData.length;
       const wavHeader = this.createWavHeader(dataSize, sample_rate, bits_per_sample, channels);
-
-      const finalPath = path.join(this.AUDIO_SAVE_DIR, filename.replace('.raw', '.wav'));
-
-      await new Promise((resolve, reject) => {
-        const ws = fs.createWriteStream(finalPath, { flags: 'w' });
-        ws.on('error', reject);
-        ws.write(wavHeader, (err) => {
-          if (err) return reject(err);
-          const rs = fs.createReadStream(temp_path);
-          rs.on('error', reject);
-          rs.on('end', () => ws.end());
-          ws.on('finish', resolve);
-          rs.pipe(ws, { end: false });
-        });
-      });
+      const wavFile = Buffer.concat([wavHeader, audioData]);
+      const wavFilename = filename.replace('.raw', '.wav');
+      const finalPath = path.join(this.AUDIO_SAVE_DIR, wavFilename);
+      fs.writeFileSync(finalPath, wavFile);
 
       try { fs.unlinkSync(temp_path); } catch (e) {}
-
       return finalPath;
     } catch (error) {
       BotUtil.makeLog('error', `[文件生成] 失败: ${error.message}`, session.device_id);
@@ -296,9 +289,8 @@ class DeviceManager {
   }
 
   cleanupStaleAudioSessions() {
-    const timeout = 10 * 60 * 1000; // 10分钟
+    const timeout = 10 * 60 * 1000;
     const now = Date.now();
-
     for (const [filename, session] of this.audioSessions) {
       if (now - session.last_chunk_time > timeout) {
         BotUtil.makeLog('warn', `[录音会话] 超时清理: ${filename} (${session.chunks_received}块)`, session.device_id);
@@ -309,7 +301,7 @@ class DeviceManager {
     }
   }
 
-  // ========== 设备Bot ==========
+  // ========== 设备Bot创建/统计/注册 ...（保持与你现有一致） ==========
   createDeviceBot(deviceId, deviceInfo, ws) {
     Bot[deviceId] = {
       adapter: this,
@@ -330,18 +322,11 @@ class DeviceManager {
         errors: 0,
         reconnects: 0
       },
-
       addLog: (level, message, data = {}) => this.addDeviceLog(deviceId, level, message, data),
       getLogs: (filter = {}) => this.getDeviceLogs(deviceId, filter),
-      clearLogs: () => deviceLogs.set(deviceId, []),
-
-      sendMsg: async (msg) => await this.sendCommand(deviceId, 'display', {
-        text: this.encodeData(msg),
-        clear: true
-      }, 1),
-
+      clearLogs: () => { deviceLogs.set(deviceId, []); },
+      sendMsg: async (msg) => await this.sendCommand(deviceId, 'display', { text: this.encodeData(msg), clear: true }, 1),
       sendCommand: async (cmd, params = {}, priority = 0) => await this.sendCommand(deviceId, cmd, params, priority),
-
       display: async (text, options = {}) => await this.sendCommand(deviceId, 'display', {
         text: this.encodeData(text),
         x: options.x || 0,
@@ -351,18 +336,14 @@ class DeviceManager {
         spacing: options.spacing || 2,
         color: options.color || 1
       }, 1),
-
       microphone: {
         getStatus: async () => await this.sendCommand(deviceId, 'microphone_status', {}, 0),
-        start: async () => await this.sendCommand(deviceId, 'microphone_start', {}, 1),
-        stop: async () => await this.sendCommand(deviceId, 'microphone_stop', {}, 1),
-        test: async (duration = 3) => await this.sendCommand(deviceId, 'microphone_test', { duration }, 1)
+        start:     async () => await this.sendCommand(deviceId, 'microphone_start',  {}, 1),
+        stop:      async () => await this.sendCommand(deviceId, 'microphone_stop',   {}, 1),
+        test:      async (duration = 3) => await this.sendCommand(deviceId, 'microphone_test', { duration }, 1)
       },
-
       reboot: async () => await this.sendCommand(deviceId, 'reboot', {}, 99),
-
       hasCapability: (cap) => deviceInfo.capabilities?.includes(cap),
-
       getStatus: () => {
         const device = devices.get(deviceId);
         return {
@@ -376,14 +357,11 @@ class DeviceManager {
           stats: device?.stats || Bot[deviceId].stats
         };
       },
-
       getStats: () => deviceStats.get(deviceId) || this.initDeviceStats(deviceId)
     };
-
     return Bot[deviceId];
   }
 
-  // ========== 设备统计 ==========
   initDeviceStats(deviceId) {
     const stats = {
       device_id: deviceId,
@@ -396,6 +374,7 @@ class DeviceManager {
     deviceStats.set(deviceId, stats);
     return stats;
   }
+
   updateDeviceStats(deviceId, type) {
     const stats = deviceStats.get(deviceId);
     if (!stats) return;
@@ -405,38 +384,22 @@ class DeviceManager {
     else if (type === 'heartbeat') stats.last_heartbeat = Date.now();
   }
 
-  // ========== 设备注册 ==========
   async registerDevice(deviceData, Bot, ws) {
     try {
       deviceData = this.decodeData(deviceData);
-      const {
-        device_id, device_type, device_name, capabilities = [],
-        metadata = {}, ip_address, firmware_version
-      } = deviceData;
-
+      const { device_id, device_type, device_name, capabilities = [], metadata = {}, ip_address, firmware_version } = deviceData;
       if (!device_id || !device_type) throw new Error('缺少必需参数: device_id 或 device_type');
-
-      if (devices.size >= CONFIG.maxDevices && !devices.has(device_id)) {
-        throw new Error(`设备数量已达上限 (${CONFIG.maxDevices})`);
-      }
+      if (devices.size >= CONFIG.maxDevices && !devices.has(device_id)) throw new Error(`设备数量已达上限 (${CONFIG.maxDevices})`);
 
       const existingDevice = devices.get(device_id);
       const device = {
-        device_id,
-        device_type,
+        device_id, device_type,
         device_name: device_name || `${device_type}_${device_id}`,
-        capabilities,
-        metadata,
-        ip_address,
-        firmware_version,
-        online: true,
-        last_seen: Date.now(),
+        capabilities, metadata, ip_address, firmware_version,
+        online: true, last_seen: Date.now(),
         registered_at: existingDevice?.registered_at || Date.now(),
         stats: existingDevice?.stats || {
-          messages_sent: 0,
-          messages_received: 0,
-          commands_executed: 0,
-          errors: 0,
+          messages_sent: 0, messages_received: 0, commands_executed: 0, errors: 0,
           reconnects: existingDevice ? existingDevice.stats.reconnects + 1 : 0
         }
       };
@@ -448,24 +411,14 @@ class DeviceManager {
       if (!Bot.uin.includes(device_id)) Bot.uin.push(device_id);
       this.createDeviceBot(device_id, device, ws);
 
-      BotUtil.makeLog(
-        'info',
-        `[设备注册] ${device.device_name} (${device_id})
- IP: ${ip_address}
- 固件: v${firmware_version}
- 能力: ${capabilities.join(', ')}`,
+      BotUtil.makeLog('info',
+        `[设备注册] ${device.device_name} (${device_id})\n IP: ${ip_address}\n 固件: v${firmware_version}\n 能力: ${capabilities.join(', ')}`,
         device.device_name
       );
 
       Bot.em('device.online', {
-        post_type: 'device',
-        event_type: 'online',
-        device_id,
-        device_type,
-        device_name: device.device_name,
-        capabilities,
-        self_id: device_id,
-        time: Math.floor(Date.now() / 1000)
+        post_type: 'device', event_type: 'online', device_id, device_type,
+        device_name: device.device_name, capabilities, self_id: device_id, time: Math.floor(Date.now() / 1000)
       });
 
       return device;
@@ -475,12 +428,11 @@ class DeviceManager {
     }
   }
 
-  // ========== WebSocket设置 ==========
   setupWebSocket(deviceId, ws) {
     const oldWs = deviceWebSockets.get(deviceId);
     if (oldWs && oldWs !== ws) {
       clearInterval(oldWs.heartbeatTimer);
-      try { oldWs.close(); } catch (e) {}
+      oldWs.close();
     }
 
     ws.device_id = deviceId;
@@ -509,7 +461,6 @@ class DeviceManager {
     deviceWebSockets.set(deviceId, ws);
   }
 
-  // ========== 设备断开 ==========
   handleDeviceDisconnect(deviceId, ws) {
     clearInterval(ws.heartbeatTimer);
     const device = devices.get(deviceId);
@@ -517,19 +468,14 @@ class DeviceManager {
       device.online = false;
       BotUtil.makeLog('warn', `[设备离线] ${device.device_name}`, device.device_name);
       Bot.em('device.offline', {
-        post_type: 'device',
-        event_type: 'offline',
-        device_id: deviceId,
-        device_type: device.device_type,
-        device_name: device.device_name,
-        self_id: deviceId,
-        time: Math.floor(Date.now() / 1000)
+        post_type: 'device', event_type: 'offline',
+        device_id: deviceId, device_type: device.device_type, device_name: device.device_name,
+        self_id: deviceId, time: Math.floor(Date.now() / 1000)
       });
     }
     deviceWebSockets.delete(deviceId);
   }
 
-  // ========== 日志 ==========
   addDeviceLog(deviceId, level, message, data = {}) {
     message = this.decodeUnicode(String(message)).substring(0, 500);
     const logEntry = { timestamp: Date.now(), level, message, data: this.decodeData(data) };
@@ -543,12 +489,12 @@ class DeviceManager {
       device.stats.errors++;
       this.updateDeviceStats(deviceId, 'error');
     }
-
     if (level !== 'debug') {
       BotUtil.makeLog(level, `[${device?.device_name || deviceId}] ${message}`, device?.device_name || deviceId);
     }
     return logEntry;
   }
+
   getDeviceLogs(deviceId, filter = {}) {
     let logs = deviceLogs.get(deviceId) || [];
     if (filter.level) logs = logs.filter(log => log.level === filter.level);
@@ -560,7 +506,6 @@ class DeviceManager {
     return logs;
   }
 
-  // ========== 事件处理 ==========
   async processDeviceEvent(deviceId, eventType, eventData = {}, Bot) {
     try {
       eventData = this.decodeData(eventData);
@@ -595,20 +540,21 @@ class DeviceManager {
         }
         case 'audio_start':
           return await this.handleAudioStart(deviceId, eventData);
+
         case 'audio_chunk':
           return await this.handleAudioChunk(deviceId, eventData);
+
+        case 'audio_chunk_batch': // 新增
+          return await this.handleAudioChunkBatch(deviceId, eventData);
+
         case 'audio_stop':
           return await this.handleAudioStop(deviceId, eventData);
+
         default:
           Bot.em(`device.${eventType}`, {
-            post_type: 'device',
-            event_type: eventType,
-            device_id: deviceId,
-            device_type: device.device_type,
-            device_name: device.device_name,
-            event_data: eventData,
-            self_id: deviceId,
-            time: Math.floor(Date.now() / 1000)
+            post_type: 'device', event_type: eventType,
+            device_id: deviceId, device_type: device.device_type, device_name: device.device_name,
+            event_data: eventData, self_id: deviceId, time: Math.floor(Date.now() / 1000)
           });
       }
       return { success: true };
@@ -619,7 +565,6 @@ class DeviceManager {
     }
   }
 
-  // ========== 命令发送 ==========
   async sendCommand(deviceId, command, parameters = {}, priority = 0) {
     const device = devices.get(deviceId);
     if (!device) throw new Error('设备未找到');
@@ -631,6 +576,7 @@ class DeviceManager {
       priority,
       timestamp: Date.now()
     };
+
     this.updateDeviceStats(deviceId, 'command');
 
     const ws = deviceWebSockets.get(deviceId);
@@ -660,7 +606,6 @@ class DeviceManager {
     const commands = deviceCommands.get(deviceId) || [];
     if (priority > 0) commands.unshift(cmd);
     else commands.push(cmd);
-
     if (commands.length > CONFIG.messageQueueSize) commands.length = CONFIG.messageQueueSize;
     deviceCommands.set(deviceId, commands);
     device.stats.commands_executed++;
@@ -668,11 +613,9 @@ class DeviceManager {
     return { success: true, command_id: cmd.id, queued: commands.length, method: 'queue' };
   }
 
-  // ========== 离线检查 ==========
   checkOfflineDevices(Bot) {
     const timeout = CONFIG.heartbeatTimeout * 1000;
     const now = Date.now();
-
     for (const [id, device] of devices) {
       if (device.online && now - device.last_seen > timeout) {
         const ws = deviceWebSockets.get(id);
@@ -681,13 +624,9 @@ class DeviceManager {
         } else {
           device.online = false;
           Bot.em('device.offline', {
-            post_type: 'device',
-            event_type: 'offline',
-            device_id: id,
-            device_type: device.device_type,
-            device_name: device.device_name,
-            self_id: id,
-            time: Math.floor(Date.now() / 1000)
+            post_type: 'device', event_type: 'offline',
+            device_id: id, device_type: device.device_type, device_name: device.device_name,
+            self_id: id, time: Math.floor(Date.now() / 1000)
           });
           BotUtil.makeLog('warn', `[设备离线] ${device.device_name}`, device.device_name);
         }
@@ -695,7 +634,6 @@ class DeviceManager {
     }
   }
 
-  // ========== 获取设备信息 ==========
   getDeviceList() {
     return Array.from(devices.values()).map(d => ({
       device_id: d.device_id,
@@ -713,7 +651,6 @@ class DeviceManager {
     return { ...device, device_stats: deviceStats.get(deviceId) };
   }
 
-  // ========== WebSocket消息处理 ==========
   async processWebSocketMessage(ws, data, Bot) {
     try {
       data = this.decodeData(data);
@@ -741,24 +678,17 @@ class DeviceManager {
         case 'heartbeat': {
           ws.isAlive = true;
           ws.lastPong = Date.now();
-
           const dev = devices.get(deviceId);
           if (dev) {
             dev.last_seen = Date.now();
             dev.online = true;
             if (payload.status) dev.status = payload.status;
           }
-
           this.updateDeviceStats(deviceId, 'heartbeat');
 
           const queuedCommands = deviceCommands.get(deviceId) || [];
           const commandsToSend = queuedCommands.splice(0, 3);
-
-          ws.send(JSON.stringify({
-            type: 'heartbeat_response',
-            commands: commandsToSend,
-            timestamp: Date.now()
-          }));
+          ws.send(JSON.stringify({ type: 'heartbeat_response', commands: commandsToSend, timestamp: Date.now() }));
           break;
         }
         case 'command_result':
@@ -781,10 +711,9 @@ const deviceManager = new DeviceManager();
 // ============================================================
 export default {
   name: 'device',
-  dsc: '设备管理API（v3.1 流式录音增强版）',
+  dsc: '设备管理API（v3.1 流式录音/批量优化版）',
   priority: 90,
   routes: [
-    // 获取录音列表
     {
       method: 'GET',
       path: '/api/device/:deviceId/audio/list',
@@ -810,8 +739,6 @@ export default {
         }
       }
     },
-
-    // 下载录音文件
     {
       method: 'GET',
       path: '/api/device/:deviceId/audio/download/:filename',
@@ -819,14 +746,8 @@ export default {
         try {
           const { filename } = req.params;
           const filepath = path.join(deviceManager.AUDIO_SAVE_DIR, filename);
-
-          if (!fs.existsSync(filepath)) {
-            return res.status(404).json({ success: false, message: '文件不存在' });
-          }
-
-          const stat = fs.statSync(filepath);
+          if (!fs.existsSync(filepath)) return res.status(404).json({ success: false, message: '文件不存在' });
           res.setHeader('Content-Type', 'audio/wav');
-          res.setHeader('Content-Length', stat.size);
           res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
           fs.createReadStream(filepath).pipe(res);
         } catch (error) {
@@ -834,8 +755,6 @@ export default {
         }
       }
     },
-
-    // 删除录音文件
     {
       method: 'DELETE',
       path: '/api/device/:deviceId/audio/:filename',
@@ -843,11 +762,7 @@ export default {
         try {
           const { filename } = req.params;
           const filepath = path.join(deviceManager.AUDIO_SAVE_DIR, filename);
-
-          if (!fs.existsSync(filepath)) {
-            return res.status(404).json({ success: false, message: '文件不存在' });
-          }
-
+          if (!fs.existsSync(filepath)) return res.status(404).json({ success: false, message: '文件不存在' });
           fs.unlinkSync(filepath);
           BotUtil.makeLog('info', `[录音删除] ${filename}`, 'DeviceManager');
           res.json({ success: true, message: '文件已删除' });
@@ -856,29 +771,22 @@ export default {
         }
       }
     },
-
-    // 获取正在录音的会话（含统计）
     {
       method: 'GET',
       path: '/api/device/:deviceId/audio/sessions',
       handler: async (req, res) => {
-        const sessions = Array.from(deviceManager.audioSessions.entries()).map(([filename, s]) => ({
+        const sessions = Array.from(deviceManager.audioSessions.entries()).map(([filename, session]) => ({
           filename,
-          device_id: s.device_id,
-          chunks_received: s.chunks_received,
-          total_bytes: s.total_bytes,
-          size_kb: (s.total_bytes / 1024).toFixed(1),
-          started_at: s.started_at,
-          elapsed: ((Date.now() - s.started_at) / 1000).toFixed(1),
-          expected_next: s.expected_chunk_index,
-          dropped: s.dropped,
-          out_of_order: s.out_of_order
+          device_id: session.device_id,
+          chunks_received: session.chunks_received,
+          total_bytes: session.total_bytes,
+          size_kb: (session.total_bytes / 1024).toFixed(1),
+          started_at: session.started_at,
+          elapsed: ((Date.now() - session.started_at) / 1000).toFixed(1)
         }));
         res.json({ success: true, sessions, count: sessions.length });
       }
     },
-
-    // 麦克风状态
     {
       method: 'GET',
       path: '/api/device/:deviceId/microphone/status',
@@ -892,8 +800,6 @@ export default {
         }
       }
     },
-
-    // 麦克风测试
     {
       method: 'POST',
       path: '/api/device/:deviceId/microphone/test',
@@ -909,12 +815,9 @@ export default {
       }
     }
   ],
-
-  // WebSocket路由
   ws: {
     device: [(ws, req, Bot) => {
       BotUtil.makeLog('info', `[WebSocket] 新连接 ${req.socket.remoteAddress}`, 'DeviceManager');
-
       ws.on('message', msg => {
         try {
           const data = JSON.parse(msg);
@@ -924,62 +827,32 @@ export default {
           try { ws.send(JSON.stringify({ type: 'error', message: `解析失败: ${error.message}` })); } catch (e) {}
         }
       });
-
-      ws.on('close', () => {
-        if (ws.device_id) {
-          deviceManager.handleDeviceDisconnect(ws.device_id, ws);
-        }
-      });
-
-      ws.on('error', (error) => {
-        BotUtil.makeLog('error', `[WS错误] ${error.message}`, 'DeviceManager');
-      });
+      ws.on('close', () => { if (ws.device_id) deviceManager.handleDeviceDisconnect(ws.device_id, ws); });
+      ws.on('error', (error) => { BotUtil.makeLog('error', `[WS错误] ${error.message}`, 'DeviceManager'); });
     }]
   },
-
-  // 初始化
   init(app, Bot) {
-    deviceManager.cleanupInterval = setInterval(() => {
-      deviceManager.checkOfflineDevices(Bot);
-    }, 30000);
-
+    deviceManager.cleanupInterval = setInterval(() => { deviceManager.checkOfflineDevices(Bot); }, 30000);
     setInterval(() => {
       const now = Date.now();
       for (const [id, callback] of commandCallbacks) {
         const timestamp = parseInt(id.split('_')[0]);
-        if (now - timestamp > 60000) {
-          commandCallbacks.delete(id);
-        }
+        if (now - timestamp > 60000) commandCallbacks.delete(id);
       }
     }, 60000);
+    setInterval(() => { deviceManager.cleanupStaleAudioSessions(); }, 5 * 60 * 1000);
 
-    setInterval(() => {
-      deviceManager.cleanupStaleAudioSessions();
-    }, 5 * 60 * 1000);
-
-    BotUtil.makeLog('info', '[设备管理器] 初始化完成 (流式录音v3.1)', 'DeviceManager');
+    BotUtil.makeLog('info', '[设备管理器] 初始化完成 (流式录音v3.1/批量帧)', 'DeviceManager');
     BotUtil.makeLog('info', `[录音目录] ${deviceManager.AUDIO_SAVE_DIR}`, 'DeviceManager');
   },
-
-  // 清理
   destroy() {
     if (deviceManager.cleanupInterval) clearInterval(deviceManager.cleanupInterval);
-
     for (const [id, ws] of deviceWebSockets) {
-      try {
-        clearInterval(ws.heartbeatTimer);
-        ws.close();
-      } catch (e) {}
+      try { clearInterval(ws.heartbeatTimer); ws.close(); } catch (e) {}
     }
-
-    // 清理所有录音会话
     for (const [filename, session] of deviceManager.audioSessions) {
-      try {
-        session.write_stream.end();
-        fs.unlinkSync(session.temp_path);
-      } catch (e) {}
+      try { session.write_stream.end(); fs.unlinkSync(session.temp_path); } catch (e) {}
     }
-
     BotUtil.makeLog('info', '[设备管理器] 已清理', 'DeviceManager');
   }
 };
