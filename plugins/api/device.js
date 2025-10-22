@@ -1,13 +1,13 @@
-// device.js - 设备管理API（适配麦克风流式录音，保存到 data/wav，兼容未知总块数）
+// device.js - 设备管理API（音频流式适配版 v2.3 / 保存到 data/wav）
 import cfg from '../../lib/config/config.js';
 import WebSocket from 'ws';
 import BotUtil from '../../lib/common/util.js';
 import fs from 'fs';
 import path from 'path';
 
-// ============================================================
-// 数据存储
-// ============================================================
+// ============================
+// 存储与状态
+// ============================
 const devices = new Map();
 const deviceWebSockets = new Map();
 const deviceLogs = new Map();
@@ -16,9 +16,9 @@ const commandCallbacks = new Map();
 const cameraStreams = new Map();
 const deviceStats = new Map();
 
-// ============================================================
+// ============================
 // 配置
-// ============================================================
+// ============================
 const CONFIG = {
   heartbeatInterval: cfg.device?.heartbeat_interval || 30,
   heartbeatTimeout: cfg.device?.heartbeat_timeout || 180,
@@ -28,61 +28,54 @@ const CONFIG = {
   messageQueueSize: cfg.device?.message_queue_size || 100
 };
 
-// ============================================================
+// ============================
 // 设备管理器
-// ============================================================
+// ============================
 class DeviceManager {
   constructor() {
     this.cleanupInterval = null;
-    this.audioBuffers = new Map();
-    // 保存目录调整为 data/wav
-    this.AUDIO_SAVE_DIR = './data/wav';
 
+    // 录音缓冲：filename -> { chunks: Map<index, Buffer>, bytes, ... }
+    this.audioBuffers = new Map();
+
+    // 保存目录改为 ./data/wav
+    this.AUDIO_SAVE_DIR = './data/wav';
     if (!fs.existsSync(this.AUDIO_SAVE_DIR)) {
       fs.mkdirSync(this.AUDIO_SAVE_DIR, { recursive: true });
       BotUtil.makeLog('info', `[录音] 创建目录: ${this.AUDIO_SAVE_DIR}`, 'DeviceManager');
     }
   }
 
-  // ========== Unicode 编解码 ==========
+  // ---------- 编解码 ----------
   encodeUnicode(str) {
     if (typeof str !== 'string') return str;
-    return str.split('').map(char => {
-      const code = char.charCodeAt(0);
-      return code > 127 ? `\\u${code.toString(16).padStart(4, '0')}` : char;
+    return str.split('').map(ch => {
+      const code = ch.charCodeAt(0);
+      return code > 127 ? `\\u${code.toString(16).padStart(4, '0')}` : ch;
     }).join('');
   }
-
   decodeUnicode(str) {
     if (typeof str !== 'string') return str;
-    return str.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) =>
-      String.fromCharCode(parseInt(hex, 16))
-    );
+    return str.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
   }
-
   encodeData(data) {
     if (typeof data === 'string') return this.encodeUnicode(data);
-    if (Array.isArray(data)) return data.map(item => this.encodeData(item));
-    if (typeof data === 'object' && data !== null) {
-      return Object.fromEntries(
-        Object.entries(data).map(([k, v]) => [k, this.encodeData(v)])
-      );
+    if (Array.isArray(data)) return data.map(v => this.encodeData(v));
+    if (data && typeof data === 'object') {
+      return Object.fromEntries(Object.entries(data).map(([k, v]) => [k, this.encodeData(v)]));
     }
     return data;
   }
-
   decodeData(data) {
     if (typeof data === 'string') return this.decodeUnicode(data);
-    if (Array.isArray(data)) return data.map(item => this.decodeData(item));
-    if (typeof data === 'object' && data !== null) {
-      return Object.fromEntries(
-        Object.entries(data).map(([k, v]) => [k, this.decodeData(v)])
-      );
+    if (Array.isArray(data)) return data.map(v => this.decodeData(v));
+    if (data && typeof data === 'object') {
+      return Object.fromEntries(Object.entries(data).map(([k, v]) => [k, this.decodeData(v)]));
     }
     return data;
   }
 
-  // ========== 音频处理 ==========
+  // ---------- WAV 头 ----------
   createWavHeader(dataSize, sampleRate, bitsPerSample, channels) {
     const buffer = Buffer.alloc(44);
     buffer.write('RIFF', 0);
@@ -101,163 +94,165 @@ class DeviceManager {
     return buffer;
   }
 
-  async processAudioChunk(deviceId, chunkData) {
-    try {
-      const {
-        filename,
-        chunk_index = 0,
-        chunks_total = 0, // 允许为 0：未知总数
-        data,
-        is_last = false,
-        sample_rate = 16000,
-        bits_per_sample = 16,
-        channels = 1
-      } = chunkData;
+  // ---------- 音频：开始 ----------
+  async processAudioStart(deviceId, data) {
+    const {
+      filename,
+      sample_rate = 16000,
+      bits_per_sample = 16,
+      channels = 1
+    } = data;
 
-      if (!filename) throw new Error('缺少 filename');
-
-      // 初始化缓冲区
-      if (!this.audioBuffers.has(filename)) {
-        this.audioBuffers.set(filename, {
-          chunks: new Map(),
-          total: typeof chunks_total === 'number' ? chunks_total : 0,
-          sample_rate,
-          bits_per_sample,
-          channels,
-          device_id: deviceId,
-          started_at: Date.now()
-        });
-
-        BotUtil.makeLog(
-          'info',
-          `[录音接收] ${filename} 开始 (总块数${chunks_total || '未知'})`,
-          deviceId
-        );
-      }
-
-      const buffer = this.audioBuffers.get(filename);
-
-      // 保存一块
-      const audioData = data ? Buffer.from(data, 'base64') : Buffer.alloc(0);
-      buffer.chunks.set(chunk_index, audioData);
-
-      // 如果设备端晚些时候给出了真实总数，用最新的覆盖
-      if (chunks_total && (!buffer.total || buffer.total < chunks_total)) {
-        buffer.total = chunks_total;
-      }
-
-      // 进度显示（未知总数时显示“接收X块”）
-      let progress;
-      if (buffer.total && buffer.total > 0) {
-        progress = `${((buffer.chunks.size / buffer.total) * 100).toFixed(1)}%`;
-      } else {
-        progress = `接收${buffer.chunks.size}块`;
-      }
-
-      BotUtil.makeLog(
-        'info',
-        `[录音接收] ${filename} 第${chunk_index}块 (${audioData.length}字节) | ${progress}`,
-        deviceId
-      );
-
-      // 完成条件：收到 is_last，或已收满 total（当 total 已知）
-      const complete =
-        is_last || (buffer.total > 0 && buffer.chunks.size >= buffer.total);
-
-      if (complete) {
-        BotUtil.makeLog('info', `[录音接收] ${filename} 接收完成，开始保存`, deviceId);
-        await this.saveAudioFile(filename, buffer);
-        this.audioBuffers.delete(filename);
-      }
-
-      return {
-        success: true,
-        chunk_index,
-        received: buffer.chunks.size,
-        total: buffer.total || 0,
-        progress
-      };
-    } catch (error) {
-      BotUtil.makeLog('error', `[录音接收] 处理失败: ${error.message}`, deviceId);
-      return { success: false, error: error.message };
+    if (!filename) {
+      throw new Error('audio_start 缺少 filename');
     }
+
+    this.audioBuffers.set(filename, {
+      chunks: new Map(),
+      bytes_received: 0,
+      sample_rate,
+      bits_per_sample,
+      channels,
+      device_id: deviceId,
+      started_at: Date.now(),
+      last_index: -1
+    });
+
+    BotUtil.makeLog('info', `[录音接收] ${filename} 开始 (rate=${sample_rate}, bits=${bits_per_sample}, ch=${channels})`, deviceId);
+    return { success: true };
   }
 
-  async saveAudioFile(filename, buffer) {
-    try {
-      const { chunks, sample_rate, bits_per_sample, channels, device_id } = buffer;
+  // ---------- 音频：分片 ----------
+  async processAudioChunk(deviceId, data) {
+    const {
+      filename,
+      chunk_index,
+      data: b64,
+      is_last = false,
+      sample_rate = 16000,
+      bits_per_sample = 16,
+      channels = 1
+    } = data;
 
-      // 按 chunk_index 排序拼接
-      const sortedIndices = Array.from(chunks.keys()).sort((a, b) => a - b);
-      const audioData = Buffer.concat(sortedIndices.map(key => chunks.get(key)));
-      const dataSize = audioData.length;
-
-      const wavHeader = this.createWavHeader(
-        dataSize,
-        sample_rate,
-        bits_per_sample,
-        channels
-      );
-      const wavFile = Buffer.concat([wavHeader, audioData]);
-      const wavFilename = filename.replace(/\.raw$/i, '.wav');
-      const filepath = path.join(this.AUDIO_SAVE_DIR, wavFilename);
-
-      fs.writeFileSync(filepath, wavFile);
-
-      const duration = (
-        dataSize /
-        (sample_rate * channels * (bits_per_sample / 8))
-      ).toFixed(2);
-
-      BotUtil.makeLog(
-        'info',
-        `[录音保存] ✓ ${wavFilename}\n` +
-          `  时长: ${duration}秒, 大小: ${(wavFile.length / 1024).toFixed(2)}KB\n` +
-          `  路径: ${filepath}`,
-        device_id
-      );
-
-      // 触发事件
-      if (Bot[device_id]) {
-        Bot.em('device.audio_saved', {
-          post_type: 'device',
-          event_type: 'audio_saved',
-          device_id,
-          filename: wavFilename,
-          filepath,
-          duration: parseFloat(duration),
-          size: wavFile.length,
-          sample_rate,
-          bits_per_sample,
-          channels,
-          self_id: device_id,
-          time: Math.floor(Date.now() / 1000)
-        });
-      }
-
-      return filepath;
-    } catch (error) {
-      BotUtil.makeLog('error', `[录音保存] 失败: ${error.message}`, buffer.device_id);
-      throw error;
+    if (!filename) {
+      return { success: false, error: 'audio_chunk 缺少 filename' };
     }
+
+    // 兼容：如果未收到 audio_start，也初始化
+    if (!this.audioBuffers.has(filename)) {
+      await this.processAudioStart(deviceId, { filename, sample_rate, bits_per_sample, channels });
+    }
+
+    const buf = this.audioBuffers.get(filename);
+    const audioData = Buffer.from(b64, 'base64');
+    buf.chunks.set(chunk_index, audioData);
+    buf.bytes_received += audioData.length;
+    buf.sample_rate = sample_rate;
+    buf.bits_per_sample = bits_per_sample;
+    buf.channels = channels;
+    buf.last_index = Math.max(buf.last_index, chunk_index);
+
+    // 粗略进度（按已收秒数估算）
+    const seconds = (buf.bytes_received / (sample_rate * channels * (bits_per_sample / 8))).toFixed(2);
+
+    BotUtil.makeLog('debug',
+      `[录音接收] ${filename} 块#${chunk_index} (${audioData.length}B, 已收~${seconds}s)`,
+      deviceId
+    );
+
+    if (is_last) {
+      return await this.processAudioEnd(deviceId, { filename });
+    }
+
+    return { success: true, chunk_index };
   }
 
+  // ---------- 音频：结束并保存 ----------
+  async processAudioEnd(deviceId, data) {
+    const { filename } = data;
+    const buf = this.audioBuffers.get(filename);
+    if (!buf) {
+      return { success: false, error: 'audio_end 未找到对应缓冲（可能已清理或文件名不一致）' };
+    }
+
+    // 组装（按 index 排序）
+    const indices = Array.from(buf.chunks.keys()).sort((a, b) => a - b);
+    const audioData = Buffer.concat(indices.map(i => buf.chunks.get(i)));
+    const dataSize = audioData.length;
+
+    // 写 WAV
+    const wavHeader = this.createWavHeader(
+      dataSize,
+      buf.sample_rate,
+      buf.bits_per_sample,
+      buf.channels
+    );
+    const wavFile = Buffer.concat([wavHeader, audioData]);
+
+    const wavFilename = filename.endsWith('.raw')
+      ? filename.replace(/\.raw$/i, '.wav')
+      : `${filename}.wav`;
+    const filepath = path.join(this.AUDIO_SAVE_DIR, wavFilename);
+
+    fs.writeFileSync(filepath, wavFile);
+
+    const duration = (dataSize / (buf.sample_rate * buf.channels * (buf.bits_per_sample / 8))).toFixed(2);
+
+    BotUtil.makeLog(
+      'info',
+      `[录音保存] ✓ ${wavFilename}  时长: ${duration}s, 大小: ${(wavFile.length / 1024).toFixed(2)}KB  路径: ${filepath}`,
+      deviceId
+    );
+
+    // 事件通知
+    if (Bot[deviceId]) {
+      Bot.em('device.audio_saved', {
+        post_type: 'device',
+        event_type: 'audio_saved',
+        device_id,
+        filename: wavFilename,
+        filepath,
+        duration: parseFloat(duration),
+        size: wavFile.length,
+        sample_rate: buf.sample_rate,
+        bits_per_sample: buf.bits_per_sample,
+        channels: buf.channels,
+        self_id: deviceId,
+        time: Math.floor(Date.now() / 1000)
+      });
+    }
+
+    // 清理缓存
+    this.audioBuffers.delete(filename);
+
+    return {
+      success: true,
+      filename: wavFilename,
+      filepath,
+      duration: parseFloat(duration),
+      size: wavFile.length
+    };
+  }
+
+  // ---------- 清理超时录音 ----------
   cleanupStaleAudioBuffers() {
-    const timeout = 10 * 60 * 1000; // 10分钟
+    const timeout = 10 * 60 * 1000; // 10 分钟
     const now = Date.now();
-    for (const [filename, buffer] of this.audioBuffers) {
-      if (now - buffer.started_at > timeout) {
-        BotUtil.makeLog(
-          'warn',
-          `[录音接收] 超时清理: ${filename} (${buffer.chunks.size}/${buffer.total || '未知'}块)`,
-          buffer.device_id
+    for (const [filename, buf] of this.audioBuffers) {
+      if (now - buf.started_at > timeout) {
+        BotUtil.makeLog('warn',
+          `[录音接收] 超时清理: ${filename} (${buf.chunks.size} 块, 已收 ${buf.bytes_received}B)`,
+          buf.device_id
         );
         this.audioBuffers.delete(filename);
       }
     }
   }
 
-  // ========== 设备Bot创建 ==========
+  // =======================
+  // 以下保留与原版一致的流程
+  // =======================
+
   createDeviceBot(deviceId, deviceInfo, ws) {
     Bot[deviceId] = {
       adapter: this,
@@ -279,17 +274,9 @@ class DeviceManager {
         reconnects: 0
       },
 
-      addLog: (level, message, data = {}) => {
-        return this.addDeviceLog(deviceId, level, message, data);
-      },
-
-      getLogs: (filter = {}) => {
-        return this.getDeviceLogs(deviceId, filter);
-      },
-
-      clearLogs: () => {
-        deviceLogs.set(deviceId, []);
-      },
+      addLog: (level, message, data = {}) => this.addDeviceLog(deviceId, level, message, data),
+      getLogs: (filter = {}) => this.getDeviceLogs(deviceId, filter),
+      clearLogs: () => deviceLogs.set(deviceId, []),
 
       sendMsg: async (msg) => {
         return await this.sendCommand(deviceId, 'display', {
@@ -302,54 +289,24 @@ class DeviceManager {
         return await this.sendCommand(deviceId, cmd, params, priority);
       },
 
-      display: async (text, options = {}) => {
-        return await this.sendCommand(deviceId, 'display', {
-          text: this.encodeData(text),
-          x: options.x || 0,
-          y: options.y || 0,
-          clear: options.clear !== false,
-          wrap: options.wrap !== false,
-          spacing: options.spacing || 2,
-          color: options.color || 1
-        }, 1);
-      },
-
-      camera: {
-        startStream: async (options = {}) => {
-          return await this.sendCommand(deviceId, 'camera_start_stream', {
-            fps: options.fps || 10,
-            quality: options.quality || 12,
-            resolution: options.resolution || 'VGA'
-          }, 1);
-        },
-        stopStream: async () => {
-          return await this.sendCommand(deviceId, 'camera_stop_stream', {}, 1);
-        },
-        capture: async () => {
-          return await this.sendCommand(deviceId, 'camera_capture', {}, 1);
-        },
-        getStats: async () => {
-          return await this.sendCommand(deviceId, 'camera_stats', {}, 0);
-        }
-      },
-
       microphone: {
         getStatus: async () => {
           return await this.sendCommand(deviceId, 'microphone_status', {}, 0);
         },
         test: async (duration = 3) => {
           return await this.sendCommand(deviceId, 'microphone_test', { duration }, 1);
+        },
+        start: async (duration) => {
+          return await this.sendCommand(deviceId, 'microphone_start', { duration }, 1);
+        },
+        stop: async () => {
+          return await this.sendCommand(deviceId, 'microphone_stop', {}, 1);
         }
       },
 
-      reboot: async () => {
-        return await this.sendCommand(deviceId, 'reboot', {}, 99);
-      },
+      reboot: async () => this.sendCommand(deviceId, 'reboot', {}, 99),
 
-      hasCapability: (cap) => {
-        return deviceInfo.capabilities?.includes(cap);
-      },
-
+      hasCapability: (cap) => deviceInfo.capabilities?.includes(cap),
       getStatus: () => {
         const device = devices.get(deviceId);
         return {
@@ -362,17 +319,11 @@ class DeviceManager {
           metadata: deviceInfo.metadata,
           stats: device?.stats || Bot[deviceId].stats
         };
-      },
-
-      getStats: () => {
-        return deviceStats.get(deviceId) || this.initDeviceStats(deviceId);
       }
     };
-
     return Bot[deviceId];
   }
 
-  // ========== 设备统计 ==========
   initDeviceStats(deviceId) {
     const stats = {
       device_id: deviceId,
@@ -385,18 +336,15 @@ class DeviceManager {
     deviceStats.set(deviceId, stats);
     return stats;
   }
-
   updateDeviceStats(deviceId, type) {
     const stats = deviceStats.get(deviceId);
     if (!stats) return;
-
     if (type === 'message') stats.total_messages++;
     else if (type === 'command') stats.total_commands++;
     else if (type === 'error') stats.total_errors++;
     else if (type === 'heartbeat') stats.last_heartbeat = Date.now();
   }
 
-  // ========== 设备注册 ==========
   async registerDevice(deviceData, Bot, ws) {
     try {
       deviceData = this.decodeData(deviceData);
@@ -413,7 +361,6 @@ class DeviceManager {
       if (!device_id || !device_type) {
         throw new Error('缺少必需参数: device_id 或 device_type');
       }
-
       if (devices.size >= CONFIG.maxDevices && !devices.has(device_id)) {
         throw new Error(`设备数量已达上限 (${CONFIG.maxDevices})`);
       }
@@ -440,27 +387,16 @@ class DeviceManager {
       };
 
       devices.set(device_id, device);
+      if (!deviceLogs.has(device_id)) deviceLogs.set(device_id, []);
+      if (!deviceStats.has(device_id)) this.initDeviceStats(device_id);
+      if (ws) this.setupWebSocket(device_id, ws);
 
-      if (!deviceLogs.has(device_id)) {
-        deviceLogs.set(device_id, []);
-      }
-
-      if (!deviceStats.has(device_id)) {
-        this.initDeviceStats(device_id);
-      }
-
-      if (ws) {
-        this.setupWebSocket(device_id, ws);
-      }
-
-      if (!device.uin?.includes?.(device_id) && Bot.uin?.push) {
+      if (!Bot.uin.includes?.(device_id) && Array.isArray(Bot.uin)) {
         Bot.uin.push(device_id);
       }
-
       this.createDeviceBot(device_id, device, ws);
 
-      BotUtil.makeLog(
-        'info',
+      BotUtil.makeLog('info',
         `[设备注册] ${device.device_name} (${device_id}) - IP: ${ip_address}, 固件: v${firmware_version}`,
         device.device_name
       );
@@ -483,14 +419,12 @@ class DeviceManager {
     }
   }
 
-  // ========== WebSocket ==========
   setupWebSocket(deviceId, ws) {
     const oldWs = deviceWebSockets.get(deviceId);
     if (oldWs && oldWs !== ws) {
       clearInterval(oldWs.heartbeatTimer);
       oldWs.close();
     }
-
     ws.device_id = deviceId;
     ws.isAlive = true;
     ws.lastPong = Date.now();
@@ -502,14 +436,9 @@ class DeviceManager {
         this.handleDeviceDisconnect(deviceId, ws);
         return;
       }
-
       ws.isAlive = false;
-
       if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'heartbeat_request',
-          timestamp: Date.now()
-        }));
+        ws.send(JSON.stringify({ type: 'heartbeat_request', timestamp: Date.now() }));
       }
     }, CONFIG.heartbeatInterval * 1000);
 
@@ -524,13 +453,10 @@ class DeviceManager {
 
   handleDeviceDisconnect(deviceId, ws) {
     clearInterval(ws.heartbeatTimer);
-
     const device = devices.get(deviceId);
     if (device) {
       device.online = false;
-
       BotUtil.makeLog('warn', `[设备离线] ${device.device_name}`, device.device_name);
-
       Bot.em('device.offline', {
         post_type: 'device',
         event_type: 'offline',
@@ -541,64 +467,44 @@ class DeviceManager {
         time: Math.floor(Date.now() / 1000)
       });
     }
-
     deviceWebSockets.delete(deviceId);
-
     const stream = cameraStreams.get(deviceId);
     if (stream) {
-      stream.clients.forEach(client => {
-        try { client.close(); } catch (e) {}
-      });
+      stream.clients.forEach(c => { try { c.close(); } catch (e) {} });
       cameraStreams.delete(deviceId);
     }
   }
 
-  // ========== 日志 ==========
   addDeviceLog(deviceId, level, message, data = {}) {
     message = this.decodeUnicode(String(message)).substring(0, 500);
-
-    const logEntry = {
-      timestamp: Date.now(),
-      level,
-      message,
-      data: this.decodeData(data)
-    };
-
+    const logEntry = { timestamp: Date.now(), level, message, data: this.decodeData(data) };
     const logs = deviceLogs.get(deviceId) || [];
     logs.unshift(logEntry);
     if (logs.length > CONFIG.maxLogsPerDevice) logs.length = CONFIG.maxLogsPerDevice;
     deviceLogs.set(deviceId, logs);
-
     const device = devices.get(deviceId);
     if (device?.stats && level === 'error') {
       device.stats.errors++;
       this.updateDeviceStats(deviceId, 'error');
     }
-
     BotUtil.makeLog(level, `[${device?.device_name || deviceId}] ${message}`, device?.device_name || deviceId);
     return logEntry;
   }
 
   getDeviceLogs(deviceId, filter = {}) {
     let logs = deviceLogs.get(deviceId) || [];
-
-    if (filter.level) logs = logs.filter(log => log.level === filter.level);
-
+    if (filter.level) logs = logs.filter(l => l.level === filter.level);
     if (filter.since) {
-      const sinceTime = new Date(filter.since).getTime();
-      logs = logs.filter(log => log.timestamp >= sinceTime);
+      const since = new Date(filter.since).getTime();
+      logs = logs.filter(l => l.timestamp >= since);
     }
-
     if (filter.limit) logs = logs.slice(0, filter.limit);
-
     return logs;
   }
 
-  // ========== 事件 ==========
   async processDeviceEvent(deviceId, eventType, eventData = {}, Bot) {
     try {
       eventData = this.decodeData(eventData);
-
       if (!devices.has(deviceId)) {
         if (eventType === 'register') {
           return await this.registerDevice({ device_id: deviceId, ...eventData }, Bot);
@@ -620,36 +526,23 @@ class DeviceManager {
           this.addDeviceLog(deviceId, level, message, logData);
           break;
         }
-
         case 'command_result': {
           const { command_id, result } = eventData;
-          const callback = commandCallbacks.get(command_id);
-          if (callback) {
-            callback(result);
+          const cb = commandCallbacks.get(command_id);
+          if (cb) {
+            cb(result);
             commandCallbacks.delete(command_id);
           }
           break;
         }
 
+        // 新的音频三段式
+        case 'audio_start':
+          return await this.processAudioStart(deviceId, eventData);
         case 'audio_chunk':
           return await this.processAudioChunk(deviceId, eventData);
-
-        case 'camera_frame': {
-          const stream = cameraStreams.get(deviceId);
-          if (stream && stream.clients.size > 0) {
-            const frameData = { device_id: deviceId, ...eventData };
-            stream.clients.forEach(client => {
-              if (client.readyState === WebSocket.OPEN) {
-                try {
-                  client.send(JSON.stringify({ type: 'camera_frame', data: frameData }));
-                } catch (e) {}
-              }
-            });
-            stream.frame_count++;
-            stream.last_frame = Date.now();
-          }
-          break;
-        }
+        case 'audio_end':
+          return await this.processAudioEnd(deviceId, eventData);
 
         default:
           Bot.em(`device.${eventType}`, {
@@ -672,7 +565,6 @@ class DeviceManager {
     }
   }
 
-  // ========== 命令 ==========
   async sendCommand(deviceId, command, parameters = {}, priority = 0) {
     const device = devices.get(deviceId);
     if (!device) throw new Error('设备未找到');
@@ -689,26 +581,16 @@ class DeviceManager {
     this.updateDeviceStats(deviceId, 'command');
 
     const ws = deviceWebSockets.get(deviceId);
-
     if (ws && ws.readyState === WebSocket.OPEN) {
       return new Promise((resolve) => {
         const timeout = setTimeout(() => {
           commandCallbacks.delete(cmd.id);
-          resolve({
-            success: true,
-            command_id: cmd.id,
-            timeout: true,
-            message: '命令超时'
-          });
+          resolve({ success: true, command_id: cmd.id, timeout: true, message: '命令超时' });
         }, CONFIG.commandTimeout);
 
         commandCallbacks.set(cmd.id, (result) => {
           clearTimeout(timeout);
-          resolve({
-            success: true,
-            command_id: cmd.id,
-            result
-          });
+          resolve({ success: true, command_id: cmd.id, result });
         });
 
         try {
@@ -722,37 +604,25 @@ class DeviceManager {
       });
     }
 
-    // 走队列
+    // 无 WS，入队
     const commands = deviceCommands.get(deviceId) || [];
     if (priority > 0) commands.unshift(cmd);
     else commands.push(cmd);
-
-    if (commands.length > CONFIG.messageQueueSize) {
-      commands.length = CONFIG.messageQueueSize;
-    }
-
+    if (commands.length > CONFIG.messageQueueSize) commands.length = CONFIG.messageQueueSize;
     deviceCommands.set(deviceId, commands);
     device.stats.commands_executed++;
 
-    return {
-      success: true,
-      command_id: cmd.id,
-      queued: commands.length,
-      method: 'queue'
-    };
+    return { success: true, command_id: cmd.id, queued: commands.length, method: 'queue' };
   }
 
-  // ========== 离线检查 ==========
   checkOfflineDevices(Bot) {
     const timeout = CONFIG.heartbeatTimeout * 1000;
     const now = Date.now();
-
     for (const [id, device] of devices) {
       if (device.online && now - device.last_seen > timeout) {
         const ws = deviceWebSockets.get(id);
-        if (ws) {
-          this.handleDeviceDisconnect(id, ws);
-        } else {
+        if (ws) this.handleDeviceDisconnect(id, ws);
+        else {
           device.online = false;
           Bot.em('device.offline', {
             post_type: 'device',
@@ -769,7 +639,6 @@ class DeviceManager {
     }
   }
 
-  // ========== 查询 ==========
   getDeviceList() {
     return Array.from(devices.values()).map(d => ({
       device_id: d.device_id,
@@ -788,7 +657,6 @@ class DeviceManager {
     return { ...device, device_stats: deviceStats.get(deviceId) };
   }
 
-  // ========== WebSocket消息 ==========
   async processWebSocketMessage(ws, data, Bot) {
     try {
       data = this.decodeData(data);
@@ -803,73 +671,56 @@ class DeviceManager {
           ws.send(JSON.stringify({ type: 'register_response', success: true, device }));
           break;
         }
-
-        case 'event':
-        case 'data': {
+        case 'data':
+        case 'event': {
           const eventType = payload.data_type || payload.event_type || type;
           const eventData = payload.data || payload.event_data || payload;
           const result = await this.processDeviceEvent(deviceId, eventType, eventData, Bot);
-
-          if (eventType === 'audio_chunk') {
-            ws.send(JSON.stringify({ type: 'data_response', success: true, result }));
-          }
+          ws.send(JSON.stringify({ type: `${type}_response`, success: true, result }));
           break;
         }
-
         case 'log': {
           const { level = 'info', message, data: logData } = payload;
           this.addDeviceLog(deviceId, level, message, logData);
           break;
         }
-
         case 'heartbeat': {
           ws.isAlive = true;
           ws.lastPong = Date.now();
-
           const dev = devices.get(deviceId);
           if (dev) {
             dev.last_seen = Date.now();
             dev.online = true;
             if (payload.status) dev.status = payload.status;
           }
-
           this.updateDeviceStats(deviceId, 'heartbeat');
 
-          const queuedCommands = deviceCommands.get(deviceId) || [];
-          const commandsToSend = queuedCommands.splice(0, 3);
-
-          ws.send(JSON.stringify({
-            type: 'heartbeat_response',
-            commands: commandsToSend,
-            timestamp: Date.now()
-          }));
+          const queued = deviceCommands.get(deviceId) || [];
+          const toSend = queued.splice(0, 3);
+          ws.send(JSON.stringify({ type: 'heartbeat_response', commands: toSend, timestamp: Date.now() }));
           break;
         }
-
         case 'command_result':
           await this.processDeviceEvent(deviceId, type, payload, Bot);
           break;
-
         default:
           ws.send(JSON.stringify({ type: 'error', message: `未知类型: ${type}` }));
       }
     } catch (error) {
       BotUtil.makeLog('error', `[WS处理失败] ${error.message}`, 'DeviceManager');
-      try {
-        ws.send(JSON.stringify({ type: 'error', message: error.message }));
-      } catch (e) {}
+      try { ws.send(JSON.stringify({ type: 'error', message: error.message })); } catch (e) {}
     }
   }
 }
 
 const deviceManager = new DeviceManager();
 
-// ============================================================
-// 设备管理API
-// ============================================================
+// ============================
+// 导出 API
+// ============================
 export default {
   name: 'device',
-  dsc: '设备管理API（含麦克风流式录音适配）',
+  dsc: '设备管理API（音频流式适配版 v2.3）',
   priority: 90,
 
   routes: [
@@ -889,44 +740,99 @@ export default {
         }
       }
     },
-
     // 获取设备列表
     {
       method: 'GET',
       path: '/api/devices',
       handler: async (req, res) => {
-        const devices = deviceManager.getDeviceList();
-        res.json({ success: true, devices, count: devices.length });
+        const list = deviceManager.getDeviceList();
+        res.json({ success: true, devices: list, count: list.length });
       }
     },
-
     // 获取设备信息
     {
       method: 'GET',
       path: '/api/device/:deviceId',
       handler: async (req, res) => {
         const device = deviceManager.getDevice(req.params.deviceId);
-        if (device) {
-          res.json({ success: true, device });
-        } else {
-          res.status(404).json({ success: false, message: '设备未找到' });
-        }
+        if (device) res.json({ success: true, device });
+        else res.status(404).json({ success: false, message: '设备未找到' });
       }
     },
 
-    // 获取设备日志
+    // ===== 音频文件管理（data/wav）=====
     {
       method: 'GET',
-      path: '/api/device/:deviceId/logs',
+      path: '/api/device/:deviceId/audio/list',
       handler: async (req, res) => {
-        const { deviceId } = req.params;
-        const filter = {
-          level: req.query.level,
-          since: req.query.since,
-          limit: parseInt(req.query.limit) || 50
-        };
-        const logs = deviceManager.getDeviceLogs(deviceId, filter);
-        res.json({ success: true, logs, count: logs.length });
+        try {
+          const files = fs.readdirSync(deviceManager.AUDIO_SAVE_DIR)
+            .filter(f => f.toLowerCase().endsWith('.wav'))
+            .map(f => {
+              const p = path.join(deviceManager.AUDIO_SAVE_DIR, f);
+              const st = fs.statSync(p);
+              return {
+                filename: f,
+                size: st.size,
+                created_at: st.birthtime,
+                modified_at: st.mtime
+              };
+            })
+            .sort((a, b) => b.modified_at - a.modified_at);
+          res.json({ success: true, files, count: files.length });
+        } catch (error) {
+          res.status(500).json({ success: false, message: error.message });
+        }
+      }
+    },
+    {
+      method: 'GET',
+      path: '/api/device/:deviceId/audio/download/:filename',
+      handler: async (req, res) => {
+        try {
+          const { filename } = req.params;
+          const filepath = path.join(deviceManager.AUDIO_SAVE_DIR, filename);
+          if (!fs.existsSync(filepath)) {
+            return res.status(404).json({ success: false, message: '文件不存在' });
+          }
+          res.setHeader('Content-Type', 'audio/wav');
+          res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+          fs.createReadStream(filepath).pipe(res);
+        } catch (error) {
+          res.status(500).json({ success: false, message: error.message });
+        }
+      }
+    },
+    {
+      method: 'DELETE',
+      path: '/api/device/:deviceId/audio/:filename',
+      handler: async (req, res) => {
+        try {
+          const { filename } = req.params;
+          const filepath = path.join(deviceManager.AUDIO_SAVE_DIR, filename);
+          if (!fs.existsSync(filepath)) {
+            return res.status(404).json({ success: false, message: '文件不存在' });
+          }
+          fs.unlinkSync(filepath);
+          res.json({ success: true, message: '文件已删除' });
+        } catch (error) {
+          res.status(500).json({ success: false, message: error.message });
+        }
+      }
+    },
+    {
+      method: 'GET',
+      path: '/api/device/:deviceId/audio/receiving',
+      handler: async (req, res) => {
+        const receiving = Array.from(deviceManager.audioBuffers.entries()).map(([filename, buf]) => ({
+          filename,
+          device_id: buf.device_id,
+          chunks_received: buf.chunks.size,
+          bytes_received: buf.bytes_received,
+          started_at: buf.started_at,
+          elapsed_ms: Date.now() - buf.started_at
+        }));
+        res.json({ success: true, receiving, count: receiving.length });
       }
     },
 
@@ -944,129 +850,9 @@ export default {
           res.status(400).json({ success: false, message: error.message });
         }
       }
-    },
-
-    // 获取录音列表（data/wav）
-    {
-      method: 'GET',
-      path: '/api/device/:deviceId/audio/list',
-      handler: async (req, res) => {
-        try {
-          const dir = deviceManager.AUDIO_SAVE_DIR;
-          const files = fs.readdirSync(dir)
-            .filter(f => f.endsWith('.wav'))
-            .map(f => {
-              const filepath = path.join(dir, f);
-              const stats = fs.statSync(filepath);
-              return {
-                filename: f,
-                size: stats.size,
-                created_at: stats.birthtime,
-                modified_at: stats.mtime
-              };
-            })
-            .sort((a, b) => b.modified_at - a.modified_at);
-          res.json({ success: true, files, count: files.length });
-        } catch (error) {
-          res.status(500).json({ success: false, message: error.message });
-        }
-      }
-    },
-
-    // 下载录音文件
-    {
-      method: 'GET',
-      path: '/api/device/:deviceId/audio/download/:filename',
-      handler: async (req, res) => {
-        try {
-          const { filename } = req.params;
-          const filepath = path.join(deviceManager.AUDIO_SAVE_DIR, filename);
-
-          if (!fs.existsSync(filepath)) {
-            return res.status(404).json({ success: false, message: '文件不存在' });
-          }
-
-          res.setHeader('Content-Type', 'audio/wav');
-          res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-          fs.createReadStream(filepath).pipe(res);
-        } catch (error) {
-          res.status(500).json({ success: false, message: error.message });
-        }
-      }
-    },
-
-    // 删除录音文件
-    {
-      method: 'DELETE',
-      path: '/api/device/:deviceId/audio/:filename',
-      handler: async (req, res) => {
-        try {
-          const { filename } = req.params;
-          const filepath = path.join(deviceManager.AUDIO_SAVE_DIR, filename);
-
-          if (!fs.existsSync(filepath)) {
-            return res.status(404).json({ success: false, message: '文件不存在' });
-          }
-
-          fs.unlinkSync(filepath);
-          res.json({ success: true, message: '文件已删除' });
-        } catch (error) {
-          res.status(500).json({ success: false, message: error.message });
-        }
-      }
-    },
-
-    // 正在接收中的录音
-    {
-      method: 'GET',
-      path: '/api/device/:deviceId/audio/receiving',
-      handler: async (req, res) => {
-        const receiving = Array.from(deviceManager.audioBuffers.entries()).map(([filename, buffer]) => ({
-          filename,
-          device_id: buffer.device_id,
-          chunks_received: buffer.chunks.size,
-          chunks_total: buffer.total || 0,
-          progress: buffer.total ? `${((buffer.chunks.size / buffer.total) * 100).toFixed(1)}%` : `接收${buffer.chunks.size}块`,
-          started_at: buffer.started_at,
-          elapsed: Date.now() - buffer.started_at
-        }));
-        res.json({ success: true, receiving, count: receiving.length });
-      }
-    },
-
-    // 麦克风状态
-    {
-      method: 'GET',
-      path: '/api/device/:deviceId/microphone/status',
-      handler: async (req, res, Bot) => {
-        try {
-          const { deviceId } = req.params;
-          const result = await Bot[deviceId].microphone.getStatus();
-          res.json(result);
-        } catch (error) {
-          res.status(400).json({ success: false, message: error.message });
-        }
-      }
-    },
-
-    // 麦克风测试
-    {
-      method: 'POST',
-      path: '/api/device/:deviceId/microphone/test',
-      handler: async (req, res, Bot) => {
-        try {
-          const { deviceId } = req.params;
-          const { duration } = req.body;
-          const result = await Bot[deviceId].microphone.test(duration);
-          res.json(result);
-        } catch (error) {
-          res.status(400).json({ success: false, message: error.message });
-        }
-      }
     }
   ],
 
-  // WebSocket路由
   ws: {
     device: [(ws, req, Bot) => {
       BotUtil.makeLog('info', `[WebSocket] 新连接 ${req.socket.remoteAddress}`, 'DeviceManager');
@@ -1077,95 +863,31 @@ export default {
           deviceManager.processWebSocketMessage(ws, data, Bot);
         } catch (error) {
           BotUtil.makeLog('error', `[WS解析失败] ${error.message}`, 'DeviceManager');
-          try {
-            ws.send(JSON.stringify({ type: 'error', message: `解析失败: ${error.message}` }));
-          } catch (e) {}
+          try { ws.send(JSON.stringify({ type: 'error', message: `解析失败: ${error.message}` })); } catch (e) {}
         }
       });
 
       ws.on('close', () => {
-        if (ws.device_id) {
-          deviceManager.handleDeviceDisconnect(ws.device_id, ws);
-        }
+        if (ws.device_id) deviceManager.handleDeviceDisconnect(ws.device_id, ws);
       });
 
       ws.on('error', (error) => {
         BotUtil.makeLog('error', `[WS错误] ${error.message}`, 'DeviceManager');
       });
-    }],
-
-    'camera-stream': [(ws, req, Bot) => {
-      const deviceId = req.query.device_id;
-      const apiKey = req.query.api_key || req.headers['x-api-key'];
-
-      if (cfg.api?.key && apiKey !== cfg.api.key) {
-        ws.close(1008, '无效的API密钥');
-        return;
-      }
-
-      if (!deviceId) {
-        ws.close(1008, '缺少device_id参数');
-        return;
-      }
-
-      const device = devices.get(deviceId);
-      if (!device) {
-        ws.close(1008, '设备未找到');
-        return;
-      }
-
-      if (!cameraStreams.has(deviceId)) {
-        cameraStreams.set(deviceId, {
-          device_id: deviceId,
-          clients: new Set(),
-          frame_count: 0,
-          last_frame: Date.now(),
-          started_at: Date.now()
-        });
-      }
-
-      const stream = cameraStreams.get(deviceId);
-      stream.clients.add(ws);
-
-      BotUtil.makeLog('info', `[摄像头流] 新客户端 ${deviceId}`, device.device_name);
-
-      ws.on('close', () => {
-        stream.clients.delete(ws);
-        if (stream.clients.size === 0) {
-          Bot[deviceId].camera.stopStream().catch(() => {});
-          cameraStreams.delete(deviceId);
-        }
-        BotUtil.makeLog('info', `[摄像头流] 客户端断开 ${deviceId}`, device.device_name);
-      });
-
-      ws.on('error', (error) => {
-        BotUtil.makeLog('error', `[摄像头流错误] ${error.message}`, device.device_name);
-      });
-
-      try {
-        ws.send(JSON.stringify({
-          type: 'connected',
-          device_id: deviceId,
-          device_name: device.device_name,
-          stream_info: { clients: stream.clients.size, frame_count: stream.frame_count }
-        }));
-      } catch (e) {}
     }]
   },
 
-  // 初始化
   init(app, Bot) {
     deviceManager.cleanupInterval = setInterval(() => {
       deviceManager.checkOfflineDevices(Bot);
     }, 30000);
 
     setInterval(() => {
+      // 清理陈旧 command 回调
       const now = Date.now();
-      for (const [id, callback] of commandCallbacks) {
-        const timestamp = parseInt(id.split('_')[0]);
-        if (now - timestamp > 60000) {
-          commandCallbacks.delete(id);
-        }
+      for (const [id] of commandCallbacks) {
+        const ts = parseInt(String(id).split('_')[0], 10);
+        if (now - ts > 60000) commandCallbacks.delete(id);
       }
     }, 60000);
 
@@ -1173,22 +895,14 @@ export default {
       deviceManager.cleanupStaleAudioBuffers();
     }, 5 * 60 * 1000);
 
-    BotUtil.makeLog('info', '[设备管理器] 初始化完成（含录音功能）', 'DeviceManager');
+    BotUtil.makeLog('info', '[设备管理器] 初始化完成（音频流式适配 v2.3, 保存到 data/wav）', 'DeviceManager');
   },
 
-  // 清理
   destroy() {
-    if (deviceManager.cleanupInterval) {
-      clearInterval(deviceManager.cleanupInterval);
+    if (deviceManager.cleanupInterval) clearInterval(deviceManager.cleanupInterval);
+    for (const [, ws] of deviceWebSockets) {
+      try { clearInterval(ws.heartbeatTimer); ws.close(); } catch (e) {}
     }
-
-    for (const [id, ws] of deviceWebSockets) {
-      try {
-        clearInterval(ws.heartbeatTimer);
-        ws.close();
-      } catch (e) {}
-    }
-
     BotUtil.makeLog('info', '[设备管理器] 已清理', 'DeviceManager');
   }
 };
