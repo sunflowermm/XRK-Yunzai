@@ -1,4 +1,4 @@
-// device.js - 设备管理API（高质量录音版 v2.3）
+// device.js - 设备管理API（高质量录音版 v2.4 - 修复版）
 import cfg from '../../lib/config/config.js';
 import WebSocket from 'ws';
 import BotUtil from '../../lib/common/util.js';
@@ -133,7 +133,7 @@ class DeviceManager {
         });
         
         BotUtil.makeLog('info', 
-          `[录音接收] ${filename} 开始 (共${chunks_total}块, ${sample_rate}Hz)`, 
+          `[录音接收] ${filename} 开始 (预计${chunks_total}块, ${sample_rate}Hz)`, 
           deviceId
         );
       }
@@ -147,20 +147,30 @@ class DeviceManager {
         buffer.chunks.set(chunk_index, audioData);
         buffer.bytes_received += audioData.length;
         
-        const progress = ((buffer.chunks.size / chunks_total) * 100).toFixed(1);
+        // 更新总块数估算（使用最大值）
+        if (chunks_total > buffer.total) {
+          buffer.total = chunks_total;
+        }
+        
+        const progress = buffer.total > 0 
+          ? ((buffer.chunks.size / buffer.total) * 100).toFixed(1) 
+          : '0.0';
         const sizeMB = (buffer.bytes_received / 1024 / 1024).toFixed(2);
         
         // 每10块输出一次日志
         if (chunk_index % 10 === 0) {
           BotUtil.makeLog('info', 
-            `[录音接收] ${filename} 第${chunk_index}/${chunks_total}块 (${progress}%, ${sizeMB}MB)`, 
+            `[录音接收] ${filename} 第${chunk_index}/${buffer.total}块 (${progress}%, ${sizeMB}MB)`, 
             deviceId
           );
         }
       }
       
       // 检查是否完成
-      if (is_last || buffer.chunks.size === chunks_total) {
+      if (is_last) {
+        // 最后一块时更新总块数为实际接收的块数
+        buffer.total = Math.max(buffer.chunks.size, chunk_index);
+        
         BotUtil.makeLog('info', 
           `[录音接收] ${filename} 接收完成，共${buffer.chunks.size}块，开始合成WAV`, 
           deviceId
@@ -173,8 +183,8 @@ class DeviceManager {
         success: true, 
         chunk_index, 
         received: buffer.chunks.size, 
-        total: chunks_total,
-        progress: `${progress}%`
+        total: buffer.total,
+        progress: progress + '%'
       };
       
     } catch (error) {
@@ -892,7 +902,7 @@ const deviceManager = new DeviceManager();
 // ============================================================
 export default {
   name: 'device',
-  dsc: '设备管理API（高质量录音版 v2.3）',
+  dsc: '设备管理API（高质量录音版 v2.4 - 修复版）',
   priority: 90,
 
   routes: [
@@ -1049,7 +1059,7 @@ export default {
           device_id: buffer.device_id,
           chunks_received: buffer.chunks.size,
           chunks_total: buffer.total,
-          progress: ((buffer.chunks.size / buffer.total) * 100).toFixed(1),
+          progress: buffer.total > 0 ? ((buffer.chunks.size / buffer.total) * 100).toFixed(1) : '0.0',
           bytes_received: buffer.bytes_received,
           size_mb: (buffer.bytes_received / 1024 / 1024).toFixed(2),
           started_at: buffer.started_at,
@@ -1106,7 +1116,7 @@ export default {
         }
       }
     },
-    
+
     // 手动停止录音
     {
       method: 'POST',
