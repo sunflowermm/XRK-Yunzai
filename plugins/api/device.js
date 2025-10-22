@@ -1,4 +1,4 @@
-// device.js - 设备管理API（优化版 v2.3 + 录音功能）
+// device.js - 设备管理API（优化版 v3.0 - 流式录音保存）
 import cfg from '../../lib/config/config.js';
 import WebSocket from 'ws';
 import BotUtil from '../../lib/common/util.js';
@@ -34,14 +34,17 @@ const CONFIG = {
 class DeviceManager {
   constructor() {
     this.cleanupInterval = null;
-    this.audioBuffers = new Map();
-    this.AUDIO_SAVE_DIR = './data/wav';  // 修改为data/wav目录
+    this.audioSessions = new Map();  // 使用会话管理替代简单缓冲
+    this.AUDIO_SAVE_DIR = './data/wav';
+    this.AUDIO_TEMP_DIR = './data/wav/temp';
     
-    // 确保录音目录存在
-    if (!fs.existsSync(this.AUDIO_SAVE_DIR)) {
-      fs.mkdirSync(this.AUDIO_SAVE_DIR, { recursive: true });
-      BotUtil.makeLog('info', `[录音] 创建目录: ${this.AUDIO_SAVE_DIR}`, 'DeviceManager');
-    }
+    // 创建目录
+    [this.AUDIO_SAVE_DIR, this.AUDIO_TEMP_DIR].forEach(dir => {
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+        BotUtil.makeLog('info', `[录音] 创建目录: ${dir}`, 'DeviceManager');
+      }
+    });
   }
 
   // ========== Unicode编解码 ==========
@@ -82,7 +85,7 @@ class DeviceManager {
     return data;
   }
 
-  // ========== 音频处理 ==========
+  // ========== WAV头创建 ==========
   createWavHeader(dataSize, sampleRate, bitsPerSample, channels) {
     const buffer = Buffer.alloc(44);
     buffer.write('RIFF', 0);
@@ -101,149 +104,213 @@ class DeviceManager {
     return buffer;
   }
   
-  async processAudioChunk(deviceId, chunkData) {
+  // ========== 录音会话管理 ==========
+  createAudioSession(filename, deviceId, config) {
+    const { sample_rate = 32000, bits_per_sample = 16, channels = 1 } = config;
+    
+    // 创建临时文件用于流式写入
+    const tempPath = path.join(this.AUDIO_TEMP_DIR, `${filename}.tmp`);
+    const writeStream = fs.createWriteStream(tempPath, { flags: 'w' });
+    
+    const session = {
+      filename,
+      device_id: deviceId,
+      sample_rate,
+      bits_per_sample,
+      channels,
+      temp_path: tempPath,
+      write_stream: writeStream,
+      started_at: Date.now(),
+      chunks_received: 0,
+      total_bytes: 0,
+      last_chunk_time: Date.now(),
+      chunks_buffer: [],  // 临时缓冲，用于排序
+      next_expected_index: 0
+    };
+    
+    this.audioSessions.set(filename, session);
+    
+    BotUtil.makeLog('info', 
+      `[录音会话] ${filename} 开始 (${sample_rate}Hz, ${bits_per_sample}bit, ${channels}CH)`, 
+      deviceId
+    );
+    
+    return session;
+  }
+  
+  async handleAudioStart(deviceId, data) {
     try {
-      const { 
-        filename, 
-        chunk_index, 
-        chunks_total, 
-        data, 
-        is_last,
-        sample_rate = 16000,
-        bits_per_sample = 16,
-        channels = 1
-      } = chunkData;
+      const { filename, sample_rate, bits_per_sample, channels } = data;
       
-      // 初始化缓冲区
-      if (!this.audioBuffers.has(filename)) {
-        this.audioBuffers.set(filename, {
-          chunks: new Map(),
-          total: chunks_total,
-          sample_rate,
-          bits_per_sample,
-          channels,
-          device_id: deviceId,
-          started_at: Date.now()
-        });
-        
-        BotUtil.makeLog('info', 
-          `[录音接收] ${filename} 开始接收 (共${chunks_total}块, ${sample_rate}Hz, ${bits_per_sample}bit, ${channels}CH)`, 
-          deviceId
-        );
-      }
+      // 创建新的录音会话
+      this.createAudioSession(filename, deviceId, { sample_rate, bits_per_sample, channels });
       
-      const buffer = this.audioBuffers.get(filename);
-      
-      // 存储数据块
-      const audioData = Buffer.from(data, 'base64');
-      buffer.chunks.set(chunk_index, audioData);
-      
-      const progress = ((buffer.chunks.size / chunks_total) * 100).toFixed(1);
-      
-      // 减少日志输出，每5块或最后一块才打印
-      if (chunk_index % 5 === 0 || is_last) {
-        BotUtil.makeLog('info', 
-          `[录音接收] ${filename} 进度${progress}% (${buffer.chunks.size}/${chunks_total}块)`, 
-          deviceId
-        );
-      }
-      
-      // 检查是否完成
-      if (is_last || buffer.chunks.size === chunks_total) {
-        BotUtil.makeLog('info', `[录音接收] ${filename} 接收完成，开始合成WAV文件...`, deviceId);
-        await this.saveAudioFile(filename, buffer);
-        this.audioBuffers.delete(filename);
-      }
-      
-      return { 
-        success: true, 
-        chunk_index, 
-        received: buffer.chunks.size, 
-        total: chunks_total,
-        progress: `${progress}%`
-      };
-      
+      return { success: true, message: '录音会话已创建' };
     } catch (error) {
-      BotUtil.makeLog('error', `[录音接收] 处理失败: ${error.message}`, deviceId);
+      BotUtil.makeLog('error', `[录音开始] 失败: ${error.message}`, deviceId);
       return { success: false, error: error.message };
     }
   }
   
-  async saveAudioFile(filename, buffer) {
+  async handleAudioChunk(deviceId, chunkData) {
     try {
-      const { chunks, sample_rate, bits_per_sample, channels, device_id } = buffer;
+      const { filename, chunk_index, data, size } = chunkData;
+      
+      // 获取会话
+      let session = this.audioSessions.get(filename);
+      if (!session) {
+        // 如果没有会话（可能audio_start丢失），自动创建
+        BotUtil.makeLog('warn', `[录音接收] ${filename} 会话不存在，自动创建`, deviceId);
+        session = this.createAudioSession(filename, deviceId, {});
+      }
+      
+      // 解码音频数据
+      const audioData = Buffer.from(data, 'base64');
+      
+      session.chunks_received++;
+      session.total_bytes += audioData.length;
+      session.last_chunk_time = Date.now();
+      
+      // 立即写入临时文件（流式写入，不积压内存）
+      await new Promise((resolve, reject) => {
+        session.write_stream.write(audioData, (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+      
+      // 减少日志输出
+      if (chunk_index % 20 === 0) {
+        const elapsed = ((Date.now() - session.started_at) / 1000).toFixed(1);
+        BotUtil.makeLog('info', 
+          `[录音接收] ${filename} 块#${chunk_index} (${session.chunks_received}块, ${(session.total_bytes/1024).toFixed(1)}KB, ${elapsed}s)`, 
+          deviceId
+        );
+      }
+      
+      return { success: true, chunk_index, received: session.chunks_received };
+      
+    } catch (error) {
+      BotUtil.makeLog('error', `[录音接收] 失败: ${error.message}`, deviceId);
+      return { success: false, error: error.message };
+    }
+  }
+  
+  async handleAudioStop(deviceId, stopData) {
+    try {
+      const { filename, duration, total_bytes, total_chunks } = stopData;
+      
+      const session = this.audioSessions.get(filename);
+      if (!session) {
+        BotUtil.makeLog('warn', `[录音停止] ${filename} 会话不存在`, deviceId);
+        return { success: false, error: '会话不存在' };
+      }
       
       BotUtil.makeLog('info', 
-        `[录音保存] ${filename} 拼接${chunks.size}块数据...`, 
-        device_id
+        `[录音停止] ${filename} 开始最终保存 (${session.chunks_received}块, ${(session.total_bytes/1024).toFixed(1)}KB)`, 
+        deviceId
       );
       
-      // 按顺序拼接数据
-      const sortedIndices = Array.from(chunks.keys()).sort((a, b) => a - b);
-      const audioData = Buffer.concat(sortedIndices.map(key => chunks.get(key)));
-      const dataSize = audioData.length;
+      // 关闭写入流
+      await new Promise((resolve) => {
+        session.write_stream.end(() => resolve());
+      });
       
-      // 创建WAV文件
-      const wavHeader = this.createWavHeader(dataSize, sample_rate, bits_per_sample, channels);
-      const wavFile = Buffer.concat([wavHeader, audioData]);
+      // 立即生成WAV文件
+      const filepath = await this.finalizeAudioFile(session);
       
-      // 保存文件
-      const wavFilename = filename.replace('.raw', '.wav');
-      const filepath = path.join(this.AUDIO_SAVE_DIR, wavFilename);
-      fs.writeFileSync(filepath, wavFile);
-      
-      const duration = (dataSize / (sample_rate * channels * (bits_per_sample / 8))).toFixed(2);
-      const fileSize = (wavFile.length / 1024).toFixed(2);
+      // 清理会话
+      this.audioSessions.delete(filename);
       
       BotUtil.makeLog('info', 
-        `[录音保存] ✓ 成功保存\n` +
-        `  文件名: ${wavFilename}\n` +
-        `  路径: ${filepath}\n` +
-        `  时长: ${duration}秒\n` +
-        `  大小: ${fileSize}KB\n` +
-        `  采样率: ${sample_rate}Hz\n` +
-        `  位深度: ${bits_per_sample}bit\n` +
-        `  声道: ${channels}`, 
-        device_id
+        `[录音完成] ✓ ${path.basename(filepath)}\n` +
+        `  时长: ${duration.toFixed(2)}秒\n` +
+        `  大小: ${(session.total_bytes/1024).toFixed(1)}KB\n` +
+        `  块数: ${session.chunks_received}`, 
+        deviceId
       );
       
-      // 触发录音完成事件
-      if (Bot[device_id]) {
+      // 触发事件
+      if (Bot[deviceId]) {
         Bot.em('device.audio_saved', {
           post_type: 'device',
           event_type: 'audio_saved',
-          device_id,
-          filename: wavFilename,
+          device_id: deviceId,
+          filename: path.basename(filepath),
           filepath,
-          duration: parseFloat(duration),
-          size: wavFile.length,
-          sample_rate,
-          bits_per_sample,
-          channels,
-          self_id: device_id,
+          duration: parseFloat(duration.toFixed(2)),
+          size: session.total_bytes,
+          sample_rate: session.sample_rate,
+          bits_per_sample: session.bits_per_sample,
+          channels: session.channels,
+          chunks: session.chunks_received,
+          self_id: deviceId,
           time: Math.floor(Date.now() / 1000)
         });
       }
       
-      return filepath;
+      return { success: true, filepath };
       
     } catch (error) {
-      BotUtil.makeLog('error', `[录音保存] 失败: ${error.message}`, buffer.device_id);
+      BotUtil.makeLog('error', `[录音停止] 失败: ${error.message}`, deviceId);
+      return { success: false, error: error.message };
+    }
+  }
+  
+  async finalizeAudioFile(session) {
+    try {
+      const { temp_path, filename, sample_rate, bits_per_sample, channels, total_bytes } = session;
+      
+      // 读取临时文件
+      const audioData = fs.readFileSync(temp_path);
+      const dataSize = audioData.length;
+      
+      // 创建WAV头
+      const wavHeader = this.createWavHeader(dataSize, sample_rate, bits_per_sample, channels);
+      
+      // 合并为完整WAV文件
+      const wavFile = Buffer.concat([wavHeader, audioData]);
+      
+      // 保存最终文件
+      const wavFilename = filename.replace('.raw', '.wav');
+      const finalPath = path.join(this.AUDIO_SAVE_DIR, wavFilename);
+      fs.writeFileSync(finalPath, wavFile);
+      
+      // 删除临时文件
+      try {
+        fs.unlinkSync(temp_path);
+      } catch (e) {}
+      
+      return finalPath;
+      
+    } catch (error) {
+      BotUtil.makeLog('error', `[文件生成] 失败: ${error.message}`, session.device_id);
       throw error;
     }
   }
   
-  cleanupStaleAudioBuffers() {
+  cleanupStaleAudioSessions() {
     const timeout = 10 * 60 * 1000;  // 10分钟超时
     const now = Date.now();
     
-    for (const [filename, buffer] of this.audioBuffers) {
-      if (now - buffer.started_at > timeout) {
+    for (const [filename, session] of this.audioSessions) {
+      if (now - session.last_chunk_time > timeout) {
         BotUtil.makeLog('warn', 
-          `[录音接收] 超时清理: ${filename} (${buffer.chunks.size}/${buffer.total}块)`, 
-          buffer.device_id
+          `[录音会话] 超时清理: ${filename} (${session.chunks_received}块)`, 
+          session.device_id
         );
-        this.audioBuffers.delete(filename);
+        
+        // 关闭流
+        try {
+          session.write_stream.end();
+        } catch (e) {}
+        
+        // 删除临时文件
+        try {
+          fs.unlinkSync(session.temp_path);
+        } catch (e) {}
+        
+        this.audioSessions.delete(filename);
       }
     }
   }
@@ -476,7 +543,6 @@ class DeviceManager {
     ws.lastPong = Date.now();
     ws.messageQueue = [];
     
-    // 心跳定时器
     ws.heartbeatTimer = setInterval(() => {
       if (!ws.isAlive) {
         BotUtil.makeLog('warn', `[设备心跳超时] ${deviceId}`, deviceId);
@@ -553,7 +619,6 @@ class DeviceManager {
       this.updateDeviceStats(deviceId, 'error');
     }
     
-    // 减少日志输出
     if (level !== 'debug') {
       BotUtil.makeLog(level, `[${device?.device_name || deviceId}] ${message}`, device?.device_name || deviceId);
     }
@@ -614,8 +679,14 @@ class DeviceManager {
           }
           break;
         
+        case 'audio_start':
+          return await this.handleAudioStart(deviceId, eventData);
+        
         case 'audio_chunk':
-          return await this.processAudioChunk(deviceId, eventData);
+          return await this.handleAudioChunk(deviceId, eventData);
+        
+        case 'audio_stop':
+          return await this.handleAudioStop(deviceId, eventData);
         
         default:
           Bot.em(`device.${eventType}`, {
@@ -689,7 +760,6 @@ class DeviceManager {
       });
     }
     
-    // 命令队列
     const commands = deviceCommands.get(deviceId) || [];
     if (priority > 0) {
       commands.unshift(cmd);
@@ -775,12 +845,7 @@ class DeviceManager {
         case 'data':
           const eventType = payload.data_type || payload.event_type || type;
           const eventData = payload.data || payload.event_data || payload;
-          const result = await this.processDeviceEvent(deviceId, eventType, eventData, Bot);
-          
-          // 只有audio_chunk返回响应
-          if (eventType === 'audio_chunk') {
-            ws.send(JSON.stringify({ type: 'data_response', success: true, result }));
-          }
+          await this.processDeviceEvent(deviceId, eventType, eventData, Bot);
           break;
         
         case 'log':
@@ -834,7 +899,7 @@ const deviceManager = new DeviceManager();
 // ============================================================
 export default {
   name: 'device',
-  dsc: '设备管理API（v2.3 含录音功能）',
+  dsc: '设备管理API（v3.0 流式录音优化版）',
   priority: 90,
 
   routes: [
@@ -909,21 +974,21 @@ export default {
       }
     },
     
-    // 获取录音接收状态
+    // 获取正在录音的会话
     {
       method: 'GET',
-      path: '/api/device/:deviceId/audio/receiving',
+      path: '/api/device/:deviceId/audio/sessions',
       handler: async (req, res) => {
-        const receiving = Array.from(deviceManager.audioBuffers.entries()).map(([filename, buffer]) => ({
+        const sessions = Array.from(deviceManager.audioSessions.entries()).map(([filename, session]) => ({
           filename,
-          device_id: buffer.device_id,
-          chunks_received: buffer.chunks.size,
-          chunks_total: buffer.total,
-          progress: ((buffer.chunks.size / buffer.total) * 100).toFixed(1),
-          started_at: buffer.started_at,
-          elapsed: Date.now() - buffer.started_at
+          device_id: session.device_id,
+          chunks_received: session.chunks_received,
+          total_bytes: session.total_bytes,
+          size_kb: (session.total_bytes / 1024).toFixed(1),
+          started_at: session.started_at,
+          elapsed: ((Date.now() - session.started_at) / 1000).toFixed(1)
         }));
-        res.json({ success: true, receiving, count: receiving.length });
+        res.json({ success: true, sessions, count: sessions.length });
       }
     },
     
@@ -1005,10 +1070,10 @@ export default {
     }, 60000);
     
     setInterval(() => {
-      deviceManager.cleanupStaleAudioBuffers();
+      deviceManager.cleanupStaleAudioSessions();
     }, 5 * 60 * 1000);
     
-    BotUtil.makeLog('info', '[设备管理器] 初始化完成 (含录音功能)', 'DeviceManager');
+    BotUtil.makeLog('info', '[设备管理器] 初始化完成 (流式录音v3.0)', 'DeviceManager');
     BotUtil.makeLog('info', `[录音目录] ${deviceManager.AUDIO_SAVE_DIR}`, 'DeviceManager');
   },
   
@@ -1022,6 +1087,14 @@ export default {
       try {
         clearInterval(ws.heartbeatTimer);
         ws.close();
+      } catch (e) {}
+    }
+    
+    // 清理所有录音会话
+    for (const [filename, session] of deviceManager.audioSessions) {
+      try {
+        session.write_stream.end();
+        fs.unlinkSync(session.temp_path);
       } catch (e) {}
     }
     
