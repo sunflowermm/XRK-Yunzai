@@ -1,4 +1,4 @@
-// device.js - 设备管理API（完整优化版 v3.2）
+// device.js - 设备管理API（支持分层显示 v3.3）
 import cfg from '../../lib/config/config.js';
 import WebSocket from 'ws';
 import BotUtil from '../../lib/common/util.js';
@@ -384,8 +384,62 @@ class DeviceManager {
           clear: options.clear !== false,
           wrap: options.wrap !== false,
           spacing: options.spacing || 2,
-          color: options.color || 1
+          color: options.color || 1,
+          bg_color: options.bg_color || 0,
+          font_size: options.font_size || 16
         }, 1);
+      },
+
+      // ========== 分层显示API ==========
+      layer: {
+        create: async (layerId, options = {}) => {
+          return await this.sendCommand(deviceId, 'layer_create', {
+            layer_id: layerId,
+            x: options.x || 0,
+            y: options.y || 0,
+            width: options.width || 128,
+            height: options.height || 32,
+            content: this.encodeData(options.content || ''),
+            auto_scroll: options.auto_scroll || false,
+            scroll_speed: options.scroll_speed || 1,
+            update_interval: options.update_interval || 0,
+            font_size: options.font_size || 16,
+            color: options.color || 1,
+            bg_color: options.bg_color || 0,
+            auto_wrap: options.auto_wrap || false,
+            line_spacing: options.line_spacing || 2
+          }, 1);
+        },
+
+        update: async (layerId, updates = {}) => {
+          const params = { layer_id: layerId };
+          if ('content' in updates) params.content = this.encodeData(updates.content);
+          if ('x' in updates) params.x = updates.x;
+          if ('y' in updates) params.y = updates.y;
+          if ('visible' in updates) params.visible = updates.visible;
+          if ('auto_scroll' in updates) params.auto_scroll = updates.auto_scroll;
+          if ('scroll_speed' in updates) params.scroll_speed = updates.scroll_speed;
+          if ('scroll_offset' in updates) params.scroll_offset = updates.scroll_offset;
+          if ('font_size' in updates) params.font_size = updates.font_size;
+          if ('color' in updates) params.color = updates.color;
+          if ('bg_color' in updates) params.bg_color = updates.bg_color;
+          
+          return await this.sendCommand(deviceId, 'layer_update', params, 1);
+        },
+
+        delete: async (layerId) => {
+          return await this.sendCommand(deviceId, 'layer_delete', {
+            layer_id: layerId
+          }, 1);
+        },
+
+        list: async () => {
+          return await this.sendCommand(deviceId, 'layer_list', {}, 0);
+        },
+
+        clear: async () => {
+          return await this.sendCommand(deviceId, 'display_clear', {}, 1);
+        }
       },
 
       camera: {
@@ -921,7 +975,7 @@ const deviceManager = new DeviceManager();
 // ============================================================
 export default {
   name: 'device',
-  dsc: '设备管理API（完整优化版 v3.2）',
+  dsc: '设备管理API（支持分层显示 v3.3）',
   priority: 90,
   routes: [
     {
@@ -985,6 +1039,63 @@ export default {
           const { deviceId } = req.params;
           const { command, parameters, priority } = req.body;
           const result = await deviceManager.sendCommand(deviceId, command, parameters, priority);
+          res.json(result);
+        } catch (error) {
+          res.status(400).json({ success: false, message: error.message });
+        }
+      }
+    },
+
+    // ========== 分层显示API路由 ==========
+    {
+      method: 'POST',
+      path: '/api/device/:deviceId/layer/create',
+      handler: async (req, res, Bot) => {
+        try {
+          const { deviceId } = req.params;
+          const result = await Bot[deviceId].layer.create(req.body.layer_id, req.body);
+          res.json(result);
+        } catch (error) {
+          res.status(400).json({ success: false, message: error.message });
+        }
+      }
+    },
+
+    {
+      method: 'PUT',
+      path: '/api/device/:deviceId/layer/:layerId',
+      handler: async (req, res, Bot) => {
+        try {
+          const { deviceId, layerId } = req.params;
+          const result = await Bot[deviceId].layer.update(layerId, req.body);
+          res.json(result);
+        } catch (error) {
+          res.status(400).json({ success: false, message: error.message });
+        }
+      }
+    },
+
+    {
+      method: 'DELETE',
+      path: '/api/device/:deviceId/layer/:layerId',
+      handler: async (req, res, Bot) => {
+        try {
+          const { deviceId, layerId } = req.params;
+          const result = await Bot[deviceId].layer.delete(layerId);
+          res.json(result);
+        } catch (error) {
+          res.status(400).json({ success: false, message: error.message });
+        }
+      }
+    },
+
+    {
+      method: 'GET',
+      path: '/api/device/:deviceId/layers',
+      handler: async (req, res, Bot) => {
+        try {
+          const { deviceId } = req.params;
+          const result = await Bot[deviceId].layer.list();
           res.json(result);
         } catch (error) {
           res.status(400).json({ success: false, message: error.message });
@@ -1215,7 +1326,7 @@ export default {
       deviceManager.cleanupStaleAudioSessions();
     }, 5 * 60 * 1000);
 
-    BotUtil.makeLog('info', '[设备管理器] 初始化完成（完整优化版 v3.2）', 'DeviceManager');
+    BotUtil.makeLog('info', '[设备管理器] 初始化完成（支持分层显示 v3.3）', 'DeviceManager');
     BotUtil.makeLog('info', `[录音目录] ${deviceManager.AUDIO_SAVE_DIR}`, 'DeviceManager');
   },
 
