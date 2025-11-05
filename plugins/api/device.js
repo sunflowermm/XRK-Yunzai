@@ -1,1287 +1,1452 @@
-import cfg from '../../lib/config/config.js';
 import WebSocket from 'ws';
 import BotUtil from '../../lib/common/util.js';
+import StreamLoader from '../../lib/aistream/loader.js';
 import fs from 'fs';
 import path from 'path';
-import zlib from 'zlib';
-import { v4 as uuidv4 } from 'uuid';
 
-// ============================================================
-// 火山引擎ASR配置（请填写您的配置）
-// ============================================================
-const VOLCENGINE_ASR_CONFIG = {
-  enabled: true,  // 是否启用火山引擎ASR
-  wsUrl: 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async',  // 双向流式优化版
-  appKey: '你的APP_KEY',  // X-Api-App-Key
-  accessKey: '你的ACCESS_KEY',  // X-Api-Access-Key
-  resourceId: 'volc.bigasr.sauc.duration',  // 资源ID
-  // ASR参数
-  enableItn: true,       // 文本规范化
-  enablePunc: true,      // 启用标点
-  enableDdc: false,      // 语义顺滑
-  showUtterances: true,  // 显示分句信息
-  resultType: 'full'     // 结果返回方式：full=全量，single=增量
-};
+// ==================== 导入配置 ====================
+import {
+    AI_CONFIG,
+    VOLCENGINE_TTS_CONFIG,
+    VOLCENGINE_ASR_CONFIG,
+    SYSTEM_CONFIG,
+    EMOTION_KEYWORDS,
+    SUPPORTED_EMOTIONS
+} from '../../components/config/deviceConfig.js';
 
-// ============================================================
-// 数据存储
-// ============================================================
+// ==================== 导入工具函数 ====================
+import {
+    initializeDirectories,
+    validateDeviceRegistration,
+    generateCommandId,
+    hasCapability,
+    getAudioFileList
+} from '../../components/util/deviceUtil.js';
+
+// ==================== 导入ASR和TTS工厂 ====================
+import ASRFactory from '../../components/asr/ASRFactory.js';
+import TTSFactory from '../../components/tts/TTSFactory.js';
+
+// ==================== 全局存储 ====================
 const devices = new Map();
 const deviceWebSockets = new Map();
 const deviceLogs = new Map();
 const deviceCommands = new Map();
 const commandCallbacks = new Map();
-const cameraStreams = new Map();
 const deviceStats = new Map();
-
-// ASR会话管理
+const asrClients = new Map();
+const ttsClients = new Map();
 const asrSessions = new Map();
 
-// ============================================================
-// 配置参数
-// ============================================================
-const CONFIG = {
-  heartbeatInterval: cfg.device?.heartbeat_interval || 30,
-  heartbeatTimeout: cfg.device?.heartbeat_timeout || 180,
-  maxDevices: cfg.device?.max_devices || 100,
-  commandTimeout: cfg.device?.command_timeout || 10000,
-  maxLogsPerDevice: cfg.device?.max_logs_per_device || 100,
-  messageQueueSize: cfg.device?.message_queue_size || 100
-};
-
-// ============================================================
-// 火山引擎ASR会话管理器
-// ============================================================
-class VolcengineASRSession {
-  constructor(sessionId, deviceId) {
-    this.sessionId = sessionId;
-    this.deviceId = deviceId;
-    this.ws = null;
-    this.connected = false;
-    this.sequence = 0;
-    this.audioChunks = [];
-    this.startTime = Date.now();
-    this.lastChunkTime = Date.now();
-    this.totalChunks = 0;
-    this.connectId = uuidv4();
-    this.logId = null;
-  }
-
-  // 创建WebSocket连接头
-  createHeaders() {
-    return {
-      'X-Api-App-Key': VOLCENGINE_ASR_CONFIG.appKey,
-      'X-Api-Access-Key': VOLCENGINE_ASR_CONFIG.accessKey,
-      'X-Api-Resource-Id': VOLCENGINE_ASR_CONFIG.resourceId,
-      'X-Api-Connect-Id': this.connectId
-    };
-  }
-
-  // 创建协议头（4字节）
-  createProtocolHeader(messageType, messageFlags, serialization, compression) {
-    const header = Buffer.alloc(4);
-    
-    // Byte 0: Protocol version (4 bits) + Header size (4 bits)
-    header[0] = 0x11; // version=0001, headerSize=0001 (4 bytes)
-    
-    // Byte 1: Message type (4 bits) + Message type specific flags (4 bits)
-    header[1] = (messageType << 4) | messageFlags;
-    
-    // Byte 2: Serialization method (4 bits) + Compression (4 bits)
-    header[2] = (serialization << 4) | compression;
-    
-    // Byte 3: Reserved
-    header[3] = 0x00;
-    
-    return header;
-  }
-
-  // 创建Full Client Request
-  createFullClientRequest() {
-    const requestPayload = {
-      user: {
-        uid: this.deviceId,
-        platform: 'ESP32-S3'
-      },
-      audio: {
-        format: 'pcm',
-        codec: 'raw',
-        rate: 16000,
-        bits: 16,
-        channel: 1
-      },
-      request: {
-        model_name: 'bigmodel',
-        enable_itn: VOLCENGINE_ASR_CONFIG.enableItn,
-        enable_punc: VOLCENGINE_ASR_CONFIG.enablePunc,
-        enable_ddc: VOLCENGINE_ASR_CONFIG.enableDdc,
-        show_utterances: VOLCENGINE_ASR_CONFIG.showUtterances,
-        result_type: VOLCENGINE_ASR_CONFIG.resultType,
-        enable_accelerate_text: false,
-        end_window_size: 800,  // 800ms判停
-        force_to_speech_time: 1000  // 1秒后才判停
-      }
-    };
-
-    const jsonPayload = JSON.stringify(requestPayload);
-    const compressedPayload = zlib.gzipSync(Buffer.from(jsonPayload, 'utf-8'));
-
-    // Message type: 0x1 (full client request)
-    // Flags: 0x0 (no sequence)
-    // Serialization: 0x1 (JSON)
-    // Compression: 0x1 (Gzip)
-    const header = this.createProtocolHeader(0x1, 0x0, 0x1, 0x1);
-    
-    const payloadSize = Buffer.alloc(4);
-    payloadSize.writeUInt32BE(compressedPayload.length, 0);
-
-    return Buffer.concat([header, payloadSize, compressedPayload]);
-  }
-
-  // 创建Audio Only Request
-  createAudioOnlyRequest(audioData, isLast = false) {
-    const compressedAudio = zlib.gzipSync(audioData);
-
-    // Message type: 0x2 (audio only request)
-    // Flags: 0x2 (last packet) or 0x1 (has sequence)
-    // Serialization: 0x0 (none)
-    // Compression: 0x1 (Gzip)
-    const flags = isLast ? 0x2 : 0x1;
-    const header = this.createProtocolHeader(0x2, flags, 0x0, 0x1);
-    
-    const payloadSize = Buffer.alloc(4);
-    payloadSize.writeUInt32BE(compressedAudio.length, 0);
-
-    // 如果不是最后一包，添加sequence
-    if (!isLast) {
-      this.sequence++;
-      const sequenceBuffer = Buffer.alloc(4);
-      sequenceBuffer.writeUInt32BE(this.sequence, 0);
-      return Buffer.concat([header, sequenceBuffer, payloadSize, compressedAudio]);
-    }
-
-    return Buffer.concat([header, payloadSize, compressedAudio]);
-  }
-
-  // 解析Server Response
-  parseServerResponse(data) {
-    try {
-      if (data.length < 4) {
-        BotUtil.makeLog('warn', '[ASR解析] 数据包太短', this.deviceId);
-        return null;
-      }
-
-      const header = data.readUInt32BE(0);
-      const messageType = (data[1] >> 4) & 0x0F;
-      const messageFlags = data[1] & 0x0F;
-      const compression = data[2] & 0x0F;
-
-      // Error message (0xF)
-      if (messageType === 0xF) {
-        const errorCode = data.readUInt32BE(4);
-        const errorSize = data.readUInt32BE(8);
-        const errorMessage = data.slice(12, 12 + errorSize).toString('utf-8');
-        BotUtil.makeLog('error', `[ASR错误] Code: ${errorCode}, Message: ${errorMessage}`, this.deviceId);
-        return { type: 'error', errorCode, errorMessage };
-      }
-
-      // Full server response (0x9)
-      if (messageType === 0x9) {
-        let offset = 4;
-        
-        // 读取sequence（如果有）
-        if (messageFlags === 0x1 || messageFlags === 0x3) {
-          const sequence = data.readUInt32BE(offset);
-          offset += 4;
-        }
-
-        const payloadSize = data.readUInt32BE(offset);
-        offset += 4;
-
-        let payload = data.slice(offset, offset + payloadSize);
-
-        // 解压
-        if (compression === 0x1) {
-          payload = zlib.gunzipSync(payload);
-        }
-
-        const result = JSON.parse(payload.toString('utf-8'));
-        
-        // 检查是否是最后一包
-        const isLast = messageFlags === 0x3 || messageFlags === 0x2;
-
-        return { type: 'result', result, isLast };
-      }
-
-      return null;
-    } catch (error) {
-      BotUtil.makeLog('error', `[ASR解析] 失败: ${error.message}`, this.deviceId);
-      return null;
-    }
-  }
-
-  // 连接到火山引擎
-  async connect() {
-    return new Promise((resolve, reject) => {
-      try {
-        const headers = this.createHeaders();
-        
-        BotUtil.makeLog('info', `[ASR连接] 会话: ${this.sessionId}`, this.deviceId);
-        
-        this.ws = new WebSocket(VOLCENGINE_ASR_CONFIG.wsUrl, { headers });
-
-        this.ws.on('open', () => {
-          this.connected = true;
-          BotUtil.makeLog('info', '[ASR连接] WebSocket已连接', this.deviceId);
-          
-          // 发送Full Client Request
-          const fullRequest = this.createFullClientRequest();
-          this.ws.send(fullRequest);
-          BotUtil.makeLog('debug', '[ASR连接] 已发送Full Client Request', this.deviceId);
-          
-          resolve();
-        });
-
-        this.ws.on('message', (data) => {
-          const response = this.parseServerResponse(data);
-          
-          if (!response) return;
-
-          if (response.type === 'error') {
-            BotUtil.makeLog('error', `[ASR错误] ${response.errorMessage}`, this.deviceId);
-            return;
-          }
-
-          if (response.type === 'result') {
-            this.handleASRResult(response.result, response.isLast);
-          }
-        });
-
-        this.ws.on('upgrade', (response) => {
-          // 提取logId
-          this.logId = response.headers['x-tt-logid'];
-          if (this.logId) {
-            BotUtil.makeLog('info', `[ASR连接] LogId: ${this.logId}`, this.deviceId);
-          }
-        });
-
-        this.ws.on('error', (error) => {
-          BotUtil.makeLog('error', `[ASR错误] ${error.message}`, this.deviceId);
-          reject(error);
-        });
-
-        this.ws.on('close', () => {
-          this.connected = false;
-          BotUtil.makeLog('info', '[ASR关闭] WebSocket连接已关闭', this.deviceId);
-        });
-
-      } catch (error) {
-        BotUtil.makeLog('error', `[ASR连接] 失败: ${error.message}`, this.deviceId);
-        reject(error);
-      }
-    });
-  }
-
-  // 发送音频数据
-  sendAudio(audioData) {
-    if (!this.connected || !this.ws) {
-      BotUtil.makeLog('warn', '[ASR发送] WebSocket未连接', this.deviceId);
-      return false;
-    }
-
-    try {
-      const audioRequest = this.createAudioOnlyRequest(audioData, false);
-      this.ws.send(audioRequest);
-      
-      this.totalChunks++;
-      this.lastChunkTime = Date.now();
-      
-      return true;
-    } catch (error) {
-      BotUtil.makeLog('error', `[ASR发送] 失败: ${error.message}`, this.deviceId);
-      return false;
-    }
-  }
-
-  // 结束音频流（发送最后一包）
-  endAudio() {
-    if (!this.connected || !this.ws) {
-      return false;
-    }
-
-    try {
-      // 发送空的最后一包
-      const lastRequest = this.createAudioOnlyRequest(Buffer.alloc(0), true);
-      this.ws.send(lastRequest);
-      
-      BotUtil.makeLog('info', `[ASR结束] 已发送最后一包，共${this.totalChunks}块`, this.deviceId);
-      
-      return true;
-    } catch (error) {
-      BotUtil.makeLog('error', `[ASR结束] 失败: ${error.message}`, this.deviceId);
-      return false;
-    }
-  }
-
-  // 处理ASR识别结果
-  handleASRResult(result, isLast) {
-    try {
-      if (result.result && result.result.text) {
-        const text = result.result.text;
-        const duration = result.audio_info?.duration || 0;
-        
-        // 输出到日志
-        BotUtil.makeLog('info', 
-          `[ASR识别] ${isLast ? '[最终]' : '[中间]'} ${text} (${duration}ms)`,
-          this.deviceId
-        );
-
-        // 如果有分句信息
-        if (result.result.utterances && result.result.utterances.length > 0) {
-          result.result.utterances.forEach((utt, idx) => {
-            if (utt.definite) {
-              BotUtil.makeLog('info',
-                `[ASR分句${idx + 1}] ${utt.text} (${utt.start_time}-${utt.end_time}ms)`,
-                this.deviceId
-              );
-            }
-          });
-        }
-
-        // 发送事件到Bot
-        if (Bot[this.deviceId]) {
-          Bot.em('device.asr_result', {
-            post_type: 'device',
-            event_type: 'asr_result',
-            device_id: this.deviceId,
-            session_id: this.sessionId,
-            text: text,
-            is_final: isLast,
-            duration: duration,
-            result: result.result,
-            self_id: this.deviceId,
-            time: Math.floor(Date.now() / 1000)
-          });
-        }
-      }
-    } catch (error) {
-      BotUtil.makeLog('error', `[ASR结果] 处理失败: ${error.message}`, this.deviceId);
-    }
-  }
-
-  // 关闭会话
-  async close() {
-    this.endAudio();
-    
-    // 等待一下让最后的结果返回
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    if (this.ws) {
-      this.ws.close();
-    }
-
-    const elapsed = ((Date.now() - this.startTime) / 1000).toFixed(2);
-    BotUtil.makeLog('info', 
-      `[ASR会话] 已关闭 - 时长: ${elapsed}秒, 音频块: ${this.totalChunks}`,
-      this.deviceId
-    );
-  }
-}
-
-// ============================================================
-// 设备管理器核心类
-// ============================================================
+// ==================== 设备管理器类 ====================
 class DeviceManager {
-  constructor() {
-    this.cleanupInterval = null;
-    this.audioSessions = new Map();
-    this.AUDIO_SAVE_DIR = './data/wav';
-    this.AUDIO_TEMP_DIR = './data/wav/temp';
-    this.initializeDirectories();
-  }
-
-  initializeDirectories() {
-    [this.AUDIO_SAVE_DIR, this.AUDIO_TEMP_DIR].forEach(dir => {
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-        BotUtil.makeLog('info', `[目录创建] ${dir}`, 'DeviceManager');
-      }
-    });
-  }
-
-  // ========== Unicode编解码工具 ==========
-  encodeUnicode(str) {
-    if (typeof str !== 'string') return str;
-    return str.split('').map(char => {
-      const code = char.charCodeAt(0);
-      return code > 127 ? `\\u${code.toString(16).padStart(4, '0')}` : char;
-    }).join('');
-  }
-
-  decodeUnicode(str) {
-    if (typeof str !== 'string') return str;
-    return str.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) =>
-      String.fromCharCode(parseInt(hex, 16))
-    );
-  }
-
-  encodeData(data) {
-    if (typeof data === 'string') return this.encodeUnicode(data);
-    if (Array.isArray(data)) return data.map(item => this.encodeData(item));
-    if (typeof data === 'object' && data !== null) {
-      return Object.fromEntries(
-        Object.entries(data).map(([k, v]) => [k, this.encodeData(v)])
-      );
+    constructor() {
+        this.cleanupInterval = null;
+        this.AUDIO_SAVE_DIR = SYSTEM_CONFIG.audioSaveDir;
+        this.initializeDirectories();
     }
-    return data;
-  }
 
-  decodeData(data) {
-    if (typeof data === 'string') return this.decodeUnicode(data);
-    if (Array.isArray(data)) return data.map(item => this.decodeData(item));
-    if (typeof data === 'object' && data !== null) {
-      return Object.fromEntries(
-        Object.entries(data).map(([k, v]) => [k, this.decodeData(v)])
-      );
+    /**
+     * 初始化目录
+     */
+    initializeDirectories() {
+        initializeDirectories([this.AUDIO_SAVE_DIR]);
     }
-    return data;
-  }
 
-  // ========== ASR会话管理 ==========
-  async handleASRSessionStart(deviceId, data) {
-    try {
-      const { session_id, sample_rate, bits, channels } = data;
-      
-      BotUtil.makeLog('info', 
-        `[ASR会话] 开始 - ${session_id} (${sample_rate}Hz, ${bits}bit, ${channels}ch)`,
-        deviceId
-      );
-
-      // 检查火山引擎是否启用
-      if (!VOLCENGINE_ASR_CONFIG.enabled) {
-        BotUtil.makeLog('warn', '[ASR会话] 火山引擎ASR未启用', deviceId);
-        return { success: false, error: '火山引擎ASR未启用' };
-      }
-
-      // 检查配置
-      if (!VOLCENGINE_ASR_CONFIG.appKey || !VOLCENGINE_ASR_CONFIG.accessKey) {
-        BotUtil.makeLog('error', '[ASR会话] 火山引擎配置不完整', deviceId);
-        return { success: false, error: '火山引擎配置不完整' };
-      }
-
-      // 如果已有会话，先关闭
-      if (asrSessions.has(session_id)) {
-        const oldSession = asrSessions.get(session_id);
-        await oldSession.close();
-        asrSessions.delete(session_id);
-      }
-
-      // 创建新会话
-      const session = new VolcengineASRSession(session_id, deviceId);
-      asrSessions.set(session_id, session);
-
-      // 连接到火山引擎
-      await session.connect();
-
-      BotUtil.makeLog('info', `[ASR会话] 已连接到火山引擎`, deviceId);
-
-      return { success: true, session_id };
-
-    } catch (error) {
-      BotUtil.makeLog('error', `[ASR会话] 开始失败: ${error.message}`, deviceId);
-      return { success: false, error: error.message };
-    }
-  }
-
-  async handleASRAudioChunk(deviceId, data) {
-    try {
-      const { session_id, chunk_index, data: audioB64, size } = data;
-      
-      const session = asrSessions.get(session_id);
-      if (!session) {
-        BotUtil.makeLog('warn', `[ASR音频] 会话${session_id}不存在`, deviceId);
-        return { success: false, error: '会话不存在' };
-      }
-
-      // 解码base64音频数据
-      const audioBuffer = Buffer.from(audioB64, 'base64');
-
-      // 发送到火山引擎
-      const sent = session.sendAudio(audioBuffer);
-
-      // 定期输出进度
-      if (chunk_index % 50 === 0) {
-        const elapsed = ((Date.now() - session.startTime) / 1000).toFixed(1);
-        BotUtil.makeLog('debug',
-          `[ASR音频] 会话${session_id} - 块#${chunk_index} - ${elapsed}秒`,
-          deviceId
-        );
-      }
-
-      return { success: sent, chunk_index };
-
-    } catch (error) {
-      BotUtil.makeLog('error', `[ASR音频] 处理失败: ${error.message}`, deviceId);
-      return { success: false, error: error.message };
-    }
-  }
-
-  async handleASRSessionStop(deviceId, data) {
-    try {
-      const { session_id, duration, chunks_sent } = data;
-      
-      BotUtil.makeLog('info',
-        `[ASR会话] 停止 - ${session_id} (${duration}秒, ${chunks_sent}块)`,
-        deviceId
-      );
-
-      const session = asrSessions.get(session_id);
-      if (!session) {
-        BotUtil.makeLog('warn', `[ASR会话] ${session_id}不存在`, deviceId);
-        return { success: false, error: '会话不存在' };
-      }
-
-      // 关闭会话
-      await session.close();
-      asrSessions.delete(session_id);
-
-      BotUtil.makeLog('info', `[ASR会话] ${session_id}已关闭`, deviceId);
-
-      return { success: true };
-
-    } catch (error) {
-      BotUtil.makeLog('error', `[ASR会话] 停止失败: ${error.message}`, deviceId);
-      return { success: false, error: error.message };
-    }
-  }
-
-  cleanupStaleASRSessions() {
-    const timeout = 5 * 60 * 1000; // 5分钟超时
-    const now = Date.now();
-
-    for (const [sessionId, session] of asrSessions) {
-      if (now - session.lastChunkTime > timeout) {
-        BotUtil.makeLog('warn',
-          `[ASR会话] 超时清理: ${sessionId}`,
-          session.deviceId
-        );
-        session.close().catch(() => {});
-        asrSessions.delete(sessionId);
-      }
-    }
-  }
-
-  // ========== 设备Bot实例创建 ==========
-  createDeviceBot(deviceId, deviceInfo, ws) {
-    Bot[deviceId] = {
-      adapter: this,
-      ws,
-      uin: deviceId,
-      nickname: deviceInfo.device_name,
-      avatar: null,
-      info: deviceInfo,
-      device_type: deviceInfo.device_type,
-      capabilities: deviceInfo.capabilities || [],
-      metadata: deviceInfo.metadata || {},
-      online: true,
-      last_seen: Date.now(),
-      stats: {
-        messages_sent: 0,
-        messages_received: 0,
-        commands_executed: 0,
-        errors: 0,
-        reconnects: 0
-      },
-
-      addLog: (level, message, data = {}) => this.addDeviceLog(deviceId, level, message, data),
-      getLogs: (filter = {}) => this.getDeviceLogs(deviceId, filter),
-      clearLogs: () => deviceLogs.set(deviceId, []),
-
-      sendMsg: async (msg) => {
-        const emotionKeywords = ['开心', '伤心', '生气', '惊讶', '爱', '酷', '睡觉', '思考', '眨眼', '大笑'];
-        const emotionMap = {
-          '开心': 'happy', '伤心': 'sad', '生气': 'angry', '惊讶': 'surprise',
-          '爱': 'love', '酷': 'cool', '睡觉': 'sleep', '思考': 'think',
-          '眨眼': 'wink', '大笑': 'laugh'
-        };
-
-        for (const keyword of emotionKeywords) {
-          if (msg.includes(keyword)) {
-            return await this.sendCommand(deviceId, 'display_emotion', {
-              emotion: emotionMap[keyword]
-            }, 1);
-          }
+    /**
+     * 获取ASR客户端（懒加载）
+     * @param {string} deviceId - 设备ID
+     * @returns {Object} ASR客户端
+     * @private
+     */
+    _getASRClient(deviceId) {
+        let client = asrClients.get(deviceId);
+        if (!client) {
+            client = ASRFactory.createClient(deviceId, VOLCENGINE_ASR_CONFIG, Bot);
+            asrClients.set(deviceId, client);
         }
+        return client;
+    }
 
-        return await this.sendCommand(deviceId, 'display', {
-          text: this.encodeData(msg),
-          x: 0, y: 0, font_size: 16, wrap: true, spacing: 2
-        }, 1);
-      },
-
-      sendCommand: async (cmd, params = {}, priority = 0) => {
-        return await this.sendCommand(deviceId, cmd, params, priority);
-      },
-
-      display: async (text, options = {}) => {
-        return await this.sendCommand(deviceId, 'display', {
-          text: this.encodeData(text),
-          x: options.x || 0,
-          y: options.y || 0,
-          font_size: options.font_size || 16,
-          wrap: options.wrap !== false,
-          spacing: options.spacing || 2
-        }, 1);
-      },
-
-      emotion: async (emotionName) => {
-        const emotions = ['happy', 'sad', 'angry', 'surprise', 'love', 'cool', 'sleep', 'think', 'wink', 'laugh'];
-        if (!emotions.includes(emotionName)) {
-          throw new Error(`未知表情: ${emotionName}`);
+    /**
+     * 获取TTS客户端（懒加载）
+     * @param {string} deviceId - 设备ID
+     * @returns {Object} TTS客户端
+     * @private
+     */
+    _getTTSClient(deviceId) {
+        let client = ttsClients.get(deviceId);
+        if (!client) {
+            client = TTSFactory.createClient(deviceId, VOLCENGINE_TTS_CONFIG, Bot);
+            ttsClients.set(deviceId, client);
         }
-        return await this.sendCommand(deviceId, 'display_emotion', { emotion: emotionName }, 1);
-      },
+        return client;
+    }
 
-      switchMode: async (mode, options = {}) => {
-        if (!['text', 'emotion'].includes(mode)) {
-          throw new Error(`无效模式: ${mode}`);
+    // ==================== ASR会话处理 ====================
+
+    /**
+     * 处理ASR会话开始
+     * @param {string} deviceId - 设备ID
+     * @param {Object} data - 会话数据
+     * @returns {Promise<Object>} 处理结果
+     */
+    async handleASRSessionStart(deviceId, data) {
+        try {
+            const { session_id, sample_rate, bits, channels, session_number } = data;
+
+            BotUtil.makeLog('info',
+                `⚡ [ASR会话#${session_number}] 开始: ${session_id}`,
+                deviceId
+            );
+
+            if (!VOLCENGINE_ASR_CONFIG.enabled) {
+                return { success: false, error: 'ASR未启用' };
+            }
+
+            asrSessions.set(session_id, {
+                deviceId,
+                sample_rate,
+                bits,
+                channels,
+                sessionNumber: session_number,
+                startTime: Date.now(),
+                lastChunkTime: Date.now(),
+                totalChunks: 0,
+                totalBytes: 0,
+                audioBuffers: [],
+                asrStarted: false,
+                endingChunks: 0,
+                earlyEndSent: false,
+                finalText: null,
+                finalDuration: 0,
+                finalTextSetAt: null
+            });
+
+            const client = this._getASRClient(deviceId);
+            try {
+                await client.beginUtterance(session_id, {
+                    sample_rate,
+                    bits,
+                    channels
+                });
+                asrSessions.get(session_id).asrStarted = true;
+            } catch (e) {
+                BotUtil.makeLog('error',
+                    `❌ [ASR] 启动utterance失败: ${e.message}`,
+                    deviceId
+                );
+                return { success: false, error: e.message };
+            }
+
+            return { success: true, session_id };
+
+        } catch (e) {
+            BotUtil.makeLog('error',
+                `❌ [ASR会话] 启动失败: ${e.message}`,
+                deviceId
+            );
+            return { success: false, error: e.message };
         }
-        return await this.sendCommand(deviceId, 'display_mode', { mode, ...options }, 1);
-      },
+    }
 
-      clear: async () => {
-        return await this.sendCommand(deviceId, 'display_clear', {}, 1);
-      },
+    /**
+     * 处理ASR音频块
+     * @param {string} deviceId - 设备ID
+     * @param {Object} data - 音频数据
+     * @returns {Promise<Object>} 处理结果
+     */
+    async handleASRAudioChunk(deviceId, data) {
+        try {
+            const { session_id, chunk_index, data: audioHex, vad_state } = data;
 
-      camera: {
-        startStream: async (options = {}) => {
-          return await this.sendCommand(deviceId, 'camera_start_stream', {
-            fps: options.fps || 10,
-            quality: options.quality || 12,
-            resolution: options.resolution || 'VGA'
-          }, 1);
-        },
-        stopStream: async () => {
-          return await this.sendCommand(deviceId, 'camera_stop_stream', {}, 1);
-        },
-        capture: async () => {
-          return await this.sendCommand(deviceId, 'camera_capture', {}, 1);
+            const session = asrSessions.get(session_id);
+            if (!session) {
+                return { success: false, error: '会话不存在' };
+            }
+
+            const audioBuf = Buffer.from(audioHex, 'hex');
+
+            session.totalChunks++;
+            session.totalBytes += audioBuf.length;
+            session.lastChunkTime = Date.now();
+            session.audioBuffers.push(audioBuf);
+
+            if (session.asrStarted && (vad_state === 'active' || vad_state === 'ending')) {
+                const client = this._getASRClient(deviceId);
+                if (client.connected && client.currentUtterance && !client.currentUtterance.ending) {
+                    client.sendAudio(audioBuf);
+
+                    if (vad_state === 'ending') {
+                        session.endingChunks = (session.endingChunks || 0) + 1;
+
+                        if (session.endingChunks >= 2 && !session.earlyEndSent) {
+                            session.earlyEndSent = true;
+
+                            BotUtil.makeLog('info',
+                                `⚡ [ASR] 检测到ending×${session.endingChunks}，提前结束`,
+                                deviceId
+                            );
+
+                            setTimeout(async () => {
+                                try {
+                                    await client.endUtterance();
+                                } catch (e) {
+                                    BotUtil.makeLog('error',
+                                        `❌ [ASR] 提前结束失败: ${e.message}`,
+                                        deviceId
+                                    );
+                                }
+                            }, 50);
+                        }
+                    } else {
+                        session.endingChunks = 0;
+                        session.earlyEndSent = false;
+                    }
+                }
+            }
+
+            return { success: true, received: chunk_index };
+
+        } catch (e) {
+            BotUtil.makeLog('error',
+                `❌ [ASR] 处理音频块失败: ${e.message}`,
+                deviceId
+            );
+            return { success: false, error: e.message };
         }
-      },
+    }
 
-      microphone: {
-        getStatus: async () => {
-          return await this.sendCommand(deviceId, 'microphone_status', {}, 0);
-        },
-        start: async () => {
-          return await this.sendCommand(deviceId, 'microphone_start', {}, 1);
-        },
-        stop: async () => {
-          return await this.sendCommand(deviceId, 'microphone_stop', {}, 1);
+    /**
+     * 处理ASR会话停止
+     * @param {string} deviceId - 设备ID
+     * @param {Object} data - 会话数据
+     * @returns {Promise<Object>} 处理结果
+     */
+    async handleASRSessionStop(deviceId, data) {
+        try {
+            const { session_id, duration, session_number } = data;
+
+            BotUtil.makeLog('info',
+                `✓ [ASR会话#${session_number}] 停止: ${session_id} (时长=${duration}s)`,
+                deviceId
+            );
+
+            const session = asrSessions.get(session_id);
+            if (!session) {
+                return { success: true };
+            }
+
+            if (session.asrStarted) {
+                const client = this._getASRClient(deviceId);
+
+                if (!session.earlyEndSent) {
+                    try {
+                        await client.endUtterance();
+                        BotUtil.makeLog('info',
+                            `✓ [ASR会话#${session_number}] Utterance已结束`,
+                            deviceId
+                        );
+                    } catch (e) {
+                        BotUtil.makeLog('warn',
+                            `⚠️ [ASR] 结束utterance失败: ${e.message}`,
+                            deviceId
+                        );
+                    }
+                }
+            }
+
+            const maxWaitMs = VOLCENGINE_ASR_CONFIG.asrFinalTextWaitMs;
+            const checkIntervalMs = 50;
+            let waitCount = 0;
+            const maxChecks = Math.ceil(maxWaitMs / checkIntervalMs);
+
+            BotUtil.makeLog('info', `⏳ [ASR] 等待最终结果...`, deviceId);
+
+            while (!session.finalText && waitCount < maxChecks) {
+                await new Promise(r => setTimeout(r, checkIntervalMs));
+                waitCount++;
+            }
+
+            if (session.finalText) {
+                const waitedMs = waitCount * checkIntervalMs;
+                BotUtil.makeLog('info',
+                    `✅ [ASR最终] "${session.finalText}" (等待${waitedMs}ms)`,
+                    deviceId
+                );
+            } else {
+                BotUtil.makeLog('warn',
+                    `⚠️ [ASR] 等待最终结果超时(${maxWaitMs}ms)`,
+                    deviceId
+                );
+            }
+
+            const finalText = session.finalText;
+
+            if (AI_CONFIG.enabled && finalText && finalText.trim()) {
+                await this._processAIResponse(deviceId, finalText);
+            } else if (AI_CONFIG.enabled && !finalText) {
+                BotUtil.makeLog('warn',
+                    '⚠️ [AI] 未获取到ASR最终文本，跳过AI处理',
+                    deviceId
+                );
+            }
+
+            asrSessions.delete(session_id);
+            return { success: true };
+
+        } catch (e) {
+            BotUtil.makeLog('error',
+                `❌ [ASR会话] 停止失败: ${e.message}`,
+                deviceId
+            );
+            return { success: false, error: e.message };
         }
-      },
-
-      reboot: async () => {
-        return await this.sendCommand(deviceId, 'reboot', {}, 99);
-      },
-
-      hasCapability: (cap) => deviceInfo.capabilities?.includes(cap),
-
-      getStatus: () => {
-        const device = devices.get(deviceId);
-        return {
-          device_id: deviceId,
-          device_name: deviceInfo.device_name,
-          device_type: deviceInfo.device_type,
-          online: device?.online || false,
-          last_seen: device?.last_seen,
-          capabilities: deviceInfo.capabilities,
-          metadata: deviceInfo.metadata,
-          stats: device?.stats || Bot[deviceId].stats
-        };
-      },
-
-      getStats: () => deviceStats.get(deviceId) || this.initDeviceStats(deviceId)
-    };
-
-    return Bot[deviceId];
-  }
-
-  // ========== 设备统计管理 ==========
-  initDeviceStats(deviceId) {
-    const stats = {
-      device_id: deviceId,
-      connected_at: Date.now(),
-      total_messages: 0,
-      total_commands: 0,
-      total_errors: 0,
-      last_heartbeat: Date.now()
-    };
-    deviceStats.set(deviceId, stats);
-    return stats;
-  }
-
-  updateDeviceStats(deviceId, type) {
-    const stats = deviceStats.get(deviceId);
-    if (!stats) return;
-
-    switch (type) {
-      case 'message': stats.total_messages++; break;
-      case 'command': stats.total_commands++; break;
-      case 'error': stats.total_errors++; break;
-      case 'heartbeat': stats.last_heartbeat = Date.now(); break;
     }
-  }
 
-  // ========== 设备注册 ==========
-  async registerDevice(deviceData, Bot, ws) {
-    try {
-      deviceData = this.decodeData(deviceData);
-      const {
-        device_id, device_type, device_name,
-        capabilities = [], metadata = {},
-        ip_address, firmware_version
-      } = deviceData;
+    // ==================== AI处理 ====================
 
-      if (!device_id || !device_type) {
-        throw new Error('缺少必需参数');
-      }
+    /**
+     * 处理AI响应
+     * @param {string} deviceId - 设备ID
+     * @param {string} question - 用户问题
+     * @returns {Promise<void>}
+     * @private
+     */
+    async _processAIResponse(deviceId, question) {
+        try {
+            const startTime = Date.now();
 
-      const existingDevice = devices.get(device_id);
-      const device = {
-        device_id, device_type,
-        device_name: device_name || `${device_type}_${device_id}`,
-        capabilities, metadata, ip_address, firmware_version,
-        online: true,
-        last_seen: Date.now(),
-        registered_at: existingDevice?.registered_at || Date.now(),
-        stats: existingDevice?.stats || {
-          messages_sent: 0, messages_received: 0,
-          commands_executed: 0, errors: 0,
-          reconnects: existingDevice ? existingDevice.stats.reconnects + 1 : 0
+            BotUtil.makeLog('info',
+                `⚡ [AI] 开始处理: ${question.substring(0, 50)}${question.length > 50 ? '...' : ''}`,
+                deviceId
+            );
+
+            const deviceStream = StreamLoader.getStream('device');
+
+            if (!deviceStream) {
+                BotUtil.makeLog('error', '❌ [AI] 设备工作流未加载', deviceId);
+                return;
+            }
+
+            const deviceInfo = devices.get(deviceId);
+            const deviceBot = Bot[deviceId];
+
+            if (!deviceBot) {
+                BotUtil.makeLog('error', '❌ [AI] 设备Bot未找到', deviceId);
+                return;
+            }
+
+            const aiResult = await deviceStream.execute(
+                deviceId,
+                question,
+                AI_CONFIG,
+                deviceInfo || {},
+                AI_CONFIG.persona
+            );
+
+            if (!aiResult) {
+                BotUtil.makeLog('warn', '⚠️ [AI] 工作流返回空结果', deviceId);
+                return;
+            }
+
+            const aiTime = Date.now() - startTime;
+            BotUtil.makeLog('info',
+                `⚡ [AI性能] 处理耗时: ${aiTime}ms`,
+                deviceId
+            );
+
+            BotUtil.makeLog('info',
+                `✅ [AI] 回复: ${aiResult.text || '(仅表情)'}`,
+                deviceId
+            );
+
+            if (aiResult.emotion) {
+                try {
+                    await deviceBot.emotion(aiResult.emotion);
+                    BotUtil.makeLog('info',
+                        `✓ [设备] 表情: ${aiResult.emotion}`,
+                        deviceId
+                    );
+                } catch (e) {
+                    BotUtil.makeLog('error',
+                        `❌ [设备] 表情显示失败: ${e.message}`,
+                        deviceId
+                    );
+                }
+                await new Promise(r => setTimeout(r, 500));
+            }
+
+            if (aiResult.text && VOLCENGINE_TTS_CONFIG.enabled) {
+                try {
+                    const ttsClient = this._getTTSClient(deviceId);
+                    const success = await ttsClient.synthesize(aiResult.text);
+
+                    if (success) {
+                        BotUtil.makeLog('info',
+                            `🔊 [TTS] 语音合成已启动`,
+                            deviceId
+                        );
+                    } else {
+                        BotUtil.makeLog('error',
+                            `❌ [TTS] 语音合成失败`,
+                            deviceId
+                        );
+                    }
+                } catch (e) {
+                    BotUtil.makeLog('error',
+                        `❌ [TTS] 语音合成异常: ${e.message}`,
+                        deviceId
+                    );
+                }
+            }
+
+            if (aiResult.text) {
+                try {
+                    await deviceBot.display(aiResult.text, {
+                        x: 0,
+                        y: 0,
+                        font_size: 16,
+                        wrap: true,
+                        spacing: 2
+                    });
+                    BotUtil.makeLog('info',
+                        `✓ [设备] 文字: ${aiResult.text}`,
+                        deviceId
+                    );
+                } catch (e) {
+                    BotUtil.makeLog('error',
+                        `❌ [设备] 文字显示失败: ${e.message}`,
+                        deviceId
+                    );
+                }
+            }
+
+        } catch (e) {
+            BotUtil.makeLog('error',
+                `❌ [AI] 处理失败: ${e.message}`,
+                deviceId
+            );
         }
-      };
-
-      devices.set(device_id, device);
-
-      if (!deviceLogs.has(device_id)) deviceLogs.set(device_id, []);
-      if (!deviceStats.has(device_id)) this.initDeviceStats(device_id);
-      if (ws) this.setupWebSocket(device_id, ws);
-      if (!Bot.uin.includes(device_id)) Bot.uin.push(device_id);
-
-      this.createDeviceBot(device_id, device, ws);
-
-      BotUtil.makeLog('info',
-        `[设备注册] ${device.device_name} (${device_id}) - 固件: v${firmware_version}`,
-        device.device_name
-      );
-
-      Bot.em('device.online', {
-        post_type: 'device',
-        event_type: 'online',
-        device_id, device_type,
-        device_name: device.device_name,
-        capabilities,
-        self_id: device_id,
-        time: Math.floor(Date.now() / 1000)
-      });
-
-      return device;
-    } catch (error) {
-      BotUtil.makeLog('error', `[设备注册失败] ${error.message}`, 'DeviceManager');
-      throw error;
-    }
-  }
-
-  // ========== WebSocket连接管理 ==========
-  setupWebSocket(deviceId, ws) {
-    const oldWs = deviceWebSockets.get(deviceId);
-    if (oldWs && oldWs !== ws) {
-      clearInterval(oldWs.heartbeatTimer);
-      oldWs.close();
     }
 
-    ws.device_id = deviceId;
-    ws.isAlive = true;
-    ws.lastPong = Date.now();
-    ws.messageQueue = [];
+    // ==================== 设备管理 ====================
 
-    ws.heartbeatTimer = setInterval(() => {
-      if (!ws.isAlive) {
-        BotUtil.makeLog('warn', `[设备心跳超时] ${deviceId}`, deviceId);
-        this.handleDeviceDisconnect(deviceId, ws);
-        return;
-      }
-
-      ws.isAlive = false;
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'heartbeat_request', timestamp: Date.now() }));
-      }
-    }, CONFIG.heartbeatInterval * 1000);
-
-    ws.on('pong', () => {
-      ws.isAlive = true;
-      ws.lastPong = Date.now();
-      this.updateDeviceStats(deviceId, 'heartbeat');
-    });
-
-    deviceWebSockets.set(deviceId, ws);
-  }
-
-  handleDeviceDisconnect(deviceId, ws) {
-    clearInterval(ws.heartbeatTimer);
-
-    const device = devices.get(deviceId);
-    if (device) {
-      device.online = false;
-      BotUtil.makeLog('warn', `[设备离线] ${device.device_name}`, device.device_name);
-
-      Bot.em('device.offline', {
-        post_type: 'device',
-        event_type: 'offline',
-        device_id: deviceId,
-        device_type: device.device_type,
-        device_name: device.device_name,
-        self_id: deviceId,
-        time: Math.floor(Date.now() / 1000)
-      });
-    }
-
-    deviceWebSockets.delete(deviceId);
-
-    // 清理ASR会话
-    for (const [sessionId, session] of asrSessions) {
-      if (session.deviceId === deviceId) {
-        session.close().catch(() => {});
-        asrSessions.delete(sessionId);
-      }
-    }
-  }
-
-  // ========== 日志管理 ==========
-  addDeviceLog(deviceId, level, message, data = {}) {
-    message = this.decodeUnicode(String(message)).substring(0, 500);
-
-    const logEntry = {
-      timestamp: Date.now(),
-      level,
-      message,
-      data: this.decodeData(data)
-    };
-
-    const logs = deviceLogs.get(deviceId) || [];
-    logs.unshift(logEntry);
-
-    if (logs.length > CONFIG.maxLogsPerDevice) {
-      logs.length = CONFIG.maxLogsPerDevice;
-    }
-
-    deviceLogs.set(deviceId, logs);
-
-    const device = devices.get(deviceId);
-    if (device?.stats && level === 'error') {
-      device.stats.errors++;
-      this.updateDeviceStats(deviceId, 'error');
-    }
-
-    if (level !== 'debug') {
-      BotUtil.makeLog(level, `[${device?.device_name || deviceId}] ${message}`, device?.device_name || deviceId);
-    }
-
-    return logEntry;
-  }
-
-  getDeviceLogs(deviceId, filter = {}) {
-    let logs = deviceLogs.get(deviceId) || [];
-
-    if (filter.level) logs = logs.filter(log => log.level === filter.level);
-    if (filter.since) {
-      const sinceTime = new Date(filter.since).getTime();
-      logs = logs.filter(log => log.timestamp >= sinceTime);
-    }
-    if (filter.limit) logs = logs.slice(0, filter.limit);
-
-    return logs;
-  }
-
-  // ========== 事件处理 ==========
-  async processDeviceEvent(deviceId, eventType, eventData = {}, Bot) {
-    try {
-      eventData = this.decodeData(eventData);
-
-      if (!devices.has(deviceId)) {
-        if (eventType === 'register') {
-          return await this.registerDevice({ device_id: deviceId, ...eventData }, Bot);
-        }
-        return { success: false, error: '设备未注册' };
-      }
-
-      const device = devices.get(deviceId);
-      device.last_seen = Date.now();
-      device.online = true;
-      device.stats.messages_received++;
-      this.updateDeviceStats(deviceId, 'message');
-
-      switch (eventType) {
-        case 'log':
-          const { level = 'info', message, data: logData } = eventData;
-          this.addDeviceLog(deviceId, level, message, logData);
-          break;
-
-        case 'command_result':
-          const { command_id, result } = eventData;
-          const callback = commandCallbacks.get(command_id);
-          if (callback) {
-            callback(result);
-            commandCallbacks.delete(command_id);
-          }
-          break;
-
-        case 'asr_session_start':
-          return await this.handleASRSessionStart(deviceId, eventData);
-
-        case 'asr_audio_chunk':
-          return await this.handleASRAudioChunk(deviceId, eventData);
-
-        case 'asr_session_stop':
-          return await this.handleASRSessionStop(deviceId, eventData);
-
-        default:
-          Bot.em(`device.${eventType}`, {
-            post_type: 'device',
-            event_type: eventType,
+    /**
+     * 初始化设备统计
+     * @param {string} deviceId - 设备ID
+     * @returns {Object} 统计对象
+     */
+    initDeviceStats(deviceId) {
+        const stats = {
             device_id: deviceId,
-            device_type: device.device_type,
-            device_name: device.device_name,
-            event_data: eventData,
-            self_id: deviceId,
-            time: Math.floor(Date.now() / 1000)
-          });
-      }
-
-      return { success: true };
-    } catch (error) {
-      BotUtil.makeLog('error', `[事件处理失败] ${error.message}`, 'DeviceManager');
-      this.updateDeviceStats(deviceId, 'error');
-      return { success: false, error: error.message };
+            connected_at: Date.now(),
+            total_messages: 0,
+            total_commands: 0,
+            total_errors: 0,
+            last_heartbeat: Date.now()
+        };
+        deviceStats.set(deviceId, stats);
+        return stats;
     }
-  }
 
-  // ========== 命令发送 ==========
-  async sendCommand(deviceId, command, parameters = {}, priority = 0) {
-    const device = devices.get(deviceId);
-    if (!device) throw new Error('设备未找到');
+    /**
+     * 更新设备统计
+     * @param {string} deviceId - 设备ID
+     * @param {string} type - 统计类型
+     */
+    updateDeviceStats(deviceId, type) {
+        const stats = deviceStats.get(deviceId);
+        if (!stats) return;
 
-    const cmd = {
-      id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      command,
-      parameters: this.encodeData(parameters),
-      priority,
-      timestamp: Date.now()
-    };
+        if (type === 'message') stats.total_messages++;
+        if (type === 'command') stats.total_commands++;
+        if (type === 'error') stats.total_errors++;
+        if (type === 'heartbeat') stats.last_heartbeat = Date.now();
+    }
 
-    this.updateDeviceStats(deviceId, 'command');
-    const ws = deviceWebSockets.get(deviceId);
+    /**
+     * 添加设备日志
+     * @param {string} deviceId - 设备ID
+     * @param {string} level - 日志级别
+     * @param {string} message - 日志消息
+     * @param {Object} data - 附加数据
+     * @returns {Object} 日志条目
+     */
+    addDeviceLog(deviceId, level, message, data = {}) {
+        message = String(message).substring(0, 500);
 
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      return new Promise((resolve) => {
-        const timeout = setTimeout(() => {
-          commandCallbacks.delete(cmd.id);
-          resolve({ success: true, command_id: cmd.id, timeout: true });
-        }, CONFIG.commandTimeout);
+        const entry = {
+            timestamp: Date.now(),
+            level,
+            message,
+            data
+        };
 
-        commandCallbacks.set(cmd.id, (result) => {
-          clearTimeout(timeout);
-          resolve({ success: true, command_id: cmd.id, result });
+        const logs = deviceLogs.get(deviceId) || [];
+        logs.unshift(entry);
+
+        if (logs.length > SYSTEM_CONFIG.maxLogsPerDevice) {
+            logs.length = SYSTEM_CONFIG.maxLogsPerDevice;
+        }
+
+        deviceLogs.set(deviceId, logs);
+
+        const device = devices.get(deviceId);
+        if (device?.stats && level === 'error') {
+            device.stats.errors++;
+            this.updateDeviceStats(deviceId, 'error');
+        }
+
+        if (level !== 'debug' || SYSTEM_CONFIG.enableDetailedLogs) {
+            BotUtil.makeLog(level,
+                `[${device?.device_name || deviceId}] ${message}`,
+                device?.device_name || deviceId
+            );
+        }
+
+        return entry;
+    }
+
+    /**
+     * 获取设备日志
+     * @param {string} deviceId - 设备ID
+     * @param {Object} filter - 过滤条件
+     * @returns {Array} 日志列表
+     */
+    getDeviceLogs(deviceId, filter = {}) {
+        let logs = deviceLogs.get(deviceId) || [];
+
+        if (filter.level) {
+            logs = logs.filter(l => l.level === filter.level);
+        }
+
+        if (filter.since) {
+            const timestamp = new Date(filter.since).getTime();
+            logs = logs.filter(l => l.timestamp >= timestamp);
+        }
+
+        if (filter.limit) {
+            logs = logs.slice(0, filter.limit);
+        }
+
+        return logs;
+    }
+
+    /**
+     * 注册设备
+     * @param {Object} deviceData - 设备数据
+     * @param {Object} Bot - Bot实例
+     * @param {WebSocket} ws - WebSocket连接
+     * @returns {Promise<Object>} 设备对象
+     */
+    async registerDevice(deviceData, Bot, ws) {
+        const {
+            device_id,
+            device_type,
+            device_name,
+            capabilities = [],
+            metadata = {},
+            ip_address,
+            firmware_version
+        } = deviceData;
+
+        const validation = validateDeviceRegistration(deviceData);
+        if (!validation.valid) {
+            throw new Error(validation.error);
+        }
+
+        const existedDevice = devices.get(device_id);
+
+        const device = {
+            device_id,
+            device_type,
+            device_name: device_name || `${device_type}_${device_id}`,
+            capabilities,
+            metadata,
+            ip_address,
+            firmware_version,
+            online: true,
+            last_seen: Date.now(),
+            registered_at: existedDevice?.registered_at || Date.now(),
+            stats: existedDevice?.stats || {
+                messages_sent: 0,
+                messages_received: 0,
+                commands_executed: 0,
+                errors: 0,
+                reconnects: existedDevice ? existedDevice.stats.reconnects + 1 : 0
+            }
+        };
+
+        devices.set(device_id, device);
+
+        if (!deviceLogs.has(device_id)) {
+            deviceLogs.set(device_id, []);
+        }
+
+        if (!deviceStats.has(device_id)) {
+            this.initDeviceStats(device_id);
+        }
+
+        if (ws) {
+            this.setupWebSocket(device_id, ws);
+        }
+
+        if (!Bot.uin.includes(device_id)) {
+            Bot.uin.push(device_id);
+        }
+
+        this.createDeviceBot(device_id, device, ws);
+
+        BotUtil.makeLog('info',
+            `🟢 [设备上线] ${device.device_name} (${device_id}) - IP: ${ip_address}`,
+            device.device_name
+        );
+
+        Bot.em('device.online', {
+            post_type: 'device',
+            event_type: 'online',
+            device_id,
+            device_type,
+            device_name: device.device_name,
+            capabilities,
+            self_id: device_id,
+            time: Math.floor(Date.now() / 1000)
         });
 
-        try {
-          ws.send(JSON.stringify({ type: 'command', command: cmd }));
-          device.stats.commands_executed++;
-        } catch (error) {
-          clearTimeout(timeout);
-          commandCallbacks.delete(cmd.id);
-          resolve({ success: false, command_id: cmd.id, error: error.message });
+        return device;
+    }
+
+    /**
+     * 设置WebSocket连接
+     * @param {string} deviceId - 设备ID
+     * @param {WebSocket} ws - WebSocket实例
+     */
+    setupWebSocket(deviceId, ws) {
+        const oldWs = deviceWebSockets.get(deviceId);
+        if (oldWs && oldWs !== ws) {
+            clearInterval(oldWs.heartbeatTimer);
+            try {
+                if (oldWs.readyState === 1) {
+                    oldWs.close();
+                } else {
+                    oldWs.terminate();
+                }
+            } catch (e) {
+                // 忽略错误
+            }
         }
-      });
+
+        ws.device_id = deviceId;
+        ws.isAlive = true;
+        ws.lastPong = Date.now();
+        ws.messageQueue = [];
+
+        ws.heartbeatTimer = setInterval(() => {
+            if (!ws.isAlive) {
+                this.handleDeviceDisconnect(deviceId, ws);
+                return;
+            }
+
+            ws.isAlive = false;
+
+            if (ws.readyState === WebSocket.OPEN) {
+                try {
+                    ws.send(JSON.stringify({
+                        type: 'heartbeat_request',
+                        timestamp: Date.now()
+                    }));
+                } catch (e) {
+                    // 忽略错误
+                }
+            }
+        }, SYSTEM_CONFIG.heartbeatInterval * 1000);
+
+        ws.on('pong', () => {
+            ws.isAlive = true;
+            ws.lastPong = Date.now();
+            this.updateDeviceStats(deviceId, 'heartbeat');
+        });
+
+        ws.on('error', (error) => {
+            BotUtil.makeLog('error',
+                `❌ [WebSocket错误] ${error.message}`,
+                deviceId
+            );
+        });
+
+        deviceWebSockets.set(deviceId, ws);
     }
 
-    const commands = deviceCommands.get(deviceId) || [];
-    if (priority > 0) {
-      commands.unshift(cmd);
-    } else {
-      commands.push(cmd);
-    }
+    /**
+     * 处理设备断开连接
+     * @param {string} deviceId - 设备ID
+     * @param {WebSocket} ws - WebSocket实例
+     */
+    handleDeviceDisconnect(deviceId, ws) {
+        clearInterval(ws.heartbeatTimer);
 
-    if (commands.length > CONFIG.messageQueueSize) {
-      commands.length = CONFIG.messageQueueSize;
-    }
+        const device = devices.get(deviceId);
+        if (device) {
+            device.online = false;
 
-    deviceCommands.set(deviceId, commands);
-    device.stats.commands_executed++;
+            BotUtil.makeLog('info',
+                `🔴 [设备离线] ${device.device_name} (${deviceId})`,
+                device.device_name
+            );
 
-    return { success: true, command_id: cmd.id, queued: commands.length };
-  }
-
-  // ========== 设备状态检查 ==========
-  checkOfflineDevices(Bot) {
-    const timeout = CONFIG.heartbeatTimeout * 1000;
-    const now = Date.now();
-
-    for (const [id, device] of devices) {
-      if (device.online && now - device.last_seen > timeout) {
-        const ws = deviceWebSockets.get(id);
-        if (ws) {
-          this.handleDeviceDisconnect(id, ws);
-        } else {
-          device.online = false;
-          Bot.em('device.offline', {
-            post_type: 'device',
-            event_type: 'offline',
-            device_id: id,
-            device_type: device.device_type,
-            device_name: device.device_name,
-            self_id: id,
-            time: Math.floor(Date.now() / 1000)
-          });
-          BotUtil.makeLog('warn', `[设备离线] ${device.device_name}`, device.device_name);
+            Bot.em('device.offline', {
+                post_type: 'device',
+                event_type: 'offline',
+                device_id: deviceId,
+                device_type: device.device_type,
+                device_name: device.device_name,
+                self_id: deviceId,
+                time: Math.floor(Date.now() / 1000)
+            });
         }
-      }
+
+        deviceWebSockets.delete(deviceId);
     }
-  }
 
-  // ========== 设备信息获取 ==========
-  getDeviceList() {
-    return Array.from(devices.values()).map(d => ({
-      device_id: d.device_id,
-      device_name: d.device_name,
-      device_type: d.device_type,
-      online: d.online,
-      last_seen: d.last_seen,
-      capabilities: d.capabilities,
-      stats: d.stats
-    }));
-  }
+    /**
+     * 创建设备Bot实例
+     * @param {string} deviceId - 设备ID
+     * @param {Object} deviceInfo - 设备信息
+     * @param {WebSocket} ws - WebSocket实例
+     * @returns {Object} Bot实例
+     */
+    createDeviceBot(deviceId, deviceInfo, ws) {
+        Bot[deviceId] = {
+            adapter: this,
+            ws,
+            uin: deviceId,
+            nickname: deviceInfo.device_name,
+            avatar: null,
+            info: deviceInfo,
+            device_type: deviceInfo.device_type,
+            capabilities: deviceInfo.capabilities || [],
+            metadata: deviceInfo.metadata || {},
+            online: true,
+            last_seen: Date.now(),
+            stats: {
+                messages_sent: 0,
+                messages_received: 0,
+                commands_executed: 0,
+                errors: 0,
+                reconnects: 0
+            },
 
-  getDevice(deviceId) {
-    const device = devices.get(deviceId);
-    if (!device) return null;
-    return { ...device, device_stats: deviceStats.get(deviceId) };
-  }
+            addLog: (level, message, data = {}) =>
+                this.addDeviceLog(deviceId, level, message, data),
 
-  // ========== WebSocket消息处理 ==========
-  async processWebSocketMessage(ws, data, Bot) {
-    try {
-      data = this.decodeData(data);
-      const { type, device_id, ...payload } = data;
-      const deviceId = device_id || ws.device_id;
+            getLogs: (filter = {}) => this.getDeviceLogs(deviceId, filter),
 
-      switch (type) {
-        case 'register':
-          const device = await this.registerDevice({ device_id: deviceId, ...payload }, Bot, ws);
-          ws.send(JSON.stringify({ type: 'register_response', success: true, device }));
-          break;
+            clearLogs: () => deviceLogs.set(deviceId, []),
 
-        case 'event':
-        case 'data':
-          const eventType = payload.data_type || payload.event_type || type;
-          const eventData = payload.data || payload.event_data || payload;
-          await this.processDeviceEvent(deviceId, eventType, eventData, Bot);
-          break;
+            sendMsg: async (msg) => {
+                for (const [keyword, emotion] of Object.entries(EMOTION_KEYWORDS)) {
+                    if (msg.includes(keyword)) {
+                        return await this.sendCommand(
+                            deviceId,
+                            'display_emotion',
+                            { emotion },
+                            1
+                        );
+                    }
+                }
 
-        case 'asr_session_start':
-        case 'asr_audio_chunk':
-        case 'asr_session_stop':
-          await this.processDeviceEvent(deviceId, type, payload, Bot);
-          break;
+                return await this.sendCommand(
+                    deviceId,
+                    'display',
+                    {
+                        text: msg,
+                        x: 0,
+                        y: 0,
+                        font_size: 16,
+                        wrap: true,
+                        spacing: 2
+                    },
+                    1
+                );
+            },
 
-        case 'log':
-          const { level = 'info', message, data: logData } = payload;
-          this.addDeviceLog(deviceId, level, message, logData);
-          break;
+            sendCommand: async (cmd, params = {}, priority = 0) =>
+                await this.sendCommand(deviceId, cmd, params, priority),
 
-        case 'heartbeat':
-          ws.isAlive = true;
-          ws.lastPong = Date.now();
+            display: async (text, options = {}) =>
+                await this.sendCommand(
+                    deviceId,
+                    'display',
+                    {
+                        text,
+                        x: options.x || 0,
+                        y: options.y || 0,
+                        font_size: options.font_size || 16,
+                        wrap: options.wrap !== false,
+                        spacing: options.spacing || 2
+                    },
+                    1
+                ),
 
-          const dev = devices.get(deviceId);
-          if (dev) {
-            dev.last_seen = Date.now();
-            dev.online = true;
-            if (payload.status) dev.status = payload.status;
-          }
+            emotion: async (emotionName) => {
+                if (!SUPPORTED_EMOTIONS.includes(emotionName)) {
+                    throw new Error(`未知表情: ${emotionName}`);
+                }
+                return await this.sendCommand(
+                    deviceId,
+                    'display_emotion',
+                    { emotion: emotionName },
+                    1
+                );
+            },
 
-          this.updateDeviceStats(deviceId, 'heartbeat');
+            clear: async () =>
+                await this.sendCommand(deviceId, 'display_clear', {}, 1),
 
-          const queuedCommands = deviceCommands.get(deviceId) || [];
-          const commandsToSend = queuedCommands.splice(0, 3);
+            camera: {
+                startStream: async (options = {}) =>
+                    await this.sendCommand(deviceId, 'camera_start_stream', {
+                        fps: options.fps || 10,
+                        quality: options.quality || 12,
+                        resolution: options.resolution || 'VGA'
+                    }, 1),
+                stopStream: async () =>
+                    await this.sendCommand(deviceId, 'camera_stop_stream', {}, 1),
+                capture: async () =>
+                    await this.sendCommand(deviceId, 'camera_capture', {}, 1),
+            },
 
-          ws.send(JSON.stringify({
-            type: 'heartbeat_response',
-            commands: commandsToSend,
+            microphone: {
+                getStatus: async () =>
+                    await this.sendCommand(deviceId, 'microphone_status', {}, 0),
+                start: async () =>
+                    await this.sendCommand(deviceId, 'microphone_start', {}, 1),
+                stop: async () =>
+                    await this.sendCommand(deviceId, 'microphone_stop', {}, 1),
+            },
+
+            reboot: async () =>
+                await this.sendCommand(deviceId, 'reboot', {}, 99),
+
+            hasCapability: (cap) => hasCapability(deviceInfo, cap),
+
+            getStatus: () => {
+                const device = devices.get(deviceId);
+                return {
+                    device_id: deviceId,
+                    device_name: deviceInfo.device_name,
+                    device_type: deviceInfo.device_type,
+                    online: device?.online || false,
+                    last_seen: device?.last_seen,
+                    capabilities: deviceInfo.capabilities,
+                    metadata: deviceInfo.metadata,
+                    stats: device?.stats || Bot[deviceId].stats
+                };
+            },
+
+            getStats: () =>
+                deviceStats.get(deviceId) || this.initDeviceStats(deviceId)
+        };
+
+        return Bot[deviceId];
+    }
+
+    /**
+     * 发送命令到设备
+     * @param {string} deviceId - 设备ID
+     * @param {string} command - 命令名称
+     * @param {Object} parameters - 命令参数
+     * @param {number} priority - 优先级
+     * @returns {Promise<Object>} 命令结果
+     */
+    async sendCommand(deviceId, command, parameters = {}, priority = 0) {
+        const device = devices.get(deviceId);
+        if (!device) {
+            throw new Error('设备未找到');
+        }
+
+        const cmd = {
+            id: generateCommandId(),
+            command,
+            parameters,
+            priority,
             timestamp: Date.now()
-          }));
-          break;
+        };
 
-        case 'command_result':
-          await this.processDeviceEvent(deviceId, type, payload, Bot);
-          break;
+        this.updateDeviceStats(deviceId, 'command');
 
-        default:
-          ws.send(JSON.stringify({ type: 'error', message: `未知类型: ${type}` }));
-      }
-    } catch (error) {
-      BotUtil.makeLog('error', `[WS处理失败] ${error.message}`, 'DeviceManager');
-      try {
-        ws.send(JSON.stringify({ type: 'error', message: error.message }));
-      } catch (e) {}
+        const ws = deviceWebSockets.get(deviceId);
+
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            return new Promise((resolve) => {
+                const timeout = setTimeout(() => {
+                    commandCallbacks.delete(cmd.id);
+                    resolve({ success: true, command_id: cmd.id, timeout: true });
+                }, SYSTEM_CONFIG.commandTimeout);
+
+                commandCallbacks.set(cmd.id, (result) => {
+                    clearTimeout(timeout);
+                    resolve({ success: true, command_id: cmd.id, result });
+                });
+
+                try {
+                    ws.send(JSON.stringify({ type: 'command', command: cmd }));
+                    device.stats.commands_executed++;
+                } catch (e) {
+                    clearTimeout(timeout);
+                    commandCallbacks.delete(cmd.id);
+                    resolve({ success: false, command_id: cmd.id, error: e.message });
+                }
+            });
+        }
+
+        const queue = deviceCommands.get(deviceId) || [];
+        if (priority > 0) {
+            queue.unshift(cmd);
+        } else {
+            queue.push(cmd);
+        }
+
+        if (queue.length > SYSTEM_CONFIG.messageQueueSize) {
+            queue.length = SYSTEM_CONFIG.messageQueueSize;
+        }
+
+        deviceCommands.set(deviceId, queue);
+        device.stats.commands_executed++;
+
+        return { success: true, command_id: cmd.id, queued: queue.length };
     }
-  }
+
+    /**
+     * 处理设备事件
+     * @param {string} deviceId - 设备ID
+     * @param {string} eventType - 事件类型
+     * @param {Object} eventData - 事件数据
+     * @param {Object} Bot - Bot实例
+     * @returns {Promise<Object>} 处理结果
+     */
+    async processDeviceEvent(deviceId, eventType, eventData = {}, Bot) {
+        try {
+            if (!devices.has(deviceId)) {
+                if (eventType === 'register') {
+                    return await this.registerDevice(
+                        { device_id: deviceId, ...eventData },
+                        Bot
+                    );
+                }
+                return { success: false, error: '设备未注册' };
+            }
+
+            const device = devices.get(deviceId);
+            device.last_seen = Date.now();
+            device.online = true;
+            device.stats.messages_received++;
+
+            this.updateDeviceStats(deviceId, 'message');
+
+            switch (eventType) {
+                case 'log': {
+                    const { level = 'info', message, data: logData } = eventData;
+                    this.addDeviceLog(deviceId, level, message, logData);
+                    break;
+                }
+
+                case 'command_result': {
+                    const { command_id, result } = eventData;
+                    const callback = commandCallbacks.get(command_id);
+                    if (callback) {
+                        callback(result);
+                        commandCallbacks.delete(command_id);
+                    }
+                    break;
+                }
+
+                case 'asr_session_start':
+                    return await this.handleASRSessionStart(deviceId, eventData);
+
+                case 'asr_audio_chunk':
+                    return await this.handleASRAudioChunk(deviceId, eventData);
+
+                case 'asr_session_stop':
+                    return await this.handleASRSessionStop(deviceId, eventData);
+
+                default:
+                    Bot.em(`device.${eventType}`, {
+                        post_type: 'device',
+                        event_type: eventType,
+                        device_id: deviceId,
+                        device_type: device.device_type,
+                        device_name: device.device_name,
+                        event_data: eventData,
+                        self_id: deviceId,
+                        time: Math.floor(Date.now() / 1000)
+                    });
+            }
+
+            return { success: true };
+
+        } catch (e) {
+            this.updateDeviceStats(deviceId, 'error');
+            return { success: false, error: e.message };
+        }
+    }
+
+    /**
+     * 处理WebSocket消息
+     * @param {WebSocket} ws - WebSocket实例
+     * @param {Object} data - 消息数据
+     * @param {Object} Bot - Bot实例
+     * @returns {Promise<void>}
+     */
+    async processWebSocketMessage(ws, data, Bot) {
+        try {
+            const { type, device_id, ...payload } = data;
+            const deviceId = device_id || ws.device_id || 'unknown';
+
+            if (type !== 'heartbeat' && type !== 'asr_audio_chunk') {
+                BotUtil.makeLog('info',
+                    `📨 [WebSocket] 收到消息: type="${type}", device_id="${deviceId}"`,
+                    deviceId
+                );
+            }
+
+            if (!type) {
+                BotUtil.makeLog('error',
+                    `❌ [WebSocket] 消息格式错误，缺少type字段`,
+                    deviceId
+                );
+                ws.send(JSON.stringify({
+                    type: 'error',
+                    message: '消息格式错误：缺少type字段'
+                }));
+                return;
+            }
+
+            switch (type) {
+                case 'register': {
+                    BotUtil.makeLog('info', `🔌 [WebSocket] 设备注册请求`, deviceId);
+                    const device = await this.registerDevice(
+                        { device_id: deviceId, ...payload },
+                        Bot,
+                        ws
+                    );
+                    ws.send(JSON.stringify({
+                        type: 'register_response',
+                        success: true,
+                        device
+                    }));
+                    break;
+                }
+
+                case 'event':
+                case 'data': {
+                    const eventType = payload.data_type || payload.event_type || type;
+                    const eventData = payload.data || payload.event_data || payload;
+                    await this.processDeviceEvent(deviceId, eventType, eventData, Bot);
+                    break;
+                }
+
+                case 'asr_session_start':
+                case 'asr_audio_chunk':
+                case 'asr_session_stop':
+                    await this.processDeviceEvent(deviceId, type, payload, Bot);
+                    break;
+
+                case 'log': {
+                    const { level = 'info', message, data: logData } = payload;
+                    this.addDeviceLog(deviceId, level, message, logData);
+                    break;
+                }
+
+                case 'heartbeat': {
+                    ws.isAlive = true;
+                    ws.lastPong = Date.now();
+
+                    const device = devices.get(deviceId);
+                    if (device) {
+                        device.last_seen = Date.now();
+                        device.online = true;
+                        if (payload.status) {
+                            device.status = payload.status;
+                        }
+                    }
+
+                    this.updateDeviceStats(deviceId, 'heartbeat');
+
+                    const queued = deviceCommands.get(deviceId) || [];
+                    const toSend = queued.splice(0, 3);
+
+                    ws.send(JSON.stringify({
+                        type: 'heartbeat_response',
+                        commands: toSend,
+                        timestamp: Date.now()
+                    }));
+                    break;
+                }
+
+                case 'command_result':
+                    await this.processDeviceEvent(deviceId, type, payload, Bot);
+                    break;
+
+                default:
+                    ws.send(JSON.stringify({
+                        type: 'error',
+                        message: `未知消息类型: ${type}`
+                    }));
+            }
+        } catch (e) {
+            BotUtil.makeLog('error',
+                `❌ [WebSocket] 处理消息失败: ${e.message}`,
+                ws.device_id
+            );
+            try {
+                ws.send(JSON.stringify({
+                    type: 'error',
+                    message: e.message
+                }));
+            } catch (sendErr) {
+                // 忽略发送错误
+            }
+        }
+    }
+
+    /**
+     * 检查离线设备
+     * @param {Object} Bot - Bot实例
+     */
+    checkOfflineDevices(Bot) {
+        const timeout = SYSTEM_CONFIG.heartbeatTimeout * 1000;
+        const now = Date.now();
+
+        for (const [id, device] of devices) {
+            if (device.online && now - device.last_seen > timeout) {
+                const ws = deviceWebSockets.get(id);
+
+                if (ws) {
+                    this.handleDeviceDisconnect(id, ws);
+                } else {
+                    device.online = false;
+
+                    BotUtil.makeLog('info',
+                        `🔴 [设备离线] ${device.device_name} (${id})`,
+                        device.device_name
+                    );
+
+                    Bot.em('device.offline', {
+                        post_type: 'device',
+                        event_type: 'offline',
+                        device_id: id,
+                        device_type: device.device_type,
+                        device_name: device.device_name,
+                        self_id: id,
+                        time: Math.floor(Date.now() / 1000)
+                    });
+                }
+            }
+        }
+    }
+
+    /**
+     * 获取设备列表
+     * @returns {Array} 设备列表
+     */
+    getDeviceList() {
+        return Array.from(devices.values()).map(d => ({
+            device_id: d.device_id,
+            device_name: d.device_name,
+            device_type: d.device_type,
+            online: d.online,
+            last_seen: d.last_seen,
+            capabilities: d.capabilities,
+            stats: d.stats
+        }));
+    }
+
+    /**
+     * 获取设备信息
+     * @param {string} deviceId - 设备ID
+     * @returns {Object|null} 设备信息
+     */
+    getDevice(deviceId) {
+        const device = devices.get(deviceId);
+        if (!device) return null;
+
+        return {
+            ...device,
+            device_stats: deviceStats.get(deviceId)
+        };
+    }
 }
 
+// ==================== 创建设备管理器实例 ====================
 const deviceManager = new DeviceManager();
 
-// ============================================================
-// HTTP API路由
-// ============================================================
+// ==================== 导出模块 ====================
 export default {
-  name: 'device',
-  dsc: '设备管理API（支持火山引擎实时ASR v4.0）',
-  priority: 90,
-  routes: [
-    {
-      method: 'POST',
-      path: '/api/device/register',
-      handler: async (req, res, Bot) => {
-        try {
-          const device = await deviceManager.registerDevice({
-            ...req.body,
-            ip_address: req.ip || req.socket.remoteAddress
-          }, Bot);
-          res.json({ success: true, device_id: device.device_id });
-        } catch (error) {
-          res.status(400).json({ success: false, message: error.message });
-        }
-      }
+    name: 'device',
+    dsc: '设备管理API v30.0 - 路径修复版',
+    priority: 90,
+
+    routes: [
+        {
+            method: 'POST',
+            path: '/api/device/register',
+            handler: async (req, res, Bot) => {
+                try {
+                    const device = await deviceManager.registerDevice(
+                        {
+                            ...req.body,
+                            ip_address: req.ip || req.socket.remoteAddress
+                        },
+                        Bot
+                    );
+                    res.json({ success: true, device_id: device.device_id });
+                } catch (e) {
+                    res.status(400).json({ success: false, message: e.message });
+                }
+            }
+        },
+
+        {
+            method: 'GET',
+            path: '/api/devices',
+            handler: async (req, res) => {
+                const list = deviceManager.getDeviceList();
+                res.json({ success: true, devices: list, count: list.length });
+            }
+        },
+
+        {
+            method: 'GET',
+            path: '/api/device/:deviceId',
+            handler: async (req, res) => {
+                const device = deviceManager.getDevice(req.params.deviceId);
+                if (device) {
+                    res.json({ success: true, device });
+                } else {
+                    res.status(404).json({ success: false, message: '设备未找到' });
+                }
+            }
+        },
+
+        {
+            method: 'GET',
+            path: '/api/device/:deviceId/asr/sessions',
+            handler: async (req, res) => {
+                const sessions = Array.from(asrSessions.entries())
+                    .filter(([_, s]) => s.deviceId === req.params.deviceId)
+                    .map(([sid, s]) => ({
+                        session_id: sid,
+                        device_id: s.deviceId,
+                        session_number: s.sessionNumber,
+                        total_chunks: s.totalChunks,
+                        total_bytes: s.totalBytes,
+                        started_at: s.startTime,
+                        elapsed: ((Date.now() - s.startTime) / 1000).toFixed(1),
+                    }));
+
+                res.json({ success: true, sessions, count: sessions.length });
+            }
+        },
+
+        {
+            method: 'GET',
+            path: '/api/device/:deviceId/asr/recordings',
+            handler: async (req, res) => {
+                try {
+                    const recordings = await getAudioFileList(
+                        deviceManager.AUDIO_SAVE_DIR,
+                        req.params.deviceId
+                    );
+
+                    res.json({
+                        success: true,
+                        recordings,
+                        count: recordings.length,
+                        total_size: recordings.reduce((s, r) => s + r.size, 0)
+                    });
+                } catch (e) {
+                    res.status(500).json({ success: false, message: e.message });
+                }
+            }
+        },
+
+        {
+            method: 'GET',
+            path: '/api/asr/recording/:filename',
+            handler: async (req, res) => {
+                try {
+                    const filename = req.params.filename;
+
+                    if (!filename.endsWith('.wav') || filename.includes('..')) {
+                        return res.status(400).json({
+                            success: false,
+                            message: '无效的文件名'
+                        });
+                    }
+
+                    const filepath = path.join(deviceManager.AUDIO_SAVE_DIR, filename);
+
+                    if (!fs.existsSync(filepath)) {
+                        return res.status(404).json({
+                            success: false,
+                            message: '文件不存在'
+                        });
+                    }
+
+                    res.setHeader('Content-Type', 'audio/wav');
+                    res.setHeader(
+                        'Content-Disposition',
+                        `attachment; filename="${filename}"`
+                    );
+
+                    fs.createReadStream(filepath).pipe(res);
+                } catch (e) {
+                    res.status(500).json({ success: false, message: e.message });
+                }
+            }
+        },
+    ],
+
+    ws: {
+        device: [
+            (ws, req, Bot) => {
+                BotUtil.makeLog('info',
+                    `🔌 [WebSocket] 新连接: ${req.socket.remoteAddress}`,
+                    'DeviceManager'
+                );
+
+                ws.on('message', msg => {
+                    try {
+                        const data = JSON.parse(msg);
+                        deviceManager.processWebSocketMessage(ws, data, Bot);
+                    } catch (e) {
+                        BotUtil.makeLog('error',
+                            `❌ [WebSocket] 消息解析失败: ${e.message}`,
+                            ws.device_id
+                        );
+                    }
+                });
+
+                ws.on('close', () => {
+                    if (ws.device_id) {
+                        deviceManager.handleDeviceDisconnect(ws.device_id, ws);
+                    } else {
+                        BotUtil.makeLog('info',
+                            `✓ [WebSocket] 连接关闭: ${req.socket.remoteAddress}`,
+                            'DeviceManager'
+                        );
+                    }
+                });
+
+                ws.on('error', (e) => {
+                    BotUtil.makeLog('error',
+                        `❌ [WebSocket] 错误: ${e.message}`,
+                        ws.device_id || 'unknown'
+                    );
+                });
+            }
+        ]
     },
 
-    {
-      method: 'GET',
-      path: '/api/devices',
-      handler: async (req, res) => {
-        const devices = deviceManager.getDeviceList();
-        res.json({ success: true, devices, count: devices.length });
-      }
+    init(app, Bot) {
+        StreamLoader.configureEmbedding({
+            enabled: false
+        });
+
+        deviceManager.cleanupInterval = setInterval(() => {
+            deviceManager.checkOfflineDevices(Bot);
+        }, 30000);
+
+        setInterval(() => {
+            const now = Date.now();
+            for (const [id, _] of commandCallbacks) {
+                const timestamp = parseInt(id.split('_')[0]);
+                if (now - timestamp > 60000) {
+                    commandCallbacks.delete(id);
+                }
+            }
+        }, 60000);
+
+        setInterval(() => {
+            const now = Date.now();
+            for (const [sessionId, session] of asrSessions) {
+                if (now - session.lastChunkTime > 5 * 60 * 1000) {
+                    try {
+                        const client = asrClients.get(session.deviceId);
+                        if (client) {
+                            client.endUtterance().catch(() => {});
+                        }
+                    } catch (e) {
+                        // 忽略错误
+                    }
+                    asrSessions.delete(sessionId);
+                }
+            }
+        }, 5 * 60 * 1000);
+
+        BotUtil.makeLog('info', '━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'DeviceManager');
+        BotUtil.makeLog('info', '⚡ [设备管理器] v30.0 初始化完成 - 路径修复版', 'DeviceManager');
+
+        if (VOLCENGINE_ASR_CONFIG.enabled) {
+            BotUtil.makeLog('info',
+                `✓ [火山ASR] 已启用（提供商: ${VOLCENGINE_ASR_CONFIG.provider}）`,
+                'DeviceManager'
+            );
+        }
+
+        if (VOLCENGINE_TTS_CONFIG.enabled) {
+            BotUtil.makeLog('info',
+                `✓ [火山TTS] 已启用（提供商: ${VOLCENGINE_TTS_CONFIG.provider}，语音: ${VOLCENGINE_TTS_CONFIG.voiceType}）`,
+                'DeviceManager'
+            );
+        }
+
+        if (AI_CONFIG.enabled) {
+            BotUtil.makeLog('info',
+                `✓ [设备AI] 已启用（模型: ${AI_CONFIG.chatModel}）`,
+                'DeviceManager'
+            );
+        }
+
+        BotUtil.makeLog('info', '━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'DeviceManager');
     },
 
-    {
-      method: 'GET',
-      path: '/api/device/:deviceId',
-      handler: async (req, res) => {
-        const device = deviceManager.getDevice(req.params.deviceId);
-        if (device) {
-          res.json({ success: true, device });
-        } else {
-          res.status(404).json({ success: false, message: '设备未找到' });
+    destroy() {
+        if (deviceManager.cleanupInterval) {
+            clearInterval(deviceManager.cleanupInterval);
         }
-      }
-    },
 
-    {
-      method: 'GET',
-      path: '/api/device/:deviceId/asr/sessions',
-      handler: async (req, res) => {
-        const sessions = Array.from(asrSessions.entries())
-          .filter(([_, session]) => session.deviceId === req.params.deviceId)
-          .map(([sessionId, session]) => ({
-            session_id: sessionId,
-            device_id: session.deviceId,
-            connected: session.connected,
-            total_chunks: session.totalChunks,
-            started_at: session.startTime,
-            elapsed: ((Date.now() - session.startTime) / 1000).toFixed(1),
-            log_id: session.logId
-          }));
-        res.json({ success: true, sessions, count: sessions.length });
-      }
-    }
-  ],
-
-  // ========== WebSocket路由 ==========
-  ws: {
-    device: [(ws, req, Bot) => {
-      BotUtil.makeLog('info', `[WebSocket连接] ${req.socket.remoteAddress}`, 'DeviceManager');
-
-      ws.on('message', msg => {
-        try {
-          const data = JSON.parse(msg);
-          deviceManager.processWebSocketMessage(ws, data, Bot);
-        } catch (error) {
-          BotUtil.makeLog('error', `[WS解析失败] ${error.message}`, 'DeviceManager');
+        for (const [id, ws] of deviceWebSockets) {
+            try {
+                clearInterval(ws.heartbeatTimer);
+                if (ws.readyState === 1) {
+                    ws.close();
+                } else {
+                    ws.terminate();
+                }
+            } catch (e) {
+                // 忽略错误
+            }
         }
-      });
 
-      ws.on('close', () => {
-        if (ws.device_id) {
-          deviceManager.handleDeviceDisconnect(ws.device_id, ws);
+        for (const [deviceId, client] of asrClients) {
+            try {
+                client.destroy();
+            } catch (e) {
+                // 忽略错误
+            }
         }
-      });
 
-      ws.on('error', (error) => {
-        BotUtil.makeLog('error', `[WS错误] ${error.message}`, 'DeviceManager');
-      });
-    }]
-  },
-
-  // ========== 模块初始化 ==========
-  init(app, Bot) {
-    deviceManager.cleanupInterval = setInterval(() => {
-      deviceManager.checkOfflineDevices(Bot);
-    }, 30000);
-
-    setInterval(() => {
-      const now = Date.now();
-      for (const [id, callback] of commandCallbacks) {
-        const timestamp = parseInt(id.split('_')[0]);
-        if (now - timestamp > 60000) {
-          commandCallbacks.delete(id);
+        for (const [deviceId, client] of ttsClients) {
+            try {
+                client.destroy();
+            } catch (e) {
+                // 忽略错误
+            }
         }
-      }
-    }, 60000);
 
-    // 清理过期的ASR会话
-    setInterval(() => {
-      deviceManager.cleanupStaleASRSessions();
-    }, 5 * 60 * 1000);
-
-    BotUtil.makeLog('info', '[设备管理器] 初始化完成（支持火山引擎实时ASR v4.0）', 'DeviceManager');
-    
-    if (VOLCENGINE_ASR_CONFIG.enabled) {
-      BotUtil.makeLog('info', '[火山引擎ASR] 已启用', 'DeviceManager');
-    } else {
-      BotUtil.makeLog('warn', '[火山引擎ASR] 未启用', 'DeviceManager');
+        asrSessions.clear();
     }
-  },
-
-  // ========== 模块清理 ==========
-  destroy() {
-    if (deviceManager.cleanupInterval) {
-      clearInterval(deviceManager.cleanupInterval);
-    }
-
-    for (const [id, ws] of deviceWebSockets) {
-      try {
-        clearInterval(ws.heartbeatTimer);
-        ws.close();
-      } catch (e) {}
-    }
-
-    // 关闭所有ASR会话
-    for (const [sessionId, session] of asrSessions) {
-      session.close().catch(() => {});
-    }
-    asrSessions.clear();
-
-    BotUtil.makeLog('info', '[设备管理器] 已清理', 'DeviceManager');
-  }
 };

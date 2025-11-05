@@ -42,6 +42,7 @@ api/**
 !api/plugin.js
 !api/stdin.js
 !api/write.js
+!api/config.js
 
 !events
 events/**

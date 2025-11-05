@@ -1,6 +1,6 @@
 import path from 'path';
 import fs from 'fs';
-import AIStream from '../../lib/aistream/base.js';
+import AIStream from '../../lib/aistream/aistream.js';
 import BotUtil from '../../lib/common/util.js';
 
 const _path = process.cwd();
