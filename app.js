@@ -265,6 +265,78 @@ class DependencyManager {
       throw error;
     }
   }
+
+  /**
+   * 扫描并安装插件依赖（plugins/** 和 renderers/**）
+   * - 若插件目录存在 package.json 且有依赖，自动检测 node_modules 是否齐全
+   * - 缺失则执行 {manager} install（在插件子目录下）
+   * - 失败会抛错，避免无限卡死
+   */
+  async ensurePluginDependencies(rootDir = process.cwd()) {
+    const manager = await this.detectPackageManager();
+    const pluginGlobs = ['plugins', 'renderers'];
+
+    const dirs = [];
+    for (const base of pluginGlobs) {
+      const dir = path.join(rootDir, base);
+      try {
+        const entries = await fs.readdir(dir, { withFileTypes: true });
+        for (const d of entries) {
+          if (d.isDirectory()) dirs.push(path.join(dir, d.name));
+        }
+      } catch { /* ignore */ }
+    }
+
+    for (const d of dirs) {
+      const pkgPath = path.join(d, 'package.json');
+      const nodeModulesPath = path.join(d, 'node_modules');
+      try {
+        await fs.access(pkgPath);
+      } catch {
+        continue;
+      }
+
+      let pkg;
+      try {
+        pkg = JSON.parse(await fs.readFile(pkgPath, 'utf8'));
+      } catch (e) {
+        await this.logger.warning(`插件 package.json 无法解析: ${pkgPath} (${e.message})`);
+        continue;
+      }
+
+      const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+      const depNames = Object.keys(deps);
+      if (depNames.length === 0) continue;
+
+      const missing = [];
+      for (const dep of depNames) {
+        try {
+          const p = path.join(nodeModulesPath, dep);
+          const s = await fs.stat(p);
+          if (!s.isDirectory()) missing.push(dep);
+        } catch {
+          missing.push(dep);
+        }
+      }
+
+      if (missing.length > 0) {
+        await this.logger.warning(`插件依赖缺失 [${d}]: ${missing.join(', ')}`);
+        try {
+          await this.logger.log(`为插件安装依赖 (${manager}): ${d}`);
+          // 子目录安装并设定合理超时与缓冲
+          await execAsync(`${manager} install`, {
+            cwd: d,
+            maxBuffer: 1024 * 1024 * 16,
+            timeout: 10 * 60 * 1000
+          });
+          await this.logger.success(`插件依赖安装完成: ${d}`);
+        } catch (err) {
+          await this.logger.error(`插件依赖安装失败: ${d} (${err.message})`);
+          throw err;
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -393,6 +465,9 @@ class Bootstrap {
       packageJsonPath,
       nodeModulesPath
     });
+
+    // 新增：插件依赖检查与安装，防止加载期卡死
+    await this.dependencyManager.ensurePluginDependencies(process.cwd());
 
     /** 加载动态imports */
     await this.loadDynamicImports(packageJsonPath);

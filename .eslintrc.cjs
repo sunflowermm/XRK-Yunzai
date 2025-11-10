@@ -1,5 +1,3 @@
-const { StrictMode } = require("react");
-
 module.exports = {
   env: {
     es2025: true,
