@@ -3,39 +3,49 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>XRK-Yunzai葵崽 API控制中心</title>
+    <title>XRK-AGT葵子 API控制中心</title>
+    <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/normalize/8.0.1/normalize.min.css">
     <link rel="stylesheet" href="styles.css">
-    <!-- 添加代码编辑器样式 -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/monokai.min.css">
 </head>
 <body>
+    <canvas id="bgParticles"></canvas>
     <div class="app-container">
-        <!-- 侧边栏 -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div class="logo">
                     <div class="logo-icon">🤖</div>
-                    <span>葵崽API Center</span>
+                    <span>葵子API Center</span>
                 </div>
                 <button class="theme-toggle" id="themeToggle">
                     <div class="theme-toggle-thumb"></div>
                 </button>
             </div>
 
-            <a href="#" class="home-button" id="homeButton">
-                <span class="home-button-icon">🏠</span>
-                <span>返回首页</span>
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active" data-page="home" id="navHome">
+                    <span class="nav-icon"></span>
+                    <span class="nav-text">返回首页</span>
             </a>
+                <a href="#" class="nav-item" data-page="chat" id="navChat">
+                    <span class="nav-icon"></span>
+                    <span class="nav-text">葵宝聊天</span>
+                </a>
+                <a href="#" class="nav-item" data-page="config" id="navConfig">
+                    <span class="nav-icon"></span>
+                    <span class="nav-text">配置管理器</span>
+                </a>
+                <a href="#" class="nav-item" data-page="api" id="navApi">
+                    <span class="nav-icon"></span>
+                    <span class="nav-text">API调试</span>
+            </a>
+            </nav>
 
-            <div class="api-groups-container" id="apiGroups">
+            <div class="api-groups-container" id="apiGroups" style="display: none;">
                 <!-- API groups will be dynamically loaded here -->
             </div>
         </aside>
 
-        <!-- 主内容 -->
         <main class="main-content">
-            <!-- 头部 -->
             <header class="header">
                 <div class="header-content">
                     <div class="api-key-section">
@@ -54,49 +64,21 @@
                 </div>
             </header>
 
-            <!-- 内容区 -->
             <div class="content" id="content">
-                <!-- 欢迎屏幕 -->
-                <div class="welcome-screen">
-                    <div class="welcome-icon">🚀</div>
-                    <h1 class="welcome-title">XRK-Yunzai葵崽 API控制中心</h1>
-                    <p class="welcome-desc">强大的机器人管理与开发平台</p>
-
-                    <div class="stats-grid">
-                        <div class="stat-card">
-                            <div class="stat-icon">🤖</div>
-                            <div class="stat-value" id="statBots">-</div>
-                            <div class="stat-label">在线机器人</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon">📱</div>
-                            <div class="stat-value" id="statDevices">-</div>
-                            <div class="stat-label">连接设备</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon">🧩</div>
-                            <div class="stat-value" id="statPlugins">-</div>
-                            <div class="stat-label">活跃插件</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon">⏱️</div>
-                            <div class="stat-value" id="statUptime">-</div>
-                            <div class="stat-label">运行时间</div>
-                        </div>
+                <div class="welcome-screen" id="systemStatusPage">
+                    <div class="system-status-header">
+                        <h1 class="welcome-title">系统状态监控</h1>
+                        <p class="welcome-desc">实时监控系统运行状态</p>
                     </div>
-
-                    <div class="quick-actions" id="quickActions">
-                        <!-- Quick actions will be dynamically loaded here -->
+                    <div class="system-status-grid" id="systemStatusGrid">
                     </div>
                 </div>
             </div>
         </main>
     </div>
 
-    <!-- 遮罩层 -->
     <div class="overlay" id="overlay"></div>
 
-    <!-- 移动端悬浮球 -->
     <button class="floating-btn" id="floatingBtn">
         <svg viewBox="0 0 100 100" class="sunflower-icon">
             <circle cx="50" cy="50" r="20" fill="#FFD700"/>
@@ -117,20 +99,11 @@
         </svg>
     </button>
 
-    <!-- Toast容器 -->
     <div id="toastContainer"></div>
 
-    <!-- 添加代码编辑器脚本 -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/javascript/javascript.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/edit/closebrackets.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/edit/matchbrackets.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/fold/foldcode.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/fold/foldgutter.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/fold/brace-fold.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/lint/lint.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/lint/json-lint.min.js"></script>
     
+
+    <script src="https://cdn.bootcdn.net/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
