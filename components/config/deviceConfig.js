@@ -10,7 +10,7 @@ export const AI_CONFIG = {
     enabled: true,
     baseUrl: 'https://api.gptgod.online/v1',
     apiKey: 'sk-kXTC6vIMUnNrYIJhSmOpZMPZHDQuDYWCCIOHdh1qZmxpvqKC',
-    chatModel: 'gemini-exp-1206',
+    chatModel: 'deepseek-r1-0528',
     temperature: 0.8,
     max_tokens: 2000,
     top_p: 0.9,
@@ -32,9 +32,11 @@ export const VOLCENGINE_TTS_CONFIG = {
     voiceType: 'zh_female_vv_uranus_bigtts',
     encoding: 'pcm',
     sampleRate: 16000,
-    speechRate: 0,
+    speechRate: 5,
     loudnessRate: 0,
-    emotion: 'happy'
+    emotion: 'happy',
+    chunkMs: 128,
+    chunkDelayMs: 5
 };
 
 // ==================== 火山ASR配置 ====================

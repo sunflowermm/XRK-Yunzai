@@ -9,18 +9,28 @@ export default class SystemConfig extends ConfigBase {
     super({
       name: 'system',
       displayName: '系统配置',
-      description: 'XRK-Yunzai 系统配置管理',
+      description: 'XRK-AGT 系统配置管理',
       filePath: '', // 系统配置管理多个文件，此处留空
       fileType: 'yaml'
     });
 
+    // 辅助函数：生成基于端口的动态路径
+    const getConfigPath = (configName) => {
+      return (cfg) => {
+        // 从 cfg 获取端口，路径格式：data/server_bots/{port}/{name}.yaml
+        const port = cfg?._port || cfg?.server?.server?.port || 8086;
+        return port ? `data/server_bots/${port}/${configName}.yaml` : `config/config/${configName}.yaml`;
+      };
+    };
+
     // 定义所有系统配置文件
+    // 使用动态路径函数，基于端口获取正确路径
     this.configFiles = {
       bot: {
         name: 'bot',
         displayName: '机器人配置',
         description: '机器人核心配置，包括日志、文件监听、Puppeteer等',
-        filePath: 'config/config/bot.yaml',
+        filePath: getConfigPath('bot'),
         fileType: 'yaml',
         schema: {
           required: ['log_level'],
@@ -207,7 +217,7 @@ export default class SystemConfig extends ConfigBase {
         name: 'server',
         displayName: '服务器配置',
         description: 'HTTP/HTTPS服务器、反向代理、SSL证书等配置',
-        filePath: 'config/config/server.yaml',
+        filePath: getConfigPath('server'),
         fileType: 'yaml',
         schema: {
           fields: {
@@ -500,11 +510,45 @@ export default class SystemConfig extends ConfigBase {
                     }
                   }
                 },
+                hsts: {
+                  type: 'object',
+                  label: 'HSTS配置',
+                  component: 'SubForm',
+                  fields: {
+                    enabled: {
+                      type: 'boolean',
+                      label: '启用HSTS',
+                      default: false,
+                      component: 'Switch'
+                    },
+                    maxAge: {
+                      type: 'number',
+                      label: '有效期',
+                      description: '有效期（秒），31536000 = 1年',
+                      min: 0,
+                      default: 31536000,
+                      component: 'InputNumber'
+                    },
+                    includeSubDomains: {
+                      type: 'boolean',
+                      label: '包含子域名',
+                      default: true,
+                      component: 'Switch'
+                    },
+                    preload: {
+                      type: 'boolean',
+                      label: '允许预加载',
+                      default: false,
+                      component: 'Switch'
+                    }
+                  }
+                },
                 hiddenFiles: {
                   type: 'array',
                   label: '隐藏文件模式',
+                  description: '匹配这些模式的文件将返回404，注意：这些模式不会影响 /api/* 路径',
                   itemType: 'string',
-                  default: ['^\\..*', 'node_modules', '\\.git', '\\.env', 'config/', 'private/'],
+                  default: ['^\\..*', 'node_modules', '\\.git', '\\.env', '^/config/', '^/private/'],
                   component: 'Tags'
                 }
               }
@@ -531,7 +575,7 @@ export default class SystemConfig extends ConfigBase {
                   type: 'array',
                   label: '允许的方法',
                   itemType: 'string',
-                  default: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+                  default: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD'],
                   component: 'MultiSelect'
                 },
                 headers: {
@@ -792,7 +836,7 @@ export default class SystemConfig extends ConfigBase {
         name: 'db',
         displayName: '数据库配置',
         description: 'Sequelize数据库连接配置',
-        filePath: 'config/config/db.yaml',
+        filePath: getConfigPath('db'),
         fileType: 'yaml',
         schema: {
           required: ['dialect'],
@@ -824,7 +868,7 @@ export default class SystemConfig extends ConfigBase {
         name: 'device',
         displayName: '设备管理配置',
         description: '设备管理的核心参数配置',
-        filePath: 'config/config/device.yaml',
+        filePath: getConfigPath('device'),
         fileType: 'yaml',
         schema: {
           fields: {
@@ -888,7 +932,7 @@ export default class SystemConfig extends ConfigBase {
         name: 'group',
         displayName: '群组配置',
         description: '群聊相关配置',
-        filePath: 'config/config/group.yaml',
+        filePath: getConfigPath('group'),
         fileType: 'yaml',
         schema: {
           fields: {
@@ -925,7 +969,7 @@ export default class SystemConfig extends ConfigBase {
                   type: 'array',
                   label: '机器人别名',
                   itemType: 'string',
-                  default: ['葵崽', '葵葵'],
+                  default: ['葵子', '葵葵'],
                   component: 'Tags'
                 },
                 addPrivate: {
@@ -959,7 +1003,7 @@ export default class SystemConfig extends ConfigBase {
         name: 'notice',
         displayName: '通知配置',
         description: '各种通知服务配置',
-        filePath: 'config/config/notice.yaml',
+        filePath: getConfigPath('notice'),
         fileType: 'yaml',
         schema: {
           fields: {
@@ -991,7 +1035,7 @@ export default class SystemConfig extends ConfigBase {
         name: 'other',
         displayName: '其他配置',
         description: '其他杂项配置',
-        filePath: 'config/config/other.yaml',
+        filePath: getConfigPath('other'),
         fileType: 'yaml',
         schema: {
           fields: {
@@ -1077,7 +1121,7 @@ export default class SystemConfig extends ConfigBase {
         name: 'redis',
         displayName: 'Redis配置',
         description: 'Redis服务器连接配置',
-        filePath: 'config/config/redis.yaml',
+        filePath: getConfigPath('redis'),
         fileType: 'yaml',
         schema: {
           required: ['host', 'port', 'db'],
@@ -1123,7 +1167,7 @@ export default class SystemConfig extends ConfigBase {
         name: 'renderer',
         displayName: '渲染器配置',
         description: '渲染后端配置',
-        filePath: 'config/config/renderer.yaml',
+        filePath: getConfigPath('renderer'),
         fileType: 'yaml',
         schema: {
           fields: {
@@ -1142,7 +1186,7 @@ export default class SystemConfig extends ConfigBase {
         name: 'aistream',
         displayName: '工作流系统配置',
         description: 'AI工作流系统配置',
-        filePath: 'config/config/aistream.yaml',
+        filePath: getConfigPath('aistream'),
         fileType: 'yaml',
         schema: {
           fields: {
@@ -1236,22 +1280,36 @@ export default class SystemConfig extends ConfigBase {
 
   /**
    * 读取指定配置文件
-   * @param {string} name - 配置名称
+   * @param {string} [name] - 子配置名称（可选，如果不提供则返回配置列表）
    * @returns {Promise<Object>}
    */
   async read(name) {
+    // 如果没有提供子配置名称，返回配置列表信息
+    if (!name) {
+      return {
+        name: this.name,
+        displayName: this.displayName,
+        description: this.description,
+        configs: this.getConfigList()
+      };
+    }
+    
+    // 读取指定的子配置
     const instance = this.getConfigInstance(name);
     return await instance.read();
   }
 
   /**
    * 写入指定配置文件
-   * @param {string} name - 配置名称
+   * @param {string} name - 子配置名称
    * @param {Object} data - 配置数据
    * @param {Object} options - 写入选项
    * @returns {Promise<boolean>}
    */
   async write(name, data, options = {}) {
+    if (!name) {
+      throw new Error('SystemConfig 写入需要指定子配置名称');
+    }
     const instance = this.getConfigInstance(name);
     return await instance.write(data, options);
   }
