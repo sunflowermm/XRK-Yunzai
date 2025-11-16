@@ -83,7 +83,7 @@ class DeviceManager {
         return client;
     }
 
-    // ==================== ASR会话处理 ====================
+    // ==================== ASR会话处理（优化版）====================
 
     /**
      * 处理ASR会话开始
@@ -218,7 +218,7 @@ class DeviceManager {
     }
 
     /**
-     * 处理ASR会话停止
+     * 处理ASR会话停止（优化版 - 不等待最终文本）
      * @param {string} deviceId - 设备ID
      * @param {Object} data - 会话数据
      * @returns {Promise<Object>} 处理结果
@@ -236,6 +236,12 @@ class DeviceManager {
             if (!session) {
                 return { success: true };
             }
+
+            // 避免重复处理同一会话停止
+            if (session.stopped) {
+                return { success: true };
+            }
+            session.stopped = true;
 
             if (session.asrStarted) {
                 const client = this._getASRClient(deviceId);
@@ -256,43 +262,9 @@ class DeviceManager {
                 }
             }
 
-            const maxWaitMs = VOLCENGINE_ASR_CONFIG.asrFinalTextWaitMs;
-            const checkIntervalMs = 50;
-            let waitCount = 0;
-            const maxChecks = Math.ceil(maxWaitMs / checkIntervalMs);
+            // ⭐ 关键改进：异步等待最终文本，不阻塞流程
+            this._waitForFinalTextAsync(deviceId, session);
 
-            BotUtil.makeLog('info', `⏳ [ASR] 等待最终结果...`, deviceId);
-
-            while (!session.finalText && waitCount < maxChecks) {
-                await new Promise(r => setTimeout(r, checkIntervalMs));
-                waitCount++;
-            }
-
-            if (session.finalText) {
-                const waitedMs = waitCount * checkIntervalMs;
-                BotUtil.makeLog('info',
-                    `✅ [ASR最终] "${session.finalText}" (等待${waitedMs}ms)`,
-                    deviceId
-                );
-            } else {
-                BotUtil.makeLog('warn',
-                    `⚠️ [ASR] 等待最终结果超时(${maxWaitMs}ms)`,
-                    deviceId
-                );
-            }
-
-            const finalText = session.finalText;
-
-            if (AI_CONFIG.enabled && finalText && finalText.trim()) {
-                await this._processAIResponse(deviceId, finalText);
-            } else if (AI_CONFIG.enabled && !finalText) {
-                BotUtil.makeLog('warn',
-                    '⚠️ [AI] 未获取到ASR最终文本，跳过AI处理',
-                    deviceId
-                );
-            }
-
-            asrSessions.delete(session_id);
             return { success: true };
 
         } catch (e) {
@@ -302,6 +274,61 @@ class DeviceManager {
             );
             return { success: false, error: e.message };
         }
+    }
+
+    /**
+     * 异步等待最终文本并处理AI（新增）
+     * @param {string} deviceId - 设备ID
+     * @param {Object} session - 会话对象
+     * @private
+     */
+    async _waitForFinalTextAsync(deviceId, session) {
+        const maxWaitMs = 3000;  // 最多等待3秒（减少等待时间）
+        const checkIntervalMs = 50;
+        let waitCount = 0;
+        const maxChecks = Math.ceil(maxWaitMs / checkIntervalMs);
+
+        while (!session.finalText && waitCount < maxChecks) {
+            await new Promise(r => setTimeout(r, checkIntervalMs));
+            waitCount++;
+        }
+
+        if (session.finalText) {
+            const waitedMs = waitCount * checkIntervalMs;
+            BotUtil.makeLog('info',
+                `✅ [ASR最终] "${session.finalText}" (等待${waitedMs}ms)`,
+                deviceId
+            );
+
+            // 将最终识别结果推送给前端设备
+            try {
+                const ws = deviceWebSockets.get(deviceId);
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'asr_final',
+                        device_id: deviceId,
+                        session_id: session.session_id,
+                        text: session.finalText
+                    }));
+                }
+            } catch { }
+
+            // 处理AI响应
+            if (AI_CONFIG.enabled && session.finalText.trim()) {
+                await this._processAIResponse(deviceId, session.finalText);
+            }
+        } else {
+            BotUtil.makeLog('warn',
+                `⚠️ [ASR] 等待最终结果超时(${maxWaitMs}ms)`,
+                deviceId
+            );
+            
+            // 超时也要通知设备端，避免卡住
+            await this._sendAIError(deviceId);
+        }
+
+        // 清理会话
+        asrSessions.delete(session.session_id);
     }
 
     // ==================== AI处理 ====================
@@ -323,9 +350,9 @@ class DeviceManager {
             );
 
             const deviceStream = StreamLoader.getStream('device');
-
             if (!deviceStream) {
                 BotUtil.makeLog('error', '❌ [AI] 设备工作流未加载', deviceId);
+                await this._sendAIError(deviceId);
                 return;
             }
 
@@ -334,6 +361,7 @@ class DeviceManager {
 
             if (!deviceBot) {
                 BotUtil.makeLog('error', '❌ [AI] 设备Bot未找到', deviceId);
+                await this._sendAIError(deviceId);
                 return;
             }
 
@@ -347,60 +375,48 @@ class DeviceManager {
 
             if (!aiResult) {
                 BotUtil.makeLog('warn', '⚠️ [AI] 工作流返回空结果', deviceId);
+                await this._sendAIError(deviceId);
                 return;
             }
 
             const aiTime = Date.now() - startTime;
-            BotUtil.makeLog('info',
-                `⚡ [AI性能] 处理耗时: ${aiTime}ms`,
-                deviceId
-            );
+            BotUtil.makeLog('info', `⚡ [AI性能] 处理耗时: ${aiTime}ms`, deviceId);
+            BotUtil.makeLog('info', `✅ [AI] 回复: ${aiResult.text || '(仅表情)'}`, deviceId);
 
-            BotUtil.makeLog('info',
-                `✅ [AI] 回复: ${aiResult.text || '(仅表情)'}`,
-                deviceId
-            );
-
+            // 显示表情
             if (aiResult.emotion) {
                 try {
-                    await deviceBot.emotion(aiResult.emotion);
-                    BotUtil.makeLog('info',
-                        `✓ [设备] 表情: ${aiResult.emotion}`,
-                        deviceId
-                    );
+                    let emotionCode = EMOTION_KEYWORDS[aiResult.emotion] || aiResult.emotion;
+                    if (!SUPPORTED_EMOTIONS.includes(emotionCode)) {
+                        throw new Error(`未知表情: ${aiResult.emotion}`);
+                    }
+                    await deviceBot.emotion(emotionCode);
+                    BotUtil.makeLog('info', `✓ [设备] 表情: ${emotionCode}`, deviceId);
                 } catch (e) {
-                    BotUtil.makeLog('error',
-                        `❌ [设备] 表情显示失败: ${e.message}`,
-                        deviceId
-                    );
+                    BotUtil.makeLog('error', `❌ [设备] 表情显示失败: ${e.message}`, deviceId);
                 }
                 await new Promise(r => setTimeout(r, 500));
             }
 
+            // 播放TTS
             if (aiResult.text && VOLCENGINE_TTS_CONFIG.enabled) {
                 try {
                     const ttsClient = this._getTTSClient(deviceId);
                     const success = await ttsClient.synthesize(aiResult.text);
 
                     if (success) {
-                        BotUtil.makeLog('info',
-                            `🔊 [TTS] 语音合成已启动`,
-                            deviceId
-                        );
+                        BotUtil.makeLog('info', `🔊 [TTS] 语音合成已启动`, deviceId);
                     } else {
-                        BotUtil.makeLog('error',
-                            `❌ [TTS] 语音合成失败`,
-                            deviceId
-                        );
+                        BotUtil.makeLog('error', `❌ [TTS] 语音合成失败`, deviceId);
+                        await this._sendAIError(deviceId);
                     }
                 } catch (e) {
-                    BotUtil.makeLog('error',
-                        `❌ [TTS] 语音合成异常: ${e.message}`,
-                        deviceId
-                    );
+                    BotUtil.makeLog('error', `❌ [TTS] 语音合成异常: ${e.message}`, deviceId);
+                    await this._sendAIError(deviceId);
                 }
             }
 
+            // 显示文字
             if (aiResult.text) {
                 try {
                     await deviceBot.display(aiResult.text, {
@@ -410,23 +426,31 @@ class DeviceManager {
                         wrap: true,
                         spacing: 2
                     });
-                    BotUtil.makeLog('info',
-                        `✓ [设备] 文字: ${aiResult.text}`,
-                        deviceId
-                    );
+                    BotUtil.makeLog('info', `✓ [设备] 文字: ${aiResult.text}`, deviceId);
                 } catch (e) {
-                    BotUtil.makeLog('error',
-                        `❌ [设备] 文字显示失败: ${e.message}`,
-                        deviceId
-                    );
+                    BotUtil.makeLog('error', `❌ [设备] 文字显示失败: ${e.message}`, deviceId);
                 }
             }
 
         } catch (e) {
-            BotUtil.makeLog('error',
-                `❌ [AI] 处理失败: ${e.message}`,
-                deviceId
-            );
+            BotUtil.makeLog('error', `❌ [AI] 处理失败: ${e.message}`, deviceId);
+            await this._sendAIError(deviceId);
+        }
+    }
+
+    /**
+     * 发送AI错误通知
+     * @param {string} deviceId - 设备ID
+     * @private
+     */
+    async _sendAIError(deviceId) {
+        try {
+            const deviceBot = Bot[deviceId];
+            if (deviceBot && deviceBot.sendCommand) {
+                await deviceBot.sendCommand('ai_error', {}, 1);
+            }
+        } catch (e) {
+            BotUtil.makeLog('error', `❌ [AI] 发送错误通知失败: ${e.message}`, deviceId);
         }
     }
 
@@ -773,6 +797,21 @@ class DeviceManager {
 
             sendCommand: async (cmd, params = {}, priority = 0) =>
                 await this.sendCommand(deviceId, cmd, params, priority),
+
+            sendAudioChunk: (hex) => {
+                const ws = deviceWebSockets.get(deviceId);
+                if (ws && ws.readyState === WebSocket.OPEN && typeof hex === 'string' && hex.length > 0) {
+                    const cmd = {
+                        command: 'play_tts_audio',
+                        parameters: { audio_data: hex },
+                        priority: 1,
+                        timestamp: Date.now()
+                    };
+                    try {
+                        ws.send(JSON.stringify({ type: 'command', command: cmd }));
+                    } catch (e) { }
+                }
+            },
 
             display: async (text, options = {}) =>
                 await this.sendCommand(
@@ -1185,7 +1224,7 @@ const deviceManager = new DeviceManager();
 // ==================== 导出模块 ====================
 export default {
     name: 'device',
-    dsc: '设备管理API v30.0 - 路径修复版',
+    dsc: '设备管理API v31.0 - 连续对话优化版',
     priority: 90,
 
     routes: [
@@ -1204,6 +1243,31 @@ export default {
                     res.json({ success: true, device_id: device.device_id });
                 } catch (e) {
                     res.status(400).json({ success: false, message: e.message });
+                }
+            }
+        },
+
+        {
+            method: 'POST',
+            path: '/api/device/:deviceId/ai',
+            handler: async (req, res, Bot) => {
+                try {
+                    const deviceId = req.params.deviceId;
+                    const { text } = req.body || {};
+                    if (!text || !String(text).trim()) {
+                        return res.status(400).json({ success: false, message: '缺少文本内容' });
+                    }
+                    const device = deviceManager.getDevice(deviceId);
+                    if (!device) {
+                        return res.status(404).json({ success: false, message: '设备未找到' });
+                    }
+                    if (!AI_CONFIG.enabled) {
+                        return res.status(400).json({ success: false, message: 'AI未启用' });
+                    }
+                    await deviceManager._processAIResponse(deviceId, String(text));
+                    return res.json({ success: true });
+                } catch (e) {
+                    return res.status(500).json({ success: false, message: e.message });
                 }
             }
         },
@@ -1376,7 +1440,7 @@ export default {
                     try {
                         const client = asrClients.get(session.deviceId);
                         if (client) {
-                            client.endUtterance().catch(() => {});
+                            client.endUtterance().catch(() => { });
                         }
                     } catch (e) {
                         // 忽略错误
@@ -1387,7 +1451,7 @@ export default {
         }, 5 * 60 * 1000);
 
         BotUtil.makeLog('info', '━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'DeviceManager');
-        BotUtil.makeLog('info', '⚡ [设备管理器] v30.0 初始化完成 - 路径修复版', 'DeviceManager');
+        BotUtil.makeLog('info', '⚡ [设备管理器] v31.0 - 连续对话优化版', 'DeviceManager');
 
         if (VOLCENGINE_ASR_CONFIG.enabled) {
             BotUtil.makeLog('info',
@@ -1409,6 +1473,49 @@ export default {
                 'DeviceManager'
             );
         }
+
+        // 订阅ASR结果事件：更新会话finalText并转发中间结果到前端
+        try {
+            Bot.on('device', (e) => {
+                try {
+                    if (!e || e.event_type !== 'asr_result') return;
+                    const deviceId = e.device_id;
+                    const sessionId = e.session_id;
+                    const text = e.text || '';
+                    const isFinal = !!e.is_final;
+                    const duration = e.duration || 0;
+                    const session = asrSessions.get(sessionId);
+                    if (session && session.deviceId === deviceId) {
+                        if (isFinal) {
+                            session.finalText = text;
+                            session.finalDuration = duration;
+                            session.finalTextSetAt = Date.now();
+                            // 立即将最终结果推送给前端
+                            const ws = deviceWebSockets.get(deviceId);
+                            if (ws && ws.readyState === WebSocket.OPEN) {
+                                ws.send(JSON.stringify({
+                                    type: 'asr_final',
+                                    device_id: deviceId,
+                                    session_id: sessionId,
+                                    text
+                                }));
+                            }
+                        } else if (text) {
+                            // 中间结果实时转发到webclient
+                            const ws = deviceWebSockets.get(deviceId);
+                            if (ws && ws.readyState === WebSocket.OPEN) {
+                                ws.send(JSON.stringify({
+                                    type: 'asr_interim',
+                                    device_id: deviceId,
+                                    session_id: sessionId,
+                                    text
+                                }));
+                            }
+                        }
+                    }
+                } catch { }
+            });
+        } catch { }
 
         BotUtil.makeLog('info', '━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'DeviceManager');
     },
