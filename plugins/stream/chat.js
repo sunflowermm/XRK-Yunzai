@@ -129,18 +129,20 @@ class WorkflowManager {
       return `${item.index}. ${item.title}（${heat}）${item.summary ? ` - ${item.summary}` : ''}`;
     }).join('\n');
 
+    const persona = context.persona || '我是AI助手';
     const messages = [
       {
         role: 'system',
-        content: '你是一个快速新闻编辑，帮我根据输入的热点内容整理简明扼要的推送，语气可以轻松但要有条理。'
+        content: `${persona}\n\n你是一个快速新闻编辑，帮我根据输入的热点内容整理简明扼要的推送。要求：\n1. 语气轻松自然，符合QQ聊天风格\n2. 不要使用Markdown格式，用纯文本\n3. 列出要点，必要时可给出简单建议\n4. 条理清晰，易于阅读`
       },
       {
         role: 'user',
-        content: `请总结以下热点，列出要点，必要时可给出简单建议：\n${briefing}`
+        content: `请总结以下热点：\n${briefing}`
       }
     ];
 
-    return await this.stream.callAI(messages, context.config);
+    const result = await this.stream.callAI(messages, context.config);
+    return result || null;
   }
 
   formatHotNews(newsList) {
@@ -1119,53 +1121,135 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 记录消息
+   * 构建消息文本（从消息段提取）
+   */
+  extractMessageText(e) {
+    if (e.raw_message) return e.raw_message;
+    if (typeof e.msg === 'string') return e.msg;
+    
+    if (!Array.isArray(e.message)) return '';
+    
+    return e.message.map(seg => {
+      switch (seg.type) {
+        case 'text': return seg.text || '';
+        case 'image': return '[图片]';
+        case 'at': return `@${seg.qq || ''}`;
+        case 'reply': return `[回复:${seg.id || ''}]`;
+        case 'face': return `[表情:${seg.id || ''}]`;
+        case 'poke': return `[戳了戳 ${seg.target || ''}]`;
+        default: return '';
+      }
+    }).filter(Boolean).join('').trim();
+  }
+
+  /**
+   * 记录消息（以群为单位的高效Map实时构建）
    */
   recordMessage(e) {
-    if (!e.isGroup) return;
+    if (!e?.isGroup || !e.group_id) return;
     
     try {
-      const groupId = e.group_id;
+      const groupId = String(e.group_id);
+      const MAX_HISTORY = 50;
+      
       if (!ChatStream.messageHistory.has(groupId)) {
         ChatStream.messageHistory.set(groupId, []);
       }
       
       const history = ChatStream.messageHistory.get(groupId);
-      
-      let message = e.raw_message || e.msg || '';
-      if (e.message && Array.isArray(e.message)) {
-        message = e.message.map(seg => {
-          switch (seg.type) {
-            case 'text': return seg.text;
-            case 'image': return '[图片]';
-            case 'at': return `[CQ:at,qq=${seg.qq}]`;
-            case 'reply': return `[CQ:reply,id=${seg.id}]`;
-            default: return '';
-          }
-        }).join('');
-      }
+      const messageText = this.extractMessageText(e);
       
       const msgData = {
-        user_id: e.user_id,
+        user_id: String(e.user_id || ''),
         nickname: e.sender?.card || e.sender?.nickname || '未知',
-        message: message,
-        message_id: e.message_id,
+        message: messageText,
+        message_id: String(e.message_id || ''),
+        timestamp: Math.floor((e.time || Date.now()) / 1000),
         time: Date.now(),
-        hasImage: e.img?.length > 0
+        hasImage: !!(e.img?.length > 0 || e.message?.some(s => s.type === 'image'))
       };
       
       history.push(msgData);
       
-      if (history.length > 30) {
+      if (history.length > MAX_HISTORY) {
         history.shift();
       }
       
-      if (this.embeddingConfig?.enabled && message && message.length > 5) {
+      if (this.embeddingConfig?.enabled && messageText && messageText.length > 5) {
         this.storeMessageWithEmbedding(groupId, msgData).catch(() => {});
       }
     } catch (error) {
-      // 静默失败
+      BotUtil.makeLog('debug', `记录消息失败: ${error.message}`, 'ChatStream');
     }
+  }
+
+  /**
+   * 记录Bot回复
+   */
+  async recordBotReply(e, messageText) {
+    if (!e?.isGroup || !e.group_id || !messageText) return;
+    
+    try {
+      const groupId = String(e.group_id);
+      const MAX_HISTORY = 50;
+      
+      if (!ChatStream.messageHistory.has(groupId)) {
+        ChatStream.messageHistory.set(groupId, []);
+      }
+      
+      const history = ChatStream.messageHistory.get(groupId);
+      const timestamp = Math.floor(Date.now() / 1000);
+      
+      const msgData = {
+        user_id: String(e.self_id || ''),
+        nickname: (typeof Bot !== 'undefined' && Bot.nickname) || 'Bot',
+        message: messageText,
+        message_id: Date.now().toString(),
+        timestamp,
+        time: Date.now(),
+        hasImage: false
+      };
+      
+      history.push(msgData);
+      
+      if (history.length > MAX_HISTORY) {
+        history.shift();
+      }
+    } catch (error) {
+      BotUtil.makeLog('debug', `记录Bot回复失败: ${error.message}`, 'ChatStream');
+    }
+  }
+
+  /**
+   * 格式化聊天记录供AI阅读（美观易读）
+   */
+  formatHistoryForAI(messages, isGlobalTrigger = false) {
+    if (!messages || messages.length === 0) return '';
+    
+    const now = Math.floor(Date.now() / 1000);
+    const lines = ['[群聊记录]'];
+    
+    for (const msg of messages) {
+      const timeDiff = now - (msg.timestamp || Math.floor(msg.time / 1000));
+      let timeStr = '';
+      
+      if (timeDiff < 60) {
+        timeStr = `${timeDiff}秒前`;
+      } else if (timeDiff < 3600) {
+        timeStr = `${Math.floor(timeDiff / 60)}分钟前`;
+      } else {
+        const date = new Date((msg.timestamp || msg.time) * 1000);
+        timeStr = `${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+      }
+      
+      const displayName = msg.nickname || '未知';
+      const msgContent = msg.message || '(空消息)';
+      const imageTag = msg.hasImage ? '[含图片]' : '';
+      
+      lines.push(`${displayName}(${msg.user_id}) [${timeStr}]${imageTag}: ${msgContent}`);
+    }
+    
+    return lines.join('\n');
   }
 
   /**
@@ -1248,10 +1332,11 @@ ${isGlobalTrigger ? '观察群聊后主动发言' : '被召唤回复'}
 ${embeddingHint}
 【基础规则】
 1. 你是一个真实的QQ用户，不是AI助手
-2. 说话要自然、简洁、有个性
-3. 最多使用一个竖线分隔符(|)
-4. 适当使用表情包和互动功能
-5. 管理功能需谨慎使用，避免滥用
+2. 说话要自然、简洁、有个性，用QQ聊天的语气，不要用Markdown格式
+3. 回复中不要使用星号、下划线、反引号等Markdown标记符号
+4. 最多使用一个竖线分隔符(|)
+5. 适当使用表情包和互动功能
+6. 管理功能需谨慎使用，避免滥用
 
 ${functionsPrompt}
 
@@ -1261,6 +1346,7 @@ ${functionsPrompt}
 3. @人前确认QQ号在群聊记录中
 4. 不要重复使用相同功能
 5. 管理操作要有正当理由
+6. 不要输出Markdown格式，使用纯文本，比如用括号代替星号，用普通文本代替代码块
 
 【注意事项】
 ${isGlobalTrigger ? 
@@ -1297,29 +1383,21 @@ ${e.isMaster ? '6. 对主人友好和尊重' : ''}`;
     });
     
     if (e.isGroup) {
-      const history = ChatStream.messageHistory.get(e.group_id) || [];
+      const history = ChatStream.messageHistory.get(String(e.group_id)) || [];
+      const recentCount = question?.isGlobalTrigger ? 15 : 12;
+      const recentMessages = history.slice(-recentCount);
       
-      if (question?.isGlobalTrigger) {
-        const recentMessages = history.slice(-15);
-        if (recentMessages.length > 0) {
-          messages.push({
-            role: 'user',
-            content: `[群聊记录]\n${recentMessages.map(msg => 
-              `${msg.nickname}(${msg.user_id})[${msg.message_id}]: ${msg.message}`
-            ).join('\n')}\n\n请对当前话题发表你的看法。`
-          });
-        }
-      } else {
-        const recentMessages = history.slice(-10);
-        if (recentMessages.length > 0) {
-          messages.push({
-            role: 'user',
-            content: `[群聊记录]\n${recentMessages.map(msg => 
-              `${msg.nickname}(${msg.user_id})[${msg.message_id}]: ${msg.message}`
-            ).join('\n')}`
-          });
-        }
-        
+      if (recentMessages.length > 0) {
+        const historyText = this.formatHistoryForAI(recentMessages, question?.isGlobalTrigger);
+        messages.push({
+          role: 'user',
+          content: question?.isGlobalTrigger 
+            ? `${historyText}\n\n请对当前话题发表你的看法。`
+            : historyText
+        });
+      }
+      
+      if (!question?.isGlobalTrigger) {
         const userInfo = e.sender?.card || e.sender?.nickname || '未知';
         let actualQuestion = typeof question === 'string' ? question : 
                             (question?.content || question?.text || '');
@@ -1330,7 +1408,7 @@ ${e.isMaster ? '6. 对主人友好和尊重' : ''}`;
         
         messages.push({
           role: 'user',
-          content: `[当前消息]\n${userInfo}(${e.user_id})[${e.message_id}]: ${actualQuestion}`
+          content: `[当前消息]\n${userInfo}(${e.user_id}): ${actualQuestion}`
         });
       }
     } else {
@@ -1375,7 +1453,7 @@ ${e.isMaster ? '6. 对主人友好和尊重' : ''}`;
           switch (type) {
             case 'at':
               if (e.isGroup && paramObj.qq) {
-                const history = ChatStream.messageHistory.get(e.group_id) || [];
+                const history = ChatStream.messageHistory.get(String(e.group_id)) || [];
                 const userExists = history.some(msg => 
                   String(msg.user_id) === String(paramObj.qq)
                 );
@@ -1440,9 +1518,11 @@ ${e.isMaster ? '6. 对主人友好和尊重' : ''}`;
    */
   cleanupCache() {
     const now = Date.now();
+    const MAX_AGE = 1800000;
+    const CACHE_AGE = 300000;
     
     for (const [groupId, messages] of ChatStream.messageHistory.entries()) {
-      const filtered = messages.filter(msg => now - msg.time < 1800000);
+      const filtered = messages.filter(msg => now - msg.time < MAX_AGE);
       if (filtered.length === 0) {
         ChatStream.messageHistory.delete(groupId);
       } else {
@@ -1451,10 +1531,21 @@ ${e.isMaster ? '6. 对主人友好和尊重' : ''}`;
     }
     
     for (const [key, data] of ChatStream.userCache.entries()) {
-      if (now - data.time > 300000) {
+      if (now - data.time > CACHE_AGE) {
         ChatStream.userCache.delete(key);
       }
     }
+  }
+
+  /**
+   * 执行工作流（重写以记录消息）
+   */
+  async execute(e, question, config) {
+    if (e?.isGroup) {
+      this.recordMessage(e);
+    }
+    
+    return await super.execute(e, question, config);
   }
 
   /**
