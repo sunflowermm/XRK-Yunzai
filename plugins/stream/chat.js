@@ -43,20 +43,18 @@ class WorkflowManager {
     const handler = this.workflowMap.get(normalized);
 
     if (!handler) {
-      return {
-        type: 'text',
-        content: '我暂时还不会这个工作流，但会尽快学会的！'
-      };
+      return { type: 'text', content: '我暂时还不会这个工作流，但会尽快学会的！' };
     }
 
     try {
-      return await handler(params, context);
+      const result = await handler(params, context);
+      if (result && result.type === 'text' && result.content) {
+        return result;
+      }
+      return { type: 'text', content: String(result?.content || result || '') };
     } catch (error) {
       BotUtil.makeLog('warn', `工作流执行失败[${name}]: ${error.message}`, 'ChatStream');
-      return {
-        type: 'text',
-        content: '我去查资料的时候遇到点问题，稍后再试试吧～'
-      };
+      return { type: 'text', content: '我去查资料的时候遇到点问题，稍后再试试吧～' };
     }
   }
 
@@ -129,20 +127,34 @@ class WorkflowManager {
       return `${item.index}. ${item.title}（${heat}）${item.summary ? ` - ${item.summary}` : ''}`;
     }).join('\n');
 
-    const persona = context.persona || '我是AI助手';
+    const persona = context.persona || context.question?.persona || '我是AI助手';
     const messages = [
       {
         role: 'system',
-        content: `${persona}\n\n你是一个快速新闻编辑，帮我根据输入的热点内容整理简明扼要的推送。要求：\n1. 语气轻松自然，符合QQ聊天风格\n2. 不要使用Markdown格式，用纯文本\n3. 列出要点，必要时可给出简单建议\n4. 条理清晰，易于阅读`
+        content: `${persona}
+
+【重要要求】
+1. 必须使用纯文本，绝对不要使用Markdown格式
+2. 禁止使用以下符号：星号(*)、下划线(_)、反引号(`)、井号(#)、方括号([])用于标题
+3. 不要使用###、**、__等Markdown标记
+4. 用普通文字、括号、冒号来表达层次，比如用"一、"、"二、"或"1."、"2."来分点
+5. 语气要符合你的人设，自然轻松，像QQ聊天一样
+6. 条理清晰，易于阅读
+
+请根据以下热点内容，用纯文本格式整理推送：`
       },
       {
         role: 'user',
-        content: `请总结以下热点：\n${briefing}`
+        content: briefing
       }
     ];
 
-    const result = await this.stream.callAI(messages, context.config);
-    return result || null;
+    const apiConfig = context.config || context.question?.config || {};
+    const result = await this.stream.callAI(messages, apiConfig);
+    
+    if (!result) return null;
+    
+    return result.replace(/\*\*/g, '').replace(/###\s*/g, '').replace(/__/g, '').trim();
   }
 
   formatHotNews(newsList) {
@@ -410,7 +422,14 @@ export default class ChatStream extends AIStream {
         if (!this.workflowManager) {
           return { type: 'text', content: '' };
         }
-        const result = await this.workflowManager.run(params.workflow, params, context);
+        
+        const enrichedContext = {
+          ...context,
+          persona: context.question?.persona || context.persona,
+          config: context.config || context.question?.config
+        };
+        
+        const result = await this.workflowManager.run(params.workflow, params, enrichedContext);
         return result;
       },
       enabled: true
@@ -1346,7 +1365,8 @@ ${functionsPrompt}
 3. @人前确认QQ号在群聊记录中
 4. 不要重复使用相同功能
 5. 管理操作要有正当理由
-6. 不要输出Markdown格式，使用纯文本，比如用括号代替星号，用普通文本代替代码块
+6. 绝对禁止Markdown格式：不要用###、**、__、`、#等符号，用纯文本和普通标点
+7. 工作流调用时，确保输出符合人设且为纯文本格式
 
 【注意事项】
 ${isGlobalTrigger ? 
