@@ -1,5 +1,6 @@
 import path from 'path';
 import fs from 'fs';
+import fetch from 'node-fetch';
 import AIStream from '../../lib/aistream/aistream.js';
 import BotUtil from '../../lib/common/util.js';
 
@@ -18,6 +19,137 @@ const EMOJI_REACTIONS = {
   '爱心': ['66', '122', '319'],
   '生气': ['8', '23', '39', '86', '179', '265']
 };
+
+class WorkflowManager {
+  constructor(stream) {
+    this.stream = stream;
+    this.cache = new Map();
+    this.cacheTTL = 5 * 60 * 1000;
+    this.workflowMap = new Map([
+      ['hot-news', this.runHotNews.bind(this)],
+      ['hotnews', this.runHotNews.bind(this)],
+      ['热点', this.runHotNews.bind(this)],
+      ['热点新闻', this.runHotNews.bind(this)],
+      ['热点资讯', this.runHotNews.bind(this)]
+    ]);
+  }
+
+  normalizeName(name = '') {
+    return name.toString().trim().toLowerCase();
+  }
+
+  async run(name, params = {}, context = {}) {
+    const normalized = this.normalizeName(name);
+    const handler = this.workflowMap.get(normalized);
+
+    if (!handler) {
+      return {
+        type: 'text',
+        content: '我暂时还不会这个工作流，但会尽快学会的！'
+      };
+    }
+
+    try {
+      return await handler(params, context);
+    } catch (error) {
+      BotUtil.makeLog('warn', `工作流执行失败[${name}]: ${error.message}`, 'ChatStream');
+      return {
+        type: 'text',
+        content: '我去查资料的时候遇到点问题，稍后再试试吧～'
+      };
+    }
+  }
+
+  async runHotNews(params = {}, context = {}) {
+    const keyword = params.argument?.trim();
+    const newsList = await this.fetchHotNews(keyword);
+
+    if (!newsList || newsList.length === 0) {
+      return {
+        type: 'text',
+        content: '暂时没查到新的热点新闻，要不我们聊点别的？'
+      };
+    }
+
+    const summary = await this.summarizeHotNews(newsList, context).catch(() => null);
+    return {
+      type: 'text',
+      content: summary || this.formatHotNews(newsList)
+    };
+  }
+
+  async fetchHotNews(keyword) {
+    const cacheKey = keyword ? `hot-news:${keyword}` : 'hot-news:all';
+    const cached = this.cache.get(cacheKey);
+
+    if (cached && Date.now() - cached.time < this.cacheTTL) {
+      return cached.data;
+    }
+
+    try {
+      const response = await fetch('https://top.baidu.com/api/board?tab=realtime', {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (XRK-Yunzai Bot)'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`热点接口响应异常: ${response.status}`);
+      }
+
+      const payload = await response.json();
+      const items = payload?.data?.cards?.[0]?.content || [];
+      const normalized = items.slice(0, 8).map((item, index) => ({
+        index: index + 1,
+        title: item.query || item.word,
+        summary: item.desc || item.biz_ext?.abstract || '',
+        heat: item.hotScore || item.hotVal || '',
+        url: item.url || `https://m.baidu.com/s?word=${encodeURIComponent(item.query || '')}`
+      })).filter(item => item.title);
+
+      const filtered = keyword ? normalized.filter(item => item.title.includes(keyword) || item.summary.includes(keyword)) : normalized;
+
+      this.cache.set(cacheKey, {
+        data: filtered,
+        time: Date.now()
+      });
+
+      return filtered;
+    } catch (error) {
+      BotUtil.makeLog('warn', `获取热点失败: ${error.message}`, 'ChatStream');
+      return [];
+    }
+  }
+
+  async summarizeHotNews(newsList, context = {}) {
+    if (!this.stream?.callAI) return null;
+
+    const briefing = newsList.map(item => {
+      const heat = item.heat ? `热度${item.heat}` : '热度未知';
+      return `${item.index}. ${item.title}（${heat}）${item.summary ? ` - ${item.summary}` : ''}`;
+    }).join('\n');
+
+    const messages = [
+      {
+        role: 'system',
+        content: '你是一个快速新闻编辑，帮我根据输入的热点内容整理简明扼要的推送，语气可以轻松但要有条理。'
+      },
+      {
+        role: 'user',
+        content: `请总结以下热点，列出要点，必要时可给出简单建议：\n${briefing}`
+      }
+    ];
+
+    return await this.stream.callAI(messages, context.config);
+  }
+
+  formatHotNews(newsList) {
+    return newsList.map(item => {
+      const heat = item.heat ? `（热度 ${item.heat}）` : '';
+      return `${item.index}. ${item.title}${heat}${item.summary ? ` - ${item.summary}` : ''}`;
+    }).join('\n');
+  }
+}
 
 function randomRange(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -54,6 +186,8 @@ export default class ChatStream extends AIStream {
         provider: 'lightweight',
       }
     });
+
+    this.workflowManager = new WorkflowManager(this);
   }
 
   /**
@@ -119,13 +253,18 @@ export default class ChatStream extends AIStream {
         const functions = [];
         let cleanText = text;
         
-        const emotionRegex = /\[(开心|惊讶|伤心|大笑|害怕|生气)\]/;
-        const match = emotionRegex.exec(text);
-        if (match) {
+        const emotionRegex = /\[(开心|惊讶|伤心|大笑|害怕|生气)\]/g;
+        let match;
+        while ((match = emotionRegex.exec(text))) {
+          if (functions.length >= 1) break;
           functions.push({ 
             type: 'emotion', 
-            params: { emotion: match[1] }
+            params: { emotion: match[1] },
+            raw: match[0]
           });
+        }
+
+        if (functions.length > 0) {
           cleanText = text.replace(/\[(开心|惊讶|伤心|大笑|害怕|生气)\]/g, '').trim();
         }
         
@@ -164,7 +303,8 @@ export default class ChatStream extends AIStream {
         while ((match = pokeRegex.exec(text))) {
           functions.push({ 
             type: 'poke', 
-            params: { qq: match[1] }
+            params: { qq: match[1] },
+            raw: match[0]
           });
         }
         
@@ -211,7 +351,8 @@ export default class ChatStream extends AIStream {
         while ((match = regex.exec(text))) {
           functions.push({ 
             type: 'emojiReaction', 
-            params: { msgId: match[1], emojiType: match[2] }
+            params: { msgId: match[1], emojiType: match[2] },
+            raw: match[0]
           });
         }
         
@@ -236,7 +377,44 @@ export default class ChatStream extends AIStream {
       enabled: true
     });
 
-    // 6. 点赞
+    // 6. 扩展工作流
+    this.registerFunction('workflow', {
+      description: '调用扩展工作流（热点资讯等）',
+      prompt: `[工作流:类型:可选参数] - 触发扩展动作，如 [工作流:hot-news]`,
+      parser: (text) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[工作流:([^\]:]+)(?::([^\]]+))?\]/g;
+        let match;
+
+        while ((match = regex.exec(text))) {
+          functions.push({
+            type: 'workflow',
+            params: {
+              workflow: match[1]?.trim(),
+              argument: match[2]?.trim()
+            },
+            raw: match[0]
+          });
+        }
+
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (!this.workflowManager) {
+          return { type: 'text', content: '' };
+        }
+        const result = await this.workflowManager.run(params.workflow, params, context);
+        return result;
+      },
+      enabled: true
+    });
+
+    // 7. 点赞
     this.registerFunction('thumbUp', {
       description: '点赞',
       prompt: `[点赞:QQ号:次数] - 给某人点赞（1-50次）`,
@@ -249,7 +427,8 @@ export default class ChatStream extends AIStream {
         while ((match = regex.exec(text))) {
           functions.push({ 
             type: 'thumbUp', 
-            params: { qq: match[1], count: match[2] }
+            params: { qq: match[1], count: match[2] },
+            raw: match[0]
           });
         }
         
@@ -274,7 +453,7 @@ export default class ChatStream extends AIStream {
       enabled: true
     });
 
-    // 7. 签到
+    // 8. 签到
     this.registerFunction('sign', {
       description: '群签到',
       prompt: `[签到] - 执行群签到`,
@@ -282,9 +461,14 @@ export default class ChatStream extends AIStream {
         const functions = [];
         let cleanText = text;
         
-        if (text.includes('[签到]')) {
-          functions.push({ type: 'sign', params: {} });
-          cleanText = text.replace(/\[签到\]/g, '').trim();
+        const regex = /\[签到\]/g;
+        let match;
+        while ((match = regex.exec(text))) {
+          functions.push({ type: 'sign', params: {}, raw: match[0] });
+        }
+
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
         }
         
         return { functions, cleanText };
@@ -302,7 +486,7 @@ export default class ChatStream extends AIStream {
       enabled: true
     });
 
-    // 8. 禁言
+    // 9. 禁言
     this.registerFunction('mute', {
       description: '禁言群成员',
       prompt: `[禁言:QQ号:时长] - 禁言某人（时长单位：秒，最大2592000秒/30天）
@@ -317,7 +501,8 @@ export default class ChatStream extends AIStream {
           const duration = Math.min(parseInt(match[2]), 2592000);
           functions.push({ 
             type: 'mute', 
-            params: { qq: match[1], duration }
+            params: { qq: match[1], duration },
+            raw: match[0]
           });
         }
         
@@ -341,7 +526,7 @@ export default class ChatStream extends AIStream {
       requireAdmin: true
     });
 
-    // 9. 解禁
+    // 10. 解禁
     this.registerFunction('unmute', {
       description: '解除禁言',
       prompt: `[解禁:QQ号] - 解除某人的禁言`,
@@ -354,7 +539,8 @@ export default class ChatStream extends AIStream {
         while ((match = regex.exec(text))) {
           functions.push({ 
             type: 'unmute', 
-            params: { qq: match[1] }
+            params: { qq: match[1] },
+            raw: match[0]
           });
         }
         
@@ -378,7 +564,7 @@ export default class ChatStream extends AIStream {
       requireAdmin: true
     });
 
-    // 10. 全员禁言
+    // 11. 全员禁言
     this.registerFunction('muteAll', {
       description: '全员禁言',
       prompt: `[全员禁言] - 开启全员禁言`,
@@ -386,9 +572,15 @@ export default class ChatStream extends AIStream {
         const functions = [];
         let cleanText = text;
         
-        if (text.includes('[全员禁言]')) {
-          functions.push({ type: 'muteAll', params: { enable: true } });
-          cleanText = text.replace(/\[全员禁言\]/g, '').trim();
+        const regex = /\[全员禁言\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ type: 'muteAll', params: { enable: true }, raw: match[0] });
+        }
+
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
         }
         
         return { functions, cleanText };
@@ -407,7 +599,7 @@ export default class ChatStream extends AIStream {
       requireAdmin: true
     });
 
-    // 11. 解除全员禁言
+    // 12. 解除全员禁言
     this.registerFunction('unmuteAll', {
       description: '解除全员禁言',
       prompt: `[解除全员禁言] - 关闭全员禁言`,
@@ -415,9 +607,15 @@ export default class ChatStream extends AIStream {
         const functions = [];
         let cleanText = text;
         
-        if (text.includes('[解除全员禁言]')) {
-          functions.push({ type: 'unmuteAll', params: { enable: false } });
-          cleanText = text.replace(/\[解除全员禁言\]/g, '').trim();
+        const regex = /\[解除全员禁言\]/g;
+        let match;
+
+        while ((match = regex.exec(text))) {
+          functions.push({ type: 'unmuteAll', params: { enable: false }, raw: match[0] });
+        }
+
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
         }
         
         return { functions, cleanText };
@@ -436,7 +634,7 @@ export default class ChatStream extends AIStream {
       requireAdmin: true
     });
 
-    // 12. 改群名片
+    // 13. 改群名片
     this.registerFunction('setCard', {
       description: '修改群名片',
       prompt: `[改名片:QQ号:新名片] - 修改某人的群名片
@@ -450,7 +648,8 @@ export default class ChatStream extends AIStream {
         while ((match = regex.exec(text))) {
           functions.push({ 
             type: 'setCard', 
-            params: { qq: match[1], card: match[2] }
+            params: { qq: match[1], card: match[2] },
+            raw: match[0]
           });
         }
         
@@ -474,7 +673,7 @@ export default class ChatStream extends AIStream {
       requireAdmin: true
     });
 
-    // 13. 改群名
+    // 14. 改群名
     this.registerFunction('setGroupName', {
       description: '修改群名',
       prompt: `[改群名:新群名] - 修改当前群的群名
@@ -488,7 +687,8 @@ export default class ChatStream extends AIStream {
         while ((match = regex.exec(text))) {
           functions.push({ 
             type: 'setGroupName', 
-            params: { name: match[1] }
+            params: { name: match[1] },
+            raw: match[0]
           });
         }
         
@@ -512,7 +712,7 @@ export default class ChatStream extends AIStream {
       requireAdmin: true
     });
 
-    // 14. 设置管理员
+    // 15. 设置管理员
     this.registerFunction('setAdmin', {
       description: '设置管理员',
       prompt: `[设管:QQ号] - 设置某人为管理员`,
@@ -525,7 +725,8 @@ export default class ChatStream extends AIStream {
         while ((match = regex.exec(text))) {
           functions.push({ 
             type: 'setAdmin', 
-            params: { qq: match[1], enable: true }
+            params: { qq: match[1], enable: true },
+            raw: match[0]
           });
         }
         
@@ -549,7 +750,7 @@ export default class ChatStream extends AIStream {
       requireOwner: true
     });
 
-    // 15. 取消管理员
+    // 16. 取消管理员
     this.registerFunction('unsetAdmin', {
       description: '取消管理员',
       prompt: `[取管:QQ号] - 取消某人的管理员`,
@@ -562,7 +763,8 @@ export default class ChatStream extends AIStream {
         while ((match = regex.exec(text))) {
           functions.push({ 
             type: 'unsetAdmin', 
-            params: { qq: match[1], enable: false }
+            params: { qq: match[1], enable: false },
+            raw: match[0]
           });
         }
         
@@ -586,7 +788,7 @@ export default class ChatStream extends AIStream {
       requireOwner: true
     });
 
-    // 16. 设置头衔
+    // 17. 设置头衔
     this.registerFunction('setTitle', {
       description: '设置专属头衔',
       prompt: `[头衔:QQ号:头衔名:时长] - 设置某人的专属头衔
@@ -605,7 +807,8 @@ export default class ChatStream extends AIStream {
               qq: match[1], 
               title: match[2],
               duration: parseInt(match[3])
-            }
+            },
+            raw: match[0]
           });
         }
         
@@ -629,7 +832,7 @@ export default class ChatStream extends AIStream {
       requireOwner: true
     });
 
-    // 17. 踢人
+    // 18. 踢人
     this.registerFunction('kick', {
       description: '踢出群成员',
       prompt: `[踢人:QQ号] - 踢出某人
@@ -646,7 +849,8 @@ export default class ChatStream extends AIStream {
             params: { 
               qq: match[1],
               reject: match[2] === '拒绝'
-            }
+            },
+            raw: match[0]
           });
         }
         
@@ -670,7 +874,7 @@ export default class ChatStream extends AIStream {
       requireAdmin: true
     });
 
-    // 18. 设置精华消息
+    // 19. 设置精华消息
     this.registerFunction('setEssence', {
       description: '设置精华消息',
       prompt: `[设精华:消息ID] - 将某条消息设为精华`,
@@ -683,7 +887,8 @@ export default class ChatStream extends AIStream {
         while ((match = regex.exec(text))) {
           functions.push({ 
             type: 'setEssence', 
-            params: { msgId: String(match[1]) }
+            params: { msgId: String(match[1]) },
+            raw: match[0]
           });
         }
         
@@ -709,7 +914,7 @@ export default class ChatStream extends AIStream {
       requireAdmin: true
     });
 
-    // 19. 取消精华消息
+    // 20. 取消精华消息
     this.registerFunction('removeEssence', {
       description: '取消精华消息',
       prompt: `[取消精华:消息ID] - 取消某条精华消息`,
@@ -722,7 +927,8 @@ export default class ChatStream extends AIStream {
         while ((match = regex.exec(text))) {
           functions.push({ 
             type: 'removeEssence', 
-            params: { msgId: String(match[1]) }
+            params: { msgId: String(match[1]) },
+            raw: match[0]
           });
         }
         
@@ -748,7 +954,7 @@ export default class ChatStream extends AIStream {
       requireAdmin: true
     });
 
-    // 20. 发送群公告
+    // 21. 发送群公告
     this.registerFunction('announce', {
       description: '发送群公告',
       prompt: `[公告:公告内容] - 发送群公告
@@ -762,7 +968,8 @@ export default class ChatStream extends AIStream {
         while ((match = regex.exec(text))) {
           functions.push({ 
             type: 'announce', 
-            params: { content: match[1] }
+            params: { content: match[1] },
+            raw: match[0]
           });
         }
         
@@ -789,7 +996,7 @@ export default class ChatStream extends AIStream {
       requireAdmin: true
     });
 
-    // 21. 撤回消息
+    // 22. 撤回消息
     this.registerFunction('recall', {
       description: '撤回消息',
       prompt: `[撤回:消息ID] - 撤回指定消息
@@ -806,7 +1013,8 @@ export default class ChatStream extends AIStream {
         while ((match = regex.exec(text))) {
           functions.push({ 
             type: 'recall', 
-            params: { msgId: String(match[1]) }
+            params: { msgId: String(match[1]) },
+            raw: match[0]
           });
         }
         
