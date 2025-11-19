@@ -124,7 +124,8 @@ class WorkflowManager {
 
     const briefing = newsList.map(item => {
       const heat = item.heat ? `热度${item.heat}` : '热度未知';
-      return `${item.index}. ${item.title}（${heat}）${item.summary ? ` - ${item.summary}` : ''}`;
+      const summary = item.summary ? ` - ${item.summary}` : '';
+      return `${item.index}. ${item.title}（${heat}）${summary}`;
     }).join('\n');
 
     const persona = context.persona || context.question?.persona || '我是AI助手';
@@ -160,7 +161,8 @@ class WorkflowManager {
   formatHotNews(newsList) {
     return newsList.map(item => {
       const heat = item.heat ? `（热度 ${item.heat}）` : '';
-      return `${item.index}. ${item.title}${heat}${item.summary ? ` - ${item.summary}` : ''}`;
+      const summary = item.summary ? ` - ${item.summary}` : '';
+      return `${item.index}. ${item.title}${heat}${summary}`;
     }).join('\n');
   }
 }
@@ -1339,9 +1341,7 @@ ${persona}
 【身份信息】
 名字：${Bot.nickname}
 QQ号：${e.self_id}
-${e.isGroup ? `群名：${e.group?.group_name || '未知'}
-群号：${e.group_id}
-身份：${botRole}` : ''}
+${e.isGroup ? '群名：' + (e.group?.group_name || '未知') + '\n群号：' + e.group_id + '\n身份：' + botRole : ''}
 
 【时间信息】
 当前时间：${dateStr}
@@ -1370,11 +1370,8 @@ ${functionsPrompt}
 
 【注意事项】
 ${isGlobalTrigger ? 
-`1. 主动发言要有新意
-2. 可以戳一戳活跃成员
-3. 语气自然` : 
-`1. 回复要有针对性
-2. 积极互动`}
+'1. 主动发言要有新意\n2. 可以戳一戳活跃成员\n3. 语气自然' : 
+'1. 回复要有针对性\n2. 积极互动'}
 3. 多使用戳一戳和表情回应
 4. 适当使用表情包
 5. 管理功能仅在必要时使用
