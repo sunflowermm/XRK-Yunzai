@@ -62,15 +62,28 @@ ${persona}
 
   /**
    * 执行设备工作流并解析输出
+   * 如果提供了deviceBot，会直接调用emotion()切换表情
    */
-  async execute(deviceId, question, apiConfig, deviceInfo = {}, persona = '') {
+  async execute(deviceId, question, apiConfig, deviceInfo = {}, persona = '', deviceBot = null) {
     try {
       const messages = await this.buildChatContext(null, { text: question, persona });
       const response = await this.callAI(messages, apiConfig);
       if (!response) {
         return null;
       }
+      
       const { emotion, cleanText } = this.parseEmotion(response);
+      
+      // 如果提供了deviceBot，直接调用emotion()切换表情
+      if (emotion && deviceBot && typeof deviceBot.emotion === 'function') {
+        try {
+          await deviceBot.emotion(emotion);
+          BotUtil.makeLog('info', `✓ [工作流] 表情已切换: ${emotion}`, 'DeviceStream');
+        } catch (e) {
+          BotUtil.makeLog('error', `❌ [工作流] 表情切换失败: ${e.message}`, 'DeviceStream');
+        }
+      }
+      
       return {
         text: cleanText || '',
         emotion  // emotion已经是英文代码（如'happy'）

@@ -4,9 +4,7 @@
  */
 
 import StreamLoader from '../../lib/aistream/loader.js';
-import { deviceWebSockets, deviceManager } from './device.js';
-import TTSFactory from '../../components/tts/TTSFactory.js';
-import { sendEmotionCommand, sendTTSAudioCommand } from '../../components/util/webSocketUtil.js';
+import { deviceManager, getTTSClientForDevice } from './device.js';
 import BotUtil from '../../lib/common/util.js';
 
 /**
@@ -30,23 +28,12 @@ function sendSSEData(res, data) {
   }
 }
 
-/**
- * 创建TTS Bot对象（用于接收音频数据）
- */
-function createTTSBot(ws) {
-  return {
-    webclient: {
-      sendAudioChunk: (hex) => {
-        sendTTSAudioCommand(ws, hex);
-      }
-    }
-  };
-}
 
 /**
  * 处理流式输出完成后的逻辑
+ * 使用工作流统一处理表情和TTS
  */
-async function handleStreamComplete(res, finalText, stream, ws) {
+async function handleStreamComplete(res, finalText, stream, deviceBot) {
   if (!finalText) {
     sendSSEData(res, { done: true, text: '' });
     return;
@@ -59,22 +46,26 @@ async function handleStreamComplete(res, finalText, stream, ws) {
   // 发送完整文本
   sendSSEData(res, { done: true, text: displayText });
 
-  // 发送表情命令到前端
-  if (emotion && ws) {
-    const sent = sendEmotionCommand(ws, emotion);
-    if (sent) {
-      BotUtil.makeLog('info', `✓ [AI流式] 发送表情: ${emotion}`, 'AIStream');
+  // 如果提供了deviceBot，让工作流处理表情（通过execute方法）
+  // 这里我们直接调用工作流的execute，它会自动调用deviceBot.emotion()
+  if (emotion && deviceBot) {
+    try {
+      await deviceBot.emotion(emotion);
+      BotUtil.makeLog('info', `✓ [AI流式] 表情已切换: ${emotion}`, 'AIStream');
+    } catch (e) {
+      BotUtil.makeLog('error', `❌ [AI流式] 表情切换失败: ${e.message}`, 'AIStream');
     }
   }
 
   // 触发TTS
   const ttsConfig = deviceManager.getTTSConfig();
-  if (ttsConfig.enabled && displayText && ws) {
+  if (ttsConfig.enabled && displayText && deviceBot) {
     try {
-      const fakeBot = createTTSBot(ws);
-      const ttsClient = TTSFactory.createClient('webclient', ttsConfig, fakeBot);
-      await ttsClient.synthesize(displayText);
-      BotUtil.makeLog('info', `✓ [AI流式] TTS合成完成`, 'AIStream');
+      const ttsClient = getTTSClientForDevice('webclient');
+      if (ttsClient) {
+        await ttsClient.synthesize(displayText);
+        BotUtil.makeLog('info', `✓ [AI流式] TTS合成完成`, 'AIStream');
+      }
     } catch (e) {
       BotUtil.makeLog('error', `❌ [AI流式] TTS合成失败: ${e.message}`, 'AIStream');
     }
@@ -106,8 +97,21 @@ export default {
           // 设置SSE头
           setSSEHeaders(res);
 
-          // 获取WebSocket连接（用于发送表情和TTS命令）
-          const ws = deviceWebSockets.get('webclient');
+          // 获取webclient的Bot实例（用于表情和TTS）
+          // 等待一下确保设备已注册
+          let deviceBot = null;
+          if (typeof Bot !== 'undefined' && Bot['webclient']) {
+            deviceBot = Bot['webclient'];
+          } else {
+            // 如果Bot未就绪，尝试等待一下
+            for (let i = 0; i < 10; i++) {
+              await new Promise(r => setTimeout(r, 100));
+              if (typeof Bot !== 'undefined' && Bot['webclient']) {
+                deviceBot = Bot['webclient'];
+                break;
+              }
+            }
+          }
 
           // 构建消息并开始流式输出
           const messages = await stream.buildChatContext(null, { text: prompt, persona });
@@ -118,8 +122,8 @@ export default {
             sendSSEData(res, { delta });
           });
 
-          // 流式输出完成后，处理表情和TTS
-          await handleStreamComplete(res, acc.trim(), stream, ws);
+          // 流式输出完成后，处理表情和TTS（通过deviceBot统一处理）
+          await handleStreamComplete(res, acc.trim(), stream, deviceBot);
           
           res.end();
         } catch (e) {

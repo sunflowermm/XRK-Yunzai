@@ -36,37 +36,151 @@ class APIControlCenter {
     }
 
     updateEmotionDisplay(emotion) {
-        const map = {
-            happy: '😀',
-            sad: '😢',
-            angry: '😠',
-            surprise: '😮',
-            love: '❤️',
-            cool: '😎',
-            sleep: '😴',
-            think: '🤔',
-            wink: '😉',
-            laugh: '😂'
-        };
-        const zh2en = {
-            '开心': 'happy',
-            '伤心': 'sad',
-            '生气': 'angry',
-            '惊讶': 'surprise',
-            '爱': 'love',
-            '酷': 'cool',
-            '睡觉': 'sleep',
-            '思考': 'think',
-            '眨眼': 'wink',
-            '大笑': 'laugh'
-        };
-        let code = String(emotion || '').toLowerCase();
-        if (!map[code]) {
-            code = zh2en[emotion] || 'happy';
+        console.log('[WebClient] updateEmotionDisplay 被调用，表情:', emotion);
+        
+        // 动态导入表情配置（如果可用）
+        let getEmotionIcon, getEmotionAnimation, smartMatchEmotion;
+        try {
+            // 尝试使用外部表情配置
+            if (typeof getEmotionIcon === 'function') {
+                const icon = getEmotionIcon(emotion);
+                const anim = getEmotionAnimation(emotion);
+                this._applyEmotionWithAnimation(icon, anim);
+                return;
+            }
+        } catch (e) {
+            // 如果导入失败，使用内置配置
         }
-        const icon = map[code] || '😀';
+        
+        // 内置表情配置（完整版）
+        const EMOTION_ICONS = {
+            happy: '😀', excited: '🤩', sad: '😢', angry: '😠', surprise: '😮',
+            love: '❤️', cool: '😎', sleep: '😴', think: '🤔', wink: '😉', laugh: '😂',
+            shy: '😊', confused: '😕', proud: '😤', bored: '😑', worried: '😟',
+            calm: '😌', playful: '😜', gentle: '🥰', serious: '😐'
+        };
+        
+        const EMOTION_ZH2EN = {
+            '开心': 'happy', '高兴': 'happy', '快乐': 'happy', '愉快': 'happy',
+            '兴奋': 'excited', '激动': 'excited',
+            '伤心': 'sad', '难过': 'sad', '悲伤': 'sad', '沮丧': 'sad', '失落': 'sad',
+            '生气': 'angry', '愤怒': 'angry', '恼火': 'angry', '烦躁': 'angry',
+            '惊讶': 'surprise', '吃惊': 'surprise', '震惊': 'surprise', '意外': 'surprise',
+            '害怕': 'surprise', '恐惧': 'surprise',
+            '爱': 'love', '喜欢': 'love', '爱心': 'love', '喜爱': 'love',
+            '酷': 'cool', '帅气': 'cool', '潇洒': 'cool',
+            '睡觉': 'sleep', '困': 'sleep', '疲惫': 'sleep', '累': 'sleep', '疲倦': 'sleep',
+            '思考': 'think', '想': 'think', '考虑': 'think', '专注': 'think', '认真': 'think',
+            '眨眼': 'wink', '调皮': 'wink', '顽皮': 'wink',
+            '大笑': 'laugh', '笑': 'laugh', '哈哈': 'laugh', '搞笑': 'laugh',
+            '害羞': 'shy', '不好意思': 'shy', '腼腆': 'shy',
+            '困惑': 'confused', '疑惑': 'confused', '不解': 'confused', '迷茫': 'confused',
+            '骄傲': 'proud', '自豪': 'proud', '得意': 'proud',
+            '无聊': 'bored', '无趣': 'bored', '乏味': 'bored',
+            '担心': 'worried', '忧虑': 'worried', '焦虑': 'worried',
+            '平静': 'calm', '安静': 'calm', '淡定': 'calm',
+            '调皮': 'playful', '活泼': 'playful', '活跃': 'playful',
+            '温柔': 'gentle', '温和': 'gentle', '柔和': 'gentle',
+            '严肃': 'serious', '认真': 'serious', '正经': 'serious'
+        };
+        
+        // 智能匹配表情
+        let code = String(emotion || '').toLowerCase().trim();
+        
+        // 直接匹配英文
+        if (EMOTION_ICONS[code]) {
+            this._applyEmotionWithAnimation(EMOTION_ICONS[code], code);
+            return;
+        }
+        
+        // 中文映射
+        if (EMOTION_ZH2EN[code]) {
+            code = EMOTION_ZH2EN[code];
+            this._applyEmotionWithAnimation(EMOTION_ICONS[code] || '😀', code);
+            return;
+        }
+        
+        // 模糊匹配（包含关键词）
+        for (const [zh, en] of Object.entries(EMOTION_ZH2EN)) {
+            if (code.includes(zh) || zh.includes(code)) {
+                this._applyEmotionWithAnimation(EMOTION_ICONS[en] || '😀', en);
+                return;
+            }
+        }
+        
+        // 默认
+        this._applyEmotionWithAnimation('😀', 'happy');
+    }
+    
+    /**
+     * 应用表情并添加动画效果
+     */
+    _applyEmotionWithAnimation(icon, emotionCode) {
         const el = document.getElementById('emotionIcon');
-        if (el) el.textContent = icon;
+        if (!el) {
+            console.error('[WebClient] 找不到emotionIcon元素');
+            return;
+        }
+        
+        // 如果表情相同，不重复更新
+        if (el.textContent === icon && el.dataset.emotion === emotionCode) {
+            return;
+        }
+        
+        // 添加淡出效果
+        el.style.transition = 'opacity 0.2s ease, transform 0.3s ease';
+        el.style.opacity = '0.5';
+        el.style.transform = 'scale(0.8)';
+        
+        setTimeout(() => {
+            // 更新图标
+            el.textContent = icon;
+            el.dataset.emotion = emotionCode;
+            
+            // 根据表情类型应用不同的动画
+            const animConfig = this._getEmotionAnimation(emotionCode);
+            
+            // 淡入并应用动画
+            el.style.opacity = '1';
+            el.style.transform = `scale(${animConfig.scale}) ${animConfig.rotate || ''}`;
+            
+            // 特殊动画效果
+            if (animConfig.bounce) {
+                el.style.animation = 'emotionBounce 0.3s ease';
+            } else if (animConfig.pulse) {
+                el.style.animation = 'emotionPulse 0.5s ease';
+            } else if (animConfig.shake) {
+                el.style.animation = 'emotionShake 0.3s ease';
+            }
+            
+            // 恢复默认状态
+            setTimeout(() => {
+                el.style.transform = 'scale(1)';
+                el.style.animation = '';
+            }, animConfig.duration || 300);
+            
+            console.log('[WebClient] 表情图标已更新:', emotionCode, '->', icon);
+        }, 100);
+    }
+    
+    /**
+     * 获取表情动画配置
+     */
+    _getEmotionAnimation(emotionCode) {
+        const animations = {
+            happy: { scale: 1.2, duration: 300, bounce: true },
+            excited: { scale: 1.3, duration: 400, bounce: true, rotate: 'rotate(5deg)' },
+            sad: { scale: 0.9, duration: 200 },
+            angry: { scale: 1.15, duration: 150, shake: true },
+            surprise: { scale: 1.25, duration: 250, bounce: true },
+            love: { scale: 1.1, duration: 300, pulse: true },
+            laugh: { scale: 1.3, duration: 400, bounce: true, rotate: 'rotate(-5deg)' },
+            shy: { scale: 1.1, duration: 300, pulse: true },
+            confused: { scale: 1.05, duration: 250, shake: true },
+            worried: { scale: 1.0, duration: 250, shake: true },
+            playful: { scale: 1.2, duration: 300, bounce: true, rotate: 'rotate(3deg)' }
+        };
+        return animations[emotionCode] || { scale: 1.1, duration: 300, bounce: true };
     }
 
     async init() {
@@ -1278,6 +1392,20 @@ class APIControlCenter {
     }
 
     async startAIStream(prompt) {
+        // 确保WebSocket连接已建立
+        await this.ensureDeviceWs();
+        // 等待WebSocket就绪（最多等待2秒）
+        let waitCount = 0;
+        while ((!this._deviceWs || this._deviceWs.readyState !== 1) && waitCount < 20) {
+            await new Promise(r => setTimeout(r, 100));
+            waitCount++;
+        }
+        if (this._deviceWs && this._deviceWs.readyState === 1) {
+            console.log('[WebClient] WebSocket已就绪，开始AI流式输出');
+        } else {
+            console.warn('[WebClient] WebSocket未就绪，但继续AI流式输出');
+        }
+        
         // 通过 SSE 获取流式结果并渲染
         try {
             const ctx = this._buildChatContext(800, 8);
@@ -1422,31 +1550,38 @@ class APIControlCenter {
             return;
         }
         this._deviceWs.addEventListener('open', () => {
-            console.log('WebSocket connected to /device');
+            console.log('[WebClient] WebSocket connected to /device');
             this._wsReconnectAttempt = 0;
             this._startHeartbeat();
             // 注册为webclient设备
             try {
-                this._deviceWs.send(JSON.stringify({
+                const registerMsg = {
                     type: 'register',
                     device_id: 'webclient',
                     device_type: 'web',
                     device_name: 'Web客户端',
-                    capabilities: ['display', 'microphone'],
+                    capabilities: ['display', 'microphone', 'emotion', 'tts'],
                     metadata: {
                         ua: navigator.userAgent,
                         lang: navigator.language,
                         tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'local'
                     }
-                }));
+                };
+                console.log('[WebClient] 发送注册消息:', registerMsg);
+                this._deviceWs.send(JSON.stringify(registerMsg));
+                
                 // 主动上报一次心跳，帮助服务端尽快建立在线状态
-                this._deviceWs.send(JSON.stringify({
-                    type: 'heartbeat',
-                    device_id: 'webclient',
-                    status: { ui: 'ready' }
-                }));
+                setTimeout(() => {
+                    if (this._deviceWs && this._deviceWs.readyState === 1) {
+                        this._deviceWs.send(JSON.stringify({
+                            type: 'heartbeat',
+                            device_id: 'webclient',
+                            status: { ui: 'ready' }
+                        }));
+                    }
+                }, 500);
             } catch (error) {
-                console.warn('Failed to send WebSocket message:', error);
+                console.error('[WebClient] 发送WebSocket消息失败:', error);
             }
         });
         
@@ -1486,7 +1621,10 @@ class APIControlCenter {
             }
             if (data.type === 'command') {
                 const cmd = data.command ? [data.command] : [];
-                if (cmd.length) this._handleDeviceCommands(cmd);
+                if (cmd.length) {
+                    console.log('[WebClient] 收到命令:', cmd);
+                    this._handleDeviceCommands(cmd);
+                }
                 return;
             }
             if (data.type === 'asr_interim' && data.text) {
@@ -1504,9 +1642,17 @@ class APIControlCenter {
                 }
                 return;
             }
-            if (data.type === 'register_response' && data.success) {
-                this.showToast('已连接设备: webclient', 'success');
-                this.loadStats();
+            if (data.type === 'register_response') {
+                if (data.success) {
+                    console.log('[WebClient] 设备注册成功:', data.device);
+                    this.showToast('已连接设备: webclient', 'success');
+                    this.loadStats();
+                    // 标记WebSocket已就绪
+                    this._deviceWsReady = true;
+                } else {
+                    console.error('[WebClient] 设备注册失败:', data.message);
+                    this.showToast('设备注册失败: ' + (data.message || '未知错误'), 'error');
+                }
             }
         });
         // 移除重复的空监听器，避免冗余
@@ -1632,9 +1778,16 @@ class APIControlCenter {
                     if (box) box.innerHTML = '';
                     result = { ok: true };
                 } else if (command === 'display_emotion' && parameters.emotion) {
-                    try { this.updateEmotionDisplay(parameters.emotion); } catch {}
-                    this.showToast(`表情: ${parameters.emotion}`, 'info');
-                    result = { ok: true };
+                    try {
+                        console.log('[WebClient] 收到表情命令:', parameters.emotion);
+                        this.updateEmotionDisplay(parameters.emotion);
+                        console.log('[WebClient] 表情已更新');
+                        this.showToast(`表情: ${parameters.emotion}`, 'info');
+                        result = { ok: true };
+                    } catch (e) {
+                        console.error('[WebClient] 更新表情失败:', e);
+                        result = { ok: false, message: e?.message || '更新表情失败' };
+                    }
                 } else {
                     result = { ok: false, message: 'unsupported_command' };
                 }

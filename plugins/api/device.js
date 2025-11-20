@@ -449,12 +449,14 @@ class DeviceManager {
             }
 
             const aiConfig = this.getAIConfig();
+            // 传递deviceBot给工作流，让工作流直接调用emotion()
             const aiResult = await deviceStream.execute(
                 deviceId,
                 question,
                 aiConfig,
                 deviceInfo || {},
-                aiConfig.persona
+                aiConfig.persona,
+                deviceBot  // 传递deviceBot实例
             );
 
             if (!aiResult) {
@@ -467,15 +469,9 @@ class DeviceManager {
             BotUtil.makeLog('info', `⚡ [AI性能] 处理耗时: ${aiTime}ms`, deviceId);
             BotUtil.makeLog('info', `✅ [AI] 回复: ${aiResult.text || '(仅表情)'}`, deviceId);
 
-            // 显示表情（aiResult.emotion已经是英文代码）
+            // 表情已由工作流处理，这里只需要等待一下让表情动画完成
             if (aiResult.emotion) {
-                try {
-                    await deviceBot.emotion(aiResult.emotion);
-                    BotUtil.makeLog('info', `✓ [设备] 表情: ${aiResult.emotion}`, deviceId);
-                } catch (e) {
-                    BotUtil.makeLog('error', `❌ [设备] 表情显示失败: ${e.message}`, deviceId);
-                }
-                await new Promise(r => setTimeout(r, 500));
+                await new Promise(r => setTimeout(r, 300));
             }
 
             // 播放TTS
@@ -1307,6 +1303,11 @@ const deviceManager = new DeviceManager();
 // ==================== 导出模块 ====================
 // 导出 deviceWebSockets 和 deviceManager 供其他模块使用
 export { deviceWebSockets, deviceManager };
+
+// 导出TTS客户端获取方法（供ai.js使用）
+export function getTTSClientForDevice(deviceId) {
+    return deviceManager._getTTSClient(deviceId);
+}
 
 export default {
     name: 'device',

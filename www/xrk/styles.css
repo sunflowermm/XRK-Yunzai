@@ -216,6 +216,42 @@ body.light::before {
     line-height: 1;
     filter: drop-shadow(0 3px 6px rgba(0,0,0,0.15));
     user-select: none;
+    transition: transform 0.3s ease, opacity 0.2s ease, filter 0.3s ease;
+    display: inline-block;
+    cursor: pointer;
+}
+
+/* 表情动画效果 */
+@keyframes emotionBounce {
+    0%, 100% { transform: scale(1) translateY(0); }
+    50% { transform: scale(1.2) translateY(-10px); }
+}
+
+@keyframes emotionPulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.15); opacity: 0.9; }
+}
+
+@keyframes emotionShake {
+    0%, 100% { transform: translateX(0) rotate(0deg); }
+    25% { transform: translateX(-5px) rotate(-5deg); }
+    75% { transform: translateX(5px) rotate(5deg); }
+}
+
+@keyframes emotionRotate {
+    0% { transform: rotate(0deg) scale(1); }
+    50% { transform: rotate(180deg) scale(1.2); }
+    100% { transform: rotate(360deg) scale(1); }
+}
+
+@keyframes emotionFade {
+    0% { opacity: 0; transform: scale(0.8); }
+    100% { opacity: 1; transform: scale(1); }
+}
+
+.emotion-icon:hover {
+    transform: scale(1.1);
+    filter: drop-shadow(0 0 15px var(--accent-glow));
 }
 
 @keyframes lineMove {
