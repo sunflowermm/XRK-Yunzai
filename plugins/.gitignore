@@ -57,6 +57,7 @@ events/**
 !stream
 stream/**
 !stream/chat.js
+!stream/device.js
 
 *.psd
 *.map

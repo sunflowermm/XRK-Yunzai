@@ -1294,17 +1294,27 @@ class APIControlCenter {
                     }
                     if (data.done) {
                         es.close();
-                        this.renderAssistantStreaming(acc, true);
+                        // 使用data.text（完整文本）或acc（累积文本）
+                        const finalText = data.text || acc;
+                        this.renderAssistantStreaming(finalText, true);
                     }
                     if (data.error) {
                         es.close();
                         this.showToast('AI错误: ' + data.error, 'error');
                     }
-                } catch {}
+                } catch (err) {
+                    console.warn('解析SSE消息失败:', err);
+                }
             };
             es.addEventListener('message', onMessage);
-            es.addEventListener('error', () => {
+            es.addEventListener('error', (e) => {
                 es.close();
+                if (acc) {
+                    // 如果已经有部分内容，保存它
+                    this.renderAssistantStreaming(acc, true);
+                } else {
+                    this.showToast('AI流式连接失败', 'error');
+                }
             });
         } catch (e) {
             this.showToast('开启流式失败: ' + e.message, 'error');
@@ -1323,9 +1333,31 @@ class APIControlCenter {
         last.textContent = text;
         if (done) {
             last.classList.remove('streaming');
-            if (text) this._persistChat('assistant', text);
+            if (text) {
+                this._persistChat('assistant', text);
+                // 打字聊天完成后调用TTS
+                this._triggerTTS(text);
+            }
         }
         box.scrollTop = box.scrollHeight;
+    }
+
+    async _triggerTTS(text) {
+        // 通过WebSocket发送TTS请求
+        try {
+            await this.ensureDeviceWs();
+            if (this._deviceWs && this._deviceWs.readyState === 1 && text) {
+                this._deviceWs.send(JSON.stringify({
+                    type: 'tts_request',
+                    device_id: 'webclient',
+                    text: text,
+                    voice_type: 'zh_female_vv_uranus_bigtts',
+                    emotion: 'happy'
+                }));
+            }
+        } catch (e) {
+            console.warn('TTS请求失败:', e);
+        }
     }
 
     renderASRStreaming(text, done = false) {
@@ -1673,24 +1705,32 @@ class APIControlCenter {
     // 简单哈希路由
     _installRouter() {
         window.addEventListener('hashchange', () => this._applyRoute());
-        this._applyRoute();
+        // 只在初始化时应用路由，不自动跳转
+        const hash = (location.hash || '').replace(/^#\/?/, '');
+        const page = hash.split('?')[0];
+        if (page && ['home', 'chat', 'api', 'config'].includes(page)) {
+            this._applyRoute();
+        } else {
+            // 没有hash时，使用保存的页面或默认首页
+            const savedPage = localStorage.getItem('currentPage');
+            if (savedPage && ['home', 'chat', 'api', 'config'].includes(savedPage)) {
+                this.navigateToPage(savedPage);
+            } else {
+                this.navigateToPage('home');
+            }
+        }
     }
     _applyRoute() {
         const hash = (location.hash || '').replace(/^#\/?/, '');
         const page = hash.split('?')[0];
         
-        if (!page || page === '') {
-            const savedPage = localStorage.getItem('currentPage');
-            if (savedPage && ['home', 'chat', 'api', 'config'].includes(savedPage)) {
-                this.navigateToPage(savedPage);
-                return;
+        // 只在hash明确指定页面时才跳转，避免自动刷新
+        if (page && ['home', 'chat', 'api', 'config'].includes(page)) {
+            // 如果当前页面已经是目标页面，不重复跳转
+            if (this.currentPage !== page) {
+                this.navigateToPage(page);
             }
         }
-        
-        if (page === 'chat') { this.navigateToPage('chat'); return; }
-        if (page === 'api') { this.navigateToPage('api'); return; }
-        if (page === 'config') { this.navigateToPage('config'); return; }
-        this.navigateToPage('home');
     }
 
     async toggleMic() {
