@@ -55,3 +55,8 @@ asr:
   maxAudioBufferSize: 30
   asrFinalTextWaitMs: 1200
 
+responsePolish:
+  enabled: true
+  maxTokens: 320
+  temperature: 0.25
+  instructions: '你是QQ聊天润色器，只能做轻微整理：1. 删除舞台提示、括号或方括号里未执行的工具描述（例如[回复:xxx]、(正在... )等）1. 删除舞台提示、括号或方括号里未执行的工具描述（例如[回复:xxx]、(正在... )等）2. 保留原意，语气自然，像正常聊天，尽量简短，用常用标点分句3. 不要添加新信息或Markdown，只输出纯文本'

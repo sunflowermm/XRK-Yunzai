@@ -1,679 +1,700 @@
 import fs from 'fs';
 import path from 'path';
-import cfg from '../../lib/config/config.js';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import yaml from 'yaml';
+import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
+import Puppeteer from '../../renderers/puppeteer/lib/puppeteer.js';
 
-// 统一路径处理：使用path.resolve确保跨平台兼容
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
+
 const ROOT_PATH = process.cwd();
-const DB_PATH = path.resolve(ROOT_PATH, 'temp', 'screenshot', 'screenshot-manager.db');
-const OUTPUT_BASE_PATH = path.resolve(ROOT_PATH, 'plugins', 'XRK', 'resources', 'help_other');
+const DB_PATH = path.join(ROOT_PATH, 'trash', 'screenshot', 'screenshot-manager.db');
+const OUTPUT_BASE_PATH = path.join(ROOT_PATH, 'plugins', 'XRK', 'resources', 'help_other');
 const MAX_RENDER_COUNT = 100;
 const MAX_IDLE_TIME = 3600000;
-const DEFAULT_IMAGE_PATH = path.resolve(ROOT_PATH, 'renderers', '截图失败.jpg');
-const CONFIG_PATH = path.resolve(ROOT_PATH, 'data', 'xrkconfig', 'config.yaml');
-
-let configs = { screen_shot_quality: 1 };
-try {
-    if (fs.existsSync(CONFIG_PATH)) {
-        configs = yaml.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-    }
-} catch (e) {
-    logger?.info?.('读取配置文件失败，使用默认配置', e);
-}
-
-const DEFAULT_CONFIG = {
-    width: 'auto',
-    height: 'auto',
-    quality: 100,
-    type: 'jpeg',
-    deviceScaleFactor: configs.screen_shot_quality || 1,
-    selector: null,
-    waitForSelector: null,
-    waitForTimeout: null,
-    waitUntil: 'networkidle2',
-    fullPage: true,
-    topCutRatio: 0,
-    bottomCutRatio: 0,
-    leftCutRatio: 0,
-    rightCutRatio: 0,
-    cacheTime: 3600,
-    emulateDevice: null,
-    userAgent: null,
-    timeout: 120000,
-    scrollToBottom: true,
-    cookies: null,
-    allowFailure: true,
-    authentication: null,
-    clip: null,
-    omitBackground: false,
-    encoding: 'binary',
-    hideScrollbars: true,
-    javascript: true,
-    dark: false,
-    retryCount: 2,
-    retryDelay: 1000,
-    autoHeight: true
-};
+const DEFAULT_IMAGE_PATH = path.join(ROOT_PATH, 'renderers', '截图失败.jpg');
+const CONFIG_PATH = path.join(ROOT_PATH, 'data', 'xrkconfig', 'config.yaml');
 
 const MIN_DIMENSION = 320;
 const MAX_DIMENSION = 32768;
 
-function normalizeDimension(value, fallback) {
-    const base = typeof value === 'number' && !Number.isNaN(value)
-        ? value
-        : (typeof fallback === 'number' ? fallback : MIN_DIMENSION);
-    const rounded = Math.round(base);
-    return Math.min(Math.max(rounded, MIN_DIMENSION), MAX_DIMENSION);
+let browserExecutablePath = null;
+try {
+  const rcPath = path.join(ROOT_PATH, '.puppeteerrc.cjs');
+  if (fs.existsSync(rcPath)) {
+    const puppeteerConfig = require(rcPath);
+    browserExecutablePath = puppeteerConfig?.executablePath ?? null;
+  }
+} catch (error) {
+  logger?.warn?.('无法加载 .puppeteerrc.cjs，将使用默认浏览器路径', error);
+}
+
+let configs = { screen_shot_quality: 1 };
+try {
+  if (fs.existsSync(CONFIG_PATH)) {
+    configs = yaml.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) || configs;
+  } else {
+    logger?.info?.('未找到 data/xrkconfig/config.yaml，使用默认截图配置');
+  }
+} catch (error) {
+  logger?.info?.('读取 data/xrkconfig/config.yaml 失败，使用默认截图配置', error);
+}
+
+const DEFAULT_CONFIG = {
+  width: 'auto',
+  height: 'auto',
+  quality: 100,
+  type: 'jpeg',
+  deviceScaleFactor: configs.screen_shot_quality || 1,
+  selector: null,
+  waitForSelector: null,
+  waitForTimeout: null,
+  waitUntil: 'networkidle2',
+  fullPage: true,
+  topCutRatio: 0,
+  bottomCutRatio: 0,
+  leftCutRatio: 0,
+  rightCutRatio: 0,
+  cacheTime: 3600,
+  emulateDevice: null,
+  userAgent: null,
+  timeout: 120000,
+  scrollToBottom: true,
+  cookies: null,
+  allowFailure: true,
+  authentication: null,
+  clip: null,
+  omitBackground: false,
+  encoding: 'binary',
+  hideScrollbars: true,
+  javascript: true,
+  dark: false,
+  retryCount: 2,
+  retryDelay: 1000,
+  autoHeight: true
+};
+
+function ensureDir(targetPath) {
+  if (!fs.existsSync(targetPath)) {
+    fs.mkdirSync(targetPath, { recursive: true });
+  }
+}
+
+function clampDimension(value, fallback) {
+  const candidate = Number.isFinite(value) ? value : fallback;
+  const rounded = Math.round(candidate || MIN_DIMENSION);
+  return Math.min(Math.max(rounded, MIN_DIMENSION), MAX_DIMENSION);
+}
+
+function isAuto(value) {
+  return value === undefined || value === null || value === 'auto';
+}
+
+function toFileUrl(target) {
+  if (/^https?:\/\//i.test(target)) {
+    return target;
+  }
+
+  const resolvedPath = path.resolve(target);
+  const normalized = resolvedPath.replace(/\\/g, '/');
+
+  if (process.platform === 'win32') {
+    const drive = normalized.match(/^([A-Za-z]:)/);
+    if (drive) {
+      const rest = normalized.slice(drive[0].length);
+      return `file:///${drive[0]}${encodeURI(rest).replace(/#/g, '%23')}`;
+    }
+  }
+
+  return `file://${encodeURI(normalized).replace(/#/g, '%23')}`;
+}
+
+async function waitImagesLoaded(page) {
+  await page.evaluate(() => {
+    return new Promise((resolve) => {
+      const timeout = setTimeout(resolve, 3000);
+      const images = document.querySelectorAll('img');
+      if (images.length === 0) {
+        clearTimeout(timeout);
+        resolve();
+        return;
+      }
+
+      let loaded = 0;
+      const done = () => {
+        loaded += 1;
+        if (loaded >= images.length) {
+          clearTimeout(timeout);
+          resolve();
+        }
+      };
+
+      images.forEach((img) => {
+        if (img.complete) {
+          done();
+        } else {
+          img.onload = done;
+          img.onerror = done;
+        }
+      });
+    });
+  }).catch(() => {});
+}
+
+async function getContentDimensions(page) {
+  return await page
+    .evaluate(() => {
+      const body = document.body;
+      const html = document.documentElement;
+      return {
+        width: Math.max(
+          body.scrollWidth,
+          html.scrollWidth,
+          body.offsetWidth,
+          html.offsetWidth,
+          body.clientWidth,
+          html.clientWidth
+        ),
+        height: Math.max(
+          body.scrollHeight,
+          html.scrollHeight,
+          body.offsetHeight,
+          html.offsetHeight,
+          body.clientHeight,
+          html.clientHeight
+        )
+      };
+    })
+    .catch(() => ({ width: 1280, height: 720 }));
 }
 
 class ScreenshotManager {
-    constructor() {
-        this.browser = null;
-        this.context = null;
-        this.rendererType = null;
-        this.renderCount = 0;
-        this.lastUsedTime = Date.now();
-        this.dbInstance = null;
+  constructor() {
+    this.browser = null;
+    this.browserPromise = null;
+    this.renderCount = 0;
+    this.lastUsedTime = Date.now();
+    this.dbInstance = null;
+    this.idleTimer = null;
+    this.pageQueue = new Set();
+    this.isClosing = false;
+
+    process.once('exit', () => this.cleanup());
+    process.once('SIGINT', () => this.cleanup());
+    process.once('SIGTERM', () => this.cleanup());
+    process.once('beforeExit', () => this.cleanup());
+  }
+
+  async cleanup() {
+    if (this.isClosing) return;
+    this.isClosing = true;
+
+    try {
+      if (this.idleTimer) {
+        clearInterval(this.idleTimer);
         this.idleTimer = null;
-        this.pageQueue = new Set();
-        this.isClosing = false;
+      }
+
+      if (this.pageQueue.size > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+
+      if (this.browser) {
+        try {
+          const pages = await this.browser.pages();
+          await Promise.all(pages.map((page) => page.close().catch(() => {})));
+          await this.browser.close();
+        } catch {
+          // ignore close errors
+        }
+        this.browser = null;
+      }
+
+      if (this.dbInstance) {
+        await this.dbInstance.close().catch(() => {});
+        this.dbInstance = null;
+      }
+    } catch {
+      // ignore cleanup errors
+    }
+  }
+
+  async initDB() {
+    if (this.dbInstance) return this.dbInstance;
+
+    try {
+      ensureDir(path.dirname(DB_PATH));
+      this.dbInstance = await open({
+        filename: DB_PATH,
+        driver: sqlite3.Database
+      });
+
+      await this.dbInstance.exec(`
+        CREATE TABLE IF NOT EXISTS screenshot_cache (
+          target TEXT,
+          config TEXT,
+          image_path TEXT,
+          created_at INTEGER,
+          PRIMARY KEY (target, config)
+        );
+        CREATE TABLE IF NOT EXISTS render_stats (
+          date TEXT,
+          total_renders INTEGER DEFAULT 0,
+          PRIMARY KEY (date)
+        );
+        CREATE TABLE IF NOT EXISTS error_logs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          date TEXT,
+          time TEXT,
+          error TEXT,
+          stack TEXT,
+          target TEXT
+        );
+      `);
+    } catch (error) {
+      logger?.error?.('初始化截图数据库失败:', error);
+      this.dbInstance = {
+        run: async () => ({ changes: 0 }),
+        get: async () => null,
+        all: async () => [],
+        exec: async () => {},
+        close: async () => {}
+      };
+    }
+
+    return this.dbInstance;
+  }
+
+  async getBrowser() {
+    if (this.isClosing) {
+      throw new Error('浏览器正在关闭');
+    }
+
+    this.lastUsedTime = Date.now();
+
+    if (this.browser) {
+      try {
+        await this.browser.version();
+        return this.browser;
+      } catch {
+        logger?.warn?.('现有浏览器实例不可用，准备重建');
+        this.browser = null;
         this.browserPromise = null;
-        
-        process.once('exit', () => this.cleanup());
-        process.once('SIGINT', () => this.cleanup());
-        process.once('SIGTERM', () => this.cleanup());
-        process.once('beforeExit', () => this.cleanup());
+      }
     }
 
-    getRendererType() {
-        if (this.rendererType) return this.rendererType;
-        
-        const rendererCfg = cfg.renderer || {};
-        const playwrightCfg = rendererCfg.playwright || {};
-        const puppeteerCfg = rendererCfg.puppeteer || {};
-        
-        if (playwrightCfg.enabled !== false && (playwrightCfg.chromiumPath || playwrightCfg.channel)) {
-            this.rendererType = 'playwright';
-        } else if (puppeteerCfg.enabled !== false) {
-            this.rendererType = 'puppeteer';
-        } else {
-            this.rendererType = 'puppeteer';
+    if (this.browserPromise) {
+      return this.browserPromise;
+    }
+
+    this.browserPromise = this._createBrowser();
+
+    try {
+      this.browser = await this.browserPromise;
+      return this.browser;
+    } finally {
+      this.browserPromise = null;
+    }
+  }
+
+  async _createBrowser() {
+    if (this.isClosing) {
+      throw new Error('浏览器正在关闭');
+    }
+
+    try {
+      const puppeteerOptions = {
+        headless: 'new',
+        args: [
+          '--disable-gpu',
+          '--no-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-setuid-sandbox',
+          '--disable-web-security',
+          '--allow-file-access-from-files',
+          '--disable-infobars',
+          '--disable-notifications',
+          '--window-size=1920,1080',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-extensions',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding'
+        ],
+        puppeteerTimeout: 60000
+      };
+
+      if (browserExecutablePath) {
+        puppeteerOptions.executablePath = browserExecutablePath;
+      }
+
+      const renderer = new Puppeteer(puppeteerOptions);
+      const browser = await renderer.browserInit();
+
+      if (!browser) {
+        throw new Error('浏览器实例创建失败');
+      }
+
+      this.renderCount = 0;
+
+      if (!this.idleTimer) {
+        this.idleTimer = setInterval(() => this.checkIdle(), 5 * 60 * 1000);
+      }
+
+      browser.on('disconnected', () => {
+        logger?.warn?.('浏览器断开连接，等待重新创建');
+        if (this.browser === browser) {
+          this.browser = null;
+          this.browserPromise = null;
         }
-        
-        return this.rendererType;
+      });
+
+      return browser;
+    } catch (error) {
+      logger?.error?.('启动Chromium失败:', error);
+      throw error;
+    }
+  }
+
+  async resetBrowser() {
+    if (this.isClosing) return;
+
+    const oldBrowser = this.browser;
+    this.browser = null;
+    this.browserPromise = null;
+
+    if (oldBrowser) {
+      try {
+        const pages = await oldBrowser.pages();
+        await Promise.all(pages.map((page) => page.close().catch(() => {})));
+        setTimeout(async () => {
+          try {
+            await oldBrowser.close();
+          } catch {
+            // ignore
+          }
+        }, 1000);
+      } catch (error) {
+        logger?.error?.('关闭旧浏览器失败:', error);
+      }
     }
 
-    async initBrowser() {
-        if (this.browser) return this.browser;
-        if (this.browserPromise) return await this.browserPromise;
-        
-        this.browserPromise = this._createBrowser();
-        
+    try {
+      await this.getBrowser();
+    } catch (error) {
+      logger?.error?.('重置浏览器失败:', error);
+    }
+  }
+
+  checkIdle() {
+    if (this.isClosing || !this.browser) return;
+    if (Date.now() - this.lastUsedTime > MAX_IDLE_TIME) {
+      logger?.info?.('浏览器长时间未使用，开始释放资源');
+      this.resetBrowser();
+    }
+  }
+
+  async configurePage(page, config) {
+    if (config.authentication) {
+      await page.authenticate(config.authentication);
+    }
+
+    if (config.cookies) {
+      await page.setCookie(...config.cookies);
+    }
+
+    if (config.userAgent) {
+      await page.setUserAgent(config.userAgent);
+    }
+
+    if (config.emulateDevice) {
+      try {
+        const puppeteer = await import('puppeteer');
+        const device = puppeteer.devices?.[config.emulateDevice];
+        if (device) {
+          await page.emulate(device);
+        }
+      } catch (error) {
+        logger?.debug?.('模拟设备失败，使用默认视口', error);
+      }
+    }
+
+    const defaultWidth = clampDimension(
+      isAuto(config.width) ? 1280 : Number(config.width),
+      1280
+    );
+    const defaultHeight = clampDimension(
+      isAuto(config.height) ? 720 : Number(config.height),
+      720
+    );
+
+    await page.setViewport({
+      width: defaultWidth,
+      height: defaultHeight,
+      deviceScaleFactor: config.deviceScaleFactor
+    });
+
+    await page.setJavaScriptEnabled(config.javascript);
+
+    if (config.dark) {
+      await page.emulateMediaFeatures([
+        { name: 'prefers-color-scheme', value: 'dark' }
+      ]);
+    }
+
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => false
+      });
+    });
+  }
+
+  async waitForPage(page, config) {
+    if (config.waitForSelector) {
+      await page
+        .waitForSelector(config.waitForSelector, { timeout: 30000 })
+        .catch((err) => logger?.warn?.(`等待选择器失败: ${config.waitForSelector}`, err));
+    }
+
+    if (config.waitForTimeout) {
+      await page.waitForTimeout(config.waitForTimeout);
+    }
+
+    if (config.scrollToBottom) {
+      await page
+        .evaluate(async () => {
+          await new Promise((resolve) => {
+            let totalHeight = 0;
+            const distance = 100;
+            const timer = setInterval(() => {
+              window.scrollBy(0, distance);
+              totalHeight += distance;
+              if (totalHeight >= document.body.scrollHeight) {
+                clearInterval(timer);
+                window.scrollTo(0, 0);
+                resolve();
+              }
+            }, 100);
+          });
+        })
+        .catch((err) => logger?.warn?.('滚动到底部失败:', err));
+    }
+
+    if (config.hideScrollbars) {
+      await page
+        .evaluate(() => {
+          document.documentElement.style.overflow = 'hidden';
+          document.body.style.overflow = 'hidden';
+        })
+        .catch((err) => logger?.warn?.('隐藏滚动条失败:', err));
+    }
+
+    await waitImagesLoaded(page);
+  }
+
+  async prepareScreenshotOptions(page, config) {
+    const options = {
+      type: config.type,
+      quality: config.type === 'jpeg' ? config.quality : undefined,
+      fullPage: config.fullPage,
+      omitBackground: config.omitBackground,
+      encoding: config.encoding === 'base64' ? 'base64' : 'binary'
+    };
+
+    if (config.fullPage && !config.clip) {
+      return options;
+    }
+
+    const dims = await getContentDimensions(page);
+    let { width, height } = dims;
+
+    let x = Math.floor(width * config.leftCutRatio);
+    width -= x + Math.floor(width * config.rightCutRatio);
+    let y = Math.floor(height * config.topCutRatio);
+    height -= y + Math.floor(height * config.bottomCutRatio);
+
+    width = Math.max(width, 1);
+    height = Math.max(height, 1);
+
+    options.clip = {
+      x,
+      y,
+      width,
+      height
+    };
+
+    if (config.clip) {
+      options.clip = {
+        x: config.clip.x ?? x,
+        y: config.clip.y ?? y,
+        width: config.clip.width ?? width,
+        height: config.clip.height ?? height
+      };
+    }
+
+    if (config.selector) {
+      const handle = await page.$(config.selector);
+      if (handle) {
+        const box = await handle.boundingBox();
+        if (box) {
+          options.clip = {
+            x: Math.max(box.x, 0),
+            y: Math.max(box.y, 0),
+            width: Math.max(box.width, 1),
+            height: Math.max(box.height, 1)
+          };
+        }
+      }
+    }
+
+    return options;
+  }
+
+  async executeScreenshot(target, imageName, config) {
+    const pageId = Math.random().toString(36).slice(2);
+    this.pageQueue.add(pageId);
+
+    let page = null;
+
+    try {
+      const browser = await this.getBrowser();
+      page = await browser.newPage();
+      page.setDefaultTimeout(config.timeout);
+      page.setDefaultNavigationTimeout(config.timeout);
+
+      await this.configurePage(page, config);
+
+      await page.goto(toFileUrl(target), {
+        waitUntil: config.waitUntil,
+        timeout: config.timeout - 5000
+      });
+
+      await this.waitForPage(page, config);
+
+      const contentDimensions = await getContentDimensions(page);
+      const finalWidth = clampDimension(
+        isAuto(config.width) ? contentDimensions.width : Number(config.width),
+        contentDimensions.width
+      );
+      const finalHeight = clampDimension(
+        isAuto(config.height) ? contentDimensions.height : Number(config.height),
+        contentDimensions.height
+      );
+
+      if (!config.fullPage) {
+        await page.setViewport({
+          width: finalWidth,
+          height: finalHeight,
+          deviceScaleFactor: config.deviceScaleFactor
+        });
+      }
+
+      const screenshotOptions = await this.prepareScreenshotOptions(page, {
+        ...config,
+        width: finalWidth,
+        height: finalHeight
+      });
+
+      const buffer = await page.screenshot(screenshotOptions);
+      const imagePath = path.join(OUTPUT_BASE_PATH, `${imageName}.${config.type}`);
+      ensureDir(path.dirname(imagePath));
+
+      if (typeof buffer === 'string') {
+        fs.writeFileSync(imagePath, buffer, 'base64');
+      } else {
+        fs.writeFileSync(imagePath, buffer);
+      }
+
+      this.renderCount += 1;
+      this.lastUsedTime = Date.now();
+
+      if (this.renderCount >= MAX_RENDER_COUNT && this.pageQueue.size === 1) {
+        logger?.info?.(
+          `截图次数达到阈值(${this.renderCount}/${MAX_RENDER_COUNT})，准备重置浏览器`
+        );
+        setTimeout(() => this.resetBrowser(), 1000);
+      }
+
+      return imagePath;
+    } finally {
+      if (page) {
         try {
-            this.browser = await this.browserPromise;
-            return this.browser;
-        } finally {
-            this.browserPromise = null;
+          await page.close();
+        } catch {
+          // ignore
         }
+      }
+      this.pageQueue.delete(pageId);
     }
+  }
 
-    async _createBrowser() {
-        if (this.isClosing) throw new Error('浏览器正在关闭');
-        
-        const type = this.getRendererType();
-        
-        try {
-            if (type === 'playwright') {
-                const playwright = (await import('playwright')).default;
-                const rendererCfg = cfg.renderer?.playwright || {};
-                const browserType = rendererCfg.browserType || 'chromium';
-                const defaultViewport = rendererCfg.viewport || { width: 1280, height: 720, deviceScaleFactor: 1 };
-                
-                // Windows兼容：确保executablePath使用标准化路径
-                const executablePath = rendererCfg.chromiumPath 
-                    ? path.resolve(rendererCfg.chromiumPath) 
-                    : undefined;
-                
-                this.browser = await playwright[browserType].launch({
-                    headless: rendererCfg.headless !== false,
-                    args: rendererCfg.args || [],
-                    channel: rendererCfg.channel,
-                    executablePath: executablePath
-                });
-                
-                this.context = await this.browser.newContext({
-                    viewport: defaultViewport,
-                    deviceScaleFactor: defaultViewport.deviceScaleFactor || 1
-                });
-                
-                logger?.info?.('[截图] 使用 playwright 渲染器');
-            } else {
-                const puppeteer = (await import('puppeteer')).default;
-                const rendererCfg = cfg.renderer?.puppeteer || {};
-                
-                // Windows兼容：确保executablePath使用标准化路径
-                const executablePath = rendererCfg.chromiumPath 
-                    ? path.resolve(rendererCfg.chromiumPath) 
-                    : undefined;
-                
-                this.browser = await puppeteer.launch({
-                    headless: rendererCfg.headless !== false ? 'new' : false,
-                    args: rendererCfg.args || [],
-                    executablePath: executablePath
-                });
-                
-                logger?.info?.('[截图] 使用 puppeteer 渲染器');
-            }
-            
-            this.renderCount = 0;
-            
-            if (!this.idleTimer && !this.isClosing) {
-                this.idleTimer = setInterval(() => this.checkIdle(), 5 * 60 * 1000);
-            }
-            
-            if (this.browser.on) {
-                this.browser.on('disconnected', () => {
-                    logger?.warn?.('浏览器断开连接');
-                    this.browser = null;
-                    this.context = null;
-                    this.browserPromise = null;
-                });
-            }
-            
-            return this.browser;
-        } catch (error) {
-            logger?.error?.(`启动${type}失败:`, error);
-            if (type === 'playwright') {
-                try {
-                    const puppeteer = (await import('puppeteer')).default;
-                    const rendererCfg = cfg.renderer?.puppeteer || {};
-                    
-                    // Windows兼容：确保executablePath使用标准化路径
-                    const executablePath = rendererCfg.chromiumPath 
-                        ? path.resolve(rendererCfg.chromiumPath) 
-                        : undefined;
-                    
-                    this.browser = await puppeteer.launch({
-                        headless: rendererCfg.headless !== false ? 'new' : false,
-                        args: rendererCfg.args || [],
-                        executablePath: executablePath
-                    });
-                    
-                    this.rendererType = 'puppeteer';
-                    logger?.info?.('[截图] 回退到 puppeteer 渲染器');
-                    return this.browser;
-                } catch (e) {
-                    logger?.error?.('puppeteer 初始化也失败:', e);
-                    throw e;
-                }
-            }
-            throw error;
-        }
+  useDefaultImage(imageName, config) {
+    const defaultOutput = path.join(OUTPUT_BASE_PATH, `${imageName}.${config.type}`);
+    try {
+      ensureDir(path.dirname(defaultOutput));
+      if (fs.existsSync(DEFAULT_IMAGE_PATH)) {
+        fs.copyFileSync(DEFAULT_IMAGE_PATH, defaultOutput);
+        return defaultOutput;
+      }
+    } catch (error) {
+      logger?.error?.('复制默认截图失败:', error);
     }
-
-    async cleanup() {
-        if (this.isClosing) return;
-        this.isClosing = true;
-        
-        try {
-            if (this.idleTimer) {
-                clearInterval(this.idleTimer);
-                this.idleTimer = null;
-            }
-            
-            if (this.pageQueue.size > 0) {
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-            
-            if (this.context) {
-                await this.context.close().catch(() => {});
-                this.context = null;
-            }
-            
-            if (this.browser) {
-                await this.browser.close().catch(() => {});
-                this.browser = null;
-            }
-            
-            if (this.dbInstance) {
-                await this.dbInstance.close().catch(() => {});
-                this.dbInstance = null;
-            }
-        } catch (e) {
-            // 忽略清理错误
-        }
-    }
-
-    async initDB() {
-        if (!this.dbInstance) {
-            try {
-                const dbDir = path.dirname(DB_PATH);
-                if (!fs.existsSync(dbDir)) {
-                    fs.mkdirSync(dbDir, { recursive: true });
-                }
-                
-                this.dbInstance = await open({
-                    filename: DB_PATH,
-                    driver: sqlite3.Database
-                });
-                
-                await this.dbInstance.exec(`
-                    CREATE TABLE IF NOT EXISTS screenshot_cache (
-                        target TEXT,
-                        config TEXT,
-                        image_path TEXT,
-                        created_at INTEGER,
-                        PRIMARY KEY (target, config)
-                    );
-                    CREATE TABLE IF NOT EXISTS render_stats (
-                        date TEXT,
-                        total_renders INTEGER DEFAULT 0,
-                        PRIMARY KEY (date)
-                    );
-                    CREATE TABLE IF NOT EXISTS error_logs (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        date TEXT,
-                        time TEXT,
-                        error TEXT,
-                        stack TEXT,
-                        target TEXT
-                    );
-                `);
-            } catch (err) {
-                logger?.error?.('初始化数据库失败:', err);
-                this.dbInstance = { 
-                    run: async () => ({ changes: 0 }), 
-                    get: async () => null, 
-                    all: async () => [], 
-                    exec: async () => {}, 
-                    close: async () => {} 
-                };
-            }
-        }
-        return this.dbInstance;
-    }
-
-    checkIdle() {
-        if (this.isClosing) return;
-        
-        const now = Date.now();
-        if (now - this.lastUsedTime > MAX_IDLE_TIME && this.browser) {
-            logger?.info?.('浏览器实例长时间未使用，释放资源');
-            this.browser = null;
-            this.context = null;
-        }
-    }
-
-    async getContentDimensions(page, type) {
-        if (type === 'playwright') {
-            return await page.evaluate(() => {
-                const body = document.body;
-                const html = document.documentElement;
-                return {
-                    width: Math.max(
-                        body.scrollWidth, html.scrollWidth,
-                        body.offsetWidth, html.offsetWidth,
-                        body.clientWidth, html.clientWidth
-                    ),
-                    height: Math.max(
-                        body.scrollHeight, html.scrollHeight,
-                        body.offsetHeight, html.offsetHeight,
-                        body.clientHeight, html.clientHeight
-                    )
-                };
-            });
-        } else {
-            return await page.evaluate(() => {
-                const body = document.body;
-                const html = document.documentElement;
-                return {
-                    width: Math.max(
-                        body.scrollWidth, html.scrollWidth,
-                        body.offsetWidth, html.offsetWidth,
-                        body.clientWidth, html.clientWidth
-                    ),
-                    height: Math.max(
-                        body.scrollHeight, html.scrollHeight,
-                        body.offsetHeight, html.offsetHeight,
-                        body.clientHeight, html.clientHeight
-                    )
-                };
-            });
-        }
-    }
-
-    async executeScreenshot(target, imageName, config) {
-        const pageId = Math.random().toString(36).substring(7);
-        this.pageQueue.add(pageId);
-        
-        let page = null;
-        
-        try {
-            await this.initBrowser();
-            this.lastUsedTime = Date.now();
-            
-            const type = this.getRendererType();
-            const isUrl = target.startsWith('http') || target.startsWith('https');
-            // Windows兼容：file://协议需要正确的路径格式
-            let targetUrl;
-            if (isUrl) {
-                targetUrl = target;
-            } else {
-                const resolvedPath = path.resolve(target);
-                // 转换为file:// URL格式（跨平台兼容）
-                // Windows需要三个斜杠 file:///，Unix需要两个斜杠 file://
-                const isWindows = process.platform === 'win32';
-                const normalizedPath = resolvedPath.replace(/\\/g, '/');
-                // Windows路径需要编码，特别是空格和特殊字符
-                if (isWindows) {
-                    // Windows: file:///C:/path/to/file
-                    const driveLetter = normalizedPath.match(/^([A-Za-z]:)/);
-                    if (driveLetter) {
-                        // 移除驱动器字母前的斜杠（如果有）
-                        const pathWithoutDrive = normalizedPath.substring(driveLetter[0].length);
-                        const encodedPath = encodeURI(pathWithoutDrive).replace(/#/g, '%23');
-                        targetUrl = `file:///${driveLetter[0].toLowerCase()}${encodedPath}`;
-                    } else {
-                        // 无驱动器字母的情况
-                        const encodedPath = encodeURI(normalizedPath).replace(/#/g, '%23');
-                        targetUrl = `file:///${encodedPath}`;
-                    }
-                } else {
-                    // Unix: file:///path/to/file
-                    const encodedPath = encodeURI(normalizedPath).replace(/#/g, '%23');
-                    targetUrl = `file://${encodedPath}`;
-                }
-            }
-            
-            const rendererCfg = cfg.renderer?.[type] || {};
-            const defaultViewport = rendererCfg.viewport || { width: 1280, height: 720, deviceScaleFactor: 1 };
-            
-            const needAutoWidth = config.width === null || config.width === 'auto';
-            let viewportWidth = typeof config.width === 'number' ? config.width : defaultViewport.width;
-            let viewportHeight = typeof config.height === 'number' ? config.height : null;
-            const deviceScaleFactor = config.deviceScaleFactor || defaultViewport.deviceScaleFactor || 1;
-            
-            const needAutoHeight = config.height === null || config.height === 'auto' || config.autoHeight || config.fullPage;
-            
-            if (type === 'playwright') {
-                page = await this.context.newPage();
-                await page.setDefaultTimeout(config.timeout);
-                await page.setDefaultNavigationTimeout(config.timeout);
-                
-                if (config.userAgent) {
-                    await page.setExtraHTTPHeaders({ 'User-Agent': config.userAgent });
-                }
-                
-                await page.goto(targetUrl, {
-                    waitUntil: config.waitUntil,
-                    timeout: config.timeout
-                });
-                
-                if (config.waitForSelector) {
-                    await page.waitForSelector(config.waitForSelector, { timeout: 30000 }).catch(() => {});
-                }
-                
-                if (config.waitForTimeout) {
-                    await page.waitForTimeout(config.waitForTimeout);
-                }
-                
-                if (config.scrollToBottom) {
-                    await page.evaluate(async () => {
-                        await new Promise(resolve => {
-                            let totalHeight = 0;
-                            const distance = 100;
-                            const timer = setInterval(() => {
-                                window.scrollBy(0, distance);
-                                totalHeight += distance;
-                                if (totalHeight >= document.body.scrollHeight) {
-                                    clearInterval(timer);
-                                    window.scrollTo(0, 0);
-                                    resolve();
-                                }
-                            }, 100);
-                        });
-                    }).catch(() => {});
-                }
-                
-                if (needAutoHeight || needAutoWidth) {
-                    const contentDims = await this.getContentDimensions(page, type);
-                    if (needAutoHeight) {
-                        viewportHeight = Math.max(contentDims.height, viewportHeight || 0);
-                    }
-                    if (needAutoWidth) {
-                        viewportWidth = Math.max(contentDims.width, viewportWidth || 0);
-                    }
-                } else {
-                    viewportHeight = viewportHeight || defaultViewport.height;
-                }
-                
-                const sanitizedWidth = normalizeDimension(viewportWidth, defaultViewport.width);
-                const sanitizedHeight = normalizeDimension(viewportHeight, defaultViewport.height);
-                await page.setViewportSize({ width: sanitizedWidth, height: sanitizedHeight });
-                
-                if (needAutoHeight && !config.fullPage) {
-                    await page.waitForTimeout(200);
-                    const finalDims = await this.getContentDimensions(page, type);
-                    if (finalDims.height > viewportHeight) {
-                        viewportHeight = finalDims.height;
-                        const finalWidth = normalizeDimension(viewportWidth, defaultViewport.width);
-                        const finalHeight = normalizeDimension(viewportHeight, defaultViewport.height);
-                        await page.setViewportSize({ width: finalWidth, height: finalHeight });
-                    }
-                }
-                
-                const screenshotOptions = {
-                    type: config.type,
-                    quality: config.type === 'jpeg' ? config.quality : undefined,
-                    fullPage: config.fullPage || needAutoHeight,
-                    omitBackground: config.omitBackground
-                };
-                
-                if (config.selector) {
-                    const element = await page.locator(config.selector).first();
-                    if (element) {
-                        const imageBuffer = await element.screenshot(screenshotOptions);
-                        return await this.saveImage(imageBuffer, imageName, config);
-                    }
-                }
-                
-                const imageBuffer = await page.screenshot(screenshotOptions);
-                return await this.saveImage(imageBuffer, imageName, config);
-                
-            } else {
-                page = await this.browser.newPage();
-                page.setDefaultTimeout(config.timeout);
-                page.setDefaultNavigationTimeout(config.timeout);
-                
-                if (config.userAgent) {
-                    await page.setUserAgent(config.userAgent);
-                }
-                
-                await page.goto(targetUrl, {
-                    waitUntil: config.waitUntil,
-                    timeout: config.timeout
-                });
-                
-                if (config.waitForSelector) {
-                    await page.waitForSelector(config.waitForSelector, { timeout: 30000 }).catch(() => {});
-                }
-                
-                if (config.waitForTimeout) {
-                    await page.waitForTimeout(config.waitForTimeout);
-                }
-                
-                if (config.scrollToBottom) {
-                    await page.evaluate(async () => {
-                        await new Promise(resolve => {
-                            let totalHeight = 0;
-                            const distance = 100;
-                            const timer = setInterval(() => {
-                                window.scrollBy(0, distance);
-                                totalHeight += distance;
-                                if (totalHeight >= document.body.scrollHeight) {
-                                    clearInterval(timer);
-                                    window.scrollTo(0, 0);
-                                    resolve();
-                                }
-                            }, 100);
-                        });
-                    }).catch(() => {});
-                }
-                
-                if (needAutoHeight || needAutoWidth) {
-                    const contentDims = await this.getContentDimensions(page, type);
-                    if (needAutoHeight) {
-                        viewportHeight = Math.max(contentDims.height, viewportHeight || 0);
-                    }
-                    if (needAutoWidth) {
-                        viewportWidth = Math.max(contentDims.width, viewportWidth || 0);
-                    }
-                } else {
-                    viewportHeight = viewportHeight || defaultViewport.height;
-                }
-                
-                const sanitizedWidth = normalizeDimension(viewportWidth, defaultViewport.width);
-                const sanitizedHeight = normalizeDimension(viewportHeight, defaultViewport.height);
-                await page.setViewport({
-                    width: sanitizedWidth,
-                    height: sanitizedHeight,
-                    deviceScaleFactor: deviceScaleFactor
-                });
-                
-                if (needAutoHeight && !config.fullPage) {
-                    await page.waitForTimeout(200);
-                    const finalDims = await this.getContentDimensions(page, type);
-                    if (finalDims.height > viewportHeight) {
-                        viewportHeight = finalDims.height;
-                        await page.setViewport({
-                            width: normalizeDimension(viewportWidth, defaultViewport.width),
-                            height: normalizeDimension(viewportHeight, defaultViewport.height),
-                            deviceScaleFactor: deviceScaleFactor
-                        });
-                    }
-                }
-                
-                const screenshotOptions = {
-                    type: config.type,
-                    quality: config.type === 'jpeg' ? config.quality : undefined,
-                    fullPage: config.fullPage || needAutoHeight,
-                    omitBackground: config.omitBackground
-                };
-                
-                if (config.selector) {
-                    const element = await page.$(config.selector);
-                    if (element) {
-                        const imageBuffer = await element.screenshot(screenshotOptions);
-                        return await this.saveImage(imageBuffer, imageName, config);
-                    }
-                }
-                
-                const imageBuffer = await page.screenshot(screenshotOptions);
-                return await this.saveImage(imageBuffer, imageName, config);
-            }
-            
-        } finally {
-            if (page) {
-                try {
-                    await page.close();
-                } catch (e) {
-                    // 忽略关闭错误
-                }
-            }
-            this.pageQueue.delete(pageId);
-        }
-    }
-
-    async saveImage(imageBuffer, imageName, config) {
-        // 使用path.resolve确保跨平台兼容
-        const imagePath = path.resolve(OUTPUT_BASE_PATH, `${imageName}.${config.type}`);
-        const outputDir = path.dirname(imagePath);
-        if (!fs.existsSync(outputDir)) {
-            fs.mkdirSync(outputDir, { recursive: true });
-        }
-        
-        if (Buffer.isBuffer(imageBuffer)) {
-            fs.writeFileSync(imagePath, imageBuffer);
-        } else if (typeof imageBuffer === 'string') {
-            fs.writeFileSync(imagePath, imageBuffer, 'base64');
-        } else {
-            throw new Error('不支持的图片格式');
-        }
-        
-        this.renderCount++;
-        this.lastUsedTime = Date.now();
-        
-        if (this.renderCount >= MAX_RENDER_COUNT && this.pageQueue.size === 1) {
-            logger?.info?.(`渲染次数已达到阈值(${this.renderCount}/${MAX_RENDER_COUNT})，准备重置浏览器...`);
-            setTimeout(() => {
-                this.browser = null;
-                this.context = null;
-            }, 1000);
-        }
-        
-        return imagePath;
-    }
-
-    useDefaultImage(imageName, config, outputBasePath) {
-        // 使用path.resolve确保跨平台兼容
-        const defaultImagePath = path.resolve(outputBasePath, `${imageName}.${config.type}`);
-        try {
-            if (fs.existsSync(DEFAULT_IMAGE_PATH)) {
-                fs.copyFileSync(DEFAULT_IMAGE_PATH, defaultImagePath);
-                return defaultImagePath;
-            }
-        } catch (error) {
-            logger?.error?.('复制默认图片失败:', error);
-        }
-        return DEFAULT_IMAGE_PATH;
-    }
+    return DEFAULT_IMAGE_PATH;
+  }
 }
 
 const manager = new ScreenshotManager();
 
 export async function takeScreenshot(target, imageName, config = {}) {
-    const finalConfig = { ...DEFAULT_CONFIG, ...config };
-    
-    if (!fs.existsSync(OUTPUT_BASE_PATH)) {
-        fs.mkdirSync(OUTPUT_BASE_PATH, { recursive: true });
-    }
-    
-    for (let retryAttempt = 0; retryAttempt <= finalConfig.retryCount; retryAttempt++) {
-        try {
-            const imagePath = await manager.executeScreenshot(target, imageName, finalConfig);
-            return imagePath;
-            
-        } catch (error) {
-            logger?.error?.(`截图失败 (尝试 ${retryAttempt + 1}/${finalConfig.retryCount + 1}):`, error);
-            
-            const db = await manager.initDB();
-            const today = new Date().toISOString().split('T')[0];
-            const now = new Date().toISOString();
-            await db.run(
-                `INSERT INTO error_logs (date, time, error, stack, target) VALUES (?, ?, ?, ?, ?)`,
-                today, now, error.message, error.stack, target
-            ).catch(() => {});
-            
-            if (retryAttempt < finalConfig.retryCount) {
-                if (error.message.includes('浏览器') || 
-                    error.message.includes('Protocol') ||
-                    error.message.includes('Target closed') ||
-                    error.message.includes('Session closed')) {
-                    manager.browser = null;
-                    manager.context = null;
-                }
-                
-                await new Promise(resolve => setTimeout(resolve, finalConfig.retryDelay));
-                continue;
-            }
-            
-            if (finalConfig.allowFailure) {
-                return manager.useDefaultImage(imageName, finalConfig, OUTPUT_BASE_PATH);
-            }
-            
-            throw error;
+  const finalConfig = { ...DEFAULT_CONFIG, ...config };
+  ensureDir(OUTPUT_BASE_PATH);
+
+  for (let attempt = 0; attempt <= finalConfig.retryCount; attempt += 1) {
+    try {
+      return await manager.executeScreenshot(target, imageName, finalConfig);
+    } catch (error) {
+      logger?.error?.(
+        `截图失败 (尝试 ${attempt + 1}/${finalConfig.retryCount + 1}):`,
+        error
+      );
+
+      const db = await manager.initDB();
+      const today = new Date().toISOString().split('T')[0];
+      const now = new Date().toISOString();
+      await db
+        .run(
+          `INSERT INTO error_logs (date, time, error, stack, target) VALUES (?, ?, ?, ?, ?)`,
+          today,
+          now,
+          error.message,
+          error.stack,
+          target
+        )
+        .catch((err) => logger?.debug?.('记录截图错误失败:', err));
+
+      if (attempt < finalConfig.retryCount) {
+        if (
+          error.message.includes('浏览器') ||
+          error.message.includes('Protocol') ||
+          error.message.includes('Target closed') ||
+          error.message.includes('Session closed')
+        ) {
+          await manager.resetBrowser();
         }
+
+        await new Promise((resolve) => setTimeout(resolve, finalConfig.retryDelay));
+        continue;
+      }
+
+      if (finalConfig.allowFailure) {
+        return manager.useDefaultImage(imageName, finalConfig);
+      }
+
+      throw error;
     }
+  }
 }

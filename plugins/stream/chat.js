@@ -3,6 +3,7 @@ import fs from 'fs';
 import fetch from 'node-fetch';
 import AIStream from '../../lib/aistream/aistream.js';
 import BotUtil from '../../lib/common/util.js';
+import cfg from '../../lib/config/config.js';
 
 const _path = process.cwd();
 // 统一路径处理：使用path.resolve确保跨平台兼容
@@ -19,6 +20,16 @@ const EMOJI_REACTIONS = {
   '喜欢': ['42', '63', '85', '116', '122', '319'],
   '爱心': ['66', '122', '319'],
   '生气': ['8', '23', '39', '86', '179', '265']
+};
+
+const RESPONSE_POLISH_DEFAULT = {
+  enabled: true,
+  maxTokens: 400,
+  temperature: 0.3,
+  instructions: `你是QQ聊天润色器，只能做轻微整理：
+1. 删除舞台提示、括号或方括号里未执行的工具描述（例如[回复:xxx]、(正在... )等）
+2. 保留原意，语气自然，像正常聊天，尽量简短，用常用标点分句
+3. 不要添加新信息或Markdown，只输出纯文本`
 };
 
 /**
@@ -266,6 +277,14 @@ export default class ChatStream extends AIStream {
     });
 
     this.workflowManager = new WorkflowManager(this);
+
+    const polishCfg = cfg.kuizai?.ai?.responsePolish || {};
+    this.responsePolishConfig = {
+      enabled: polishCfg.enabled ?? RESPONSE_POLISH_DEFAULT.enabled,
+      instructions: polishCfg.instructions || RESPONSE_POLISH_DEFAULT.instructions,
+      maxTokens: polishCfg.maxTokens || RESPONSE_POLISH_DEFAULT.maxTokens,
+      temperature: polishCfg.temperature ?? RESPONSE_POLISH_DEFAULT.temperature
+    };
   }
 
   /**
@@ -403,7 +422,7 @@ export default class ChatStream extends AIStream {
           }
         }
       },
-      enabled: true
+      enabled: false
     });
 
     // 4. 回复
@@ -453,7 +472,7 @@ export default class ChatStream extends AIStream {
           }
         }
       },
-      enabled: true
+      enabled: false
     });
 
     // 6. 扩展工作流
@@ -1521,6 +1540,63 @@ export default class ChatStream extends AIStream {
     return lines.join('\n');
   }
 
+  cleanupArtifacts(text) {
+    if (!text) return text;
+
+    let cleaned = text;
+    cleaned = cleaned.replace(/\[\s*\]/g, '');
+    cleaned = cleaned.replace(/\[(?:回复|回应|工具|命令)[^\]]*\]/gi, '');
+    cleaned = cleaned.replace(/\((?:正在|过了一会儿?|稍等)[^)]*\)/g, '');
+    cleaned = cleaned.replace(/（(?:正在|过了一会儿?|稍等)[^）]*）/g, '');
+    cleaned = cleaned.replace(/\s{2,}/g, ' ');
+
+    return cleaned.trim();
+  }
+
+  async refineResponse(text, context) {
+    if (!text || !this.responsePolishConfig?.enabled) {
+      return text;
+    }
+
+    const polishConfig = this.responsePolishConfig;
+    const persona = context?.question?.persona || '保持原角色语气';
+
+    const messages = [
+      {
+        role: 'system',
+        content: `${persona}
+
+${polishConfig.instructions || RESPONSE_POLISH_DEFAULT.instructions}`
+      },
+      {
+        role: 'user',
+        content: text
+      }
+    ];
+
+    const apiConfig = {
+      ...context?.config,
+      maxTokens: polishConfig.maxTokens || RESPONSE_POLISH_DEFAULT.maxTokens,
+      temperature: polishConfig.temperature ?? RESPONSE_POLISH_DEFAULT.temperature
+    };
+
+    const refined = await this.callAI(messages, apiConfig);
+    if (!refined) return text;
+    return refined.trim();
+  }
+
+  async postProcessResponse(text, context) {
+    if (!text) return text;
+    let processed = this.cleanupArtifacts(text);
+    if (!processed) return processed;
+
+    if (this.responsePolishConfig?.enabled) {
+      processed = await this.refineResponse(processed, context);
+    }
+
+    return processed;
+  }
+
   /**
    * 获取Bot角色
    */
@@ -1810,7 +1886,12 @@ ${e.isMaster ? '6. 对主人友好和尊重' : ''}`;
       this.recordMessage(e);
     }
     
-    return await super.execute(e, question, config);
+    const rawResult = await super.execute(e, question, config);
+    if (!rawResult) {
+      return rawResult;
+    }
+
+    return await this.postProcessResponse(rawResult, { e, question, config });
   }
 
   /**
