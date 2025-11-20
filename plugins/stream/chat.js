@@ -21,6 +21,67 @@ const EMOJI_REACTIONS = {
   '生气': ['8', '23', '39', '86', '179', '265']
 };
 
+/**
+ * 统一封装：模拟触发用户消息事件
+ * 用于从聊天工作流内部，伪造一条用户消息，交由其他插件按正常指令流程处理
+ * @param {Object} e 原始事件对象
+ * @param {string} simulatedMessage 要模拟发送的文本消息，例如 "#点歌南山南"
+ * @param {Object} extra 可选扩展字段，覆盖默认的模拟事件属性
+ */
+async function simulateUserMessageEvent(e, simulatedMessage, extra = {}) {
+  if (!e || !simulatedMessage) return;
+
+  try {
+    const now = Date.now();
+
+    const simulatedEvent = {
+      ...e,
+      raw_message: simulatedMessage,
+      message: [{ type: 'text', text: simulatedMessage }],
+      msg: simulatedMessage,
+      message_id: now.toString(),
+      time: now,
+      user_id: e.user_id,
+      self_id: e.self_id,
+      post_type: 'message',
+      message_type: e.isGroup ? 'group' : 'private',
+      sub_type: e.isGroup ? 'normal' : 'friend',
+      group_id: e.group_id,
+      sender: {
+        ...e.sender,
+        nickname: e.sender?.nickname || '用户'
+      },
+      ...extra
+    };
+
+    if (typeof Bot !== 'undefined' && Bot.em) {
+      const eventType = e.isGroup
+        ? 'message.group.normal'
+        : 'message.private.friend';
+
+      BotUtil.makeLog(
+        'info',
+        `[ChatStream] 模拟用户消息事件: ${eventType} -> ${simulatedMessage}`,
+        'ChatStream'
+      );
+
+      Bot.em(eventType, simulatedEvent);
+    } else {
+      BotUtil.makeLog(
+        'warn',
+        '[ChatStream] Bot.em 不可用，无法触发模拟 message 事件',
+        'ChatStream'
+      );
+    }
+  } catch (error) {
+    BotUtil.makeLog(
+      'error',
+      `[ChatStream] 模拟用户消息事件失败: ${error.message}`,
+      'ChatStream'
+    );
+  }
+}
+
 class WorkflowManager {
   constructor(stream) {
     this.stream = stream;
@@ -1021,7 +1082,7 @@ export default class ChatStream extends AIStream {
       requireAdmin: true
     });
 
-    // 22. 点歌功能（钩子：触发message事件）
+    // 22. 点歌功能（钩子：触发 message 事件）
     this.registerFunction('playMusic', {
       description: '点歌功能',
       prompt: `[点歌:歌曲名] - 触发点歌功能，模拟用户发送#点歌指令
@@ -1056,55 +1117,140 @@ export default class ChatStream extends AIStream {
             return;
           }
 
-          // 模拟用户发送#点歌指令，触发message事件
+          // 模拟用户发送 #点歌 指令，触发 message 事件
           const simulatedMessage = `#点歌${songName}`;
-          
-          BotUtil.makeLog('info', 
-            `[点歌钩子] 触发点歌: ${songName}，模拟用户消息: ${simulatedMessage}`, 
-            'ChatStream'
-          );
-
-          // 创建模拟的message事件对象
-          const simulatedEvent = {
-            ...context.e,
-            raw_message: simulatedMessage,
-            message: [{ type: 'text', text: simulatedMessage }],
-            msg: simulatedMessage,
-            message_id: Date.now().toString(),
-            time: Date.now(),
-            user_id: context.e.user_id, // 使用原用户的ID
-            self_id: context.e.self_id,
-            post_type: 'message',
-            message_type: context.e.isGroup ? 'group' : 'private',
-            sub_type: context.e.isGroup ? 'normal' : 'friend',
-            group_id: context.e.group_id,
-            sender: {
-              ...context.e.sender,
-              nickname: context.e.sender?.nickname || '用户'
-            }
-          };
-
-          // 触发message事件，让插件系统处理
-          if (typeof Bot !== 'undefined' && Bot.em) {
-            const eventType = context.e.isGroup 
-              ? 'message.group.normal' 
-              : 'message.private.friend';
-            
-            BotUtil.makeLog('info', 
-              `[点歌钩子] 触发事件: ${eventType}`, 
-              'ChatStream'
-            );
-            
-            // 触发message事件，让其他插件处理#点歌指令
-            Bot.em(eventType, simulatedEvent);
-          } else {
-            BotUtil.makeLog('warn', 
-              '[点歌钩子] Bot.em不可用，无法触发message事件', 
-              'ChatStream'
-            );
-          }
+          await simulateUserMessageEvent(context.e, simulatedMessage);
         } catch (error) {
           BotUtil.makeLog('error', `点歌功能失败: ${error.message}`, 'ChatStream');
+        }
+      },
+      enabled: true
+    });
+
+    // 23. 网易点歌功能（钩子：触发 message 事件）
+    this.registerFunction('neteasePlayMusic', {
+      description: '网易云点歌功能',
+      prompt: `[网易点歌:歌曲名] - 触发网易云点歌功能，模拟用户发送#网易点歌指令
+示例：[网易点歌:晴天]`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[网易点歌:([^\]]+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ 
+            type: 'neteasePlayMusic', 
+            params: { songName: match[1].trim() },
+            raw: match[0]
+          });
+        }
+        
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (!context.e) return;
+
+        try {
+          const songName = params.songName;
+          if (!songName) {
+            BotUtil.makeLog('warn', '网易点歌功能：歌曲名为空', 'ChatStream');
+            return;
+          }
+
+          // 模拟用户发送 #网易点歌 指令，触发 message 事件
+          const simulatedMessage = `#网易点歌${songName}`;
+          await simulateUserMessageEvent(context.e, simulatedMessage);
+        } catch (error) {
+          BotUtil.makeLog('error', `网易点歌功能失败: ${error.message}`, 'ChatStream');
+        }
+      },
+      enabled: true
+    });
+
+    // 24. 查天气功能（钩子：触发 message 事件）
+    this.registerFunction('queryWeather', {
+      description: '查天气功能',
+      prompt: `[查天气:城市名] - 触发查天气功能，模拟用户发送#查天气指令
+示例：[查天气:上海]`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[查天气:([^\]]+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ 
+            type: 'queryWeather', 
+            params: { cityName: match[1].trim() },
+            raw: match[0]
+          });
+        }
+        
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (!context.e) return;
+
+        try {
+          const cityName = params.cityName;
+          if (!cityName) {
+            BotUtil.makeLog('warn', '查天气功能：城市名为空', 'ChatStream');
+            return;
+          }
+
+          // 模拟用户发送 #查天气 指令，触发 message 事件
+          const simulatedMessage = `#查天气${cityName}`;
+          await simulateUserMessageEvent(context.e, simulatedMessage);
+        } catch (error) {
+          BotUtil.makeLog('error', `查天气功能失败: ${error.message}`, 'ChatStream');
+        }
+      },
+      enabled: true
+    });
+
+    // 25. 今日运势功能（钩子：触发 message 事件）
+    this.registerFunction('todayFortune', {
+      description: '今日运势功能',
+      prompt: `[今日运势] - 触发今日运势功能，模拟用户发送#今日运势指令
+示例：[今日运势]`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[今日运势\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ 
+            type: 'todayFortune', 
+            params: {}, 
+            raw: match[0]
+          });
+        }
+        
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (!context.e) return;
+
+        try {
+          // 模拟用户发送 #今日运势 指令，触发 message 事件
+          const simulatedMessage = '#今日运势';
+          await simulateUserMessageEvent(context.e, simulatedMessage);
+        } catch (error) {
+          BotUtil.makeLog('error', `今日运势功能失败: ${error.message}`, 'ChatStream');
         }
       },
       enabled: true
