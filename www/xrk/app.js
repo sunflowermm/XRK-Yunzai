@@ -3067,33 +3067,23 @@ class APIControlCenter {
         this.closeSidebar();
         this.currentAPI = null;
         const content = document.getElementById('content');
+        if (!content) return;
+
         content.innerHTML = `
             <div class="config-editor-container">
                 <div class="config-editor-header">
                     <div class="config-editor-title">配置管理</div>
-                    <div class="config-editor-controls">
-                        <button class="btn btn-secondary" id="refreshConfigListBtn">
-                            <span>🔄</span><span>刷新</span>
-                        </button>
-                    </div>
+                    <button class="btn btn-secondary" data-action="refresh-list">🔄 刷新</button>
                 </div>
                 <div class="config-editor-body">
-                    <div class="config-list-panel" id="configListPanel">
-                        <div class="config-list-loading">加载中...</div>
-                    </div>
+                    <div class="config-list-panel" id="configListPanel">加载中...</div>
                     <div class="config-editor-panel" id="configEditorPanel" style="display: none;">
                         <div class="config-editor-toolbar">
                             <div class="config-editor-name" id="configEditorName"></div>
                             <div class="config-editor-actions">
-                                <button class="btn btn-secondary" id="saveConfigBtn">
-                                    <span class="btn-icon">保存</span>
-                                </button>
-                                <button class="btn btn-secondary" id="validateConfigBtn">
-                                    <span class="btn-icon">验证</span>
-                                </button>
-                                <button class="btn btn-secondary" id="backConfigBtn">
-                                    <span class="btn-icon">返回</span>
-                                </button>
+                                <button class="btn btn-secondary" data-action="save">保存</button>
+                                <button class="btn btn-secondary" data-action="validate">验证</button>
+                                <button class="btn btn-secondary" data-action="back">返回</button>
                             </div>
                         </div>
                         <div class="config-editor-content">
@@ -3104,15 +3094,26 @@ class APIControlCenter {
             </div>
         `;
 
-        const refreshBtn = document.getElementById('refreshConfigListBtn');
-        const saveBtn = document.getElementById('saveConfigBtn');
-        const validateBtn = document.getElementById('validateConfigBtn');
-        const backBtn = document.getElementById('backConfigBtn');
-
-        refreshBtn.addEventListener('click', () => this.loadConfigList());
-        saveBtn.addEventListener('click', () => this.saveConfig());
-        validateBtn.addEventListener('click', () => this.validateConfig());
-        backBtn.addEventListener('click', () => this.backToConfigList());
+        // 统一事件委托处理
+        content.addEventListener('click', (e) => {
+            const action = e.target.closest('[data-action]')?.dataset.action;
+            if (!action) return;
+            
+            switch (action) {
+                case 'refresh-list':
+                    this.loadConfigList();
+                    break;
+                case 'save':
+                    this.saveConfig();
+                    break;
+                case 'validate':
+                    this.validateConfig();
+                    break;
+                case 'back':
+                    this.backToConfigList();
+                    break;
+            }
+        });
 
         await this.loadConfigList();
     }
@@ -3167,19 +3168,16 @@ class APIControlCenter {
             `;
             }).join('');
 
-            // 使用事件委托，确保事件绑定可靠
-            panel.querySelectorAll('[data-action="edit"]').forEach(btn => {
-                // 先移除可能存在的旧事件监听器
-                const newBtn = btn.cloneNode(true);
-                btn.parentNode.replaceChild(newBtn, btn);
-                // 绑定新的事件监听器
-                newBtn.addEventListener('click', (e) => {
+            // 使用事件委托绑定编辑按钮
+            panel.addEventListener('click', (e) => {
+                const btn = e.target.closest('[data-action="edit"]');
+                if (btn) {
                     e.stopPropagation();
-                    const configName = newBtn.dataset.configName;
+                    const configName = btn.dataset.configName;
                     if (configName) {
                         this.editConfig(configName);
                     }
-                });
+                }
             });
         } catch (error) {
             panel.innerHTML = `<div class="config-list-error">加载失败: ${error.message}</div>`;
@@ -3280,46 +3278,18 @@ class APIControlCenter {
         });
     }
 
-    // 切换到编辑器视图（带过渡动画）
     switchToEditor() {
         const listPanel = document.getElementById('configListPanel');
         const editorPanel = document.getElementById('configEditorPanel');
-        if (!listPanel || !editorPanel) return;
-
-        listPanel.style.opacity = '0';
-        listPanel.style.transform = 'translateX(-20px)';
-        setTimeout(() => {
-            listPanel.style.display = 'none';
-            editorPanel.style.display = 'block';
-            editorPanel.style.opacity = '0';
-            editorPanel.style.transform = 'translateX(20px)';
-            requestAnimationFrame(() => {
-                editorPanel.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
-                editorPanel.style.opacity = '1';
-                editorPanel.style.transform = 'translateX(0)';
-            });
-        }, 150);
+        if (listPanel) listPanel.style.display = 'none';
+        if (editorPanel) editorPanel.style.display = 'block';
     }
 
-    // 切换到列表视图（带过渡动画）
     switchToList() {
         const listPanel = document.getElementById('configListPanel');
         const editorPanel = document.getElementById('configEditorPanel');
-        if (!listPanel || !editorPanel) return;
-
-        editorPanel.style.opacity = '0';
-        editorPanel.style.transform = 'translateX(20px)';
-        setTimeout(() => {
-            editorPanel.style.display = 'none';
-            listPanel.style.display = 'block';
-            listPanel.style.opacity = '0';
-            listPanel.style.transform = 'translateX(-20px)';
-            requestAnimationFrame(() => {
-                listPanel.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
-                listPanel.style.opacity = '1';
-                listPanel.style.transform = 'translateX(0)';
-            });
-        }, 150);
+        if (editorPanel) editorPanel.style.display = 'none';
+        if (listPanel) listPanel.style.display = 'block';
     }
 
     // 获取配置数据（统一方法）
@@ -3449,9 +3419,7 @@ class APIControlCenter {
         editorPanel.innerHTML = `
             <div class="config-editor-toolbar">
                 <div class="config-editor-name">选择子配置: ${configName}</div>
-                <button class="btn btn-secondary" id="backConfigBtn">
-                    <span class="btn-icon">返回</span>
-                </button>
+                <button class="btn btn-secondary" data-action="back">返回</button>
             </div>
             <div class="config-editor-content">
                 <div class="sub-config-list-scroll">
@@ -3459,16 +3427,13 @@ class APIControlCenter {
                         ${subConfigs.map(subName => {
                             const subConfig = structure.configs[subName];
                             return `
-                                <div class="sub-config-item" data-sub-name="${subName}">
-                                    <div class="sub-config-icon"></div>
+                                <div class="sub-config-item">
                                     <div class="sub-config-info">
                                         <div class="sub-config-name">${subConfig.displayName || subName}</div>
                                         <div class="sub-config-desc">${subConfig.description || ''}</div>
                                         <div class="sub-config-path">${subConfig.filePath || ''}</div>
                                     </div>
-                                    <button class="btn btn-sm btn-primary" data-action="edit-sub" data-sub-name="${subName}">
-                                        <span class="btn-icon">编辑</span>
-                                    </button>
+                                    <button class="btn btn-primary" data-action="edit-sub" data-sub-name="${subName}">编辑</button>
                                 </div>
                             `;
                         }).join('')}
@@ -3477,28 +3442,27 @@ class APIControlCenter {
             </div>
         `;
 
-        const backBtn = document.getElementById('backConfigBtn');
-        if (backBtn) {
-            backBtn.addEventListener('click', () => this.backToConfigList());
-        }
-        
-        editorPanel.querySelectorAll('[data-action="edit-sub"]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const subName = btn.dataset.subName;
-                this.editSubConfig(configName, subName);
-            });
+        editorPanel.addEventListener('click', (e) => {
+            const action = e.target.closest('[data-action]')?.dataset.action;
+            if (action === 'back') {
+                this.backToConfigList();
+            } else if (action === 'edit-sub') {
+                const subName = e.target.closest('[data-sub-name]')?.dataset.subName;
+                if (subName) this.editSubConfig(configName, subName);
+            }
         });
+
+        this.switchToEditor();
     }
 
     async editSubConfig(parentName, subName) {
+        const editorName = document.getElementById('configEditorName');
+        const editorTextarea = document.getElementById('configEditorTextarea');
         const editorPanel = document.getElementById('configEditorPanel');
-        if (!editorPanel) return;
+        if (!editorName || !editorTextarea || !editorPanel) return;
 
         try {
-            const toolbar = editorPanel.querySelector('.config-editor-toolbar');
-            if (toolbar) {
-                toolbar.querySelector('.config-editor-name').textContent = `编辑配置: ${parentName}.${subName}`;
-            }
+            editorName.textContent = `编辑配置: ${parentName}.${subName}`;
 
             const [subConfigData, structure] = await Promise.all([
                 fetch(`${this.serverUrl}/api/config/${parentName}/read?path=${subName}`, {
@@ -3515,7 +3479,6 @@ class APIControlCenter {
 
             const subConfigStructure = structure?.configs?.[subName]?.schema;
             const safeData = subConfigData && typeof subConfigData === 'object' ? subConfigData : {};
-            const editorTextarea = document.getElementById('configEditorTextarea');
 
             if (subConfigStructure?.fields) {
                 this.renderConfigForm(parentName, safeData, subConfigStructure, editorPanel, editorTextarea, subName);
@@ -3527,18 +3490,25 @@ class APIControlCenter {
                 await this.initJSONEditor(editorTextarea, parentName);
             }
 
-            document.getElementById('saveConfigBtn')?.addEventListener('click', () => this.saveSubConfig());
-            document.getElementById('validateConfigBtn')?.addEventListener('click', () => this.validateSubConfig());
-            document.getElementById('backConfigBtn')?.addEventListener('click', async () => {
-                try {
-                    const [s, d] = await Promise.all([
-                        this.getConfigStructure(parentName),
-                        this.readConfigData(parentName)
-                    ]);
-                    if (s && d) this.showSubConfigSelector(parentName, s, d);
-                    else this.backToConfigList();
-                } catch (e) {
-                    this.backToConfigList();
+            editorPanel.addEventListener('click', (e) => {
+                const action = e.target.closest('[data-action]')?.dataset.action;
+                if (action === 'save') {
+                    this.saveSubConfig();
+                } else if (action === 'validate') {
+                    this.validateSubConfig();
+                } else if (action === 'back') {
+                    (async () => {
+                        try {
+                            const [s, d] = await Promise.all([
+                                this.getConfigStructure(parentName),
+                                this.readConfigData(parentName)
+                            ]);
+                            if (s && d) this.showSubConfigSelector(parentName, s, d);
+                            else this.backToConfigList();
+                        } catch (e) {
+                            this.backToConfigList();
+                        }
+                    })();
                 }
             });
 
@@ -3632,21 +3602,15 @@ class APIControlCenter {
     }
 
     backToConfigList() {
-        const listPanel = document.getElementById('configListPanel');
-        const editorPanel = document.getElementById('configEditorPanel');
-        if (!listPanel || !editorPanel) return;
-
         if (this.configEditor) {
             try {
                 this.configEditor.toTextArea();
+                this.configEditor = null;
             } catch (e) {
                 console.warn('清理编辑器失败:', e);
             }
-            this.configEditor = null;
         }
-
         this.switchToList();
-        this.loadConfigList().catch(() => {});
     }
 
     /**
