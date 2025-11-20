@@ -10,6 +10,7 @@ import {
     EMOTION_KEYWORDS,
     SUPPORTED_EMOTIONS
 } from '../../components/config/deviceConfig.js';
+import { normalizeEmotion } from '../../components/util/emotionUtil.js';
 
 // ==================== 导入工具函数 ====================
 import {
@@ -466,15 +467,11 @@ class DeviceManager {
             BotUtil.makeLog('info', `⚡ [AI性能] 处理耗时: ${aiTime}ms`, deviceId);
             BotUtil.makeLog('info', `✅ [AI] 回复: ${aiResult.text || '(仅表情)'}`, deviceId);
 
-            // 显示表情
+            // 显示表情（aiResult.emotion已经是英文代码）
             if (aiResult.emotion) {
                 try {
-                    let emotionCode = EMOTION_KEYWORDS[aiResult.emotion] || aiResult.emotion;
-                    if (!SUPPORTED_EMOTIONS.includes(emotionCode)) {
-                        throw new Error(`未知表情: ${aiResult.emotion}`);
-                    }
-                    await deviceBot.emotion(emotionCode);
-                    BotUtil.makeLog('info', `✓ [设备] 表情: ${emotionCode}`, deviceId);
+                    await deviceBot.emotion(aiResult.emotion);
+                    BotUtil.makeLog('info', `✓ [设备] 表情: ${aiResult.emotion}`, deviceId);
                 } catch (e) {
                     BotUtil.makeLog('error', `❌ [设备] 表情显示失败: ${e.message}`, deviceId);
                 }
@@ -913,13 +910,14 @@ class DeviceManager {
                 ),
 
             emotion: async (emotionName) => {
-                if (!SUPPORTED_EMOTIONS.includes(emotionName)) {
+                const normalized = normalizeEmotion(emotionName);
+                if (!normalized) {
                     throw new Error(`未知表情: ${emotionName}`);
                 }
                 return await this.sendCommand(
                     deviceId,
                     'display_emotion',
-                    { emotion: emotionName },
+                    { emotion: normalized },
                     1
                 );
             },

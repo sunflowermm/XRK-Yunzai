@@ -27,17 +27,33 @@ export const TTS_EVENTS = {
 };
 
 // ==================== 表情关键词映射 ====================
+// 中文到英文的表情映射（统一使用）
 export const EMOTION_KEYWORDS = {
     '开心': 'happy',
     '伤心': 'sad',
     '生气': 'angry',
     '惊讶': 'surprise',
+    '害怕': 'surprise',  // 害怕映射到惊讶
     '爱': 'love',
     '酷': 'cool',
     '睡觉': 'sleep',
     '思考': 'think',
     '眨眼': 'wink',
     '大笑': 'laugh'
+};
+
+// 反向映射：英文到中文（用于显示）
+export const EMOTION_NAMES = {
+    'happy': '开心',
+    'sad': '伤心',
+    'angry': '生气',
+    'surprise': '惊讶',
+    'love': '爱',
+    'cool': '酷',
+    'sleep': '睡觉',
+    'think': '思考',
+    'wink': '眨眼',
+    'laugh': '大笑'
 };
 
 // ==================== 支持的表情列表 ====================

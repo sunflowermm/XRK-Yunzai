@@ -1,11 +1,13 @@
 import AIStream from '../../lib//aistream/aistream.js';
 import BotUtil from '../../lib/common/util.js';
+import { parseEmotionFromText, normalizeEmotion } from '../../components/util/emotionUtil.js';
+import { EMOTION_KEYWORDS } from '../../components/config/deviceConfig.js';
 
 /**
  * 设备工作流
  * - 解析响应中的表情标记并驱动设备显示/表情与TTS
  * - 支持 [开心]、[开心}、[惊讶] 等简写
- * - 返回 { text, emotion } 给调用方（core/api/device.js 已对接 TTS 与 display）
+ * - 返回 { text, emotion } 给调用方（emotion为英文代码，如'happy'）
  */
 export default class DeviceStream extends AIStream {
   constructor() {
@@ -34,13 +36,14 @@ export default class DeviceStream extends AIStream {
    */
   buildSystemPrompt(context) {
     const persona = context?.persona || '你是一个简洁友好的设备语音助手，以地道中文回答。';
+    const supportedEmotions = Object.keys(EMOTION_KEYWORDS).join(' ');
     return `【人设】
 ${persona}
 
 【规则】
 1. 尽量简洁，优先中文
 2. 如需展示表情或动画，请在文本前加一个表情标记（可选）：
-   [开心] [惊讶] [伤心] [大笑] [害怕] [生气]
+   [${supportedEmotions}]
 3. 最多一个表情标记
 4. 不要输出多余解释`;
   }
@@ -70,7 +73,7 @@ ${persona}
       const { emotion, cleanText } = this.parseEmotion(response);
       return {
         text: cleanText || '',
-        emotion
+        emotion  // emotion已经是英文代码（如'happy'）
       };
     } catch (err) {
       BotUtil.makeLog('error', `设备工作流失败: ${err.message}`, 'DeviceStream');
@@ -80,23 +83,14 @@ ${persona}
 
   /**
    * 解析表情指令，兼容 ] 或 }
+   * 使用统一的表情处理工具
+   * 返回的emotion为英文代码（如'happy'）
    * 示例：
-   *  [开心]你好 → emotion=开心, text=你好
-   *  [惊讶}哇 → emotion=惊讶, text=哇
+   *  [开心]你好 → emotion='happy', text='你好'
+   *  [惊讶}哇 → emotion='surprise', text='哇'
    */
   parseEmotion(text) {
-    const EMOTIONS = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
-    const regex = /^\s*\[(开心|惊讶|伤心|大笑|害怕|生气)[\]\}]\s*/;
-    const match = regex.exec(text || '');
-    if (!match) {
-      return { emotion: null, cleanText: (text || '').trim() };
-    }
-    const emotion = match[1];
-    const cleanText = (text || '').replace(regex, '').trim();
-    if (!EMOTIONS.includes(emotion)) {
-      return { emotion: null, cleanText: (text || '').trim() };
-    }
-    return { emotion, cleanText };
+    return parseEmotionFromText(text);
   }
 }
 
