@@ -90,9 +90,11 @@ export default {
 
           const persona = (req.query.persona || '').toString();
 
-          // 确保工作流已加载
-          if (!StreamLoader.loaded) {
+          // 确保工作流已加载（避免重复加载）
+          if (!StreamLoader.loaded && !StreamLoader._loadingPromise) {
             await StreamLoader.load();
+          } else if (StreamLoader._loadingPromise) {
+            await StreamLoader._loadingPromise;
           }
 
           // 获取设备工作流
