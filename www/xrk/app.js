@@ -1573,11 +1573,11 @@ class APIControlCenter {
                 // 主动上报一次心跳，帮助服务端尽快建立在线状态
                 setTimeout(() => {
                     if (this._deviceWs && this._deviceWs.readyState === 1) {
-                        this._deviceWs.send(JSON.stringify({
-                            type: 'heartbeat',
-                            device_id: 'webclient',
-                            status: { ui: 'ready' }
-                        }));
+                this._deviceWs.send(JSON.stringify({
+                    type: 'heartbeat',
+                    device_id: 'webclient',
+                    status: { ui: 'ready' }
+                }));
                     }
                 }, 500);
             } catch (error) {
@@ -1645,8 +1645,8 @@ class APIControlCenter {
             if (data.type === 'register_response') {
                 if (data.success) {
                     console.log('[WebClient] 设备注册成功:', data.device);
-                    this.showToast('已连接设备: webclient', 'success');
-                    this.loadStats();
+                this.showToast('已连接设备: webclient', 'success');
+                this.loadStats();
                     // 标记WebSocket已就绪
                     this._deviceWsReady = true;
                 } else {
@@ -1782,8 +1782,8 @@ class APIControlCenter {
                         console.log('[WebClient] 收到表情命令:', parameters.emotion, '完整命令:', cmd);
                         this.updateEmotionDisplay(parameters.emotion);
                         console.log('[WebClient] 表情已更新为:', parameters.emotion);
-                        this.showToast(`表情: ${parameters.emotion}`, 'info');
-                        result = { ok: true };
+                    this.showToast(`表情: ${parameters.emotion}`, 'info');
+                    result = { ok: true };
                     } catch (e) {
                         console.error('[WebClient] 更新表情失败:', e);
                         result = { ok: false, message: e?.message || '更新表情失败' };

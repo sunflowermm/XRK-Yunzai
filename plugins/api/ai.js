@@ -81,7 +81,7 @@ export default {
         try {
           const prompt = (req.query.prompt || '').toString();
           const persona = (req.query.persona || '').toString();
-          
+
           // 获取设备工作流
           const stream = StreamLoader.getStream('device');
           if (!stream) {
