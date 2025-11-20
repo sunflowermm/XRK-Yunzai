@@ -35,11 +35,11 @@ try {
 
 let configs = { screen_shot_quality: 1 };
 try {
-  if (fs.existsSync(CONFIG_PATH)) {
+    if (fs.existsSync(CONFIG_PATH)) {
     configs = yaml.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) || configs;
   } else {
     logger?.info?.('未找到 data/xrkconfig/config.yaml，使用默认截图配置');
-  }
+    }
 } catch (error) {
   logger?.info?.('读取 data/xrkconfig/config.yaml 失败，使用默认截图配置', error);
 }
@@ -47,34 +47,34 @@ try {
 const DEFAULT_CONFIG = {
   width: 'auto',
   height: 'auto',
-  quality: 100,
-  type: 'jpeg',
-  deviceScaleFactor: configs.screen_shot_quality || 1,
-  selector: null,
-  waitForSelector: null,
-  waitForTimeout: null,
-  waitUntil: 'networkidle2',
+    quality: 100,
+    type: 'jpeg',
+    deviceScaleFactor: configs.screen_shot_quality || 1,
+    selector: null,
+    waitForSelector: null,
+    waitForTimeout: null,
+    waitUntil: 'networkidle2',
   fullPage: true,
-  topCutRatio: 0,
-  bottomCutRatio: 0,
-  leftCutRatio: 0,
-  rightCutRatio: 0,
-  cacheTime: 3600,
-  emulateDevice: null,
-  userAgent: null,
-  timeout: 120000,
-  scrollToBottom: true,
-  cookies: null,
-  allowFailure: true,
-  authentication: null,
-  clip: null,
-  omitBackground: false,
-  encoding: 'binary',
-  hideScrollbars: true,
-  javascript: true,
-  dark: false,
-  retryCount: 2,
-  retryDelay: 1000,
+    topCutRatio: 0,
+    bottomCutRatio: 0,
+    leftCutRatio: 0,
+    rightCutRatio: 0,
+    cacheTime: 3600,
+    emulateDevice: null,
+    userAgent: null,
+    timeout: 120000,
+    scrollToBottom: true,
+    cookies: null,
+    allowFailure: true,
+    authentication: null,
+    clip: null,
+    omitBackground: false,
+    encoding: 'binary',
+    hideScrollbars: true,
+    javascript: true,
+    dark: false,
+    retryCount: 2,
+    retryDelay: 1000,
   autoHeight: true
 };
 
@@ -173,37 +173,37 @@ async function getContentDimensions(page) {
 }
 
 class ScreenshotManager {
-  constructor() {
-    this.browser = null;
+    constructor() {
+        this.browser = null;
     this.browserPromise = null;
-    this.renderCount = 0;
-    this.lastUsedTime = Date.now();
-    this.dbInstance = null;
-    this.idleTimer = null;
-    this.pageQueue = new Set();
-    this.isClosing = false;
-
-    process.once('exit', () => this.cleanup());
-    process.once('SIGINT', () => this.cleanup());
-    process.once('SIGTERM', () => this.cleanup());
-    process.once('beforeExit', () => this.cleanup());
-  }
-
-  async cleanup() {
-    if (this.isClosing) return;
-    this.isClosing = true;
-
-    try {
-      if (this.idleTimer) {
-        clearInterval(this.idleTimer);
+        this.renderCount = 0;
+        this.lastUsedTime = Date.now();
+        this.dbInstance = null;
         this.idleTimer = null;
-      }
+        this.pageQueue = new Set();
+        this.isClosing = false;
+        
+        process.once('exit', () => this.cleanup());
+        process.once('SIGINT', () => this.cleanup());
+        process.once('SIGTERM', () => this.cleanup());
+        process.once('beforeExit', () => this.cleanup());
+    }
 
-      if (this.pageQueue.size > 0) {
+    async cleanup() {
+        if (this.isClosing) return;
+        this.isClosing = true;
+        
+        try {
+            if (this.idleTimer) {
+                clearInterval(this.idleTimer);
+                this.idleTimer = null;
+            }
+            
+            if (this.pageQueue.size > 0) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
-
-      if (this.browser) {
+            }
+            
+            if (this.browser) {
         try {
           const pages = await this.browser.pages();
           await Promise.all(pages.map((page) => page.close().catch(() => {})));
@@ -211,63 +211,63 @@ class ScreenshotManager {
         } catch {
           // ignore close errors
         }
-        this.browser = null;
-      }
-
-      if (this.dbInstance) {
-        await this.dbInstance.close().catch(() => {});
-        this.dbInstance = null;
-      }
+                this.browser = null;
+            }
+            
+            if (this.dbInstance) {
+                await this.dbInstance.close().catch(() => {});
+                this.dbInstance = null;
+            }
     } catch {
       // ignore cleanup errors
+        }
     }
-  }
 
-  async initDB() {
+    async initDB() {
     if (this.dbInstance) return this.dbInstance;
 
-    try {
+            try {
       ensureDir(path.dirname(DB_PATH));
-      this.dbInstance = await open({
-        filename: DB_PATH,
-        driver: sqlite3.Database
-      });
-
-      await this.dbInstance.exec(`
-        CREATE TABLE IF NOT EXISTS screenshot_cache (
-          target TEXT,
-          config TEXT,
-          image_path TEXT,
-          created_at INTEGER,
-          PRIMARY KEY (target, config)
-        );
-        CREATE TABLE IF NOT EXISTS render_stats (
-          date TEXT,
-          total_renders INTEGER DEFAULT 0,
-          PRIMARY KEY (date)
-        );
-        CREATE TABLE IF NOT EXISTS error_logs (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          date TEXT,
-          time TEXT,
-          error TEXT,
-          stack TEXT,
-          target TEXT
-        );
-      `);
+                this.dbInstance = await open({
+                    filename: DB_PATH,
+                    driver: sqlite3.Database
+                });
+                
+                await this.dbInstance.exec(`
+                    CREATE TABLE IF NOT EXISTS screenshot_cache (
+                        target TEXT,
+                        config TEXT,
+                        image_path TEXT,
+                        created_at INTEGER,
+                        PRIMARY KEY (target, config)
+                    );
+                    CREATE TABLE IF NOT EXISTS render_stats (
+                        date TEXT,
+                        total_renders INTEGER DEFAULT 0,
+                        PRIMARY KEY (date)
+                    );
+                    CREATE TABLE IF NOT EXISTS error_logs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        date TEXT,
+                        time TEXT,
+                        error TEXT,
+                        stack TEXT,
+                        target TEXT
+                    );
+                `);
     } catch (error) {
       logger?.error?.('初始化截图数据库失败:', error);
-      this.dbInstance = {
-        run: async () => ({ changes: 0 }),
-        get: async () => null,
-        all: async () => [],
-        exec: async () => {},
-        close: async () => {}
-      };
-    }
+                this.dbInstance = { 
+                    run: async () => ({ changes: 0 }), 
+                    get: async () => null, 
+                    all: async () => [], 
+                    exec: async () => {}, 
+                    close: async () => {} 
+                };
+            }
 
-    return this.dbInstance;
-  }
+        return this.dbInstance;
+    }
 
   async getBrowser() {
     if (this.isClosing) {
@@ -282,9 +282,9 @@ class ScreenshotManager {
         return this.browser;
       } catch {
         logger?.warn?.('现有浏览器实例不可用，准备重建');
-        this.browser = null;
+            this.browser = null;
         this.browserPromise = null;
-      }
+        }
     }
 
     if (this.browserPromise) {
@@ -298,8 +298,8 @@ class ScreenshotManager {
       return this.browser;
     } finally {
       this.browserPromise = null;
+        }
     }
-  }
 
   async _createBrowser() {
     if (this.isClosing) {
@@ -330,8 +330,8 @@ class ScreenshotManager {
 
       if (browserExecutablePath) {
         puppeteerOptions.executablePath = browserExecutablePath;
-      }
-
+            }
+            
       const renderer = new Puppeteer(puppeteerOptions);
       const browser = await renderer.browserInit();
 
@@ -376,18 +376,18 @@ class ScreenshotManager {
             await oldBrowser.close();
           } catch {
             // ignore
-          }
+                                }
         }, 1000);
       } catch (error) {
         logger?.error?.('关闭旧浏览器失败:', error);
-      }
+                }
     }
 
     try {
       await this.getBrowser();
     } catch (error) {
       logger?.error?.('重置浏览器失败:', error);
-    }
+                    }
   }
 
   checkIdle() {
@@ -395,22 +395,22 @@ class ScreenshotManager {
     if (Date.now() - this.lastUsedTime > MAX_IDLE_TIME) {
       logger?.info?.('浏览器长时间未使用，开始释放资源');
       this.resetBrowser();
-    }
-  }
-
+                    }
+                }
+                
   async configurePage(page, config) {
     if (config.authentication) {
       await page.authenticate(config.authentication);
-    }
+                    }
 
     if (config.cookies) {
       await page.setCookie(...config.cookies);
     }
-
-    if (config.userAgent) {
-      await page.setUserAgent(config.userAgent);
-    }
-
+                
+                if (config.userAgent) {
+                    await page.setUserAgent(config.userAgent);
+                }
+                
     if (config.emulateDevice) {
       try {
         const puppeteer = await import('puppeteer');
@@ -454,36 +454,36 @@ class ScreenshotManager {
   }
 
   async waitForPage(page, config) {
-    if (config.waitForSelector) {
+                if (config.waitForSelector) {
       await page
         .waitForSelector(config.waitForSelector, { timeout: 30000 })
         .catch((err) => logger?.warn?.(`等待选择器失败: ${config.waitForSelector}`, err));
-    }
-
-    if (config.waitForTimeout) {
-      await page.waitForTimeout(config.waitForTimeout);
-    }
-
-    if (config.scrollToBottom) {
+                }
+                
+                if (config.waitForTimeout) {
+                    await page.waitForTimeout(config.waitForTimeout);
+                }
+                
+                if (config.scrollToBottom) {
       await page
         .evaluate(async () => {
           await new Promise((resolve) => {
-            let totalHeight = 0;
-            const distance = 100;
-            const timer = setInterval(() => {
-              window.scrollBy(0, distance);
-              totalHeight += distance;
-              if (totalHeight >= document.body.scrollHeight) {
-                clearInterval(timer);
-                window.scrollTo(0, 0);
-                resolve();
-              }
-            }, 100);
-          });
+                            let totalHeight = 0;
+                            const distance = 100;
+                            const timer = setInterval(() => {
+                                window.scrollBy(0, distance);
+                                totalHeight += distance;
+                                if (totalHeight >= document.body.scrollHeight) {
+                                    clearInterval(timer);
+                                    window.scrollTo(0, 0);
+                                    resolve();
+                                }
+                            }, 100);
+                        });
         })
         .catch((err) => logger?.warn?.('滚动到底部失败:', err));
-    }
-
+                }
+                
     if (config.hideScrollbars) {
       await page
         .evaluate(() => {
@@ -498,8 +498,8 @@ class ScreenshotManager {
 
   async prepareScreenshotOptions(page, config) {
     const options = {
-      type: config.type,
-      quality: config.type === 'jpeg' ? config.quality : undefined,
+                    type: config.type,
+                    quality: config.type === 'jpeg' ? config.quality : undefined,
       fullPage: config.fullPage,
       omitBackground: config.omitBackground,
       encoding: config.encoding === 'base64' ? 'base64' : 'binary'
@@ -535,8 +535,8 @@ class ScreenshotManager {
         height: config.clip.height ?? height
       };
     }
-
-    if (config.selector) {
+                
+                if (config.selector) {
       const handle = await page.$(config.selector);
       if (handle) {
         const box = await handle.boundingBox();
@@ -617,57 +617,57 @@ class ScreenshotManager {
           `截图次数达到阈值(${this.renderCount}/${MAX_RENDER_COUNT})，准备重置浏览器`
         );
         setTimeout(() => this.resetBrowser(), 1000);
-      }
-
+            }
+            
       return imagePath;
-    } finally {
-      if (page) {
-        try {
-          await page.close();
+        } finally {
+            if (page) {
+                try {
+                    await page.close();
         } catch {
           // ignore
+                }
+            }
+            this.pageQueue.delete(pageId);
         }
-      }
-      this.pageQueue.delete(pageId);
     }
-  }
 
   useDefaultImage(imageName, config) {
     const defaultOutput = path.join(OUTPUT_BASE_PATH, `${imageName}.${config.type}`);
     try {
       ensureDir(path.dirname(defaultOutput));
-      if (fs.existsSync(DEFAULT_IMAGE_PATH)) {
+            if (fs.existsSync(DEFAULT_IMAGE_PATH)) {
         fs.copyFileSync(DEFAULT_IMAGE_PATH, defaultOutput);
         return defaultOutput;
-      }
-    } catch (error) {
+            }
+        } catch (error) {
       logger?.error?.('复制默认截图失败:', error);
+        }
+        return DEFAULT_IMAGE_PATH;
     }
-    return DEFAULT_IMAGE_PATH;
-  }
 }
 
 const manager = new ScreenshotManager();
 
 export async function takeScreenshot(target, imageName, config = {}) {
-  const finalConfig = { ...DEFAULT_CONFIG, ...config };
+    const finalConfig = { ...DEFAULT_CONFIG, ...config };
   ensureDir(OUTPUT_BASE_PATH);
 
   for (let attempt = 0; attempt <= finalConfig.retryCount; attempt += 1) {
-    try {
+        try {
       return await manager.executeScreenshot(target, imageName, finalConfig);
-    } catch (error) {
+        } catch (error) {
       logger?.error?.(
         `截图失败 (尝试 ${attempt + 1}/${finalConfig.retryCount + 1}):`,
         error
       );
-
-      const db = await manager.initDB();
-      const today = new Date().toISOString().split('T')[0];
-      const now = new Date().toISOString();
+            
+            const db = await manager.initDB();
+            const today = new Date().toISOString().split('T')[0];
+            const now = new Date().toISOString();
       await db
         .run(
-          `INSERT INTO error_logs (date, time, error, stack, target) VALUES (?, ?, ?, ?, ?)`,
+                `INSERT INTO error_logs (date, time, error, stack, target) VALUES (?, ?, ?, ?, ?)`,
           today,
           now,
           error.message,
@@ -675,26 +675,26 @@ export async function takeScreenshot(target, imageName, config = {}) {
           target
         )
         .catch((err) => logger?.debug?.('记录截图错误失败:', err));
-
+            
       if (attempt < finalConfig.retryCount) {
         if (
           error.message.includes('浏览器') ||
-          error.message.includes('Protocol') ||
-          error.message.includes('Target closed') ||
+                    error.message.includes('Protocol') ||
+                    error.message.includes('Target closed') ||
           error.message.includes('Session closed')
         ) {
           await manager.resetBrowser();
-        }
-
+                }
+                
         await new Promise((resolve) => setTimeout(resolve, finalConfig.retryDelay));
-        continue;
-      }
-
-      if (finalConfig.allowFailure) {
+                continue;
+            }
+            
+            if (finalConfig.allowFailure) {
         return manager.useDefaultImage(imageName, finalConfig);
-      }
-
-      throw error;
+            }
+            
+            throw error;
+        }
     }
-  }
 }

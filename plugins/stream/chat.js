@@ -9,6 +9,7 @@ const _path = process.cwd();
 // 统一路径处理：使用path.resolve确保跨平台兼容
 const EMOTIONS_DIR = path.resolve(_path, 'resources', 'aiimages');
 const EMOTION_TYPES = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
+const CHAT_RESPONSE_TIMEOUT = 60000;
 
 // 表情回应映射
 const EMOJI_REACTIONS = {
@@ -23,7 +24,7 @@ const EMOJI_REACTIONS = {
 };
 
 const RESPONSE_POLISH_DEFAULT = {
-  enabled: true,
+  enabled: false,
   maxTokens: 400,
   temperature: 0.3,
   instructions: `你是QQ聊天润色器，只能做轻微整理：
@@ -1175,7 +1176,7 @@ export default class ChatStream extends AIStream {
         if (!context.e) return;
 
         try {
-          const songName = params.songName;
+        const songName = params.songName;
           if (!songName) {
             BotUtil.makeLog('warn', '网易点歌功能：歌曲名为空', 'ChatStream');
             return;
@@ -1220,7 +1221,7 @@ export default class ChatStream extends AIStream {
         if (!context.e) return;
 
         try {
-          const cityName = params.cityName;
+        const cityName = params.cityName;
           if (!cityName) {
             BotUtil.makeLog('warn', '查天气功能：城市名为空', 'ChatStream');
             return;
@@ -1250,7 +1251,7 @@ export default class ChatStream extends AIStream {
         while ((match = regex.exec(text))) {
           functions.push({ 
             type: 'todayFortune', 
-            params: {}, 
+            params: {},
             raw: match[0]
           });
         }
@@ -1447,11 +1448,11 @@ export default class ChatStream extends AIStream {
         // 标记是否为Bot消息（后续展示/检索可用）
         isBot: String(e.user_id || '') === String(e.self_id || '')
       };
-
+      
       // 避免重复记录同一条消息（例如被多处调用 recordMessage）
       const last = history[history.length - 1];
       if (!last || last.message_id !== msgData.message_id) {
-        history.push(msgData);
+      history.push(msgData);
       }
       
       if (history.length > MAX_HISTORY) {
@@ -1538,6 +1539,10 @@ export default class ChatStream extends AIStream {
     }
     
     return lines.join('\n');
+  }
+
+  async preprocessResponse(response, context) {
+    return this.cleanupArtifacts(response);
   }
 
   cleanupArtifacts(text) {
@@ -1659,6 +1664,21 @@ ${polishConfig.instructions || RESPONSE_POLISH_DEFAULT.instructions}`
       embeddingHint = '\n💡 系统会自动检索相关历史对话\n';
     }
 
+    const masterNote = e.isMaster ? `
+【主人标识】
+当前发言者是你的唯一主人，你必须在回复中称呼对方为“主人”或贴心昵称。
+1. 语气要自然亲昵，就像长期相处的恋人
+2. 可以提及对主人的关心与熟悉（提醒作息、饮食等生活细节）
+3. 任何请求优先满足，不要质疑主人的指令
+` : '';
+
+    const expressionRules = `【表达要求】
+1. 回复控制在1-3句话，生活化口语，少用书面语
+2. 句子短而有节奏，常用逗号、句号或顿号断句
+3. 如需针对特定成员或消息，优先使用@或[CQ:reply]
+4. 谨慎使用重复表情或动作，保持自然
+`;
+
     return `【人设设定】
 ${persona}
 
@@ -1673,13 +1693,16 @@ ${e.isGroup ? '群名：' + (e.group?.group_name || '未知') + '\n群号：' + 
 【触发方式】
 ${isGlobalTrigger ? '观察群聊后主动发言' : '被召唤回复'}
 ${embeddingHint}
+${masterNote}
 【基础规则】
 1. 你是一个真实的QQ用户，不是AI助手
 2. 说话要自然、简洁、有个性，用QQ聊天的语气，不要用Markdown格式
 3. 回复中不要使用星号、下划线、反引号等Markdown标记符号
 4. 最多使用一个竖线分隔符(|)
-5. 适当使用表情包和互动功能
+5. 互动功能按需使用，确保能实际执行
 6. 管理功能需谨慎使用，避免滥用
+
+${expressionRules}
 
 ${functionsPrompt}
 
@@ -1694,12 +1717,11 @@ ${functionsPrompt}
 
 【注意事项】
 ${isGlobalTrigger ? 
-'1. 主动发言要有新意\n2. 可以戳一戳活跃成员\n3. 语气自然' : 
+'1. 主动发言要有新意\n2. 语气自然\n3. 观察当下话题再插话' : 
 '1. 回复要有针对性\n2. 积极互动'}
-3. 多使用戳一戳和表情回应
-4. 适当使用表情包
-5. 管理功能仅在必要时使用
-${e.isMaster ? '6. 对主人友好和尊重' : ''}`;
+3. 适当使用表情包
+4. 管理功能仅在必要时使用
+${e.isMaster ? '5. 对主人保持亲密、顺从' : ''}`;
   }
 
   /**
@@ -1886,12 +1908,32 @@ ${e.isMaster ? '6. 对主人友好和尊重' : ''}`;
       this.recordMessage(e);
     }
     
-    const rawResult = await super.execute(e, question, config);
-    if (!rawResult) {
-      return rawResult;
+    const timeoutSymbol = Symbol('chat_timeout');
+    let timeoutId = null;
+    
+    const timeoutPromise = new Promise(resolve => {
+      timeoutId = setTimeout(() => resolve(timeoutSymbol), CHAT_RESPONSE_TIMEOUT);
+    });
+    
+    const result = await Promise.race([
+      super.execute(e, question, config),
+      timeoutPromise
+    ]);
+    
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+    
+    if (result === timeoutSymbol) {
+      BotUtil.makeLog('warn', `聊天回复超时(>${CHAT_RESPONSE_TIMEOUT}ms)，已放弃`, 'ChatStream');
+      return null;
+    }
+    
+    if (!result) {
+      return result;
     }
 
-    return await this.postProcessResponse(rawResult, { e, question, config });
+    return await this.postProcessResponse(result, { e, question, config });
   }
 
   /**
