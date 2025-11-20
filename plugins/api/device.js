@@ -1307,6 +1307,9 @@ class DeviceManager {
 const deviceManager = new DeviceManager();
 
 // ==================== 导出模块 ====================
+// 导出 deviceWebSockets 和 deviceManager 供其他模块使用
+export { deviceWebSockets, deviceManager };
+
 export default {
     name: 'device',
     dsc: '设备管理API v31.0 - 连续对话优化版',
