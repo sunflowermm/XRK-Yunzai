@@ -1,0 +1,57 @@
+# 葵崽AI配置
+# 此配置文件用于定义AI相关的核心参数
+
+# AI基础配置
+ai:
+  enabled: true
+  baseUrl: 'https://api.gptgod.online/v1'
+  apiKey: ''  # 默认不配置，需要用户自行填写
+  chatModel: 'deepseek-r1-0528'
+  temperature: 0.8
+  max_tokens: 2000
+  top_p: 0.9
+  presence_penalty: 0.6
+  frequency_penalty: 0.6
+  timeout: 30000
+  displayDelay: 1500
+  persona: '我是一个智能语音助手，可以听懂你说的话并做出回应。我会用简短的话语和表情与你交流。'
+
+# 火山TTS配置（V3双向流式）
+tts:
+  enabled: true
+  provider: 'volcengine'
+  wsUrl: 'wss://openspeech.bytedance.com/api/v3/tts/bidirection'
+  appKey: '5231143210'
+  accessKey: 'hSkG2n1yavXry2N3DtQeoTohvWp3qTrR'
+  resourceId: 'seed-tts-2.0'
+  voiceType: 'zh_female_vv_uranus_bigtts'
+  encoding: 'pcm'
+  sampleRate: 16000
+  speechRate: 5
+  loudnessRate: 0
+  emotion: 'happy'
+  chunkMs: 128
+  chunkDelayMs: 5
+
+# 火山ASR配置
+asr:
+  enabled: true
+  provider: 'volcengine'
+  wsUrl: 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async'
+  appKey: '5231143210'
+  accessKey: 'hSkG2n1yavXry2N3DtQeoTohvWp3qTrR'
+  resourceId: 'volc.bigasr.sauc.duration'
+  enableItn: true
+  enablePunc: true
+  enableDdc: false
+  showUtterances: true
+  resultType: 'full'
+  enableAccelerateText: true
+  accelerateScore: 15
+  persistentWs: true
+  idleCloseMs: 6000
+  endWindowSize: 350
+  forceToSpeechTime: 500
+  maxAudioBufferSize: 30
+  asrFinalTextWaitMs: 1200
+

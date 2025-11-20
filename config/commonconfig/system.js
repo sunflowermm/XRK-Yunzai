@@ -969,7 +969,7 @@ export default class SystemConfig extends ConfigBase {
                   type: 'array',
                   label: '机器人别名',
                   itemType: 'string',
-                  default: ['葵子', '葵葵'],
+                  default: ['葵崽', '葵葵'],
                   component: 'Tags'
                 },
                 addPrivate: {

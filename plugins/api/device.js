@@ -5,11 +5,8 @@ import fs from 'fs';
 import path from 'path';
 
 // ==================== 导入配置 ====================
+import cfg from '../../lib/config/config.js';
 import {
-    AI_CONFIG,
-    VOLCENGINE_TTS_CONFIG,
-    VOLCENGINE_ASR_CONFIG,
-    SYSTEM_CONFIG,
     EMOTION_KEYWORDS,
     SUPPORTED_EMOTIONS
 } from '../../components/config/deviceConfig.js';
@@ -42,8 +39,93 @@ const asrSessions = new Map();
 class DeviceManager {
     constructor() {
         this.cleanupInterval = null;
-        this.AUDIO_SAVE_DIR = SYSTEM_CONFIG.audioSaveDir;
+        const kuizaiConfig = cfg.kuizai || {};
+        const systemConfig = cfg.device || {};
+        this.AUDIO_SAVE_DIR = './data/wav';
         this.initializeDirectories();
+        
+        // 获取配置的辅助方法
+        this.getAIConfig = () => {
+            const kuizai = cfg.kuizai || {};
+            return {
+                enabled: kuizai.ai?.enabled !== false,
+                baseUrl: kuizai.ai?.baseUrl || '',
+                apiKey: kuizai.ai?.apiKey || '',
+                chatModel: kuizai.ai?.chatModel || 'deepseek-r1-0528',
+                temperature: kuizai.ai?.temperature || 0.8,
+                max_tokens: kuizai.ai?.max_tokens || 2000,
+                top_p: kuizai.ai?.top_p || 0.9,
+                presence_penalty: kuizai.ai?.presence_penalty || 0.6,
+                frequency_penalty: kuizai.ai?.frequency_penalty || 0.6,
+                timeout: kuizai.ai?.timeout || 30000,
+                displayDelay: kuizai.ai?.displayDelay || 1500,
+                persona: kuizai.ai?.persona || '我是一个智能语音助手，可以听懂你说的话并做出回应。我会用简短的话语和表情与你交流。'
+            };
+        };
+        
+        this.getTTSConfig = () => {
+            const kuizai = cfg.kuizai || {};
+            return {
+                enabled: kuizai.tts?.enabled !== false,
+                provider: kuizai.tts?.provider || 'volcengine',
+                wsUrl: kuizai.tts?.wsUrl || 'wss://openspeech.bytedance.com/api/v3/tts/bidirection',
+                appKey: kuizai.tts?.appKey || '',
+                accessKey: kuizai.tts?.accessKey || '',
+                resourceId: kuizai.tts?.resourceId || 'seed-tts-2.0',
+                voiceType: kuizai.tts?.voiceType || 'zh_female_vv_uranus_bigtts',
+                encoding: kuizai.tts?.encoding || 'pcm',
+                sampleRate: kuizai.tts?.sampleRate || 16000,
+                speechRate: kuizai.tts?.speechRate || 5,
+                loudnessRate: kuizai.tts?.loudnessRate || 0,
+                emotion: kuizai.tts?.emotion || 'happy',
+                chunkMs: kuizai.tts?.chunkMs || 128,
+                chunkDelayMs: kuizai.tts?.chunkDelayMs || 5
+            };
+        };
+        
+        this.getASRConfig = () => {
+            const kuizai = cfg.kuizai || {};
+            return {
+                enabled: kuizai.asr?.enabled !== false,
+                provider: kuizai.asr?.provider || 'volcengine',
+                wsUrl: kuizai.asr?.wsUrl || 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async',
+                appKey: kuizai.asr?.appKey || '',
+                accessKey: kuizai.asr?.accessKey || '',
+                resourceId: kuizai.asr?.resourceId || 'volc.bigasr.sauc.duration',
+                enableItn: kuizai.asr?.enableItn !== false,
+                enablePunc: kuizai.asr?.enablePunc !== false,
+                enableDdc: kuizai.asr?.enableDdc || false,
+                showUtterances: kuizai.asr?.showUtterances !== false,
+                resultType: kuizai.asr?.resultType || 'full',
+                enableAccelerateText: kuizai.asr?.enableAccelerateText !== false,
+                accelerateScore: kuizai.asr?.accelerateScore || 15,
+                persistentWs: kuizai.asr?.persistentWs !== false,
+                idleCloseMs: kuizai.asr?.idleCloseMs || 6000,
+                endWindowSize: kuizai.asr?.endWindowSize || 350,
+                forceToSpeechTime: kuizai.asr?.forceToSpeechTime || 500,
+                maxAudioBufferSize: kuizai.asr?.maxAudioBufferSize || 30,
+                asrFinalTextWaitMs: kuizai.asr?.asrFinalTextWaitMs || 1200
+            };
+        };
+        
+        this.getSystemConfig = () => {
+            const deviceConfig = cfg.device || {};
+            return {
+                heartbeatInterval: deviceConfig.heartbeat_interval || 30,
+                heartbeatTimeout: deviceConfig.heartbeat_timeout || 180,
+                commandTimeout: deviceConfig.command_timeout || 10000,
+                maxDevices: deviceConfig.max_devices || 100,
+                maxLogsPerDevice: deviceConfig.max_logs_per_device || 100,
+                messageQueueSize: deviceConfig.message_queue_size || 100,
+                wsPingIntervalMs: 30000,
+                wsPongTimeoutMs: 10000,
+                wsReconnectDelayMs: 2000,
+                wsMaxReconnectAttempts: 5,
+                enableDetailedLogs: true,
+                enablePerformanceLogs: true,
+                audioSaveDir: './data/wav'
+            };
+        };
     }
 
     /**
@@ -62,7 +144,7 @@ class DeviceManager {
     _getASRClient(deviceId) {
         let client = asrClients.get(deviceId);
         if (!client) {
-            client = ASRFactory.createClient(deviceId, VOLCENGINE_ASR_CONFIG, Bot);
+            client = ASRFactory.createClient(deviceId, this.getASRConfig(), Bot);
             asrClients.set(deviceId, client);
         }
         return client;
@@ -77,7 +159,7 @@ class DeviceManager {
     _getTTSClient(deviceId) {
         let client = ttsClients.get(deviceId);
         if (!client) {
-            client = TTSFactory.createClient(deviceId, VOLCENGINE_TTS_CONFIG, Bot);
+            client = TTSFactory.createClient(deviceId, this.getTTSConfig(), Bot);
             ttsClients.set(deviceId, client);
         }
         return client;
@@ -100,7 +182,7 @@ class DeviceManager {
                 deviceId
             );
 
-            if (!VOLCENGINE_ASR_CONFIG.enabled) {
+            if (!this.getASRConfig().enabled) {
                 return { success: false, error: 'ASR未启用' };
             }
 
@@ -314,7 +396,7 @@ class DeviceManager {
             } catch { }
 
             // 处理AI响应
-            if (AI_CONFIG.enabled && session.finalText.trim()) {
+            if (this.getAIConfig().enabled && session.finalText.trim()) {
                 await this._processAIResponse(deviceId, session.finalText);
             }
         } else {
@@ -365,12 +447,13 @@ class DeviceManager {
                 return;
             }
 
+            const aiConfig = this.getAIConfig();
             const aiResult = await deviceStream.execute(
                 deviceId,
                 question,
-                AI_CONFIG,
+                aiConfig,
                 deviceInfo || {},
-                AI_CONFIG.persona
+                aiConfig.persona
             );
 
             if (!aiResult) {
@@ -399,7 +482,7 @@ class DeviceManager {
             }
 
             // 播放TTS
-            if (aiResult.text && VOLCENGINE_TTS_CONFIG.enabled) {
+            if (aiResult.text && this.getTTSConfig().enabled) {
                 try {
                     const ttsClient = this._getTTSClient(deviceId);
                     const success = await ttsClient.synthesize(aiResult.text);
@@ -510,8 +593,9 @@ class DeviceManager {
         const logs = deviceLogs.get(deviceId) || [];
         logs.unshift(entry);
 
-        if (logs.length > SYSTEM_CONFIG.maxLogsPerDevice) {
-            logs.length = SYSTEM_CONFIG.maxLogsPerDevice;
+        const systemConfig = this.getSystemConfig();
+        if (logs.length > systemConfig.maxLogsPerDevice) {
+            logs.length = systemConfig.maxLogsPerDevice;
         }
 
         deviceLogs.set(deviceId, logs);
@@ -522,7 +606,8 @@ class DeviceManager {
             this.updateDeviceStats(deviceId, 'error');
         }
 
-        if (level !== 'debug' || SYSTEM_CONFIG.enableDetailedLogs) {
+        const systemConfig = this.getSystemConfig();
+        if (level !== 'debug' || systemConfig.enableDetailedLogs) {
             BotUtil.makeLog(level,
                 `[${device?.device_name || deviceId}] ${message}`,
                 device?.device_name || deviceId
@@ -684,7 +769,7 @@ class DeviceManager {
                     // 忽略错误
                 }
             }
-        }, SYSTEM_CONFIG.heartbeatInterval * 1000);
+        }, this.getSystemConfig().heartbeatInterval * 1000);
 
         ws.on('pong', () => {
             ws.isAlive = true;
@@ -922,7 +1007,7 @@ class DeviceManager {
                 const timeout = setTimeout(() => {
                     commandCallbacks.delete(cmd.id);
                     resolve({ success: true, command_id: cmd.id, timeout: true });
-                }, SYSTEM_CONFIG.commandTimeout);
+                }, this.getSystemConfig().commandTimeout);
 
                 commandCallbacks.set(cmd.id, (result) => {
                     clearTimeout(timeout);
@@ -947,8 +1032,9 @@ class DeviceManager {
             queue.push(cmd);
         }
 
-        if (queue.length > SYSTEM_CONFIG.messageQueueSize) {
-            queue.length = SYSTEM_CONFIG.messageQueueSize;
+        const systemConfig = this.getSystemConfig();
+        if (queue.length > systemConfig.messageQueueSize) {
+            queue.length = systemConfig.messageQueueSize;
         }
 
         deviceCommands.set(deviceId, queue);
@@ -1155,7 +1241,7 @@ class DeviceManager {
      * @param {Object} Bot - Bot实例
      */
     checkOfflineDevices(Bot) {
-        const timeout = SYSTEM_CONFIG.heartbeatTimeout * 1000;
+        const timeout = this.getSystemConfig().heartbeatTimeout * 1000;
         const now = Date.now();
 
         for (const [id, device] of devices) {
@@ -1261,7 +1347,7 @@ export default {
                     if (!device) {
                         return res.status(404).json({ success: false, message: '设备未找到' });
                     }
-                    if (!AI_CONFIG.enabled) {
+                    if (!deviceManager.getAIConfig().enabled) {
                         return res.status(400).json({ success: false, message: 'AI未启用' });
                     }
                     await deviceManager._processAIResponse(deviceId, String(text));
@@ -1453,23 +1539,26 @@ export default {
         BotUtil.makeLog('info', '━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'DeviceManager');
         BotUtil.makeLog('info', '⚡ [设备管理器] v31.0 - 连续对话优化版', 'DeviceManager');
 
-        if (VOLCENGINE_ASR_CONFIG.enabled) {
+        const asrConfig = this.getASRConfig();
+        if (asrConfig.enabled) {
             BotUtil.makeLog('info',
-                `✓ [火山ASR] 已启用（提供商: ${VOLCENGINE_ASR_CONFIG.provider}）`,
+                `✓ [火山ASR] 已启用（提供商: ${asrConfig.provider}）`,
                 'DeviceManager'
             );
         }
 
-        if (VOLCENGINE_TTS_CONFIG.enabled) {
+        const ttsConfig = this.getTTSConfig();
+        if (ttsConfig.enabled) {
             BotUtil.makeLog('info',
-                `✓ [火山TTS] 已启用（提供商: ${VOLCENGINE_TTS_CONFIG.provider}，语音: ${VOLCENGINE_TTS_CONFIG.voiceType}）`,
+                `✓ [火山TTS] 已启用（提供商: ${ttsConfig.provider}，语音: ${ttsConfig.voiceType}）`,
                 'DeviceManager'
             );
         }
 
-        if (AI_CONFIG.enabled) {
+        const aiConfig = this.getAIConfig();
+        if (aiConfig.enabled) {
             BotUtil.makeLog('info',
-                `✓ [设备AI] 已启用（模型: ${AI_CONFIG.chatModel}）`,
+                `✓ [设备AI] 已启用（模型: ${aiConfig.chatModel}）`,
                 'DeviceManager'
             );
         }

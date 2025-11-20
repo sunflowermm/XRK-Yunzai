@@ -1,6 +1,6 @@
 import EventListener from "../../lib/listener/listener.js"
 import cfg from "../../lib/config/config.js"
-import { takeScreenshot } from "../../lib/common/takeScreenshot.js"
+import { takeScreenshot } from "../../components/util/takeScreenshot.js"
 import fs from 'fs/promises'
 import path from 'path'
 import loader from '../../lib/plugins/loader.js'
