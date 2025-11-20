@@ -1175,7 +1175,7 @@ export default class ChatStream extends AIStream {
     // 24. 查天气功能（钩子：触发 message 事件）
     this.registerFunction('queryWeather', {
       description: '查天气功能',
-      prompt: `[查天气:城市名] - 触发查天气功能，模拟用户发送#查天气指令
+      prompt: `[查天气:城市名] - 触发查天气功能，模拟用户发送#查天气指令，用户要查天气优先使用这个
 示例：[查天气:上海]`,
       parser: (text, context) => {
         const functions = [];
@@ -1220,7 +1220,7 @@ export default class ChatStream extends AIStream {
     // 25. 今日运势功能（钩子：触发 message 事件）
     this.registerFunction('todayFortune', {
       description: '今日运势功能',
-      prompt: `[今日运势] - 触发今日运势功能，模拟用户发送#今日运势指令
+      prompt: `[今日运势] - 触发今日运势功能，模拟用户发送#今日运势指令，帮用户查运势
 示例：[今日运势]`,
       parser: (text, context) => {
         const functions = [];
