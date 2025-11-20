@@ -43,6 +43,7 @@ api/**
 !api/stdin.js
 !api/write.js
 !api/config.js
+!api/ai.js
 
 !events
 events/**
