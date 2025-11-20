@@ -24,8 +24,8 @@ try {
 }
 
 const DEFAULT_CONFIG = {
-    width: null,
-    height: null,
+    width: 'auto',
+    height: 'auto',
     quality: 100,
     type: 'jpeg',
     deviceScaleFactor: configs.screen_shot_quality || 1,
@@ -33,7 +33,7 @@ const DEFAULT_CONFIG = {
     waitForSelector: null,
     waitForTimeout: null,
     waitUntil: 'networkidle2',
-    fullPage: false,
+    fullPage: true,
     topCutRatio: 0,
     bottomCutRatio: 0,
     leftCutRatio: 0,
@@ -54,8 +54,19 @@ const DEFAULT_CONFIG = {
     dark: false,
     retryCount: 2,
     retryDelay: 1000,
-    autoHeight: false
+    autoHeight: true
 };
+
+const MIN_DIMENSION = 320;
+const MAX_DIMENSION = 32768;
+
+function normalizeDimension(value, fallback) {
+    const base = typeof value === 'number' && !Number.isNaN(value)
+        ? value
+        : (typeof fallback === 'number' ? fallback : MIN_DIMENSION);
+    const rounded = Math.round(base);
+    return Math.min(Math.max(rounded, MIN_DIMENSION), MAX_DIMENSION);
+}
 
 class ScreenshotManager {
     constructor() {
@@ -379,8 +390,9 @@ class ScreenshotManager {
             const rendererCfg = cfg.renderer?.[type] || {};
             const defaultViewport = rendererCfg.viewport || { width: 1280, height: 720, deviceScaleFactor: 1 };
             
-            let viewportWidth = config.width || defaultViewport.width;
-            let viewportHeight = config.height;
+            const needAutoWidth = config.width === null || config.width === 'auto';
+            let viewportWidth = typeof config.width === 'number' ? config.width : defaultViewport.width;
+            let viewportHeight = typeof config.height === 'number' ? config.height : null;
             const deviceScaleFactor = config.deviceScaleFactor || defaultViewport.deviceScaleFactor || 1;
             
             const needAutoHeight = config.height === null || config.height === 'auto' || config.autoHeight || config.fullPage;
@@ -425,24 +437,30 @@ class ScreenshotManager {
                     }).catch(() => {});
                 }
                 
-                if (needAutoHeight) {
+                if (needAutoHeight || needAutoWidth) {
                     const contentDims = await this.getContentDimensions(page, type);
-                    viewportHeight = Math.max(contentDims.height, viewportHeight || 0);
-                    if (config.width === null || config.width === 'auto') {
-                        viewportWidth = contentDims.width;
+                    if (needAutoHeight) {
+                        viewportHeight = Math.max(contentDims.height, viewportHeight || 0);
+                    }
+                    if (needAutoWidth) {
+                        viewportWidth = Math.max(contentDims.width, viewportWidth || 0);
                     }
                 } else {
                     viewportHeight = viewportHeight || defaultViewport.height;
                 }
                 
-                await page.setViewportSize({ width: viewportWidth, height: viewportHeight });
+                const sanitizedWidth = normalizeDimension(viewportWidth, defaultViewport.width);
+                const sanitizedHeight = normalizeDimension(viewportHeight, defaultViewport.height);
+                await page.setViewportSize({ width: sanitizedWidth, height: sanitizedHeight });
                 
                 if (needAutoHeight && !config.fullPage) {
                     await page.waitForTimeout(200);
                     const finalDims = await this.getContentDimensions(page, type);
                     if (finalDims.height > viewportHeight) {
                         viewportHeight = finalDims.height;
-                        await page.setViewportSize({ width: viewportWidth, height: viewportHeight });
+                        const finalWidth = normalizeDimension(viewportWidth, defaultViewport.width);
+                        const finalHeight = normalizeDimension(viewportHeight, defaultViewport.height);
+                        await page.setViewportSize({ width: finalWidth, height: finalHeight });
                     }
                 }
                 
@@ -504,19 +522,23 @@ class ScreenshotManager {
                     }).catch(() => {});
                 }
                 
-                if (needAutoHeight) {
+                if (needAutoHeight || needAutoWidth) {
                     const contentDims = await this.getContentDimensions(page, type);
-                    viewportHeight = Math.max(contentDims.height, viewportHeight || 0);
-                    if (config.width === null || config.width === 'auto') {
-                        viewportWidth = contentDims.width;
+                    if (needAutoHeight) {
+                        viewportHeight = Math.max(contentDims.height, viewportHeight || 0);
+                    }
+                    if (needAutoWidth) {
+                        viewportWidth = Math.max(contentDims.width, viewportWidth || 0);
                     }
                 } else {
                     viewportHeight = viewportHeight || defaultViewport.height;
                 }
                 
+                const sanitizedWidth = normalizeDimension(viewportWidth, defaultViewport.width);
+                const sanitizedHeight = normalizeDimension(viewportHeight, defaultViewport.height);
                 await page.setViewport({
-                    width: viewportWidth,
-                    height: viewportHeight,
+                    width: sanitizedWidth,
+                    height: sanitizedHeight,
                     deviceScaleFactor: deviceScaleFactor
                 });
                 
@@ -526,8 +548,8 @@ class ScreenshotManager {
                     if (finalDims.height > viewportHeight) {
                         viewportHeight = finalDims.height;
                         await page.setViewport({
-                            width: viewportWidth,
-                            height: viewportHeight,
+                            width: normalizeDimension(viewportWidth, defaultViewport.width),
+                            height: normalizeDimension(viewportHeight, defaultViewport.height),
                             deviceScaleFactor: deviceScaleFactor
                         });
                     }
