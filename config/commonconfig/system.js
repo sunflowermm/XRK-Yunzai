@@ -1812,102 +1812,6 @@ export default class SystemConfig extends ConfigBase {
   }
 
   /**
-   * 创建支持默认配置合并的配置实例
-   * @param {string} name - 配置名称
-   * @param {Object} configMeta - 配置元数据
-   * @param {Object} options - 选项
-   * @param {string} options.defaultDir - 默认配置目录
-   * @param {string} options.serverDirPattern - 服务器配置目录模式（支持 {port} 和 {type} 占位符）
-   * @returns {ConfigBase}
-   */
-  _createMergedConfigInstance(name, configMeta, options = {}) {
-    const { defaultDir, serverDirPattern } = options;
-    
-    const MergedConfig = class extends ConfigBase {
-      async read(useCache = true) {
-        const cfg = global.cfg || { _port: parseInt(process.env.SERVER_PORT || process.env.PORT || 8086) };
-        const port = cfg?._port || cfg?.server?.server?.port || 8086;
-        
-        // 读取默认配置
-        const defaultFile = path.join(process.cwd(), defaultDir, 'config_default.yaml');
-        let defaultConfig = {};
-        if (fsSync.existsSync(defaultFile)) {
-          try {
-            const content = await fs.readFile(defaultFile, 'utf8');
-            defaultConfig = yaml.parse(content);
-          } catch (error) {
-            BotUtil.makeLog('error', `读取默认配置失败 [${name}]: ${error.message}`, 'MergedConfig');
-          }
-        }
-        
-        // 读取服务器配置
-        if (!port) {
-          return defaultConfig;
-        }
-        
-        const serverFile = path.join(process.cwd(), serverDirPattern.replace('{port}', port).replace('{type}', name.replace('renderer_', '')));
-        let serverConfig = {};
-        
-        if (fsSync.existsSync(serverFile)) {
-          try {
-            const content = await fs.readFile(serverFile, 'utf8');
-            serverConfig = yaml.parse(content);
-          } catch (error) {
-            BotUtil.makeLog('error', `读取服务器配置失败 [${name}]: ${error.message}`, 'MergedConfig');
-          }
-        } else {
-          // 如果服务器配置文件不存在，创建它（从默认配置复制）
-          const serverDir = path.dirname(serverFile);
-          if (!fsSync.existsSync(serverDir)) {
-            await fs.mkdir(serverDir, { recursive: true });
-          }
-          try {
-            await fs.writeFile(serverFile, yaml.stringify(defaultConfig), 'utf8');
-          } catch (error) {
-            BotUtil.makeLog('error', `创建服务器配置失败 [${name}]: ${error.message}`, 'MergedConfig');
-          }
-        }
-        
-        // 合并配置（服务器配置覆盖默认配置）
-        return { ...defaultConfig, ...serverConfig };
-      }
-      
-      async write(data, options = {}) {
-        const cfg = global.cfg || { _port: parseInt(process.env.SERVER_PORT || process.env.PORT || 8086) };
-        const port = cfg?._port || cfg?.server?.server?.port || 8086;
-        
-        if (!port) {
-          throw new Error('无法确定服务器端口，无法保存配置');
-        }
-        
-        const serverFile = path.join(process.cwd(), serverDirPattern.replace('{port}', port).replace('{type}', name.replace('renderer_', '')));
-        const serverDir = path.dirname(serverFile);
-        
-        if (!fsSync.existsSync(serverDir)) {
-          await fs.mkdir(serverDir, { recursive: true });
-        }
-        
-        const { backup = true } = options;
-        if (backup && fsSync.existsSync(serverFile)) {
-          await this.backup();
-        }
-        
-        const content = yaml.stringify(data, {
-          indent: 2,
-          lineWidth: 0,
-          minContentWidth: 0
-        });
-        
-        await fs.writeFile(serverFile, content, 'utf8');
-        BotUtil.makeLog('info', `配置已保存 [${name}]`, 'MergedConfig');
-        return true;
-      }
-    };
-    
-    return new MergedConfig(configMeta);
-  }
-
-  /**
    * 获取指定配置文件的实例
    * @param {string} name - 配置名称
    * @returns {ConfigBase}
@@ -1919,12 +1823,86 @@ export default class SystemConfig extends ConfigBase {
     }
 
     // 为 renderer 配置创建特殊实例，支持读取默认配置
-    if (name.startsWith('renderer_')) {
-      const type = name.replace('renderer_', '');
-      return this._createMergedConfigInstance(name, configMeta, {
-        defaultDir: `renderers/${type}`,
-        serverDirPattern: `data/server_bots/{port}/renderers/{type}/config.yaml`
-      });
+    if (name === 'renderer_puppeteer' || name === 'renderer_playwright') {
+      const RendererConfig = class extends ConfigBase {
+        async read(useCache = true) {
+          const cfg = global.cfg || { _port: parseInt(process.env.SERVER_PORT || process.env.PORT || 8086) };
+          const port = cfg?._port || cfg?.server?.server?.port || 8086;
+          const type = name === 'renderer_puppeteer' ? 'puppeteer' : 'playwright';
+          
+          // 读取默认配置
+          const defaultFile = path.join(process.cwd(), 'renderers', type, 'config_default.yaml');
+          let defaultConfig = {};
+          if (fsSync.existsSync(defaultFile)) {
+            try {
+              const content = await fs.readFile(defaultFile, 'utf8');
+              defaultConfig = yaml.parse(content);
+            } catch (error) {
+              BotUtil.makeLog('error', `读取默认配置失败 [${name}]: ${error.message}`, 'RendererConfig');
+            }
+          }
+          
+          // 读取服务器配置
+          const serverFile = path.join(process.cwd(), `data/server_bots/${port}/renderers/${type}/config.yaml`);
+          let serverConfig = {};
+          if (fsSync.existsSync(serverFile)) {
+            try {
+              const content = await fs.readFile(serverFile, 'utf8');
+              serverConfig = yaml.parse(content);
+            } catch (error) {
+              BotUtil.makeLog('error', `读取服务器配置失败 [${name}]: ${error.message}`, 'RendererConfig');
+            }
+          } else if (port) {
+            // 如果服务器配置文件不存在，创建它（从默认配置复制）
+            const serverDir = path.dirname(serverFile);
+            if (!fsSync.existsSync(serverDir)) {
+              await fs.mkdir(serverDir, { recursive: true });
+            }
+            try {
+              await fs.writeFile(serverFile, yaml.stringify(defaultConfig), 'utf8');
+            } catch (error) {
+              BotUtil.makeLog('error', `创建服务器配置失败 [${name}]: ${error.message}`, 'RendererConfig');
+            }
+          }
+          
+          // 合并配置（服务器配置覆盖默认配置）
+          return { ...defaultConfig, ...serverConfig };
+        }
+        
+        async write(data, options = {}) {
+          const cfg = global.cfg || { _port: parseInt(process.env.SERVER_PORT || process.env.PORT || 8086) };
+          const port = cfg?._port || cfg?.server?.server?.port || 8086;
+          const type = name === 'renderer_puppeteer' ? 'puppeteer' : 'playwright';
+          
+          if (!port) {
+            throw new Error('无法确定服务器端口，无法保存配置');
+          }
+          
+          const serverFile = path.join(process.cwd(), `data/server_bots/${port}/renderers/${type}/config.yaml`);
+          const serverDir = path.dirname(serverFile);
+          
+          if (!fsSync.existsSync(serverDir)) {
+            await fs.mkdir(serverDir, { recursive: true });
+          }
+          
+          const { backup = true } = options;
+          if (backup && fsSync.existsSync(serverFile)) {
+            await this.backup();
+          }
+          
+          const content = yaml.stringify(data, {
+            indent: 2,
+            lineWidth: 0,
+            minContentWidth: 0
+          });
+          
+          await fs.writeFile(serverFile, content, 'utf8');
+          BotUtil.makeLog('info', `配置已保存 [${name}]`, 'RendererConfig');
+          return true;
+        }
+      };
+      
+      return new RendererConfig(configMeta);
     }
 
     return new ConfigBase(configMeta);
@@ -1995,37 +1973,16 @@ export default class SystemConfig extends ConfigBase {
    * @returns {Object}
    */
   getStructure() {
-    const cfg = global.cfg || { _port: parseInt(process.env.SERVER_PORT || process.env.PORT || 8086) };
-    const port = cfg?._port || cfg?.server?.server?.port || 8086;
-    
     const structure = {
       name: this.name,
       displayName: this.displayName,
       description: this.description,
-      filePath: '', // SystemConfig 管理多个文件，此处留空
-      fileType: 'yaml',
       configs: {}
     };
 
-    // 构建子配置结构
     for (const [name, meta] of Object.entries(this.configFiles)) {
-      let filePath = '';
-      if (typeof meta.filePath === 'function') {
-        try {
-          filePath = meta.filePath(cfg);
-        } catch (error) {
-          filePath = '(动态路径)';
-        }
-      } else {
-        filePath = meta.filePath || '';
-      }
-      
       structure.configs[name] = {
-        name: meta.name || name,
-        displayName: meta.displayName,
-        description: meta.description,
-        filePath: filePath,
-        fileType: meta.fileType || 'yaml',
+        ...meta,
         fields: meta.schema?.fields || {}
       };
     }
@@ -2042,8 +1999,8 @@ export default class SystemConfig extends ConfigBase {
       name,
       displayName: meta.displayName,
       description: meta.description,
-      filePath: typeof meta.filePath === 'function' ? '(动态路径)' : meta.filePath,
-      fileType: meta.fileType || 'yaml'
+      filePath: meta.filePath,
+      fileType: meta.fileType
     }));
   }
 }
