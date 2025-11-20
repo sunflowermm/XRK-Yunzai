@@ -1378,15 +1378,31 @@ class APIControlCenter {
     }
 
     async sendChatMessage() {
-        const input = document.getElementById('chatInput');
+        // 支持多种输入框选择器
+        const input = document.getElementById('chatInput') || 
+                     document.querySelector('#chatInput') ||
+                     document.querySelector('.chat-input') ||
+                     document.querySelector('input[type="text"]');
+        
+        if (!input) {
+            console.error('[WebClient] 未找到聊天输入框');
+            return;
+        }
+        
         const text = (input.value || '').trim();
-        if (!text) return;
+        if (!text) {
+            console.warn('[WebClient] 输入为空，忽略发送');
+            return;
+        }
+        
+        console.log('[WebClient] 发送消息:', text);
         this.appendChat('user', text);
         input.value = '';
 
         try {
             await this.startAIStream(text);
         } catch (err) {
+            console.error('[WebClient] 发送失败:', err);
             this.showToast('发送失败: ' + err.message, 'error');
         }
     }
@@ -2354,11 +2370,14 @@ class APIControlCenter {
 
     _loadCodeMirror() {
         if (this._codeMirrorLoading) return this._codeMirrorLoading;
-        // 使用多个CDN备用方案，提高加载成功率
+        // 使用多个CDN备用方案，提高加载成功率（添加更多可用源）
         const cdnBases = [
             'https://cdn.jsdelivr.net/npm/codemirror@5.65.2',
+            'https://fastly.jsdelivr.net/npm/codemirror@5.65.2',
+            'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2',
             'https://cdn.bootcdn.net/ajax/libs/codemirror/5.65.2',
-            'https://unpkg.com/codemirror@5.65.2'
+            'https://unpkg.com/codemirror@5.65.2',
+            'https://cdn.staticfile.org/codemirror/5.65.2'
         ];
         const cssList = [
             'codemirror.min.css',

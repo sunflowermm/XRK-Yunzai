@@ -1021,7 +1021,96 @@ export default class ChatStream extends AIStream {
       requireAdmin: true
     });
 
-    // 22. 撤回消息
+    // 22. 点歌功能（钩子：触发message事件）
+    this.registerFunction('playMusic', {
+      description: '点歌功能',
+      prompt: `[点歌:歌曲名] - 触发点歌功能，模拟用户发送#点歌指令
+示例：[点歌:南山南]`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[点歌:([^\]]+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ 
+            type: 'playMusic', 
+            params: { songName: match[1].trim() },
+            raw: match[0]
+          });
+        }
+        
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (!context.e) return;
+        
+        try {
+          const songName = params.songName;
+          if (!songName) {
+            BotUtil.makeLog('warn', '点歌功能：歌曲名为空', 'ChatStream');
+            return;
+          }
+
+          // 模拟用户发送#点歌指令，触发message事件
+          const simulatedMessage = `#点歌${songName}`;
+          
+          BotUtil.makeLog('info', 
+            `[点歌钩子] 触发点歌: ${songName}，模拟用户消息: ${simulatedMessage}`, 
+            'ChatStream'
+          );
+
+          // 创建模拟的message事件对象
+          const simulatedEvent = {
+            ...context.e,
+            raw_message: simulatedMessage,
+            message: [{ type: 'text', text: simulatedMessage }],
+            msg: simulatedMessage,
+            message_id: Date.now().toString(),
+            time: Date.now(),
+            user_id: context.e.user_id, // 使用原用户的ID
+            self_id: context.e.self_id,
+            post_type: 'message',
+            message_type: context.e.isGroup ? 'group' : 'private',
+            sub_type: context.e.isGroup ? 'normal' : 'friend',
+            group_id: context.e.group_id,
+            sender: {
+              ...context.e.sender,
+              nickname: context.e.sender?.nickname || '用户'
+            }
+          };
+
+          // 触发message事件，让插件系统处理
+          if (typeof Bot !== 'undefined' && Bot.em) {
+            const eventType = context.e.isGroup 
+              ? 'message.group.normal' 
+              : 'message.private.friend';
+            
+            BotUtil.makeLog('info', 
+              `[点歌钩子] 触发事件: ${eventType}`, 
+              'ChatStream'
+            );
+            
+            // 触发message事件，让其他插件处理#点歌指令
+            Bot.em(eventType, simulatedEvent);
+          } else {
+            BotUtil.makeLog('warn', 
+              '[点歌钩子] Bot.em不可用，无法触发message事件', 
+              'ChatStream'
+            );
+          }
+        } catch (error) {
+          BotUtil.makeLog('error', `点歌功能失败: ${error.message}`, 'ChatStream');
+        }
+      },
+      enabled: true
+    });
+
+    // 23. 撤回消息
     this.registerFunction('recall', {
       description: '撤回消息',
       prompt: `[撤回:消息ID] - 撤回指定消息
