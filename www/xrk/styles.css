@@ -3038,51 +3038,38 @@ body.light .bot-card {
         justify-content: center;
     }
 
-    /* 侧边栏 - 手机端优化 */
     .sidebar {
         position: fixed;
         top: 0;
         left: 0;
-        width: 85%;
-        max-width: 300px; /* 减小最大宽度 */
+        width: var(--sidebar-width);
+        max-width: 320px;
         height: 100vh;
-        height: 100dvh;
-        box-shadow: 4px 0 30px rgba(0, 0, 0, 0.4);
+        box-shadow: 4px 0 30px rgba(0, 0, 0, 0.3);
         transform: translateX(-100%);
         z-index: 10001;
-        background: var(--bg-card);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
     }
 
     .sidebar.open {
         transform: translateX(0);
     }
 
-    /* 主内容区 - 手机端全屏 */
     .main-content {
         margin-left: 0;
         width: 100%;
+        /* 移动端：背景图使用cover确保充满屏幕，并裁切多余部分 */
         background-size: cover;
         background-position: center center;
-        min-height: 100vh;
-        min-height: 100dvh;
+        min-height: 100vh; /* 确保背景图覆盖整个屏幕 */
     }
 
-    /* 顶部栏 - 手机端紧凑设计 */
     .header {
-        padding: 16px 20px;
-        background: var(--bg-card);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        border-bottom: 1px solid var(--border-light);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        padding: 20px;
     }
 
     .header-content {
         flex-direction: column;
         align-items: stretch;
-        gap: 16px;
     }
 
     .api-key-section {
@@ -3140,320 +3127,266 @@ body.light .bot-card {
         padding: 20px 12px; /* 减小内边距，充分利用屏幕 */
     }
 
-    /* ==================== 手机端配置编辑器 - 自适应设计 ==================== */
+    /* 配置编辑器移动端优化 - 最大化可操作区域 */
     .config-editor-container {
-        position: fixed;
-        inset: 0;
+        height: 100vh;
+        border-radius: 0;
         display: flex;
         flex-direction: column;
-        background: var(--bg-primary);
-        z-index: 10000;
-        overflow: hidden;
     }
 
     .config-editor-header {
+        padding: 12px 16px;
         flex-shrink: 0;
-        padding: clamp(0.75rem, 2vw, 1rem) clamp(1rem, 3vw, 1.25rem);
-        background: var(--bg-card);
-        border-bottom: 1px solid var(--border-light);
-        backdrop-filter: blur(10px);
     }
 
     .config-editor-title {
-        font-size: clamp(1rem, 4vw, 1.125rem);
-        font-weight: 600;
+        font-size: 16px;
+        font-weight: 500;
     }
     
     .config-editor-panel {
+        padding: 0;
         flex: 1;
         display: flex;
         flex-direction: column;
         overflow: hidden;
-        min-height: 0;
     }
 
     .config-editor-toolbar {
-        flex-shrink: 0;
-        display: flex;
         flex-direction: column;
-        gap: clamp(0.5rem, 2vw, 0.75rem);
-        padding: clamp(0.75rem, 2vw, 1rem) clamp(1rem, 3vw, 1.25rem);
+        gap: 10px;
+        align-items: stretch;
+        padding: 12px 16px;
+        margin-bottom: 0;
+        flex-shrink: 0;
         background: var(--bg-card);
         border-bottom: 1px solid var(--border-light);
-        backdrop-filter: blur(10px);
     }
 
     .config-editor-name {
-        font-size: clamp(0.875rem, 3.5vw, 1rem);
+        font-size: 15px;
+        margin-bottom: 0;
         font-weight: 600;
     }
 
     .config-editor-actions {
+        width: 100%;
         display: grid;
         grid-template-columns: repeat(2, 1fr);
-        gap: clamp(0.5rem, 2vw, 0.75rem);
+        gap: 10px;
     }
 
     .config-editor-actions .btn {
-        padding: clamp(0.75rem, 2.5vw, 0.875rem) clamp(0.75rem, 2vw, 1rem);
-        font-size: clamp(0.8125rem, 3vw, 0.9375rem);
+        flex: 1;
+        min-width: 0;
+        padding: 12px 16px;
+        font-size: 14px;
         font-weight: 500;
+        border-radius: var(--radius-md);
     }
 
     .config-editor-content {
         flex: 1;
+        padding: 0;
+        padding-bottom: 0;
+        min-height: 0;
         overflow-y: auto;
-        overflow-x: hidden;
         -webkit-overflow-scrolling: touch;
-        scroll-behavior: smooth;
-        padding-bottom: clamp(3rem, 8vw, 4rem);
     }
 
-    .config-form-scroll,
+    .config-form-scroll {
+        padding: 16px;
+        padding-bottom: 140px; /* 确保底部有足够空间，避免被键盘遮挡 */
+        min-height: 100%;
+    }
+    
     .sub-config-list-scroll {
-        padding: clamp(1rem, 3vw, 1.25rem) clamp(0.75rem, 2vw, 1rem);
-        padding-bottom: clamp(2rem, 6vw, 2.5rem);
-        box-sizing: border-box;
-        width: 100%;
+        padding: 16px;
+        padding-bottom: 140px;
+        min-height: 100%;
     }
 
     .config-form-field {
-        padding: clamp(1rem, 3vw, 1.25rem);
-        margin-bottom: clamp(0.75rem, 2vw, 1rem);
+        padding: 20px 16px;
+        margin-bottom: 12px;
         background: var(--bg-card);
         border-radius: var(--radius-md);
         border: 1px solid var(--border-light);
-        backdrop-filter: blur(10px);
-        box-sizing: border-box;
-        width: 100%;
     }
 
     .config-form-label {
-        font-size: clamp(0.875rem, 3.5vw, 1rem);
-        font-weight: 600;
-        margin-bottom: clamp(0.5rem, 2vw, 0.75rem);
+        font-size: 15px;
+        font-weight: 500;
+        margin-bottom: 10px;
         display: block;
     }
 
     .config-form-input,
     .config-form-select {
+        padding: 14px 16px;
+        font-size: 16px; /* 增大字体，提高可读性 */
         width: 100%;
-        padding: clamp(0.875rem, 3vw, 1rem) clamp(1rem, 3.5vw, 1.125rem);
-        font-size: clamp(1rem, 4vw, 1.0625rem);
         border-radius: var(--radius-md);
-        border: 2px solid var(--border);
+        border: 1px solid var(--border);
         background: var(--bg-secondary);
-        box-sizing: border-box;
-        -webkit-appearance: none;
-        appearance: none;
-        min-height: clamp(3rem, 8vw, 3.5rem);
-    }
-
-    .config-form-select {
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1em' height='1em' viewBox='0 0 16 16'%3E%3Cpath fill='%23ffffff' d='M8 11L3 6h10z'/%3E%3C/svg%3E");
-        background-repeat: no-repeat;
-        background-position: right clamp(1rem, 3.5vw, 1.125rem) center;
-        background-size: 1em;
-        padding-right: clamp(2.5rem, 8vw, 3rem);
+        transition: all var(--transition-base);
     }
 
     .config-form-input:focus,
     .config-form-select:focus {
         outline: none;
         border-color: var(--accent);
-        box-shadow: 0 0 0 clamp(0.125rem, 0.5vw, 0.1875rem) var(--accent-light);
+        box-shadow: 0 0 0 3px var(--accent-light);
     }
 
-    .config-form-array,
-    .config-form-arrayform,
-    .config-form-tags {
-        width: 100%;
-        box-sizing: border-box;
-    }
-
-    .config-form-array-item,
-    .config-form-arrayform-item {
-        display: flex;
+    .config-form-array-item {
         flex-direction: column;
-        padding: clamp(0.75rem, 2.5vw, 1rem);
-        margin-bottom: clamp(0.5rem, 2vw, 0.75rem);
+        align-items: stretch;
+        padding: 16px;
         background: var(--bg-secondary);
         border-radius: var(--radius-md);
-        border: 1px solid var(--border-light);
-        box-sizing: border-box;
-        width: 100%;
+        margin-bottom: 12px;
     }
 
     .config-form-array-item input {
         width: 100%;
-        padding: clamp(0.875rem, 3vw, 1rem) clamp(1rem, 3.5vw, 1.125rem);
-        font-size: clamp(1rem, 4vw, 1.0625rem);
-        margin-bottom: clamp(0.5rem, 2vw, 0.75rem);
-        min-height: clamp(3rem, 8vw, 3.5rem);
-        box-sizing: border-box;
+        padding: 14px 16px;
+        font-size: 16px;
+        margin-bottom: 10px;
     }
 
     .config-form-array-remove,
     .config-form-arrayform-remove {
+        padding: 12px 20px;
+        font-size: 14px;
         width: 100%;
-        padding: clamp(0.75rem, 2.5vw, 0.875rem) clamp(1rem, 3vw, 1.125rem);
-        font-size: clamp(0.8125rem, 3vw, 0.9375rem);
-        font-weight: 500;
-        margin-top: clamp(0.375rem, 1.5vw, 0.5rem);
-        box-sizing: border-box;
     }
 
     .config-form-array-add,
     .config-form-arrayform-add {
-        width: calc(100% - clamp(1.5rem, 4vw, 2rem));
-        max-width: calc(100% - clamp(1.5rem, 4vw, 2rem));
-        padding: clamp(0.875rem, 3vw, 1rem) clamp(1rem, 3.5vw, 1.25rem);
-        font-size: clamp(0.8125rem, 3vw, 0.9375rem);
-        font-weight: 500;
-        margin: clamp(0.5rem, 2vw, 0.75rem) clamp(0.75rem, 2vw, 1rem) 0;
-        box-sizing: border-box;
+        padding: 14px 20px;
+        font-size: 15px;
+        width: 100%;
+        margin-top: 12px;
     }
 
     .config-form-subform {
-        padding: clamp(0.75rem, 2.5vw, 1rem);
-        margin-top: clamp(0.5rem, 2vw, 0.75rem);
+        padding: 16px;
+        margin-top: 12px;
         background: var(--bg-secondary);
         border-radius: var(--radius-md);
-        border: 1px solid var(--border-light);
-        box-sizing: border-box;
-        width: 100%;
     }
 
     .config-form-subfield {
-        margin-bottom: clamp(0.75rem, 2vw, 1rem);
+        margin-bottom: 16px;
     }
 
     .config-form-subfield:last-child {
         margin-bottom: 0;
     }
 
+    .config-form-arrayform-item {
+        padding: 16px;
+        margin-bottom: 16px;
+        background: var(--bg-secondary);
+        border-radius: var(--radius-md);
+    }
+
     .config-form-arrayform-actions {
-        margin-top: clamp(0.5rem, 2vw, 0.75rem);
+        margin-top: 12px;
     }
 
     .config-form-switch {
-        width: clamp(3.5rem, 10vw, 3.75rem);
-        height: clamp(1.875rem, 5vw, 2.125rem);
+        width: 56px;
+        height: 32px;
     }
 
     .config-form-switch-slider:before {
-        height: clamp(1.5rem, 4.5vw, 1.625rem);
-        width: clamp(1.5rem, 4.5vw, 1.625rem);
+        height: 24px;
+        width: 24px;
     }
 
     .config-form-checkbox:checked + .config-form-switch-slider:before {
-        transform: translateX(clamp(1.5rem, 4.5vw, 1.625rem));
+        transform: translateX(24px);
     }
 
-    .config-form-tags-list {
-        margin-bottom: clamp(0.5rem, 2vw, 0.75rem);
-        display: flex;
-        flex-wrap: wrap;
-        gap: clamp(0.375rem, 1.5vw, 0.5rem);
-    }
-
-    .config-form-tag-item {
-        padding: clamp(0.5rem, 2vw, 0.625rem) clamp(0.75rem, 2.5vw, 0.875rem);
-        background: var(--bg-secondary);
-        border-radius: var(--radius-md);
-        border: 1px solid var(--border-light);
-        display: inline-flex;
-        align-items: center;
-        gap: clamp(0.375rem, 1.5vw, 0.5rem);
+    .config-form-tags {
+        margin-top: 12px;
     }
 
     .config-form-tags-input-wrapper {
+        margin-top: 12px;
         display: flex;
-        gap: clamp(0.5rem, 2vw, 0.625rem);
-        width: 100%;
-        box-sizing: border-box;
+        gap: 10px;
     }
 
     .config-form-tags-input {
         flex: 1;
-        padding: clamp(0.875rem, 3vw, 1rem) clamp(1rem, 3.5vw, 1.125rem);
-        font-size: clamp(1rem, 4vw, 1.0625rem);
-        min-height: clamp(3rem, 8vw, 3.5rem);
-        box-sizing: border-box;
+        padding: 14px 16px;
+        font-size: 16px;
     }
 
     .config-form-tags-add {
-        padding: clamp(0.875rem, 3vw, 1rem) clamp(1rem, 3.5vw, 1.25rem);
-        font-size: clamp(0.8125rem, 3vw, 0.9375rem);
-        min-width: clamp(5rem, 15vw, 5.625rem);
-        box-sizing: border-box;
+        padding: 14px 20px;
+        font-size: 14px;
+        min-width: 80px;
     }
 
     .config-form-hint {
-        font-size: clamp(0.75rem, 2.5vw, 0.8125rem);
+        font-size: 13px;
         color: var(--text-muted);
-        margin-top: clamp(0.25rem, 1vw, 0.375rem);
+        margin-top: 6px;
+        margin-bottom: 8px;
         line-height: 1.4;
     }
 
     .config-list-panel {
-        padding: clamp(1rem, 3vw, 1.25rem) clamp(0.75rem, 2vw, 1rem);
-        padding-bottom: clamp(2rem, 6vw, 2.5rem);
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-        scroll-behavior: smooth;
-        box-sizing: border-box;
-        width: 100%;
+        padding: 16px;
+        padding-bottom: 140px;
+        min-height: 100%;
     }
 
     .config-item {
-        padding: clamp(1rem, 3vw, 1.25rem);
-        display: flex;
+        padding: 20px 16px;
         flex-direction: column;
-        gap: clamp(0.75rem, 2.5vw, 0.875rem);
-        margin-bottom: clamp(0.75rem, 2vw, 1rem);
+        align-items: flex-start;
+        gap: 14px;
+        margin-bottom: 16px;
         background: var(--bg-card);
         border-radius: var(--radius-md);
         border: 1px solid var(--border-light);
-        backdrop-filter: blur(10px);
-        box-sizing: border-box;
-        width: 100%;
     }
 
     .config-item-actions {
         width: 100%;
-        display: flex;
-        gap: clamp(0.5rem, 2vw, 0.75rem);
+        justify-content: flex-end;
     }
 
     .config-item-actions .btn {
-        flex: 1;
-        padding: clamp(0.75rem, 2.5vw, 0.875rem) clamp(1rem, 3vw, 1.125rem);
-        font-size: clamp(0.8125rem, 3vw, 0.9375rem);
-        font-weight: 500;
+        padding: 12px 20px;
+        font-size: 14px;
+        min-width: 100px;
+    }
+
+    .sub-config-list-scroll {
+        padding: 16px;
+        padding-bottom: 140px;
+        min-height: 100%;
     }
     
     .sub-config-list {
-        display: grid;
         grid-template-columns: 1fr;
-        gap: clamp(0.75rem, 2vw, 1rem);
+        gap: 16px;
         padding: 0;
-        width: 100%;
-        box-sizing: border-box;
     }
 
     .sub-config-item {
-        padding: clamp(1rem, 3vw, 1.25rem);
+        padding: 20px 16px;
         background: var(--bg-card);
         border-radius: var(--radius-md);
         border: 1px solid var(--border-light);
-        backdrop-filter: blur(10px);
         transition: all var(--transition-base);
-        box-sizing: border-box;
-        width: 100%;
-        display: flex;
-        flex-direction: column;
-        gap: clamp(0.5rem, 2vw, 0.75rem);
     }
 
     .sub-config-item:active {
@@ -3462,42 +3395,21 @@ body.light .bot-card {
     }
 
     .sub-config-name {
-        font-size: clamp(1rem, 4vw, 1.0625rem);
+        font-size: 16px;
         font-weight: 600;
-        margin-bottom: clamp(0.25rem, 1vw, 0.375rem);
+        margin-bottom: 6px;
     }
 
     .sub-config-desc {
-        font-size: clamp(0.8125rem, 3vw, 0.875rem);
+        font-size: 14px;
         color: var(--text-muted);
-        margin-bottom: clamp(0.375rem, 1.5vw, 0.5rem);
-        line-height: 1.4;
+        margin-bottom: 8px;
     }
 
     .sub-config-path {
-        font-size: clamp(0.75rem, 2.5vw, 0.8125rem);
+        font-size: 12px;
         color: var(--text-dim);
         font-family: 'Courier New', monospace;
-        word-break: break-all;
-    }
-
-    .sub-config-item .btn {
-        width: 100%;
-        padding: clamp(0.75rem, 2.5vw, 0.875rem) clamp(1rem, 3vw, 1.125rem);
-        font-size: clamp(0.8125rem, 3vw, 0.9375rem);
-        font-weight: 500;
-        margin-top: clamp(0.375rem, 1.5vw, 0.5rem);
-    }
-
-    .config-form-container {
-        width: 100%;
-        box-sizing: border-box;
-        overflow-x: hidden;
-    }
-
-    .config-form-container * {
-        box-sizing: border-box;
-        max-width: 100%;
     }
 }
 
