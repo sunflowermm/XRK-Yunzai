@@ -8,7 +8,7 @@
  * 3. 所有错误和日志都会直接输出到控制台，方便调试
  */
 
-import Bot from './src/bot.js';
+import Bot from './lib/bot.js';
 
 // 默认调试端口
 const DEBUG_PORT = 11451;
