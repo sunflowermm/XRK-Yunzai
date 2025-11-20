@@ -3140,23 +3140,25 @@ body.light .bot-card {
         padding: 20px 12px; /* 减小内边距，充分利用屏幕 */
     }
 
-    /* ==================== 手机端配置编辑器 - 完全重新设计 ==================== */
-    /* 配置编辑器容器 - 全屏设计 */
+    /* ==================== 手机端配置编辑器 - 优化设计 ==================== */
+    /* 配置编辑器容器 - 留底部空间 */
     .config-editor-container {
         position: fixed;
         top: 0;
         left: 0;
         right: 0;
-        bottom: 0;
-        height: 100vh;
-        height: 100dvh; /* 使用动态视口高度 */
+        bottom: 20px; /* 底部留空间 */
+        height: calc(100vh - 20px);
+        height: calc(100dvh - 20px);
         width: 100vw;
-        border-radius: 0;
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
         display: flex;
         flex-direction: column;
         background: var(--bg-primary);
         z-index: 10000;
         overflow: hidden;
+        box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
+        transition: transform var(--transition-smooth), opacity var(--transition-smooth);
     }
 
     /* 顶部工具栏 - 紧凑设计 */
@@ -3223,7 +3225,7 @@ body.light .bot-card {
         margin: 0;
     }
 
-    /* 内容区域 - 可滚动 */
+    /* 内容区域 - 可滚动，优化滑动体验 */
     .config-editor-content {
         flex: 1;
         padding: 0;
@@ -3231,14 +3233,15 @@ body.light .bot-card {
         overflow-y: auto;
         overflow-x: hidden;
         -webkit-overflow-scrolling: touch;
+        scroll-behavior: smooth;
         background: var(--bg-primary);
         position: relative;
     }
 
-    /* 表单滚动容器 - 增大内边距，确保内容可操作 */
+    /* 表单滚动容器 - 确保底部内容可见 */
     .config-form-scroll {
         padding: 20px 16px;
-        padding-bottom: 200px; /* 大幅增加底部空间 */
+        padding-bottom: 180px; /* 确保底部内容可见 */
         min-height: calc(100% + 1px);
         box-sizing: border-box;
         width: 100%;
@@ -3248,7 +3251,7 @@ body.light .bot-card {
     /* 子配置列表滚动容器 */
     .sub-config-list-scroll {
         padding: 20px 16px;
-        padding-bottom: 200px;
+        padding-bottom: 180px;
         min-height: calc(100% + 1px);
         box-sizing: border-box;
         width: 100%;
@@ -3512,11 +3515,14 @@ body.light .bot-card {
     /* 配置列表面板 */
     .config-list-panel {
         padding: 20px 16px;
-        padding-bottom: 200px;
+        padding-bottom: 180px;
         min-height: calc(100% + 1px);
         box-sizing: border-box;
         width: 100%;
         max-width: 100%;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        scroll-behavior: smooth;
     }
 
     .config-item {
@@ -3558,11 +3564,14 @@ body.light .bot-card {
     /* 子配置列表 */
     .sub-config-list-scroll {
         padding: 20px 16px;
-        padding-bottom: 200px;
+        padding-bottom: 180px;
         min-height: calc(100% + 1px);
         box-sizing: border-box;
         width: 100%;
         max-width: 100%;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        scroll-behavior: smooth;
     }
     
     .sub-config-list {
