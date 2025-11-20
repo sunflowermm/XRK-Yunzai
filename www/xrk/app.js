@@ -4397,8 +4397,21 @@ class APIControlCenter {
                     const numVal = field.value !== '' && field.value !== null && field.value !== undefined ? Number(field.value) : null;
                     data[fieldName] = (numVal !== null && !isNaN(numVal)) ? numVal : null;
                 } else if (field.tagName === 'SELECT') {
-                    // Select：空值保持为 null
-                    data[fieldName] = field.value || null;
+                    // Select：根据字段类型转换值
+                    const selectValue = field.value || null;
+                    if (selectValue !== null && selectValue !== '') {
+                        // 检查是否是数字类型的 enum（通过检查选项值是否为数字字符串）
+                        const options = Array.from(field.options);
+                        const isNumericEnum = options.some(opt => opt.value !== '' && !isNaN(Number(opt.value)));
+                        if (isNumericEnum) {
+                            const numValue = Number(selectValue);
+                            data[fieldName] = !isNaN(numValue) ? numValue : selectValue;
+                        } else {
+                            data[fieldName] = selectValue;
+                        }
+                    } else {
+                        data[fieldName] = null;
+                    }
                 } else if (field.closest('.config-form-multiselect')) {
                     // MultiSelect：收集所有选中的值
                     const multiSelect = field.closest('.config-form-multiselect');
@@ -4425,7 +4438,21 @@ class APIControlCenter {
                     const numVal = field.value !== '' && field.value !== null && field.value !== undefined ? Number(field.value) : null;
                     current[lastKey] = (numVal !== null && !isNaN(numVal)) ? numVal : null;
                 } else if (field.tagName === 'SELECT') {
-                    current[lastKey] = field.value || null;
+                    // Select：根据字段类型转换值
+                    const selectValue = field.value || null;
+                    if (selectValue !== null && selectValue !== '') {
+                        // 检查是否是数字类型的 enum
+                        const options = Array.from(field.options);
+                        const isNumericEnum = options.some(opt => opt.value !== '' && !isNaN(Number(opt.value)));
+                        if (isNumericEnum) {
+                            const numValue = Number(selectValue);
+                            current[lastKey] = !isNaN(numValue) ? numValue : selectValue;
+                        } else {
+                            current[lastKey] = selectValue;
+                        }
+                    } else {
+                        current[lastKey] = null;
+                    }
                 } else if (field.closest('.config-form-multiselect')) {
                     // MultiSelect：收集所有选中的值
                     const multiSelect = field.closest('.config-form-multiselect');
@@ -4484,8 +4511,22 @@ class APIControlCenter {
                     else if (f.type === 'number') {
                         const numVal = f.value !== '' && f.value !== null && f.value !== undefined ? Number(f.value) : null;
                         cur[last] = (numVal !== null && !isNaN(numVal)) ? numVal : null;
-                    } else if (f.tagName === 'SELECT') cur[last] = f.value || null;
-                    else cur[last] = f.value || '';
+                    } else if (f.tagName === 'SELECT') {
+                        // Select：根据字段类型转换值
+                        const selectValue = f.value || null;
+                        if (selectValue !== null && selectValue !== '') {
+                            const options = Array.from(f.options);
+                            const isNumericEnum = options.some(opt => opt.value !== '' && !isNaN(Number(opt.value)));
+                            if (isNumericEnum) {
+                                const numValue = Number(selectValue);
+                                cur[last] = !isNaN(numValue) ? numValue : selectValue;
+                            } else {
+                                cur[last] = selectValue;
+                            }
+                        } else {
+                            cur[last] = null;
+                        }
+                    } else cur[last] = f.value || '';
                 });
                 items.push(itemObj);
             });

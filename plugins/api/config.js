@@ -4,7 +4,7 @@
  */
 import BotUtil from '../../lib/common/util.js';
 
-// 辅助函数：清理配置数据
+// 辅助函数：清理配置数据（与验证逻辑保持一致的类型转换）
 function cleanConfigData(data, config) {
   if (!data || typeof data !== 'object') {
     return data;
@@ -16,20 +16,43 @@ function cleanConfigData(data, config) {
   if (schema && schema.fields) {
     for (const [field, fieldSchema] of Object.entries(schema.fields)) {
       if (field in cleaned) {
-        const value = cleaned[field];
+        let value = cleaned[field];
+        const expectedType = fieldSchema.type;
+        
+        // 类型转换：字符串数字转换为数字（与验证逻辑一致）
+        if (expectedType === 'number' && typeof value === 'string') {
+          const numValue = Number(value);
+          if (!isNaN(numValue) && value.trim() !== '') {
+            value = numValue;
+            cleaned[field] = value;
+          } else if (value === '') {
+            cleaned[field] = null;
+          }
+        }
+        
+        // 类型转换：字符串布尔值转换为布尔
+        if (expectedType === 'boolean' && typeof value === 'string') {
+          if (value === 'true' || value === '1') {
+            value = true;
+            cleaned[field] = value;
+          } else if (value === 'false' || value === '0') {
+            value = false;
+            cleaned[field] = value;
+          }
+        }
         
         // 对于数字类型字段，将空字符串转换为 null
-        if (fieldSchema.type === 'number' && value === '') {
+        if (expectedType === 'number' && value === '') {
           cleaned[field] = null;
         }
         
         // 递归处理嵌套对象
-        if (fieldSchema.type === 'object' && value && typeof value === 'object' && !Array.isArray(value)) {
+        if (expectedType === 'object' && value && typeof value === 'object' && !Array.isArray(value)) {
           cleaned[field] = cleanConfigData(value, { schema: { fields: fieldSchema.fields || {} } });
         }
         
         // 递归处理数组中的对象
-        if (fieldSchema.type === 'array' && Array.isArray(value) && fieldSchema.itemType === 'object') {
+        if (expectedType === 'array' && Array.isArray(value) && fieldSchema.itemType === 'object') {
           cleaned[field] = value.map(item => {
             if (item && typeof item === 'object') {
               return cleanConfigData(item, { schema: { fields: fieldSchema.itemSchema?.fields || {} } });

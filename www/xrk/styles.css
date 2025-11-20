@@ -3127,14 +3127,17 @@ body.light .bot-card {
         padding: 20px 12px; /* 减小内边距，充分利用屏幕 */
     }
 
-    /* 配置编辑器移动端优化 */
+    /* 配置编辑器移动端优化 - 最大化可操作区域 */
     .config-editor-container {
         height: 100vh;
         border-radius: 0;
+        display: flex;
+        flex-direction: column;
     }
 
     .config-editor-header {
-        padding: 16px 20px;
+        padding: 12px 16px;
+        flex-shrink: 0;
     }
 
     .config-editor-title {
@@ -3142,90 +3145,217 @@ body.light .bot-card {
         font-weight: 500;
     }
     
-    .config-editor-header {
-        padding: 16px 20px;
-    }
-
     .config-editor-panel {
-        padding: 16px;
+        padding: 0;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
     }
 
     .config-editor-toolbar {
         flex-direction: column;
-        gap: 8px; /* 减小间距 */
+        gap: 10px;
         align-items: stretch;
-        padding: 10px 12px; /* 进一步减小内边距，缩小工具栏卡片 */
-        margin-bottom: 12px; /* 减小底部间距 */
+        padding: 12px 16px;
+        margin-bottom: 0;
+        flex-shrink: 0;
+        background: var(--bg-card);
+        border-bottom: 1px solid var(--border-light);
     }
 
     .config-editor-name {
-        font-size: 16px; /* 缩小字体 */
+        font-size: 15px;
         margin-bottom: 0;
+        font-weight: 600;
     }
 
     .config-editor-actions {
         width: 100%;
-        flex-wrap: wrap;
-        gap: 8px; /* 减小按钮间距 */
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
     }
 
     .config-editor-actions .btn {
         flex: 1;
-        min-width: 80px; /* 减小最小宽度 */
-        padding: 8px 12px; /* 减小按钮内边距 */
-        font-size: 13px; /* 减小字体 */
+        min-width: 0;
+        padding: 12px 16px;
+        font-size: 14px;
+        font-weight: 500;
+        border-radius: var(--radius-md);
     }
 
     .config-editor-content {
-        padding: 12px;
-        padding-bottom: 100px; /* 大幅增加底部内边距，确保最底下的配置可以操作 */
+        flex: 1;
+        padding: 0;
+        padding-bottom: 0;
         min-height: 0;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
     }
 
     .config-form-scroll {
-        padding: 12px;
-        padding-bottom: 120px; /* 大幅增加底部内边距，确保最底下的配置可以操作 */
+        padding: 16px;
+        padding-bottom: 140px; /* 确保底部有足够空间，避免被键盘遮挡 */
+        min-height: 100%;
     }
     
     .sub-config-list-scroll {
-        padding-bottom: 30px; /* 移动端也增加底部内边距 */
+        padding: 16px;
+        padding-bottom: 140px;
+        min-height: 100%;
     }
 
     .config-form-field {
-        padding: 16px;
-        margin-bottom: 16px;
+        padding: 20px 16px;
+        margin-bottom: 12px;
+        background: var(--bg-card);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border-light);
     }
 
     .config-form-label {
-        font-size: 14px;
+        font-size: 15px;
+        font-weight: 500;
+        margin-bottom: 10px;
+        display: block;
     }
 
     .config-form-input,
     .config-form-select {
-        padding: 10px 12px;
-        font-size: 14px;
+        padding: 14px 16px;
+        font-size: 16px; /* 增大字体，提高可读性 */
+        width: 100%;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border);
+        background: var(--bg-secondary);
+        transition: all var(--transition-base);
+    }
+
+    .config-form-input:focus,
+    .config-form-select:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-light);
     }
 
     .config-form-array-item {
         flex-direction: column;
         align-items: stretch;
+        padding: 16px;
+        background: var(--bg-secondary);
+        border-radius: var(--radius-md);
+        margin-bottom: 12px;
     }
 
     .config-form-array-item input {
         width: 100%;
+        padding: 14px 16px;
+        font-size: 16px;
+        margin-bottom: 10px;
+    }
+
+    .config-form-array-remove,
+    .config-form-arrayform-remove {
+        padding: 12px 20px;
+        font-size: 14px;
+        width: 100%;
+    }
+
+    .config-form-array-add,
+    .config-form-arrayform-add {
+        padding: 14px 20px;
+        font-size: 15px;
+        width: 100%;
+        margin-top: 12px;
+    }
+
+    .config-form-subform {
+        padding: 16px;
+        margin-top: 12px;
+        background: var(--bg-secondary);
+        border-radius: var(--radius-md);
+    }
+
+    .config-form-subfield {
+        margin-bottom: 16px;
+    }
+
+    .config-form-subfield:last-child {
+        margin-bottom: 0;
+    }
+
+    .config-form-arrayform-item {
+        padding: 16px;
+        margin-bottom: 16px;
+        background: var(--bg-secondary);
+        border-radius: var(--radius-md);
+    }
+
+    .config-form-arrayform-actions {
+        margin-top: 12px;
+    }
+
+    .config-form-switch {
+        width: 56px;
+        height: 32px;
+    }
+
+    .config-form-switch-slider:before {
+        height: 24px;
+        width: 24px;
+    }
+
+    .config-form-checkbox:checked + .config-form-switch-slider:before {
+        transform: translateX(24px);
+    }
+
+    .config-form-tags {
+        margin-top: 12px;
+    }
+
+    .config-form-tags-input-wrapper {
+        margin-top: 12px;
+        display: flex;
+        gap: 10px;
+    }
+
+    .config-form-tags-input {
+        flex: 1;
+        padding: 14px 16px;
+        font-size: 16px;
+    }
+
+    .config-form-tags-add {
+        padding: 14px 20px;
+        font-size: 14px;
+        min-width: 80px;
+    }
+
+    .config-form-hint {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-top: 6px;
+        margin-bottom: 8px;
+        line-height: 1.4;
     }
 
     .config-list-panel {
         padding: 16px;
-        padding-bottom: 100px; /* 大幅增加底部内边距，扩大可操作区域 */
+        padding-bottom: 140px;
+        min-height: 100%;
     }
 
     .config-item {
-        padding: 16px;
+        padding: 20px 16px;
         flex-direction: column;
         align-items: flex-start;
-        gap: 12px;
-        margin-bottom: 20px; /* 增加卡片之间的间距 */
+        gap: 14px;
+        margin-bottom: 16px;
+        background: var(--bg-card);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border-light);
     }
 
     .config-item-actions {
@@ -3233,15 +3363,53 @@ body.light .bot-card {
         justify-content: flex-end;
     }
 
-    .sub-config-list-scroll {
-        padding: 12px;
-        padding-bottom: 100px; /* 大幅增加底部内边距，扩大可操作区域 */
+    .config-item-actions .btn {
+        padding: 12px 20px;
+        font-size: 14px;
+        min-width: 100px;
     }
+
+    .sub-config-list-scroll {
+        padding: 16px;
+        padding-bottom: 140px;
+        min-height: 100%;
+    }
+    
     .sub-config-list {
         grid-template-columns: 1fr;
-        gap: 12px;
-        padding: 16px;
-        padding-bottom: 100px; /* 大幅增加底部内边距，确保有足够空间 */
+        gap: 16px;
+        padding: 0;
+    }
+
+    .sub-config-item {
+        padding: 20px 16px;
+        background: var(--bg-card);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border-light);
+        transition: all var(--transition-base);
+    }
+
+    .sub-config-item:active {
+        transform: scale(0.98);
+        background: var(--bg-hover);
+    }
+
+    .sub-config-name {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 6px;
+    }
+
+    .sub-config-desc {
+        font-size: 14px;
+        color: var(--text-muted);
+        margin-bottom: 8px;
+    }
+
+    .sub-config-path {
+        font-size: 12px;
+        color: var(--text-dim);
+        font-family: 'Courier New', monospace;
     }
 }
 
