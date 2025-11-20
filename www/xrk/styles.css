@@ -3140,16 +3140,15 @@ body.light .bot-card {
         padding: 20px 12px; /* 减小内边距，充分利用屏幕 */
     }
 
-    /* ==================== 手机端配置编辑器 - 优化设计 ==================== */
-    /* 配置编辑器容器 - 留底部空间 */
+    /* ==================== 手机端配置编辑器 ==================== */
     .config-editor-container {
         position: fixed;
         top: 0;
         left: 0;
         right: 0;
-        bottom: 20px; /* 底部留空间 */
-        height: calc(100vh - 20px);
-        height: calc(100dvh - 20px);
+        bottom: 60px; /* 底部留足够空间 */
+        height: calc(100vh - 60px);
+        height: calc(100dvh - 60px);
         width: 100vw;
         border-radius: var(--radius-lg) var(--radius-lg) 0 0;
         display: flex;
@@ -3158,16 +3157,13 @@ body.light .bot-card {
         z-index: 10000;
         overflow: hidden;
         box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
-        transition: transform var(--transition-smooth), opacity var(--transition-smooth);
     }
 
-    /* 顶部工具栏 - 紧凑设计 */
     .config-editor-header {
         padding: 0;
         flex-shrink: 0;
         background: var(--bg-card);
         border-bottom: 1px solid var(--border-light);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     }
 
     .config-editor-title {
@@ -3176,7 +3172,6 @@ body.light .bot-card {
         padding: 16px 20px;
     }
     
-    /* 编辑器面板 - 弹性布局 */
     .config-editor-panel {
         padding: 0;
         flex: 1;
@@ -3186,13 +3181,10 @@ body.light .bot-card {
         min-height: 0;
     }
 
-    /* 工具栏 - 固定顶部 */
     .config-editor-toolbar {
         flex-direction: column;
         gap: 12px;
-        align-items: stretch;
         padding: 16px 20px;
-        margin: 0;
         flex-shrink: 0;
         background: var(--bg-card);
         border-bottom: 1px solid var(--border-light);
@@ -3200,383 +3192,258 @@ body.light .bot-card {
 
     .config-editor-name {
         font-size: 16px;
-        margin-bottom: 0;
         font-weight: 600;
-        color: var(--text-primary);
     }
 
-    /* 按钮组 - 网格布局，确保不超出 */
     .config-editor-actions {
-        width: 100%;
         display: grid;
         grid-template-columns: repeat(2, 1fr);
         gap: 12px;
-        box-sizing: border-box;
     }
 
     .config-editor-actions .btn {
         width: 100%;
-        min-width: 0;
         padding: 14px 16px;
         font-size: 15px;
         font-weight: 500;
-        border-radius: var(--radius-md);
-        box-sizing: border-box;
-        margin: 0;
     }
 
-    /* 内容区域 - 可滚动，优化滑动体验 */
     .config-editor-content {
         flex: 1;
-        padding: 0;
-        min-height: 0;
         overflow-y: auto;
         overflow-x: hidden;
         -webkit-overflow-scrolling: touch;
         scroll-behavior: smooth;
-        background: var(--bg-primary);
-        position: relative;
     }
 
-    /* 表单滚动容器 - 确保底部内容可见 */
-    .config-form-scroll {
-        padding: 20px 16px;
-        padding-bottom: 180px; /* 确保底部内容可见 */
-        min-height: calc(100% + 1px);
-        box-sizing: border-box;
-        width: 100%;
-        max-width: 100%;
-    }
-    
-    /* 子配置列表滚动容器 */
+    .config-form-scroll,
     .sub-config-list-scroll {
         padding: 20px 16px;
-        padding-bottom: 180px;
+        padding-bottom: 200px; /* 确保底部内容可见 */
         min-height: calc(100% + 1px);
         box-sizing: border-box;
         width: 100%;
         max-width: 100%;
     }
 
-    /* 表单字段 - 大卡片设计 */
     .config-form-field {
-        padding: 24px 20px;
-        margin: 0 0 20px 0;
+        padding: 20px;
+        margin-bottom: 16px;
         background: var(--bg-card);
-        border-radius: var(--radius-lg);
+        border-radius: var(--radius-md);
         border: 1px solid var(--border-light);
-        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
         box-sizing: border-box;
         width: 100%;
         max-width: 100%;
-        transition: all var(--transition-base);
-    }
-
-    .config-form-field:last-child {
-        margin-bottom: 0;
     }
 
     .config-form-label {
         font-size: 16px;
         font-weight: 600;
-        margin-bottom: 14px;
+        margin-bottom: 12px;
         display: block;
-        color: var(--text-primary);
-        line-height: 1.4;
     }
 
-    /* 输入框和选择框 - 大尺寸，易点击 */
     .config-form-input,
     .config-form-select {
-        padding: 18px 20px;
-        font-size: 17px; /* iOS 推荐大小，避免自动缩放 */
+        padding: 16px 18px;
+        font-size: 17px;
         width: 100%;
         max-width: 100%;
         border-radius: var(--radius-md);
         border: 2px solid var(--border);
         background: var(--bg-secondary);
-        color: var(--text-primary);
-        transition: all var(--transition-base);
         box-sizing: border-box;
         -webkit-appearance: none;
         appearance: none;
-        min-height: 56px; /* 确保足够的点击区域 */
+        min-height: 56px;
     }
 
     .config-form-select {
         background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath fill='%23ffffff' d='M8 11L3 6h10z'/%3E%3C/svg%3E");
         background-repeat: no-repeat;
-        background-position: right 20px center;
+        background-position: right 18px center;
         background-size: 16px;
-        padding-right: 50px;
+        padding-right: 48px;
     }
 
     .config-form-input:focus,
     .config-form-select:focus {
         outline: none;
         border-color: var(--accent);
-        box-shadow: 0 0 0 4px var(--accent-light);
-        background: var(--bg-hover);
+        box-shadow: 0 0 0 3px var(--accent-light);
     }
 
-    /* 数组项 - 独立卡片 */
-    .config-form-array {
-        margin-top: 0;
+    .config-form-array,
+    .config-form-arrayform,
+    .config-form-tags {
         width: 100%;
         max-width: 100%;
         box-sizing: border-box;
     }
 
-    .config-form-array-item {
+    .config-form-array-item,
+    .config-form-arrayform-item {
         flex-direction: column;
-        align-items: stretch;
-        padding: 20px;
+        padding: 16px;
+        margin-bottom: 12px;
         background: var(--bg-secondary);
         border-radius: var(--radius-md);
-        margin: 0 0 16px 0;
-        border: 2px solid var(--border-light);
+        border: 1px solid var(--border-light);
         box-sizing: border-box;
         width: 100%;
         max-width: 100%;
-    }
-
-    .config-form-array-item:last-of-type {
-        margin-bottom: 0;
     }
 
     .config-form-array-item input {
         width: 100%;
-        max-width: 100%;
-        padding: 18px 20px;
+        padding: 16px 18px;
         font-size: 17px;
-        margin-bottom: 14px;
+        margin-bottom: 12px;
         min-height: 56px;
         box-sizing: border-box;
     }
 
-    /* 数组删除按钮 - 全宽 */
     .config-form-array-remove,
-    .config-form-arrayform-remove {
+    .config-form-arrayform-remove,
+    .config-form-array-add,
+    .config-form-arrayform-add {
         width: 100%;
-        max-width: 100%;
         padding: 16px 20px;
         font-size: 15px;
         font-weight: 500;
         box-sizing: border-box;
-        margin: 0;
     }
 
-    /* 数组添加按钮 - 全宽，确保在容器内 */
     .config-form-array-add,
     .config-form-arrayform-add {
-        width: 100%;
-        max-width: 100%;
-        padding: 18px 20px;
-        font-size: 16px;
-        font-weight: 600;
-        margin: 20px 0 0 0;
-        box-sizing: border-box;
-        border-radius: var(--radius-md);
+        margin-top: 12px;
     }
 
-    /* 子表单 - 嵌套卡片 */
     .config-form-subform {
-        padding: 20px;
-        margin-top: 16px;
+        padding: 16px;
+        margin-top: 12px;
         background: var(--bg-secondary);
         border-radius: var(--radius-md);
-        border: 2px solid var(--border-light);
+        border: 1px solid var(--border-light);
         box-sizing: border-box;
         width: 100%;
         max-width: 100%;
     }
 
     .config-form-subfield {
-        margin-bottom: 20px;
+        margin-bottom: 16px;
     }
 
     .config-form-subfield:last-child {
         margin-bottom: 0;
     }
 
-    /* ArrayForm 项 - 大卡片 */
-    .config-form-arrayform {
-        margin-top: 0;
-        width: 100%;
-        max-width: 100%;
-        box-sizing: border-box;
-    }
-
-    .config-form-arrayform-item {
-        padding: 20px;
-        margin: 0 0 20px 0;
-        background: var(--bg-secondary);
-        border-radius: var(--radius-md);
-        border: 2px solid var(--border-light);
-        box-sizing: border-box;
-        width: 100%;
-        max-width: 100%;
-    }
-
-    .config-form-arrayform-item:last-of-type {
-        margin-bottom: 0;
-    }
-
     .config-form-arrayform-actions {
-        margin-top: 16px;
-        width: 100%;
-        box-sizing: border-box;
+        margin-top: 12px;
     }
 
-    /* Switch - 大尺寸 */
     .config-form-switch {
-        width: 64px;
-        height: 36px;
-        flex-shrink: 0;
-    }
-
-    .config-form-switch-slider {
-        border-radius: 36px;
+        width: 60px;
+        height: 34px;
     }
 
     .config-form-switch-slider:before {
-        height: 28px;
-        width: 28px;
-        left: 4px;
-        bottom: 4px;
+        height: 26px;
+        width: 26px;
     }
 
     .config-form-checkbox:checked + .config-form-switch-slider:before {
-        transform: translateX(28px);
-    }
-
-    /* Tags - 优化布局 */
-    .config-form-tags {
-        margin-top: 0;
-        width: 100%;
-        max-width: 100%;
-        box-sizing: border-box;
+        transform: translateX(26px);
     }
 
     .config-form-tags-list {
-        margin-bottom: 16px;
+        margin-bottom: 12px;
         display: flex;
         flex-wrap: wrap;
-        gap: 10px;
+        gap: 8px;
     }
 
     .config-form-tag-item {
-        margin: 0;
-        padding: 12px 16px;
+        padding: 10px 14px;
         background: var(--bg-secondary);
         border-radius: var(--radius-md);
-        border: 2px solid var(--border-light);
+        border: 1px solid var(--border-light);
         display: inline-flex;
         align-items: center;
         gap: 8px;
     }
 
     .config-form-tags-input-wrapper {
-        margin-top: 0;
         display: flex;
-        gap: 12px;
+        gap: 10px;
         width: 100%;
-        max-width: 100%;
         box-sizing: border-box;
     }
 
     .config-form-tags-input {
         flex: 1;
-        min-width: 0;
-        padding: 18px 20px;
+        padding: 16px 18px;
         font-size: 17px;
         min-height: 56px;
         box-sizing: border-box;
     }
 
     .config-form-tags-add {
-        padding: 18px 24px;
+        padding: 16px 20px;
         font-size: 15px;
-        font-weight: 500;
-        min-width: 100px;
-        flex-shrink: 0;
+        min-width: 90px;
         box-sizing: border-box;
-        white-space: nowrap;
     }
 
     .config-form-hint {
-        font-size: 14px;
+        font-size: 13px;
         color: var(--text-muted);
-        margin-top: 8px;
-        margin-bottom: 0;
-        line-height: 1.5;
+        margin-top: 6px;
+        line-height: 1.4;
     }
 
-    /* 配置列表面板 */
     .config-list-panel {
         padding: 20px 16px;
-        padding-bottom: 180px;
+        padding-bottom: 200px;
         min-height: calc(100% + 1px);
-        box-sizing: border-box;
-        width: 100%;
-        max-width: 100%;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
         scroll-behavior: smooth;
-    }
-
-    .config-item {
-        padding: 24px 20px;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 16px;
-        margin: 0 0 20px 0;
-        background: var(--bg-card);
-        border-radius: var(--radius-lg);
-        border: 1px solid var(--border-light);
-        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
         box-sizing: border-box;
         width: 100%;
         max-width: 100%;
     }
 
-    .config-item:last-child {
-        margin-bottom: 0;
+    .config-item {
+        padding: 20px;
+        flex-direction: column;
+        gap: 14px;
+        margin-bottom: 16px;
+        background: var(--bg-card);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border-light);
+        box-sizing: border-box;
+        width: 100%;
+        max-width: 100%;
     }
 
     .config-item-actions {
         width: 100%;
-        justify-content: stretch;
         display: flex;
         gap: 12px;
-        box-sizing: border-box;
     }
 
     .config-item-actions .btn {
         flex: 1;
-        padding: 16px 20px;
+        padding: 14px 18px;
         font-size: 15px;
         font-weight: 500;
-        min-width: 0;
-        box-sizing: border-box;
-    }
-
-    /* 子配置列表 */
-    .sub-config-list-scroll {
-        padding: 20px 16px;
-        padding-bottom: 180px;
-        min-height: calc(100% + 1px);
-        box-sizing: border-box;
-        width: 100%;
-        max-width: 100%;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-        scroll-behavior: smooth;
     }
     
     .sub-config-list {
         grid-template-columns: 1fr;
-        gap: 20px;
+        gap: 16px;
         padding: 0;
         width: 100%;
         max-width: 100%;
@@ -3584,11 +3451,10 @@ body.light .bot-card {
     }
 
     .sub-config-item {
-        padding: 24px 20px;
+        padding: 20px;
         background: var(--bg-card);
-        border-radius: var(--radius-lg);
+        border-radius: var(--radius-md);
         border: 1px solid var(--border-light);
-        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
         transition: all var(--transition-base);
         box-sizing: border-box;
         width: 100%;
@@ -3601,38 +3467,19 @@ body.light .bot-card {
     .sub-config-item:active {
         transform: scale(0.98);
         background: var(--bg-hover);
-        border-color: var(--accent);
-    }
-
-    .sub-config-icon {
-        width: 56px;
-        height: 56px;
-        border-radius: var(--radius-md);
-        background: var(--accent-light);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 28px;
-        margin-bottom: 8px;
-    }
-
-    .sub-config-info {
-        flex: 1;
-        width: 100%;
     }
 
     .sub-config-name {
-        font-size: 18px;
+        font-size: 17px;
         font-weight: 600;
-        margin-bottom: 8px;
-        color: var(--text-primary);
+        margin-bottom: 6px;
     }
 
     .sub-config-desc {
         font-size: 14px;
         color: var(--text-muted);
-        margin-bottom: 10px;
-        line-height: 1.5;
+        margin-bottom: 8px;
+        line-height: 1.4;
     }
 
     .sub-config-path {
@@ -3644,14 +3491,12 @@ body.light .bot-card {
 
     .sub-config-item .btn {
         width: 100%;
-        padding: 16px 20px;
+        padding: 14px 18px;
         font-size: 15px;
         font-weight: 500;
-        box-sizing: border-box;
         margin-top: 8px;
     }
 
-    /* 确保所有配置表单元素都在容器内 */
     .config-form-container {
         width: 100%;
         max-width: 100%;
@@ -3662,14 +3507,6 @@ body.light .bot-card {
     .config-form-container * {
         box-sizing: border-box;
         max-width: 100%;
-    }
-
-    .config-form-container .btn,
-    .config-form-container button {
-        max-width: 100%;
-        word-wrap: break-word;
-        overflow-wrap: break-word;
-        white-space: normal;
     }
 }
 

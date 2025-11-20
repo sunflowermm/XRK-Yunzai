@@ -3491,146 +3491,60 @@ class APIControlCenter {
     }
 
     async editSubConfig(parentName, subName) {
-        // SystemConfig 的子配置需要通过 system 配置实例读取
-        // 格式: system.bot, system.server 等
-        const fullPath = `${parentName}.${subName}`;
-        
+        const editorPanel = document.getElementById('configEditorPanel');
+        if (!editorPanel) return;
+
         try {
-            const response = await fetch(`${this.serverUrl}/api/config/${parentName}/read?path=${subName}`, {
-                headers: this.getHeaders()
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.message || `HTTP ${response.status}: 读取子配置失败`);
+            const toolbar = editorPanel.querySelector('.config-editor-toolbar');
+            if (toolbar) {
+                toolbar.querySelector('.config-editor-name').textContent = `编辑配置: ${parentName}.${subName}`;
             }
 
-            const data = await response.json();
-            if (!data.success) {
-                throw new Error(data.message || data.error || '读取子配置失败');
-            }
-
-            // 显示编辑界面
-            const editorPanel = document.getElementById('configEditorPanel');
-            editorPanel.innerHTML = `
-                <div class="config-editor-toolbar">
-                    <div class="config-editor-name">编辑配置: ${parentName}.${subName}</div>
-                    <div class="config-editor-actions">
-                        <button class="btn btn-secondary" id="saveConfigBtn">
-                            <span class="btn-icon">保存</span>
-                        </button>
-                        <button class="btn btn-secondary" id="validateConfigBtn">
-                            <span class="btn-icon">验证</span>
-                        </button>
-                        <button class="btn btn-secondary" id="backConfigBtn">
-                            <span class="btn-icon">返回</span>
-                        </button>
-                    </div>
-                </div>
-                <div class="config-editor-content">
-                    <textarea id="configEditorTextarea" class="config-editor-textarea"></textarea>
-                </div>
-            `;
-
-            const editorTextarea = document.getElementById('configEditorTextarea');
-            
-            // 获取子配置的结构信息
-            let subConfigStructure = null;
-            try {
-                const structureRes = await fetch(`${this.serverUrl}/api/config/${parentName}/structure`, {
+            const [subConfigData, structure] = await Promise.all([
+                fetch(`${this.serverUrl}/api/config/${parentName}/read?path=${subName}`, {
                     headers: this.getHeaders()
-                });
-                if (structureRes.ok) {
-                    const structureData = await structureRes.json();
-                    if (structureData.success && structureData.structure && structureData.structure.configs) {
-                        const subConfigMeta = structureData.structure.configs[subName];
-                        if (subConfigMeta && subConfigMeta.schema) {
-                            subConfigStructure = subConfigMeta.schema;
-                        }
-                    }
-                }
-            } catch (e) {
-                console.warn('获取子配置结构失败:', e);
-            }
+                }).then(res => {
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    return res.json();
+                }).then(data => {
+                    if (!data.success) throw new Error(data.message || data.error);
+                    return data.data;
+                }),
+                this.getConfigStructure(parentName)
+            ]);
 
-            // 确保 data.data 是对象
-            let subConfigData = data.data;
-            if (!subConfigData || typeof subConfigData !== 'object') {
-                subConfigData = {};
-            }
-            
-            // 检查是否有 schema，如果有则使用可视化表单，否则使用 JSON 编辑器
-            const hasSchema = subConfigStructure && subConfigStructure.fields;
-            
-            if (hasSchema) {
-                // 使用可视化表单编辑器
-                this.renderConfigForm(parentName, subConfigData, subConfigStructure, editorPanel, editorTextarea, subName);
+            const subConfigStructure = structure?.configs?.[subName]?.schema;
+            const safeData = subConfigData && typeof subConfigData === 'object' ? subConfigData : {};
+            const editorTextarea = document.getElementById('configEditorTextarea');
+
+            if (subConfigStructure?.fields) {
+                this.renderConfigForm(parentName, safeData, subConfigStructure, editorPanel, editorTextarea, subName);
             } else {
-                // 使用 JSON 编辑器（向后兼容）
-                let jsonString;
-                try {
-                    const jsonData = subConfigData || {};
-                    if (typeof jsonData === 'string') {
-                        jsonString = JSON.stringify(JSON.parse(jsonData), null, 2);
-                    } else {
-                        jsonString = JSON.stringify(jsonData, null, 2);
-                    }
-                } catch (e) {
-                    jsonString = typeof subConfigData === 'string' ? subConfigData : JSON.stringify(subConfigData || {}, null, 2);
-                }
-                
-                editorTextarea.value = jsonString;
+                editorTextarea.value = typeof safeData === 'string' ? safeData : JSON.stringify(safeData, null, 2);
                 editorTextarea.disabled = false;
                 editorTextarea.dataset.configName = parentName;
                 editorTextarea.dataset.subName = subName;
-
-                // 初始化编辑器
-                if (this.configEditor) {
-                    this.configEditor.toTextArea();
-                }
-                const theme = document.body.classList.contains('light') ? 'default' : 'monokai';
-                this.configEditor = CodeMirror.fromTextArea(editorTextarea, {
-                    mode: 'application/json',
-                    theme: theme,
-                    lineNumbers: true,
-                    lineWrapping: true,
-                    matchBrackets: true,
-                    autoCloseBrackets: true,
-                    foldGutter: true,
-                    gutters: ['CodeMirror-linenumbers', 'CodeMirror-foldgutter']
-                });
+                await this.initJSONEditor(editorTextarea, parentName);
             }
 
-            document.getElementById('saveConfigBtn').addEventListener('click', () => this.saveSubConfig());
-            document.getElementById('validateConfigBtn').addEventListener('click', () => this.validateSubConfig());
-            document.getElementById('backConfigBtn').addEventListener('click', async () => {
-                // 返回到子配置选择界面
+            document.getElementById('saveConfigBtn')?.addEventListener('click', () => this.saveSubConfig());
+            document.getElementById('validateConfigBtn')?.addEventListener('click', () => this.validateSubConfig());
+            document.getElementById('backConfigBtn')?.addEventListener('click', async () => {
                 try {
-                    const structureRes = await fetch(`${this.serverUrl}/api/config/${parentName}/structure`, {
-                        headers: this.getHeaders()
-                    });
-                    if (structureRes.ok) {
-                        const structureData = await structureRes.json();
-                        if (structureData.success) {
-                            const readRes = await fetch(`${this.serverUrl}/api/config/${parentName}/read`, {
-                                headers: this.getHeaders()
-                            });
-                            if (readRes.ok) {
-                                const readData = await readRes.json();
-                                if (readData.success) {
-                                    this.showSubConfigSelector(parentName, structureData.structure, readData.data);
-                                }
-                            }
-                        }
-                    }
+                    const [s, d] = await Promise.all([
+                        this.getConfigStructure(parentName),
+                        this.readConfigData(parentName)
+                    ]);
+                    if (s && d) this.showSubConfigSelector(parentName, s, d);
+                    else this.backToConfigList();
                 } catch (e) {
                     this.backToConfigList();
                 }
             });
+
+            this.switchToEditor();
         } catch (error) {
             this.showToast('加载子配置失败: ' + error.message, 'error');
-            // 出错时返回列表
-            setTimeout(() => this.backToConfigList(), 2000);
         }
     }
 
@@ -3720,72 +3634,19 @@ class APIControlCenter {
     backToConfigList() {
         const listPanel = document.getElementById('configListPanel');
         const editorPanel = document.getElementById('configEditorPanel');
+        if (!listPanel || !editorPanel) return;
 
-        if (listPanel && editorPanel) {
-            // 清理编辑器
-            if (this.configEditor) {
-                try {
-                    this.configEditor.toTextArea();
-                } catch (e) {
-                    console.warn('清理编辑器失败:', e);
-                }
-                this.configEditor = null;
+        if (this.configEditor) {
+            try {
+                this.configEditor.toTextArea();
+            } catch (e) {
+                console.warn('清理编辑器失败:', e);
             }
-            
-            // 重置编辑器面板内容，避免嵌套问题
-            // 但保留基本结构，以便后续重新使用
-            editorPanel.innerHTML = `
-                <div class="config-editor-toolbar">
-                    <div class="config-editor-name" id="configEditorName"></div>
-                    <div class="config-editor-actions">
-                        <button class="btn btn-secondary" id="saveConfigBtn">
-                            <span class="btn-icon">保存</span>
-                        </button>
-                        <button class="btn btn-secondary" id="validateConfigBtn">
-                            <span class="btn-icon">验证</span>
-                        </button>
-                        <button class="btn btn-secondary" id="backConfigBtn">
-                            <span class="btn-icon">返回</span>
-                        </button>
-                    </div>
-                </div>
-                <div class="config-editor-content">
-                    <textarea id="configEditorTextarea" class="config-editor-textarea"></textarea>
-                </div>
-            `;
-            
-            // 重新绑定按钮事件，确保事件监听器正确
-            const saveBtn = document.getElementById('saveConfigBtn');
-            const validateBtn = document.getElementById('validateConfigBtn');
-            const backBtn = document.getElementById('backConfigBtn');
-            
-            if (saveBtn) {
-                // 移除旧的事件监听器（如果有）
-                const newSaveBtn = saveBtn.cloneNode(true);
-                saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
-                newSaveBtn.addEventListener('click', () => this.saveConfig());
-            }
-            if (validateBtn) {
-                const newValidateBtn = validateBtn.cloneNode(true);
-                validateBtn.parentNode.replaceChild(newValidateBtn, validateBtn);
-                newValidateBtn.addEventListener('click', () => this.validateConfig());
-            }
-            if (backBtn) {
-                const newBackBtn = backBtn.cloneNode(true);
-                backBtn.parentNode.replaceChild(newBackBtn, backBtn);
-                newBackBtn.addEventListener('click', () => this.backToConfigList());
-            }
-            
-            editorPanel.style.display = 'none';
-            
-            // 显示列表面板
-            listPanel.style.display = 'block';
-            
-            // 重新加载配置列表，确保状态正确和事件绑定
-            this.loadConfigList().catch(err => {
-                console.error('重新加载配置列表失败:', err);
-            });
+            this.configEditor = null;
         }
+
+        this.switchToList();
+        this.loadConfigList().catch(() => {});
     }
 
     /**
