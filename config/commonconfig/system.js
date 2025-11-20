@@ -1,4 +1,9 @@
 import ConfigBase from '../../lib/commonconfig/commonconfig.js';
+import fs from 'fs/promises';
+import fsSync from 'fs';
+import path from 'path';
+import yaml from 'yaml';
+import BotUtil from '../../lib/common/util.js';
 
 /**
  * 系统配置管理
@@ -1260,6 +1265,548 @@ export default class SystemConfig extends ConfigBase {
             }
           }
         }
+      },
+
+      kuizai: {
+        name: 'kuizai',
+        displayName: '葵崽AI配置',
+        description: '葵崽AI、TTS、ASR相关配置',
+        filePath: getConfigPath('kuizai'),
+        fileType: 'yaml',
+        schema: {
+          fields: {
+            ai: {
+              type: 'object',
+              label: 'AI基础配置',
+              component: 'SubForm',
+              fields: {
+                enabled: {
+                  type: 'boolean',
+                  label: '启用AI',
+                  default: true,
+                  component: 'Switch'
+                },
+                baseUrl: {
+                  type: 'string',
+                  label: 'API地址',
+                  default: 'https://api.gptgod.online/v1',
+                  component: 'Input'
+                },
+                apiKey: {
+                  type: 'string',
+                  label: 'API密钥',
+                  description: 'AI API密钥，留空则不使用',
+                  default: '',
+                  component: 'Input'
+                },
+                chatModel: {
+                  type: 'string',
+                  label: '聊天模型',
+                  default: 'deepseek-r1-0528',
+                  component: 'Input'
+                },
+                temperature: {
+                  type: 'number',
+                  label: '温度参数',
+                  description: '控制输出的随机性，范围0-2',
+                  min: 0,
+                  max: 2,
+                  step: 0.1,
+                  default: 0.8,
+                  component: 'InputNumber'
+                },
+                max_tokens: {
+                  type: 'number',
+                  label: '最大Token数',
+                  min: 1,
+                  default: 2000,
+                  component: 'InputNumber'
+                },
+                top_p: {
+                  type: 'number',
+                  label: 'Top P',
+                  description: '核采样参数',
+                  min: 0,
+                  max: 1,
+                  step: 0.1,
+                  default: 0.9,
+                  component: 'InputNumber'
+                },
+                presence_penalty: {
+                  type: 'number',
+                  label: '存在惩罚',
+                  min: -2,
+                  max: 2,
+                  step: 0.1,
+                  default: 0.6,
+                  component: 'InputNumber'
+                },
+                frequency_penalty: {
+                  type: 'number',
+                  label: '频率惩罚',
+                  min: -2,
+                  max: 2,
+                  step: 0.1,
+                  default: 0.6,
+                  component: 'InputNumber'
+                },
+                timeout: {
+                  type: 'number',
+                  label: '请求超时',
+                  description: '请求超时时间（毫秒）',
+                  min: 1000,
+                  default: 30000,
+                  component: 'InputNumber'
+                },
+                displayDelay: {
+                  type: 'number',
+                  label: '显示延迟',
+                  description: '显示延迟时间（毫秒）',
+                  min: 0,
+                  default: 1500,
+                  component: 'InputNumber'
+                },
+                persona: {
+                  type: 'string',
+                  label: 'AI人设',
+                  default: '我是一个智能语音助手，可以听懂你说的话并做出回应。我会用简短的话语和表情与你交流。',
+                  component: 'Textarea'
+                }
+              }
+            },
+            tts: {
+              type: 'object',
+              label: '火山TTS配置',
+              component: 'SubForm',
+              fields: {
+                enabled: {
+                  type: 'boolean',
+                  label: '启用TTS',
+                  default: true,
+                  component: 'Switch'
+                },
+                provider: {
+                  type: 'string',
+                  label: '服务提供商',
+                  default: 'volcengine',
+                  component: 'Input'
+                },
+                wsUrl: {
+                  type: 'string',
+                  label: 'WebSocket地址',
+                  default: 'wss://openspeech.bytedance.com/api/v3/tts/bidirection',
+                  component: 'Input'
+                },
+                appKey: {
+                  type: 'string',
+                  label: 'AppKey',
+                  default: '5231143210',
+                  component: 'Input'
+                },
+                accessKey: {
+                  type: 'string',
+                  label: 'AccessKey',
+                  default: 'hSkG2n1yavXry2N3DtQeoTohvWp3qTrR',
+                  component: 'Input'
+                },
+                resourceId: {
+                  type: 'string',
+                  label: '资源ID',
+                  default: 'seed-tts-2.0',
+                  component: 'Input'
+                },
+                voiceType: {
+                  type: 'string',
+                  label: '语音类型',
+                  default: 'zh_female_vv_uranus_bigtts',
+                  component: 'Input'
+                },
+                encoding: {
+                  type: 'string',
+                  label: '编码格式',
+                  default: 'pcm',
+                  component: 'Input'
+                },
+                sampleRate: {
+                  type: 'number',
+                  label: '采样率',
+                  default: 16000,
+                  component: 'InputNumber'
+                },
+                speechRate: {
+                  type: 'number',
+                  label: '语速',
+                  default: 5,
+                  component: 'InputNumber'
+                },
+                loudnessRate: {
+                  type: 'number',
+                  label: '音量',
+                  default: 0,
+                  component: 'InputNumber'
+                },
+                emotion: {
+                  type: 'string',
+                  label: '情感',
+                  default: 'happy',
+                  component: 'Input'
+                },
+                chunkMs: {
+                  type: 'number',
+                  label: '分块大小（毫秒）',
+                  default: 128,
+                  component: 'InputNumber'
+                },
+                chunkDelayMs: {
+                  type: 'number',
+                  label: '分块延迟（毫秒）',
+                  default: 5,
+                  component: 'InputNumber'
+                }
+              }
+            },
+            asr: {
+              type: 'object',
+              label: '火山ASR配置',
+              component: 'SubForm',
+              fields: {
+                enabled: {
+                  type: 'boolean',
+                  label: '启用ASR',
+                  default: true,
+                  component: 'Switch'
+                },
+                provider: {
+                  type: 'string',
+                  label: '服务提供商',
+                  default: 'volcengine',
+                  component: 'Input'
+                },
+                wsUrl: {
+                  type: 'string',
+                  label: 'WebSocket地址',
+                  default: 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async',
+                  component: 'Input'
+                },
+                appKey: {
+                  type: 'string',
+                  label: 'AppKey',
+                  default: '5231143210',
+                  component: 'Input'
+                },
+                accessKey: {
+                  type: 'string',
+                  label: 'AccessKey',
+                  default: 'hSkG2n1yavXry2N3DtQeoTohvWp3qTrR',
+                  component: 'Input'
+                },
+                resourceId: {
+                  type: 'string',
+                  label: '资源ID',
+                  default: 'volc.bigasr.sauc.duration',
+                  component: 'Input'
+                },
+                enableItn: {
+                  type: 'boolean',
+                  label: '启用逆文本规范化',
+                  default: true,
+                  component: 'Switch'
+                },
+                enablePunc: {
+                  type: 'boolean',
+                  label: '启用标点符号',
+                  default: true,
+                  component: 'Switch'
+                },
+                enableDdc: {
+                  type: 'boolean',
+                  label: '启用DDC',
+                  default: false,
+                  component: 'Switch'
+                },
+                showUtterances: {
+                  type: 'boolean',
+                  label: '显示话语',
+                  default: true,
+                  component: 'Switch'
+                },
+                resultType: {
+                  type: 'string',
+                  label: '结果类型',
+                  default: 'full',
+                  component: 'Input'
+                },
+                enableAccelerateText: {
+                  type: 'boolean',
+                  label: '启用加速文本',
+                  default: true,
+                  component: 'Switch'
+                },
+                accelerateScore: {
+                  type: 'number',
+                  label: '加速分数',
+                  default: 15,
+                  component: 'InputNumber'
+                },
+                persistentWs: {
+                  type: 'boolean',
+                  label: '持久化WebSocket',
+                  default: true,
+                  component: 'Switch'
+                },
+                idleCloseMs: {
+                  type: 'number',
+                  label: '空闲关闭时间（毫秒）',
+                  default: 6000,
+                  component: 'InputNumber'
+                },
+                endWindowSize: {
+                  type: 'number',
+                  label: '结束窗口大小',
+                  default: 350,
+                  component: 'InputNumber'
+                },
+                forceToSpeechTime: {
+                  type: 'number',
+                  label: '强制语音时间（毫秒）',
+                  default: 500,
+                  component: 'InputNumber'
+                },
+                maxAudioBufferSize: {
+                  type: 'number',
+                  label: '最大音频缓冲区大小',
+                  default: 30,
+                  component: 'InputNumber'
+                },
+                asrFinalTextWaitMs: {
+                  type: 'number',
+                  label: 'ASR最终文本等待时间（毫秒）',
+                  default: 1200,
+                  component: 'InputNumber'
+                }
+              }
+            }
+          }
+        }
+      },
+
+      renderer_puppeteer: {
+        name: 'renderer_puppeteer',
+        displayName: 'Puppeteer截图配置',
+        description: 'Puppeteer渲染器配置，用于网页截图',
+        filePath: (cfg) => {
+          const port = cfg?._port || cfg?.server?.server?.port || 8086;
+          return port ? `data/server_bots/${port}/renderers/puppeteer/config.yaml` : `renderers/puppeteer/config_default.yaml`;
+        },
+        fileType: 'yaml',
+        schema: {
+          fields: {
+            headless: {
+              type: 'string',
+              label: '无头模式',
+              description: '"new" 为新 headless 模式',
+              default: 'new',
+              component: 'Input'
+            },
+            chromiumPath: {
+              type: 'string',
+              label: 'Chromium路径',
+              description: 'Chromium可执行文件路径（可选）',
+              default: '',
+              component: 'Input'
+            },
+            wsEndpoint: {
+              type: 'string',
+              label: 'WebSocket端点',
+              description: '连接到远程浏览器（可选）',
+              default: '',
+              component: 'Input'
+            },
+            puppeteerTimeout: {
+              type: 'number',
+              label: '截图超时时间',
+              description: '截图超时时间（毫秒）',
+              min: 1000,
+              default: 120000,
+              component: 'InputNumber'
+            },
+            restartNum: {
+              type: 'number',
+              label: '重启阈值',
+              description: '截图重启阈值',
+              min: 1,
+              default: 150,
+              component: 'InputNumber'
+            },
+            viewport: {
+              type: 'object',
+              label: '视口设置',
+              component: 'SubForm',
+              fields: {
+                width: {
+                  type: 'number',
+                  label: '宽度',
+                  min: 1,
+                  default: 1280,
+                  component: 'InputNumber'
+                },
+                height: {
+                  type: 'number',
+                  label: '高度',
+                  min: 1,
+                  default: 720,
+                  component: 'InputNumber'
+                },
+                deviceScaleFactor: {
+                  type: 'number',
+                  label: '设备缩放因子',
+                  min: 0.1,
+                  max: 5,
+                  step: 0.1,
+                  default: 1,
+                  component: 'InputNumber'
+                }
+              }
+            }
+          }
+        }
+      },
+
+      renderer_playwright: {
+        name: 'renderer_playwright',
+        displayName: 'Playwright截图配置',
+        description: 'Playwright渲染器配置，用于网页截图',
+        filePath: (cfg) => {
+          const port = cfg?._port || cfg?.server?.server?.port || 8086;
+          return port ? `data/server_bots/${port}/renderers/playwright/config.yaml` : `renderers/playwright/config_default.yaml`;
+        },
+        fileType: 'yaml',
+        schema: {
+          fields: {
+            browserType: {
+              type: 'string',
+              label: '浏览器类型',
+              enum: ['chromium', 'firefox', 'webkit'],
+              default: 'chromium',
+              component: 'Select'
+            },
+            headless: {
+              type: 'boolean',
+              label: '无头模式',
+              default: true,
+              component: 'Switch'
+            },
+            chromiumPath: {
+              type: 'string',
+              label: 'Chromium路径',
+              description: 'Chromium可执行文件路径（可选）',
+              default: '',
+              component: 'Input'
+            },
+            channel: {
+              type: 'string',
+              label: '浏览器通道',
+              description: '浏览器通道（可选）',
+              default: '',
+              component: 'Input'
+            },
+            wsEndpoint: {
+              type: 'string',
+              label: 'WebSocket端点',
+              description: '连接到远程浏览器（可选）',
+              default: '',
+              component: 'Input'
+            },
+            playwrightTimeout: {
+              type: 'number',
+              label: '截图超时时间',
+              description: '截图超时时间（毫秒）',
+              min: 1000,
+              default: 120000,
+              component: 'InputNumber'
+            },
+            healthCheckInterval: {
+              type: 'number',
+              label: '健康检查间隔',
+              description: '健康检查间隔（毫秒）',
+              min: 1000,
+              default: 60000,
+              component: 'InputNumber'
+            },
+            maxRetries: {
+              type: 'number',
+              label: '连接重试次数',
+              min: 0,
+              default: 3,
+              component: 'InputNumber'
+            },
+            retryDelay: {
+              type: 'number',
+              label: '重试延迟',
+              description: '重试延迟（毫秒）',
+              min: 0,
+              default: 2000,
+              component: 'InputNumber'
+            },
+            restartNum: {
+              type: 'number',
+              label: '重启阈值',
+              description: '截图重启阈值',
+              min: 1,
+              default: 150,
+              component: 'InputNumber'
+            },
+            viewport: {
+              type: 'object',
+              label: '视口设置',
+              component: 'SubForm',
+              fields: {
+                width: {
+                  type: 'number',
+                  label: '宽度',
+                  min: 1,
+                  default: 1280,
+                  component: 'InputNumber'
+                },
+                height: {
+                  type: 'number',
+                  label: '高度',
+                  min: 1,
+                  default: 720,
+                  component: 'InputNumber'
+                },
+                deviceScaleFactor: {
+                  type: 'number',
+                  label: '设备缩放因子',
+                  min: 0.1,
+                  max: 5,
+                  step: 0.1,
+                  default: 1,
+                  component: 'InputNumber'
+                }
+              }
+            },
+            contextOptions: {
+              type: 'object',
+              label: '上下文选项',
+              component: 'SubForm',
+              fields: {
+                bypassCSP: {
+                  type: 'boolean',
+                  label: '绕过CSP',
+                  default: true,
+                  component: 'Switch'
+                },
+                reducedMotion: {
+                  type: 'string',
+                  label: '减少动画',
+                  default: 'reduce',
+                  component: 'Input'
+                }
+              }
+            }
+          }
+        }
       }
     };
   }
@@ -1273,6 +1820,89 @@ export default class SystemConfig extends ConfigBase {
     const configMeta = this.configFiles[name];
     if (!configMeta) {
       throw new Error(`未知的配置: ${name}`);
+    }
+
+    // 为 renderer 配置创建特殊实例，支持读取默认配置
+    if (name === 'renderer_puppeteer' || name === 'renderer_playwright') {
+      const RendererConfig = class extends ConfigBase {
+        async read(useCache = true) {
+          const cfg = global.cfg || { _port: parseInt(process.env.SERVER_PORT || process.env.PORT || 8086) };
+          const port = cfg?._port || cfg?.server?.server?.port || 8086;
+          const type = name === 'renderer_puppeteer' ? 'puppeteer' : 'playwright';
+          
+          // 读取默认配置
+          const defaultFile = path.join(process.cwd(), 'renderers', type, 'config_default.yaml');
+          let defaultConfig = {};
+          if (fsSync.existsSync(defaultFile)) {
+            try {
+              const content = await fs.readFile(defaultFile, 'utf8');
+              defaultConfig = yaml.parse(content);
+            } catch (error) {
+              BotUtil.makeLog('error', `读取默认配置失败 [${name}]: ${error.message}`, 'RendererConfig');
+            }
+          }
+          
+          // 读取服务器配置
+          const serverFile = path.join(process.cwd(), `data/server_bots/${port}/renderers/${type}/config.yaml`);
+          let serverConfig = {};
+          if (fsSync.existsSync(serverFile)) {
+            try {
+              const content = await fs.readFile(serverFile, 'utf8');
+              serverConfig = yaml.parse(content);
+            } catch (error) {
+              BotUtil.makeLog('error', `读取服务器配置失败 [${name}]: ${error.message}`, 'RendererConfig');
+            }
+          } else if (port) {
+            // 如果服务器配置文件不存在，创建它（从默认配置复制）
+            const serverDir = path.dirname(serverFile);
+            if (!fsSync.existsSync(serverDir)) {
+              await fs.mkdir(serverDir, { recursive: true });
+            }
+            try {
+              await fs.writeFile(serverFile, yaml.stringify(defaultConfig), 'utf8');
+            } catch (error) {
+              BotUtil.makeLog('error', `创建服务器配置失败 [${name}]: ${error.message}`, 'RendererConfig');
+            }
+          }
+          
+          // 合并配置（服务器配置覆盖默认配置）
+          return { ...defaultConfig, ...serverConfig };
+        }
+        
+        async write(data, options = {}) {
+          const cfg = global.cfg || { _port: parseInt(process.env.SERVER_PORT || process.env.PORT || 8086) };
+          const port = cfg?._port || cfg?.server?.server?.port || 8086;
+          const type = name === 'renderer_puppeteer' ? 'puppeteer' : 'playwright';
+          
+          if (!port) {
+            throw new Error('无法确定服务器端口，无法保存配置');
+          }
+          
+          const serverFile = path.join(process.cwd(), `data/server_bots/${port}/renderers/${type}/config.yaml`);
+          const serverDir = path.dirname(serverFile);
+          
+          if (!fsSync.existsSync(serverDir)) {
+            await fs.mkdir(serverDir, { recursive: true });
+          }
+          
+          const { backup = true } = options;
+          if (backup && fsSync.existsSync(serverFile)) {
+            await this.backup();
+          }
+          
+          const content = yaml.stringify(data, {
+            indent: 2,
+            lineWidth: 0,
+            minContentWidth: 0
+          });
+          
+          await fs.writeFile(serverFile, content, 'utf8');
+          BotUtil.makeLog('info', `配置已保存 [${name}]`, 'RendererConfig');
+          return true;
+        }
+      };
+      
+      return new RendererConfig(configMeta);
     }
 
     return new ConfigBase(configMeta);
