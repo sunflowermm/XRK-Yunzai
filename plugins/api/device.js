@@ -469,9 +469,9 @@ class DeviceManager {
             BotUtil.makeLog('info', `⚡ [AI性能] 处理耗时: ${aiTime}ms`, deviceId);
             BotUtil.makeLog('info', `✅ [AI] 回复: ${aiResult.text || '(仅表情)'}`, deviceId);
 
-            // 表情已由工作流处理，这里只需要等待一下让表情动画完成
+            // 表情已由工作流处理
             if (aiResult.emotion) {
-                await new Promise(r => setTimeout(r, 300));
+                await new Promise(r => setTimeout(r, 200));
             }
 
             // 播放TTS
@@ -848,7 +848,7 @@ class DeviceManager {
             sendMsg: async (msg) => {
                 for (const [keyword, emotion] of Object.entries(EMOTION_KEYWORDS)) {
                     if (msg.includes(keyword)) {
-                        return await this.sendCommand(
+                        return await deviceManager.sendCommand(
                             deviceId,
                             'display_emotion',
                             { emotion },
@@ -857,7 +857,7 @@ class DeviceManager {
                     }
                 }
 
-                return await this.sendCommand(
+                return await deviceManager.sendCommand(
                     deviceId,
                     'display',
                     {
@@ -872,8 +872,9 @@ class DeviceManager {
                 );
             },
 
-            sendCommand: async (cmd, params = {}, priority = 0) =>
-                await this.sendCommand(deviceId, cmd, params, priority),
+            sendCommand: async (cmd, params = {}, priority = 0) => {
+                return await deviceManager.sendCommand(deviceId, cmd, params, priority);
+            },
 
             sendAudioChunk: (hex) => {
                 const ws = deviceWebSockets.get(deviceId);
@@ -890,8 +891,8 @@ class DeviceManager {
                 }
             },
 
-            display: async (text, options = {}) =>
-                await this.sendCommand(
+            display: async (text, options = {}) => {
+                return await deviceManager.sendCommand(
                     deviceId,
                     'display',
                     {
@@ -903,14 +904,15 @@ class DeviceManager {
                         spacing: options.spacing || 2
                     },
                     1
-                ),
+                );
+            },
 
             emotion: async (emotionName) => {
                 const normalized = normalizeEmotion(emotionName);
                 if (!normalized) {
                     throw new Error(`未知表情: ${emotionName}`);
                 }
-                return await this.sendCommand(
+                return await deviceManager.sendCommand(
                     deviceId,
                     'display_emotion',
                     { emotion: normalized },
@@ -918,33 +920,41 @@ class DeviceManager {
                 );
             },
 
-            clear: async () =>
-                await this.sendCommand(deviceId, 'display_clear', {}, 1),
+            clear: async () => {
+                return await deviceManager.sendCommand(deviceId, 'display_clear', {}, 1);
+            },
 
             camera: {
-                startStream: async (options = {}) =>
-                    await this.sendCommand(deviceId, 'camera_start_stream', {
+                startStream: async (options = {}) => {
+                    return await deviceManager.sendCommand(deviceId, 'camera_start_stream', {
                         fps: options.fps || 10,
                         quality: options.quality || 12,
                         resolution: options.resolution || 'VGA'
-                    }, 1),
-                stopStream: async () =>
-                    await this.sendCommand(deviceId, 'camera_stop_stream', {}, 1),
-                capture: async () =>
-                    await this.sendCommand(deviceId, 'camera_capture', {}, 1),
+                    }, 1);
+                },
+                stopStream: async () => {
+                    return await deviceManager.sendCommand(deviceId, 'camera_stop_stream', {}, 1);
+                },
+                capture: async () => {
+                    return await deviceManager.sendCommand(deviceId, 'camera_capture', {}, 1);
+                },
             },
 
             microphone: {
-                getStatus: async () =>
-                    await this.sendCommand(deviceId, 'microphone_status', {}, 0),
-                start: async () =>
-                    await this.sendCommand(deviceId, 'microphone_start', {}, 1),
-                stop: async () =>
-                    await this.sendCommand(deviceId, 'microphone_stop', {}, 1),
+                getStatus: async () => {
+                    return await deviceManager.sendCommand(deviceId, 'microphone_status', {}, 0);
+                },
+                start: async () => {
+                    return await deviceManager.sendCommand(deviceId, 'microphone_start', {}, 1);
+                },
+                stop: async () => {
+                    return await deviceManager.sendCommand(deviceId, 'microphone_stop', {}, 1);
+                },
             },
 
-            reboot: async () =>
-                await this.sendCommand(deviceId, 'reboot', {}, 99),
+            reboot: async () => {
+                return await deviceManager.sendCommand(deviceId, 'reboot', {}, 99);
+            },
 
             hasCapability: (cap) => hasCapability(deviceInfo, cap),
 

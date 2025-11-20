@@ -75,12 +75,11 @@ ${persona}
       const { emotion, cleanText } = this.parseEmotion(response);
       
       // 如果提供了deviceBot，直接调用emotion()切换表情
-      if (emotion && deviceBot && typeof deviceBot.emotion === 'function') {
+      if (emotion && deviceBot?.emotion) {
         try {
           await deviceBot.emotion(emotion);
-          BotUtil.makeLog('info', `✓ [工作流] 表情已切换: ${emotion}`, 'DeviceStream');
         } catch (e) {
-          BotUtil.makeLog('error', `❌ [工作流] 表情切换失败: ${e.message}`, 'DeviceStream');
+          BotUtil.makeLog('error', `[工作流] 表情切换失败: ${e.message}`, 'DeviceStream');
         }
       }
       

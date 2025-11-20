@@ -73,7 +73,7 @@ export function parseEmotionFromText(text) {
   const englishEmotion = normalizeEmotion(chineseEmotion);
   
   // 移除表情标记（支持任意位置）
-  const cleanText = text.replace(regex, '').trim();
+  const cleanText = text.replace(regex, '').trim() || '';
   
   return {
     emotion: englishEmotion,
