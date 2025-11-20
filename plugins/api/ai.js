@@ -31,7 +31,6 @@ function sendSSEData(res, data) {
 
 /**
  * 处理流式输出完成后的逻辑
- * 直接使用Bot['webclient']的方法
  */
 async function handleStreamComplete(res, finalText, stream, deviceBot) {
   if (!finalText) {
@@ -43,10 +42,10 @@ async function handleStreamComplete(res, finalText, stream, deviceBot) {
   const { emotion, cleanText } = stream.parseEmotion(finalText);
   const displayText = (cleanText && cleanText.trim()) || finalText;
 
-  // 发送完整文本（清理后的文本，不包含表情标记）
+  // 发送完整文本
   sendSSEData(res, { done: true, text: displayText });
 
-  // 直接调用Bot方法切换表情
+  // 切换表情
   if (emotion && deviceBot?.emotion) {
     try {
       await deviceBot.emotion(emotion);
@@ -78,21 +77,31 @@ export default {
       method: 'GET',
       path: '/api/ai/stream',
       handler: async (req, res, Bot) => {
+        // 设置SSE头（提前设置，避免后续错误）
+        setSSEHeaders(res);
+        
         try {
           const prompt = (req.query.prompt || '').toString();
-          const persona = (req.query.persona || '').toString();
-
-          // 获取设备工作流
-          const stream = StreamLoader.getStream('device');
-          if (!stream) {
-            setSSEHeaders(res);
-            sendSSEData(res, { error: '设备工作流未加载' });
+          if (!prompt) {
+            sendSSEData(res, { error: '缺少prompt参数' });
             res.end();
             return;
           }
 
-          // 设置SSE头
-          setSSEHeaders(res);
+          const persona = (req.query.persona || '').toString();
+
+          // 确保工作流已加载
+          if (!StreamLoader.loaded) {
+            await StreamLoader.load();
+          }
+
+          // 获取设备工作流
+          const stream = StreamLoader.getStream('device');
+          if (!stream) {
+            sendSSEData(res, { error: '设备工作流未加载，请检查plugins/stream/device.js是否存在' });
+            res.end();
+            return;
+          }
 
           // 直接使用Bot['webclient']（如果已注册）
           const deviceBot = Bot['webclient'];
@@ -117,6 +126,7 @@ export default {
               setSSEHeaders(res);
             }
             sendSSEData(res, { error: e.message || '未知错误' });
+            BotUtil.makeLog('error', `[AI流式] 错误: ${e.message}`, 'AIStream');
           } catch (err) {
             // 写入失败，可能客户端已断开
           }
