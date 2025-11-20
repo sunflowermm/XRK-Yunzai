@@ -54,9 +54,16 @@ export function parseEmotionFromText(text) {
   const emotionKeywords = Object.keys(EMOTION_KEYWORDS);
   const emotionPattern = emotionKeywords.join('|');
   
-  // 匹配 [表情] 或 [表情} 格式
-  const regex = new RegExp(`^\\s*\\[(${emotionPattern})[\\]\\}]\\s*`, 'i');
-  const match = regex.exec(text);
+  // 匹配 [表情] 或 [表情} 格式（支持在文本开头或中间）
+  // 先尝试匹配开头
+  let regex = new RegExp(`^\\s*\\[(${emotionPattern})[\\]\\}]\\s*`, 'i');
+  let match = regex.exec(text);
+  
+  // 如果开头没匹配到，尝试匹配任意位置（但只取第一个）
+  if (!match) {
+    regex = new RegExp(`\\[(${emotionPattern})[\\]\\}]`, 'i');
+    match = regex.exec(text);
+  }
   
   if (!match) {
     return { emotion: null, cleanText: text.trim() };
@@ -64,6 +71,8 @@ export function parseEmotionFromText(text) {
   
   const chineseEmotion = match[1];
   const englishEmotion = normalizeEmotion(chineseEmotion);
+  
+  // 移除表情标记（支持任意位置）
   const cleanText = text.replace(regex, '').trim();
   
   return {

@@ -39,22 +39,34 @@ async function handleStreamComplete(res, finalText, stream, deviceBot) {
     return;
   }
 
+  BotUtil.makeLog('info', `[AI流式] 开始处理完成文本: ${finalText.substring(0, 100)}`, 'AIStream');
+
   // 解析表情
   const { emotion, cleanText } = stream.parseEmotion(finalText);
+  BotUtil.makeLog('info', `[AI流式] 解析结果 - emotion: ${emotion || 'null'}, cleanText: ${cleanText || 'null'}`, 'AIStream');
+  
   const displayText = cleanText || finalText;
 
-  // 发送完整文本
+  // 发送完整文本（清理后的文本，不包含表情标记）
   sendSSEData(res, { done: true, text: displayText });
 
-  // 如果提供了deviceBot，让工作流处理表情（通过execute方法）
-  // 这里我们直接调用工作流的execute，它会自动调用deviceBot.emotion()
-  if (emotion && deviceBot) {
-    try {
-      await deviceBot.emotion(emotion);
-      BotUtil.makeLog('info', `✓ [AI流式] 表情已切换: ${emotion}`, 'AIStream');
-    } catch (e) {
-      BotUtil.makeLog('error', `❌ [AI流式] 表情切换失败: ${e.message}`, 'AIStream');
+  // 如果提供了deviceBot，直接调用emotion()切换表情
+  if (emotion) {
+    if (deviceBot && typeof deviceBot.emotion === 'function') {
+      try {
+        BotUtil.makeLog('info', `[AI流式] 准备切换表情: ${emotion}`, 'AIStream');
+        await deviceBot.emotion(emotion);
+        BotUtil.makeLog('info', `✓ [AI流式] 表情已切换: ${emotion}`, 'AIStream');
+      } catch (e) {
+        BotUtil.makeLog('error', `❌ [AI流式] 表情切换失败: ${e.message}`, 'AIStream');
+        BotUtil.makeLog('error', `❌ [AI流式] 错误堆栈: ${e.stack}`, 'AIStream');
+      }
+    } else {
+      BotUtil.makeLog('warn', `⚠ [AI流式] deviceBot不可用，无法切换表情: ${emotion}`, 'AIStream');
+      BotUtil.makeLog('warn', `⚠ [AI流式] deviceBot类型: ${typeof deviceBot}, emotion方法: ${deviceBot && typeof deviceBot.emotion}`, 'AIStream');
     }
+  } else {
+    BotUtil.makeLog('info', `[AI流式] 未检测到表情标记`, 'AIStream');
   }
 
   // 触发TTS
@@ -102,14 +114,20 @@ export default {
           let deviceBot = null;
           if (typeof Bot !== 'undefined' && Bot['webclient']) {
             deviceBot = Bot['webclient'];
+            BotUtil.makeLog('info', `[AI流式] 找到deviceBot实例`, 'AIStream');
           } else {
+            BotUtil.makeLog('warn', `[AI流式] deviceBot未找到，等待注册...`, 'AIStream');
             // 如果Bot未就绪，尝试等待一下
             for (let i = 0; i < 10; i++) {
               await new Promise(r => setTimeout(r, 100));
               if (typeof Bot !== 'undefined' && Bot['webclient']) {
                 deviceBot = Bot['webclient'];
+                BotUtil.makeLog('info', `[AI流式] deviceBot已就绪 (等待${i + 1}次)`, 'AIStream');
                 break;
               }
+            }
+            if (!deviceBot) {
+              BotUtil.makeLog('warn', `[AI流式] deviceBot等待超时，表情和TTS可能无法工作`, 'AIStream');
             }
           }
 

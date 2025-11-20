@@ -1779,9 +1779,9 @@ class APIControlCenter {
                     result = { ok: true };
                 } else if (command === 'display_emotion' && parameters.emotion) {
                     try {
-                        console.log('[WebClient] 收到表情命令:', parameters.emotion);
+                        console.log('[WebClient] 收到表情命令:', parameters.emotion, '完整命令:', cmd);
                         this.updateEmotionDisplay(parameters.emotion);
-                        console.log('[WebClient] 表情已更新');
+                        console.log('[WebClient] 表情已更新为:', parameters.emotion);
                         this.showToast(`表情: ${parameters.emotion}`, 'info');
                         result = { ok: true };
                     } catch (e) {

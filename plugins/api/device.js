@@ -1008,9 +1008,13 @@ class DeviceManager {
                 });
 
                 try {
-                    ws.send(JSON.stringify({ type: 'command', command: cmd }));
+                    const cmdJson = JSON.stringify({ type: 'command', command: cmd });
+                    BotUtil.makeLog('info', `[设备] 发送命令到 ${deviceId}: ${cmd.command}`, deviceId);
+                    BotUtil.makeLog('debug', `[设备] 命令内容: ${cmdJson}`, deviceId);
+                    ws.send(cmdJson);
                     device.stats.commands_executed++;
                 } catch (e) {
+                    BotUtil.makeLog('error', `[设备] 发送命令失败: ${e.message}`, deviceId);
                     clearTimeout(timeout);
                     commandCallbacks.delete(cmd.id);
                     resolve({ success: false, command_id: cmd.id, error: e.message });
