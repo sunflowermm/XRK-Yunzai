@@ -1539,7 +1539,7 @@ export default {
         BotUtil.makeLog('info', '━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'DeviceManager');
         BotUtil.makeLog('info', '⚡ [设备管理器] v31.0 - 连续对话优化版', 'DeviceManager');
 
-        const asrConfig = this.getASRConfig();
+        const asrConfig = deviceManager.getASRConfig();
         if (asrConfig.enabled) {
             BotUtil.makeLog('info',
                 `✓ [火山ASR] 已启用（提供商: ${asrConfig.provider}）`,
@@ -1547,7 +1547,7 @@ export default {
             );
         }
 
-        const ttsConfig = this.getTTSConfig();
+        const ttsConfig = deviceManager.getTTSConfig();
         if (ttsConfig.enabled) {
             BotUtil.makeLog('info',
                 `✓ [火山TTS] 已启用（提供商: ${ttsConfig.provider}，语音: ${ttsConfig.voiceType}）`,
@@ -1555,7 +1555,7 @@ export default {
             );
         }
 
-        const aiConfig = this.getAIConfig();
+        const aiConfig = deviceManager.getAIConfig();
         if (aiConfig.enabled) {
             BotUtil.makeLog('info',
                 `✓ [设备AI] 已启用（模型: ${aiConfig.chatModel}）`,

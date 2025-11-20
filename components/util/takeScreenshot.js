@@ -5,7 +5,6 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import yaml from 'yaml';
 
-// 全局常量
 const ROOT_PATH = process.cwd();
 const DB_PATH = path.join(ROOT_PATH, 'temp/screenshot/screenshot-manager.db');
 const OUTPUT_BASE_PATH = path.join(ROOT_PATH, 'plugins/XRK/resources/help_other');
@@ -14,7 +13,6 @@ const MAX_IDLE_TIME = 3600000;
 const DEFAULT_IMAGE_PATH = path.join(ROOT_PATH, 'renderers', '截图失败.jpg');
 const CONFIG_PATH = path.join(ROOT_PATH, 'data/xrkconfig/config.yaml');
 
-// 读取配置
 let configs = { screen_shot_quality: 1 };
 try {
     if (fs.existsSync(CONFIG_PATH)) {
@@ -24,7 +22,6 @@ try {
     logger?.info?.('读取配置文件失败，使用默认配置', e);
 }
 
-// 默认配置
 const DEFAULT_CONFIG = {
     width: null,
     height: null,
@@ -55,7 +52,8 @@ const DEFAULT_CONFIG = {
     javascript: true,
     dark: false,
     retryCount: 2,
-    retryDelay: 1000
+    retryDelay: 1000,
+    autoHeight: false
 };
 
 class ScreenshotManager {
@@ -77,7 +75,6 @@ class ScreenshotManager {
         process.once('beforeExit', () => this.cleanup());
     }
 
-    // 获取renderer类型
     getRendererType() {
         if (this.rendererType) return this.rendererType;
         
@@ -85,7 +82,6 @@ class ScreenshotManager {
         const playwrightCfg = rendererCfg.playwright || {};
         const puppeteerCfg = rendererCfg.puppeteer || {};
         
-        // 优先使用playwright（如果配置了且未禁用）
         if (playwrightCfg.enabled !== false && (playwrightCfg.chromiumPath || playwrightCfg.channel)) {
             this.rendererType = 'playwright';
         } else if (puppeteerCfg.enabled !== false) {
@@ -97,10 +93,8 @@ class ScreenshotManager {
         return this.rendererType;
     }
 
-    // 初始化浏览器
     async initBrowser() {
         if (this.browser) return this.browser;
-        
         if (this.browserPromise) return await this.browserPromise;
         
         this.browserPromise = this._createBrowser();
@@ -113,7 +107,6 @@ class ScreenshotManager {
         }
     }
 
-    // 创建浏览器实例
     async _createBrowser() {
         if (this.isClosing) throw new Error('浏览器正在关闭');
         
@@ -124,6 +117,7 @@ class ScreenshotManager {
                 const playwright = (await import('playwright')).default;
                 const rendererCfg = cfg.renderer?.playwright || {};
                 const browserType = rendererCfg.browserType || 'chromium';
+                const defaultViewport = rendererCfg.viewport || { width: 1280, height: 720, deviceScaleFactor: 1 };
                 
                 this.browser = await playwright[browserType].launch({
                     headless: rendererCfg.headless !== false,
@@ -133,8 +127,8 @@ class ScreenshotManager {
                 });
                 
                 this.context = await this.browser.newContext({
-                    viewport: rendererCfg.viewport || { width: 1280, height: 720 },
-                    deviceScaleFactor: rendererCfg.viewport?.deviceScaleFactor || 1
+                    viewport: defaultViewport,
+                    deviceScaleFactor: defaultViewport.deviceScaleFactor || 1
                 });
                 
                 logger?.info?.('[截图] 使用 playwright 渲染器');
@@ -169,7 +163,6 @@ class ScreenshotManager {
             return this.browser;
         } catch (error) {
             logger?.error?.(`启动${type}失败:`, error);
-            // 如果playwright失败，回退到puppeteer
             if (type === 'playwright') {
                 try {
                     const puppeteer = (await import('puppeteer')).default;
@@ -193,7 +186,6 @@ class ScreenshotManager {
         }
     }
 
-    // 清理资源
     async cleanup() {
         if (this.isClosing) return;
         this.isClosing = true;
@@ -227,7 +219,6 @@ class ScreenshotManager {
         }
     }
 
-    // 初始化数据库
     async initDB() {
         if (!this.dbInstance) {
             try {
@@ -277,7 +268,6 @@ class ScreenshotManager {
         return this.dbInstance;
     }
 
-    // 检查浏览器空闲状态
     checkIdle() {
         if (this.isClosing) return;
         
@@ -289,7 +279,44 @@ class ScreenshotManager {
         }
     }
 
-    // 执行截图
+    async getContentDimensions(page, type) {
+        if (type === 'playwright') {
+            return await page.evaluate(() => {
+                const body = document.body;
+                const html = document.documentElement;
+                return {
+                    width: Math.max(
+                        body.scrollWidth, html.scrollWidth,
+                        body.offsetWidth, html.offsetWidth,
+                        body.clientWidth, html.clientWidth
+                    ),
+                    height: Math.max(
+                        body.scrollHeight, html.scrollHeight,
+                        body.offsetHeight, html.offsetHeight,
+                        body.clientHeight, html.clientHeight
+                    )
+                };
+            });
+        } else {
+            return await page.evaluate(() => {
+                const body = document.body;
+                const html = document.documentElement;
+                return {
+                    width: Math.max(
+                        body.scrollWidth, html.scrollWidth,
+                        body.offsetWidth, html.offsetWidth,
+                        body.clientWidth, html.clientWidth
+                    ),
+                    height: Math.max(
+                        body.scrollHeight, html.scrollHeight,
+                        body.offsetHeight, html.offsetHeight,
+                        body.clientHeight, html.clientHeight
+                    )
+                };
+            });
+        }
+    }
+
     async executeScreenshot(target, imageName, config) {
         const pageId = Math.random().toString(36).substring(7);
         this.pageQueue.add(pageId);
@@ -303,6 +330,15 @@ class ScreenshotManager {
             const type = this.getRendererType();
             const isUrl = target.startsWith('http') || target.startsWith('https');
             const targetUrl = isUrl ? target : `file://${path.resolve(target)}`;
+            
+            const rendererCfg = cfg.renderer?.[type] || {};
+            const defaultViewport = rendererCfg.viewport || { width: 1280, height: 720, deviceScaleFactor: 1 };
+            
+            let viewportWidth = config.width || defaultViewport.width;
+            let viewportHeight = config.height;
+            const deviceScaleFactor = config.deviceScaleFactor || defaultViewport.deviceScaleFactor || 1;
+            
+            const needAutoHeight = config.height === null || config.height === 'auto' || config.autoHeight || config.fullPage;
             
             if (type === 'playwright') {
                 page = await this.context.newPage();
@@ -343,6 +379,18 @@ class ScreenshotManager {
                         });
                     }).catch(() => {});
                 }
+                
+                if (needAutoHeight) {
+                    const contentDims = await this.getContentDimensions(page, type);
+                    viewportHeight = contentDims.height;
+                    if (config.width === null || config.width === 'auto') {
+                        viewportWidth = contentDims.width;
+                    }
+                } else {
+                    viewportHeight = viewportHeight || defaultViewport.height;
+                }
+                
+                await page.setViewportSize({ width: viewportWidth, height: viewportHeight });
                 
                 const screenshotOptions = {
                     type: config.type,
@@ -402,6 +450,22 @@ class ScreenshotManager {
                     }).catch(() => {});
                 }
                 
+                if (needAutoHeight) {
+                    const contentDims = await this.getContentDimensions(page, type);
+                    viewportHeight = contentDims.height;
+                    if (config.width === null || config.width === 'auto') {
+                        viewportWidth = contentDims.width;
+                    }
+                } else {
+                    viewportHeight = viewportHeight || defaultViewport.height;
+                }
+                
+                await page.setViewport({
+                    width: viewportWidth,
+                    height: viewportHeight,
+                    deviceScaleFactor: deviceScaleFactor
+                });
+                
                 const screenshotOptions = {
                     type: config.type,
                     quality: config.type === 'jpeg' ? config.quality : undefined,
@@ -433,7 +497,6 @@ class ScreenshotManager {
         }
     }
 
-    // 保存图片
     async saveImage(imageBuffer, imageName, config) {
         const imagePath = path.join(OUTPUT_BASE_PATH, `${imageName}.${config.type}`);
         const outputDir = path.dirname(imagePath);
@@ -463,7 +526,6 @@ class ScreenshotManager {
         return imagePath;
     }
 
-    // 使用默认图片
     useDefaultImage(imageName, config, outputBasePath) {
         const defaultImagePath = path.join(outputBasePath, `${imageName}.${config.type}`);
         try {
@@ -478,16 +540,8 @@ class ScreenshotManager {
     }
 }
 
-// 创建管理器单例
 const manager = new ScreenshotManager();
 
-/**
- * 获取截图
- * @param {string} target - 目标 URL 或文件路径
- * @param {string} imageName - 输出图片名称
- * @param {object} config - 截图配置
- * @returns {Promise<string>} 图片路径
- */
 export async function takeScreenshot(target, imageName, config = {}) {
     const finalConfig = { ...DEFAULT_CONFIG, ...config };
     
