@@ -56,7 +56,7 @@ export default class connectEvent extends EventListener {
   async sendWelcomeMessage() {
     const htmlPath = await this.generateHTML('welcome', this.getWelcomeHTML())
     const screenshotPath = await takeScreenshot(htmlPath, 'welcome_message', {
-      width: 520, height: 780, deviceScaleFactor: 3
+      width: 520, height: null, deviceScaleFactor: 3, autoHeight: true
     })
     
     Bot.sendMasterMsg([segment.image(screenshotPath)])
@@ -69,7 +69,7 @@ export default class connectEvent extends EventListener {
     
     const htmlPath = await this.generateHTML('plugin_load', this.getPluginLoadHTML(stats))
     const screenshotPath = await takeScreenshot(htmlPath, 'plugin_load_report', {
-      width: 800, height: 1200, deviceScaleFactor: 1.5, quality: 90
+      width: 800, height: null, deviceScaleFactor: 1.5, quality: 90, autoHeight: true
     })
     
     await target.sendMsg([segment.image(screenshotPath)])

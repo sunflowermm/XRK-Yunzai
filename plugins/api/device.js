@@ -606,7 +606,6 @@ class DeviceManager {
             this.updateDeviceStats(deviceId, 'error');
         }
 
-        const systemConfig = this.getSystemConfig();
         if (level !== 'debug' || systemConfig.enableDetailedLogs) {
             BotUtil.makeLog(level,
                 `[${device?.device_name || deviceId}] ${message}`,

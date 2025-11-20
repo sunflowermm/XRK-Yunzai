@@ -382,7 +382,7 @@ class ScreenshotManager {
                 
                 if (needAutoHeight) {
                     const contentDims = await this.getContentDimensions(page, type);
-                    viewportHeight = contentDims.height;
+                    viewportHeight = Math.max(contentDims.height, viewportHeight || 0);
                     if (config.width === null || config.width === 'auto') {
                         viewportWidth = contentDims.width;
                     }
@@ -392,10 +392,19 @@ class ScreenshotManager {
                 
                 await page.setViewportSize({ width: viewportWidth, height: viewportHeight });
                 
+                if (needAutoHeight && !config.fullPage) {
+                    await page.waitForTimeout(200);
+                    const finalDims = await this.getContentDimensions(page, type);
+                    if (finalDims.height > viewportHeight) {
+                        viewportHeight = finalDims.height;
+                        await page.setViewportSize({ width: viewportWidth, height: viewportHeight });
+                    }
+                }
+                
                 const screenshotOptions = {
                     type: config.type,
                     quality: config.type === 'jpeg' ? config.quality : undefined,
-                    fullPage: config.fullPage,
+                    fullPage: config.fullPage || needAutoHeight,
                     omitBackground: config.omitBackground
                 };
                 
@@ -452,7 +461,7 @@ class ScreenshotManager {
                 
                 if (needAutoHeight) {
                     const contentDims = await this.getContentDimensions(page, type);
-                    viewportHeight = contentDims.height;
+                    viewportHeight = Math.max(contentDims.height, viewportHeight || 0);
                     if (config.width === null || config.width === 'auto') {
                         viewportWidth = contentDims.width;
                     }
@@ -466,10 +475,23 @@ class ScreenshotManager {
                     deviceScaleFactor: deviceScaleFactor
                 });
                 
+                if (needAutoHeight && !config.fullPage) {
+                    await page.waitForTimeout(200);
+                    const finalDims = await this.getContentDimensions(page, type);
+                    if (finalDims.height > viewportHeight) {
+                        viewportHeight = finalDims.height;
+                        await page.setViewport({
+                            width: viewportWidth,
+                            height: viewportHeight,
+                            deviceScaleFactor: deviceScaleFactor
+                        });
+                    }
+                }
+                
                 const screenshotOptions = {
                     type: config.type,
                     quality: config.type === 'jpeg' ? config.quality : undefined,
-                    fullPage: config.fullPage,
+                    fullPage: config.fullPage || needAutoHeight,
                     omitBackground: config.omitBackground
                 };
                 
