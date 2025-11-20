@@ -1424,10 +1424,16 @@ export default class ChatStream extends AIStream {
         message_id: String(e.message_id || ''),
         timestamp: Math.floor((e.time || Date.now()) / 1000),
         time: Date.now(),
-        hasImage: !!(e.img?.length > 0 || e.message?.some(s => s.type === 'image'))
+        hasImage: !!(e.img?.length > 0 || e.message?.some(s => s.type === 'image')),
+        // 标记是否为Bot消息（后续展示/检索可用）
+        isBot: String(e.user_id || '') === String(e.self_id || '')
       };
-      
-      history.push(msgData);
+
+      // 避免重复记录同一条消息（例如被多处调用 recordMessage）
+      const last = history[history.length - 1];
+      if (!last || last.message_id !== msgData.message_id) {
+        history.push(msgData);
+      }
       
       if (history.length > MAX_HISTORY) {
         history.shift();
@@ -1503,8 +1509,13 @@ export default class ChatStream extends AIStream {
       const displayName = msg.nickname || '未知';
       const msgContent = msg.message || '(空消息)';
       const imageTag = msg.hasImage ? '[含图片]' : '';
+      const roleTag = msg.isBot ? '[机器人]' : '[成员]';
+      const msgIdTag = msg.message_id ? ` 消息ID:${msg.message_id}` : '';
       
-      lines.push(`${displayName}(${msg.user_id}) [${timeStr}]${imageTag}: ${msgContent}`);
+      // 统一格式：角色 标识 + 昵称(QQ) + 时间 + 可选图片/消息ID
+      lines.push(
+        `${roleTag} ${displayName}(${msg.user_id}) [${timeStr}]${imageTag}${msgIdTag}: ${msgContent}`
+      );
     }
     
     return lines.join('\n');
