@@ -1535,17 +1535,31 @@ class APIControlCenter {
 
     // ============== Streaming ASR via /device WebSocket ==============
     async ensureDeviceWs() {
-        if (this._deviceWs && (this._deviceWs.readyState === 0 || this._deviceWs.readyState === 1)) {
+        // 如果正在连接或已连接，直接返回
+        if (this._deviceWs) {
+            const state = this._deviceWs.readyState;
+            if (state === WebSocket.CONNECTING || state === WebSocket.OPEN) {
+                return;
+            }
+            // 如果已关闭或出错，清理旧连接
+            this._deviceWs = null;
+        }
+        
+        // 如果正在重连，不要重复触发
+        if (this._wsReconnectTimer) {
             return;
         }
+        
         const apiKey = localStorage.getItem('apiKey') || '';
         // WebSocket 路径是 /device（根据 device.js 中的 ws.device 定义）
         const wsUrl = (this.serverUrl.replace(/^http/, 'ws') + `/device`) + (apiKey ? `?api_key=${encodeURIComponent(apiKey)}` : '');
+        
         try {
-        this._deviceWs = new WebSocket(wsUrl);
+            console.log('[WebClient] 尝试连接WebSocket:', wsUrl);
+            this._deviceWs = new WebSocket(wsUrl);
         } catch (error) {
-            console.warn('WebSocket connection failed, will retry later:', error);
-            // 如果连接失败，不抛出错误，稍后重试
+            console.error('[WebClient] WebSocket创建失败:', error);
+            this._deviceWs = null;
             this._scheduleWsReconnect();
             return;
         }
@@ -1586,15 +1600,28 @@ class APIControlCenter {
         });
         
         this._deviceWs.addEventListener('error', (error) => {
-            console.warn('WebSocket error:', error);
+            console.error('[WebClient] WebSocket错误:', error);
+            // 记录错误详情
+            if (this._deviceWs) {
+                console.error('[WebClient] WebSocket状态:', this._deviceWs.readyState);
+                console.error('[WebClient] WebSocket URL:', this._deviceWs.url);
+            }
             // 连接失败时不抛出错误，稍后会自动重试
         });
         
-        this._deviceWs.addEventListener('close', () => {
-            console.log('WebSocket closed, will retry on next use');
+        this._deviceWs.addEventListener('close', (event) => {
+            console.log('[WebClient] WebSocket关闭:', {
+                code: event.code,
+                reason: event.reason,
+                wasClean: event.wasClean
+            });
             this._deviceWs = null;
             this._stopHeartbeat();
-            this._scheduleWsReconnect();
+            
+            // 如果不是正常关闭（code 1000），则重连
+            if (event.code !== 1000) {
+                this._scheduleWsReconnect();
+            }
         });
         this._deviceWs.addEventListener('message', (evt) => {
             let data;
@@ -1659,11 +1686,26 @@ class APIControlCenter {
     }
 
     _scheduleWsReconnect() {
-        const attempt = Math.min(this._wsReconnectAttempt + 1, 8);
+        // 限制最大重试次数，避免无限重试
+        if (this._wsReconnectAttempt >= 10) {
+            console.warn('[WebClient] WebSocket重连次数过多，停止重试');
+            this._wsReconnectAttempt = 0;
+            return;
+        }
+        
+        const attempt = Math.min(this._wsReconnectAttempt + 1, 10);
         this._wsReconnectAttempt = attempt;
-        const backoff = Math.min(30000, 1000 * Math.pow(2, attempt)) + Math.floor(Math.random() * 500);
+        
+        // 指数退避：1s, 2s, 4s, 8s, 16s, 30s (max)
+        const backoff = Math.min(30000, 1000 * Math.pow(2, attempt - 1)) + Math.floor(Math.random() * 500);
+        
+        console.log(`[WebClient] WebSocket将在 ${(backoff / 1000).toFixed(1)}s 后重连 (尝试 ${attempt}/10)`);
+        
         clearTimeout(this._wsReconnectTimer);
-        this._wsReconnectTimer = setTimeout(() => this.ensureDeviceWs(), backoff);
+        this._wsReconnectTimer = setTimeout(() => {
+            this._wsReconnectTimer = null;
+            this.ensureDeviceWs();
+        }, backoff);
     }
 
     _startHeartbeat() {

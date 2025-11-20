@@ -1451,7 +1451,8 @@ export default {
                         });
                     }
 
-                    const filepath = path.join(deviceManager.AUDIO_SAVE_DIR, filename);
+                    // 使用path.resolve确保跨平台兼容
+                    const filepath = path.resolve(deviceManager.AUDIO_SAVE_DIR, filename);
 
                     if (!fs.existsSync(filepath)) {
                         return res.status(404).json({

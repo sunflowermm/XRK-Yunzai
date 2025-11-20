@@ -5,13 +5,14 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import yaml from 'yaml';
 
+// 统一路径处理：使用path.resolve确保跨平台兼容
 const ROOT_PATH = process.cwd();
-const DB_PATH = path.join(ROOT_PATH, 'temp/screenshot/screenshot-manager.db');
-const OUTPUT_BASE_PATH = path.join(ROOT_PATH, 'plugins/XRK/resources/help_other');
+const DB_PATH = path.resolve(ROOT_PATH, 'temp', 'screenshot', 'screenshot-manager.db');
+const OUTPUT_BASE_PATH = path.resolve(ROOT_PATH, 'plugins', 'XRK', 'resources', 'help_other');
 const MAX_RENDER_COUNT = 100;
 const MAX_IDLE_TIME = 3600000;
-const DEFAULT_IMAGE_PATH = path.join(ROOT_PATH, 'renderers', '截图失败.jpg');
-const CONFIG_PATH = path.join(ROOT_PATH, 'data/xrkconfig/config.yaml');
+const DEFAULT_IMAGE_PATH = path.resolve(ROOT_PATH, 'renderers', '截图失败.jpg');
+const CONFIG_PATH = path.resolve(ROOT_PATH, 'data', 'xrkconfig', 'config.yaml');
 
 let configs = { screen_shot_quality: 1 };
 try {
@@ -119,11 +120,16 @@ class ScreenshotManager {
                 const browserType = rendererCfg.browserType || 'chromium';
                 const defaultViewport = rendererCfg.viewport || { width: 1280, height: 720, deviceScaleFactor: 1 };
                 
+                // Windows兼容：确保executablePath使用标准化路径
+                const executablePath = rendererCfg.chromiumPath 
+                    ? path.resolve(rendererCfg.chromiumPath) 
+                    : undefined;
+                
                 this.browser = await playwright[browserType].launch({
                     headless: rendererCfg.headless !== false,
                     args: rendererCfg.args || [],
                     channel: rendererCfg.channel,
-                    executablePath: rendererCfg.chromiumPath
+                    executablePath: executablePath
                 });
                 
                 this.context = await this.browser.newContext({
@@ -136,10 +142,15 @@ class ScreenshotManager {
                 const puppeteer = (await import('puppeteer')).default;
                 const rendererCfg = cfg.renderer?.puppeteer || {};
                 
+                // Windows兼容：确保executablePath使用标准化路径
+                const executablePath = rendererCfg.chromiumPath 
+                    ? path.resolve(rendererCfg.chromiumPath) 
+                    : undefined;
+                
                 this.browser = await puppeteer.launch({
                     headless: rendererCfg.headless !== false ? 'new' : false,
                     args: rendererCfg.args || [],
-                    executablePath: rendererCfg.chromiumPath
+                    executablePath: executablePath
                 });
                 
                 logger?.info?.('[截图] 使用 puppeteer 渲染器');
@@ -168,10 +179,15 @@ class ScreenshotManager {
                     const puppeteer = (await import('puppeteer')).default;
                     const rendererCfg = cfg.renderer?.puppeteer || {};
                     
+                    // Windows兼容：确保executablePath使用标准化路径
+                    const executablePath = rendererCfg.chromiumPath 
+                        ? path.resolve(rendererCfg.chromiumPath) 
+                        : undefined;
+                    
                     this.browser = await puppeteer.launch({
                         headless: rendererCfg.headless !== false ? 'new' : false,
                         args: rendererCfg.args || [],
-                        executablePath: rendererCfg.chromiumPath
+                        executablePath: executablePath
                     });
                     
                     this.rendererType = 'puppeteer';
@@ -329,7 +345,36 @@ class ScreenshotManager {
             
             const type = this.getRendererType();
             const isUrl = target.startsWith('http') || target.startsWith('https');
-            const targetUrl = isUrl ? target : `file://${path.resolve(target)}`;
+            // Windows兼容：file://协议需要正确的路径格式
+            let targetUrl;
+            if (isUrl) {
+                targetUrl = target;
+            } else {
+                const resolvedPath = path.resolve(target);
+                // 转换为file:// URL格式（跨平台兼容）
+                // Windows需要三个斜杠 file:///，Unix需要两个斜杠 file://
+                const isWindows = process.platform === 'win32';
+                const normalizedPath = resolvedPath.replace(/\\/g, '/');
+                // Windows路径需要编码，特别是空格和特殊字符
+                if (isWindows) {
+                    // Windows: file:///C:/path/to/file
+                    const driveLetter = normalizedPath.match(/^([A-Za-z]:)/);
+                    if (driveLetter) {
+                        // 移除驱动器字母前的斜杠（如果有）
+                        const pathWithoutDrive = normalizedPath.substring(driveLetter[0].length);
+                        const encodedPath = encodeURI(pathWithoutDrive).replace(/#/g, '%23');
+                        targetUrl = `file:///${driveLetter[0].toLowerCase()}${encodedPath}`;
+                    } else {
+                        // 无驱动器字母的情况
+                        const encodedPath = encodeURI(normalizedPath).replace(/#/g, '%23');
+                        targetUrl = `file:///${encodedPath}`;
+                    }
+                } else {
+                    // Unix: file:///path/to/file
+                    const encodedPath = encodeURI(normalizedPath).replace(/#/g, '%23');
+                    targetUrl = `file://${encodedPath}`;
+                }
+            }
             
             const rendererCfg = cfg.renderer?.[type] || {};
             const defaultViewport = rendererCfg.viewport || { width: 1280, height: 720, deviceScaleFactor: 1 };
@@ -520,7 +565,8 @@ class ScreenshotManager {
     }
 
     async saveImage(imageBuffer, imageName, config) {
-        const imagePath = path.join(OUTPUT_BASE_PATH, `${imageName}.${config.type}`);
+        // 使用path.resolve确保跨平台兼容
+        const imagePath = path.resolve(OUTPUT_BASE_PATH, `${imageName}.${config.type}`);
         const outputDir = path.dirname(imagePath);
         if (!fs.existsSync(outputDir)) {
             fs.mkdirSync(outputDir, { recursive: true });
@@ -549,7 +595,8 @@ class ScreenshotManager {
     }
 
     useDefaultImage(imageName, config, outputBasePath) {
-        const defaultImagePath = path.join(outputBasePath, `${imageName}.${config.type}`);
+        // 使用path.resolve确保跨平台兼容
+        const defaultImagePath = path.resolve(outputBasePath, `${imageName}.${config.type}`);
         try {
             if (fs.existsSync(DEFAULT_IMAGE_PATH)) {
                 fs.copyFileSync(DEFAULT_IMAGE_PATH, defaultImagePath);

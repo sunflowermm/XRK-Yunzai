@@ -5,7 +5,8 @@ import AIStream from '../../lib/aistream/aistream.js';
 import BotUtil from '../../lib/common/util.js';
 
 const _path = process.cwd();
-const EMOTIONS_DIR = path.join(_path, 'resources/aiimages');
+// 统一路径处理：使用path.resolve确保跨平台兼容
+const EMOTIONS_DIR = path.resolve(_path, 'resources', 'aiimages');
 const EMOTION_TYPES = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
 
 // 表情回应映射
@@ -240,7 +241,8 @@ export default class ChatStream extends AIStream {
    */
   async loadEmotionImages() {
     for (const emotion of EMOTION_TYPES) {
-      const emotionDir = path.join(EMOTIONS_DIR, emotion);
+      // 使用path.resolve确保跨平台兼容
+      const emotionDir = path.resolve(EMOTIONS_DIR, emotion);
       try {
         await BotUtil.mkdir(emotionDir);
         const files = await fs.promises.readdir(emotionDir);
@@ -248,7 +250,7 @@ export default class ChatStream extends AIStream {
           /\.(jpg|jpeg|png|gif)$/i.test(file)
         );
         ChatStream.emotionImages[emotion] = imageFiles.map(file => 
-          path.join(emotionDir, file)
+          path.resolve(emotionDir, file)
         );
       } catch {
         ChatStream.emotionImages[emotion] = [];

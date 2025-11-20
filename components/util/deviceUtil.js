@@ -71,7 +71,8 @@ export async function getAudioFileList(directory, deviceId = null) {
         
         const recordings = await Promise.all(
             audioFiles.map(async (filename) => {
-                const filepath = path.join(directory, filename);
+                // 使用path.resolve确保跨平台兼容
+                const filepath = path.resolve(directory, filename);
                 const stats = await fs.promises.stat(filepath);
                 const parts = filename.replace('.wav', '').split('_');
                 const sessionId = parts.length >= 2 ? parts[1] : 'unknown';
