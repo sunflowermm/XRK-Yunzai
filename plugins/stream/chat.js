@@ -2,6 +2,7 @@ import path from 'path';
 import fs from 'fs';
 import fetch from 'node-fetch';
 import AIStream from '../../lib/aistream/aistream.js';
+import { WorkflowManager } from '../../lib/aistream/workflow-manager.js';
 import BotUtil from '../../lib/common/util.js';
 import cfg from '../../lib/config/config.js';
 
@@ -94,47 +95,56 @@ async function simulateUserMessageEvent(e, simulatedMessage, extra = {}) {
   }
 }
 
-class WorkflowManager {
-  constructor(stream, memoryManager) {
+/**
+ * 聊天工作流管理器（扩展WorkflowManager）
+ * 处理聊天场景特定的工作流
+ */
+class ChatWorkflowManager extends WorkflowManager {
+  constructor(stream) {
+    super();
     this.stream = stream;
-    this.memoryManager = memoryManager;
     this.cache = new Map();
     this.cacheTTL = 5 * 60 * 1000;
-    this.workflowMap = new Map([
-      ['hot-news', this.runHotNews.bind(this)],
-      ['hotnews', this.runHotNews.bind(this)],
-      ['热点', this.runHotNews.bind(this)],
-      ['热点新闻', this.runHotNews.bind(this)],
-      ['热点资讯', this.runHotNews.bind(this)],
-      ['memory', this.runMemory.bind(this)],
-      ['remember', this.runMemory.bind(this)],
-      ['memory-recall', this.runMemoryRecall.bind(this)],
-      ['recall-memory', this.runMemoryRecall.bind(this)]
-    ]);
+    
+    // 注册聊天特定的工作流
+    this.registerChatWorkflows();
   }
 
-  normalizeName(name = '') {
-    return name.toString().trim().toLowerCase();
-  }
-
-  async run(name, params = {}, context = {}) {
-    const normalized = this.normalizeName(name);
-    const handler = this.workflowMap.get(normalized);
-
-    if (!handler) {
-      return { type: 'text', content: '我暂时还不会这个工作流，但会尽快学会的！' };
-    }
-
-    try {
-      const result = await handler(params, context);
-      if (result && result.type === 'text' && result.content) {
-        return result;
-      }
-      return { type: 'text', content: String(result?.content || result || '') };
-    } catch (error) {
-      BotUtil.makeLog('warn', `工作流执行失败[${name}]: ${error.message}`, 'ChatStream');
-      return { type: 'text', content: '我去查资料的时候遇到点问题，稍后再试试吧～' };
-    }
+  registerChatWorkflows() {
+    // 热点新闻
+    this.registerWorkflow('hot-news', this.runHotNews.bind(this), {
+      description: '获取热点新闻',
+      enabled: true,
+      priority: 50
+    });
+    this.registerWorkflow('hotnews', this.runHotNews.bind(this));
+    this.registerWorkflow('热点', this.runHotNews.bind(this));
+    this.registerWorkflow('热点新闻', this.runHotNews.bind(this));
+    this.registerWorkflow('热点资讯', this.runHotNews.bind(this));
+    
+    // 记忆相关
+    this.registerWorkflow('memory', this.runMemory.bind(this), {
+      description: '记住信息',
+      enabled: true,
+      priority: 30
+    });
+    this.registerWorkflow('remember', this.runMemory.bind(this));
+    
+    this.registerWorkflow('memory-recall', this.runMemoryRecall.bind(this), {
+      description: '回忆记忆',
+      enabled: true,
+      priority: 30
+    });
+    this.registerWorkflow('recall-memory', this.runMemoryRecall.bind(this));
+    
+    // 删除记忆
+    this.registerWorkflow('memory-forget', this.runMemoryForget.bind(this), {
+      description: '删除记忆',
+      enabled: true,
+      priority: 30
+    });
+    this.registerWorkflow('forget-memory', this.runMemoryForget.bind(this));
+    this.registerWorkflow('删除记忆', this.runMemoryForget.bind(this));
   }
 
   async runHotNews(params = {}, context = {}) {
@@ -245,6 +255,9 @@ class WorkflowManager {
     }).join('\n');
   }
 
+  /**
+   * 解析记忆参数（群聊场景特定）
+   */
   parseMemoryArguments(rawArg = '', e) {
     const tokens = rawArg.split('|').map(t => t.trim()).filter(Boolean);
     let scope = null;
@@ -284,24 +297,37 @@ class WorkflowManager {
     }
 
     const content = contentTokens.join(' ').trim();
-    let ownerId = null;
+    
+    // 使用记忆系统的场景提取
+    const memorySystem = this.stream.getMemorySystem();
+    const { ownerId, scene } = memorySystem.extractScene(e);
+    
+    // 如果指定了scope，覆盖场景
+    let finalScene = scene;
+    let finalOwnerId = ownerId;
+    
     if (scope === 'group' && e?.group_id) {
-      ownerId = `group:${e.group_id}`;
-    } else if (e?.user_id) {
-      ownerId = String(e.user_id);
-    } else if (scope === 'group' && e?.self_id) {
-      ownerId = `group:${e.self_id}`;
+      finalScene = 'group';
+      finalOwnerId = `group:${e.group_id}`;
+    } else if (scope === 'user' && e?.user_id) {
+      finalScene = 'private';
+      finalOwnerId = String(e.user_id);
     }
 
     return {
-      ownerId: ownerId || 'global',
+      ownerId: finalOwnerId,
+      scene: finalScene,
       layer,
       content
     };
   }
 
+  /**
+   * 记住信息（使用基类记忆系统）
+   */
   async runMemory(params = {}, context = {}) {
-    if (!this.memoryManager?.isEnabled()) {
+    const memorySystem = this.stream.getMemorySystem();
+    if (!memorySystem?.isEnabled()) {
       return { type: 'text', content: '记忆系统暂时不可用～' };
     }
 
@@ -315,14 +341,14 @@ class WorkflowManager {
       return { type: 'text', content: '记忆内容还没说清楚，换种说法再来一次？' };
     }
 
-    const saved = await this.memoryManager.remember({
+    const saved = await memorySystem.remember({
       ownerId: parsed.ownerId,
+      scene: parsed.scene,
       layer: parsed.layer,
       content: parsed.content,
       metadata: {
         groupId: context.e?.group_id ? String(context.e.group_id) : null,
-        channel: context.e?.message_type || 'unknown',
-        scope: parsed.ownerId?.startsWith('group:') ? 'group' : 'user'
+        channel: context.e?.message_type || 'unknown'
       },
       authorId: context.e?.self_id
     });
@@ -334,157 +360,64 @@ class WorkflowManager {
     return { type: 'text', content: '记住啦～想看的时候可以叫我回忆。' };
   }
 
+  /**
+   * 回忆记忆（使用基类记忆系统）
+   */
   async runMemoryRecall(params = {}, context = {}) {
-    if (!this.memoryManager?.isEnabled()) {
+    const memorySystem = this.stream.getMemorySystem();
+    if (!memorySystem?.isEnabled()) {
       return { type: 'text', content: '记忆系统暂时不可用～' };
     }
 
-    const summary = await this.memoryManager.buildSummary(context.e, { preferUser: true });
+    const summary = await memorySystem.buildSummary(context.e, { preferUser: true });
     if (!summary) {
       return { type: 'text', content: '现在脑子里还没有新的记忆。' };
     }
 
     return { type: 'text', content: summary };
   }
+
+  /**
+   * 删除记忆（AI可以删除自己的记忆）
+   */
+  async runMemoryForget(params = {}, context = {}) {
+    const memorySystem = this.stream.getMemorySystem();
+    if (!memorySystem?.isEnabled()) {
+      return { type: 'text', content: '记忆系统暂时不可用～' };
+    }
+
+    const rawArg = params.argument?.trim();
+    if (!rawArg) {
+      return { type: 'text', content: '想删除什么记忆呀？说清楚内容或ID。' };
+    }
+
+    const { ownerId, scene } = memorySystem.extractScene(context.e);
+    
+    // 解析参数：支持 memoryId 或 content 关键词
+    let memoryId = null;
+    let content = null;
+    
+    // 尝试解析为ID（格式：id:xxx）
+    if (rawArg.startsWith('id:')) {
+      memoryId = rawArg.substring(3).trim();
+    } else if (rawArg.startsWith('ID:')) {
+      memoryId = rawArg.substring(3).trim();
+    } else {
+      // 否则作为内容关键词
+      content = rawArg;
+    }
+
+    const success = await memorySystem.forget(ownerId, scene, memoryId, content);
+    
+    if (success) {
+      return { type: 'text', content: '记忆已删除～' };
+    } else {
+      return { type: 'text', content: '没找到要删除的记忆，可能已经删除了？' };
+    }
+  }
 }
 
-class MemoryManager {
-  constructor() {
-    this.enabled = typeof redis !== 'undefined' && redis;
-    this.baseKey = 'ai:memory';
-    this.masterKey = `${this.baseKey}:master`;
-    this.maxPerOwner = 60;
-    this.layerTTL = {
-      long: 3 * 24 * 60 * 60 * 1000,
-      short: 24 * 60 * 60 * 1000
-    };
-  }
-
-  isEnabled() {
-    return !!this.enabled;
-  }
-
-  normalizeLayer(layer) {
-    if (!layer) return 'long';
-    const map = {
-      long: 'long',
-      '长期': 'long',
-      '长期记忆': 'long',
-      short: 'short',
-      '短期': 'short',
-      '临时': 'short'
-    };
-    return map[layer.toLowerCase()] || 'long';
-  }
-
-  ownerKey(ownerId) {
-    return `${this.baseKey}:owner:${ownerId}`;
-  }
-
-  async initMasters(masterList = []) {
-    if (!this.enabled) return;
-    await redis.del(this.masterKey).catch(() => {});
-    if (!masterList.length) return;
-    const payloads = masterList.map(qq => JSON.stringify({
-      id: `master_${qq}`,
-      layer: 'master',
-      content: `QQ:${qq} 是真正的主人`,
-      createdAt: Date.now(),
-      metadata: { qq }
-    }));
-    await redis.rPush(this.masterKey, payloads).catch(() => {});
-  }
-
-  async getMasterMemories() {
-    if (!this.enabled) return [];
-    const raw = await redis.lRange(this.masterKey, 0, -1).catch(() => []);
-    return raw.map(item => {
-      try { return JSON.parse(item); } catch { return null; }
-    }).filter(Boolean);
-  }
-
-  async remember({ ownerId = 'global', layer = 'long', content, metadata = {}, authorId }) {
-    if (!this.enabled || !content?.trim()) return false;
-
-    const normalizedLayer = this.normalizeLayer(layer);
-    const key = this.ownerKey(ownerId);
-    const now = Date.now();
-    const ttl = this.layerTTL[normalizedLayer] || this.layerTTL.long;
-    const memory = {
-      id: `mem_${now}_${Math.random().toString(36).slice(2, 8)}`,
-      ownerId,
-      layer: normalizedLayer,
-      content: content.trim(),
-      metadata,
-      authorId,
-      createdAt: now,
-      expireAt: now + ttl
-    };
-
-    await redis.zAdd(key, [{ score: memory.createdAt, value: JSON.stringify(memory) }]).catch(() => {});
-    await redis.zRemRangeByScore(key, 0, now - ttl).catch(() => {});
-
-    const count = await redis.zCard(key).catch(() => 0);
-    if (count > this.maxPerOwner) {
-      await redis.zRemRangeByRank(key, 0, count - this.maxPerOwner - 1).catch(() => {});
-    }
-
-    await redis.expire(key, Math.ceil((ttl * 2) / 1000)).catch(() => {});
-    BotUtil.makeLog('info', `[记忆] (${normalizedLayer}) ${ownerId}: ${memory.content}`, 'ChatMemory');
-    return memory;
-  }
-
-  async getMemories(ownerId, { limit = 6, layers = ['long', 'short'] } = {}) {
-    if (!this.enabled) return [];
-    const key = this.ownerKey(ownerId);
-    const raw = await redis.zRange(key, -limit * 3, -1).catch(() => []);
-    const now = Date.now();
-    const items = [];
-
-    for (let i = raw.length - 1; i >= 0; i--) {
-      try {
-        const mem = JSON.parse(raw[i]);
-        if (mem.expireAt && mem.expireAt < now) {
-          await redis.zRem(key, raw[i]).catch(() => {});
-          continue;
-        }
-        if (layers.includes(mem.layer)) {
-          items.push(mem);
-        }
-        if (items.length >= limit) break;
-      } catch {
-        continue;
-      }
-    }
-
-    return items;
-  }
-
-  async buildSummary(e, { preferUser = false } = {}) {
-    if (!this.enabled) return '';
-    const userId = e?.user_id ? String(e.user_id) : null;
-    const groupId = e?.group_id ? `group:${e.group_id}` : null;
-
-    const [master, userMemories, groupMemories] = await Promise.all([
-      this.getMasterMemories(),
-      userId ? this.getMemories(userId, { limit: preferUser ? 6 : 4 }) : [],
-      groupId ? this.getMemories(groupId, { limit: 4 }) : []
-    ]);
-
-    const lines = [];
-    if (master?.length) {
-      lines.push(`主人：${master.map(m => m.content).join('；')}`);
-    }
-    if (userMemories?.length) {
-      lines.push(`当前用户：${userMemories.map(m => m.content).join('；')}`);
-    }
-    if (groupMemories?.length) {
-      lines.push(`当前群：${groupMemories.map(m => m.content).join('；')}`);
-    }
-
-    return lines.join('\n');
-  }
-}
+// MemoryManager已移除，改用基类的记忆系统
 
 function randomRange(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -522,8 +455,9 @@ export default class ChatStream extends AIStream {
       }
     });
 
-    this.memoryManager = new MemoryManager();
-    this.workflowManager = new WorkflowManager(this, this.memoryManager);
+    // 使用基类的记忆系统（已在AIStream中初始化）
+    // 创建聊天特定的工作流管理器
+    this.workflowManager = new ChatWorkflowManager(this);
 
     const polishCfg = cfg.kuizai?.ai?.responsePolish || {};
     this.responsePolishConfig = {
@@ -548,7 +482,6 @@ export default class ChatStream extends AIStream {
       await BotUtil.mkdir(EMOTIONS_DIR);
       await this.loadEmotionImages();
       this.registerAllFunctions();
-      await this.memoryManager?.initMasters(cfg.masterQQ || []);
       
       if (!ChatStream.cleanupTimer) {
         ChatStream.cleanupTimer = setInterval(() => this.cleanupCache(), 300000);
@@ -726,7 +659,7 @@ export default class ChatStream extends AIStream {
     // 6. 扩展工作流
     this.registerFunction('workflow', {
       description: '调用扩展工作流（热点资讯等）',
-      prompt: `[工作流:类型:可选参数] - 触发扩展动作，如 [工作流:hot-news] 或 [工作流:memory:长期|group|用户喜欢原神]`,
+      prompt: `[工作流:类型:可选参数] - 触发扩展动作，如 [工作流:hot-news] 或 [工作流:memory:长期|group|用户喜欢原神] 或 [工作流:memory-forget:要删除的内容]`,
       parser: (text) => {
         const functions = [];
         let cleanText = text;
@@ -1930,8 +1863,9 @@ ${polishConfig.instructions || RESPONSE_POLISH_DEFAULT.instructions}`
 4. 谨慎使用重复表情或动作，保持自然
 `;
 
-    const memoryGuidance = this.memoryManager?.isEnabled()
-      ? '\n记忆：如需记住关键信息，可调用 [工作流:memory:层级|内容]（层级支持 长期/短期，默认长期；加 group 表示群记忆；所有记忆至多保留3天）。\n'
+    const memorySystem = this.getMemorySystem();
+    const memoryGuidance = memorySystem?.isEnabled()
+      ? '\n记忆：如需记住关键信息，可调用 [工作流:memory:层级|内容]（层级支持 长期/短期，默认长期；加 group 表示群记忆；所有记忆至多保留3天）。如需删除记忆，可调用 [工作流:memory-forget:内容或id:xxx]。\n'
       : '';
 
     return `【人设设定】
@@ -1990,7 +1924,7 @@ ${e.isMaster ? '5. 对主人保持亲密、顺从' : ''}`;
     const now = new Date();
     const dateStr = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日 ${now.getHours()}:${now.getMinutes().toString().padStart(2, '0')}`;
     const botRole = await this.getBotRole(e);
-    const memorySummary = await this.memoryManager?.buildSummary(e);
+    const memorySummary = await this.buildMemorySummary(e);
     
     const enrichedQuestion = {
       ...question,

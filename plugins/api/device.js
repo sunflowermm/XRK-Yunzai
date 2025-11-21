@@ -3,16 +3,12 @@ import BotUtil from '../../lib/common/util.js';
 import StreamLoader from '../../lib/aistream/loader.js';
 import fs from 'fs';
 import path from 'path';
-
-// ==================== 导入配置 ====================
 import cfg from '../../lib/config/config.js';
 import {
     EMOTION_KEYWORDS,
     SUPPORTED_EMOTIONS
 } from '../../components/config/deviceConfig.js';
 import { normalizeEmotion } from '../../components/util/emotionUtil.js';
-
-// ==================== 导入工具函数 ====================
 import {
     initializeDirectories,
     validateDeviceRegistration,
@@ -20,12 +16,9 @@ import {
     hasCapability,
     getAudioFileList
 } from '../../components/util/deviceUtil.js';
-
-// ==================== 导入ASR和TTS工厂 ====================
 import ASRFactory from '../../components/asr/ASRFactory.js';
 import TTSFactory from '../../components/tts/TTSFactory.js';
 
-// ==================== 全局存储 ====================
 const devices = new Map();
 const deviceWebSockets = new Map();
 const deviceLogs = new Map();
@@ -36,7 +29,6 @@ const asrClients = new Map();
 const ttsClients = new Map();
 const asrSessions = new Map();
 
-// ==================== 设备管理器类 ====================
 class DeviceManager {
     constructor() {
         this.cleanupInterval = null;
@@ -165,8 +157,6 @@ class DeviceManager {
         }
         return client;
     }
-
-    // ==================== ASR会话处理（优化版）====================
 
     /**
      * 处理ASR会话开始
@@ -414,10 +404,8 @@ class DeviceManager {
         asrSessions.delete(session.session_id);
     }
 
-    // ==================== AI处理 ====================
-
     /**
-     * 处理AI响应
+     * 处理AI响应（增强版：使用增强的device工作流，包含记忆、推理、润色）
      * @param {string} deviceId - 设备ID
      * @param {string} question - 用户问题
      * @returns {Promise<void>}
@@ -449,7 +437,7 @@ class DeviceManager {
             }
 
             const aiConfig = this.getAIConfig();
-            // 传递deviceBot给工作流，让工作流直接调用emotion()
+            // 使用增强的execute方法（包含记忆、推理、润色）
             const aiResult = await deviceStream.execute(
                 deviceId,
                 question,
@@ -529,8 +517,6 @@ class DeviceManager {
             BotUtil.makeLog('error', `❌ [AI] 发送错误通知失败: ${e.message}`, deviceId);
         }
     }
-
-    // ==================== 设备管理 ====================
 
     /**
      * 初始化设备统计
@@ -1311,14 +1297,10 @@ class DeviceManager {
     }
 }
 
-// ==================== 创建设备管理器实例 ====================
 const deviceManager = new DeviceManager();
 
-// ==================== 导出模块 ====================
-// 导出 deviceWebSockets 和 deviceManager 供其他模块使用
 export { deviceWebSockets, deviceManager };
 
-// 导出TTS客户端获取方法（供ai.js使用）
 export function getTTSClientForDevice(deviceId) {
     return deviceManager._getTTSClient(deviceId);
 }
@@ -1369,6 +1351,119 @@ export default {
                     return res.json({ success: true });
                 } catch (e) {
                     return res.status(500).json({ success: false, message: e.message });
+                }
+            }
+        },
+
+        {
+            method: 'GET',
+            path: '/api/ai/stream',
+            handler: async (req, res, Bot) => {
+                res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+                res.setHeader('Cache-Control', 'no-cache');
+                res.setHeader('Connection', 'keep-alive');
+                res.flushHeaders?.();
+                
+                try {
+                    const prompt = (req.query.prompt || '').toString();
+                    if (!prompt) {
+                        res.write(`data: ${JSON.stringify({ error: '缺少prompt参数' })}\n\n`);
+                        res.end();
+                        return;
+                    }
+
+                    const persona = (req.query.persona || '').toString();
+
+                    if (!StreamLoader.loaded && !StreamLoader._loadingPromise) {
+                        await StreamLoader.load();
+                    } else if (StreamLoader._loadingPromise) {
+                        await StreamLoader._loadingPromise;
+                    }
+
+                    const stream = StreamLoader.getStream('device');
+                    if (!stream) {
+                        res.write(`data: ${JSON.stringify({ error: '设备工作流未加载' })}\n\n`);
+                        res.end();
+                        return;
+                    }
+
+                    const deviceBot = Bot['webclient'];
+                    const e = {
+                        device_id: 'webclient',
+                        user_id: 'webclient_user',
+                        self_id: 'webclient'
+                    };
+
+                    const messages = await stream.buildChatContext(e, { 
+                        text: prompt, 
+                        persona,
+                        deviceId: 'webclient'
+                    });
+                    
+                    let acc = '';
+                    
+                    await stream.callAIStream(messages, stream.config, (delta) => {
+                        acc += delta;
+                        res.write(`data: ${JSON.stringify({ delta })}\n\n`);
+                    });
+
+                    const finalText = acc.trim();
+                    let polishedText = finalText;
+                    if (stream.responsePolishConfig?.enabled && finalText) {
+                        polishedText = await stream.polishResponse(finalText, persona).catch(() => finalText);
+                    }
+
+                    const { emotion, cleanText } = stream.parseEmotion(polishedText);
+                    const displayText = (cleanText && cleanText.trim()) || polishedText;
+
+                    res.write(`data: ${JSON.stringify({ done: true, text: displayText })}\n\n`);
+
+                    if (emotion && deviceBot?.emotion) {
+                        try {
+                            await deviceBot.emotion(emotion);
+                        } catch (e) {
+                            BotUtil.makeLog('error', `[AI流式] 表情切换失败: ${e.message}`, 'AIStream');
+                        }
+                    }
+
+                    const ttsConfig = deviceManager.getTTSConfig();
+                    if (ttsConfig.enabled && displayText && deviceBot) {
+                        try {
+                            const ttsClient = getTTSClientForDevice('webclient');
+                            if (ttsClient) {
+                                await ttsClient.synthesize(displayText);
+                            }
+                        } catch (e) {
+                            BotUtil.makeLog('error', `[AI流式] TTS合成失败: ${e.message}`, 'AIStream');
+                        }
+                    }
+
+                    if (polishedText && stream.getMemorySystem()?.isEnabled() && prompt.length > 10) {
+                        const memorySystem = stream.getMemorySystem();
+                        const { ownerId, scene } = memorySystem.extractScene(e);
+                        memorySystem.remember({
+                            ownerId,
+                            scene,
+                            layer: 'short',
+                            content: `用户: ${prompt.substring(0, 100)} | 助手: ${polishedText.substring(0, 100)}`,
+                            metadata: { deviceId: 'webclient', type: 'conversation' },
+                            authorId: 'webclient'
+                        }).catch(() => {});
+                    }
+                    
+                    res.end();
+                } catch (e) {
+                    try {
+                        if (!res.headersSent) {
+                            res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+                            res.setHeader('Cache-Control', 'no-cache');
+                            res.setHeader('Connection', 'keep-alive');
+                            res.flushHeaders?.();
+                        }
+                        res.write(`data: ${JSON.stringify({ error: e.message || '未知错误' })}\n\n`);
+                        BotUtil.makeLog('error', `[AI流式] 错误: ${e.message}`, 'AIStream');
+                    } catch (err) {}
+                    res.end();
                 }
             }
         },
