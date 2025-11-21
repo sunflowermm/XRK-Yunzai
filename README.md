@@ -1,375 +1,260 @@
+<div align="center">
+
 # XRK-Yunzai v3.0.5
 
-基于乐神版[云崽v3.0](https://gitee.com/le-niao/Yunzai-Bot) 与喵喵版[喵崽v3.1.3](https://gitee.com/yoimiya-kokomi/Miao-Yunzai) 还有时雨版[时雨崽3.1.3](https://gitee.com/TimeRainStarSky/Yunzai)
+跨平台、多适配器的智能工作流机器人；承接 [Yunzai v3.0](https://gitee.com/le-niao/Yunzai-Bot) / [Miao-Yunzai](https://gitee.com/yoimiya-kokomi/Miao-Yunzai) / [TRSS-Yunzai](https://gitee.com/TimeRainStarSky/Yunzai) 的积累并持续现代化。
 
-感谢我在编写过程中时雨佬等佬的帮助
-感谢我在编写时萌新们的支持
+</div>
 
-## 项目特性
+---
 
-### 🚀 模块化工作流系统
+## ✨ Highlights
 
-XRK-Yunzai 采用模块化工作流架构，支持：
+| 分类 | 能力 |
+|------|------|
+| 模块化工作流 | Chat / Device / File 等工作流并行、串行、管线化执行；内置记忆、推理、润色与语义检索。 |
+| 统一对象 | `Bot`、事件 `e`、`logger`、`cfg`、`segment` 与全局 `redis` 客户端开箱即用，协议与设备场景一致。 |
+| 现代 HTTP 栈 | Express + WebSocket + 反向代理 + HTTPS/HTTP2 + CORS + 限流 + 静态资源热重载。 |
+| 插件生态 | 热重载、权限/优先级、上下文管理、多账号发送、转发消息、工作流调用。 |
+| 渲染/面板 | Puppeteer / Playwright 渲染、Web 控制台、API 面板与静态站点。 |
+| DevOps 友好 | Docker / Compose / PM2 / 原生 Node 统一入口，Redis 探活与自动拉起。 |
 
-- **模块化设计**：每个工作流专注于特定功能（聊天、文件、设备等）
-- **组合调用**：可以同时调用多个工作流，实现复杂需求
-- **记忆系统**：所有工作流自动获得记忆能力，支持场景隔离
-- **推理调优**：支持多轮推理和响应润色，提升AI回复质量
-- **参数优先级**：灵活的配置系统，支持运行时参数覆盖
+---
 
-### 🔧 完整的基类体系
+## 🧰 Tech Stack Overview
 
-项目提供了完整的基类体系，方便开发者快速扩展：
+| 层级 | 组件 | 说明 |
+|------|------|------|
+| 运行时 | Node.js 18+、pnpm | ESM + 顶级 await，pnpm workspaces 管理插件依赖。 |
+| Web 服务 | Express 4、`ws`、`http-proxy-middleware` | HTTP/WS、一体化代理、Helmet 安全头、独立速率限制器。 |
+| 数据缓存 | Redis 5+（官方 client） | 记忆系统、会话缓存、API 限流、工作流 embedding、跨进程通信。 |
+| 语义能力 | `node-fetch` + 第三方 LLM API | Chat Completions、流式输出、向量检索、轻量 BM25/ONNX/HF/fastText。 |
+| 渲染与自动化 | Puppeteer / Playwright | 图像渲染、设备工作流截图、Web 控制台。 |
+| 配置管理 | YAML + chokidar | 多端口隔离配置、热更新、默认值自动回写。 |
 
-- **AIStream** - 工作流基类，提供AI调用、记忆、功能管理
-- **Plugin** - 插件基类，提供工作流集成、上下文管理
-- **HttpApi** - HTTP API基类，提供路由注册、WebSocket支持
-- **EventListener** - 事件监听基类，提供事件处理能力
-- **Renderer** - 渲染器基类，提供图片渲染能力
+更多技术细节见 `docs/TECH_STACK.md`。
 
-**详细文档：**
-- [工作流基类开发文档](./docs/WORKFLOW_BASE_CLASS.md)
-- [插件基类开发文档](./docs/PLUGIN_BASE_CLASS.md)
-- [HTTP API基类开发文档](./docs/HTTP_API_BASE_CLASS.md)
-- [项目基类总览](./docs/BASE_CLASSES.md)
+---
 
-### 🌐 现代化HTTP服务器
+## 🧩 Runtime Objects & Redis
 
-- **Express框架**：基于Express的现代化HTTP服务器
-- **WebSocket支持**：完整的WebSocket支持，支持实时通信
-- **反向代理**：支持多域名反向代理，路径重写，负载均衡
-- **HTTPS支持**：支持HTTP/2和现代TLS配置
-- **安全特性**：CORS、Helmet、速率限制等安全特性
+- **Bot**：事件驱动总线、HTTP/WS 服务、插件/工作流加载、代理协商、消息转发。
+- **事件 `e`**：统一的消息/设备事件，内置 `reply`、`group`、`friend`、`member` 快捷方法。
+- **`logger`**：多级别打印，配合 `BotUtil.makeLog()` 输出彩色日志。
+- **`cfg`**：多层配置读取器，支持默认配置 + 端口隔离目录 + 热监听。
+- **`segment`**：OneBot 消息片段构造器（图片、语音、转发等）。
+- **`redis`**：由 `lib/config/redis.js` 初始化的全局客户端，职责包含：
+  - AI 记忆：`ai:memory:*` / `ai:embedding:*`
+  - 速率限制 / 缓存 / 会话锁
+  - 状态持久化（如工作流上下文）
 
-### 📦 插件系统
+详细 API 请查阅 `docs/CORE_OBJECTS.md` 与各 reference 文档。
 
-- **热重载**：支持插件热重载，无需重启
-- **优先级控制**：灵活的优先级系统
-- **权限管理**：完整的权限控制系统
-- **上下文管理**：支持多轮对话和状态管理
+---
 
-### 🎨 渲染系统
-
-- **多渲染器支持**：支持Puppeteer和Playwright
-- **模板系统**：基于art-template的模板系统
-- **文件监听**：自动监听模板文件变化
-
-## 快速开始
+## 🚀 Quick Start
 
 ### 环境要求
 
-- **操作系统**: Windows/Linux + Chrome/Chromium/Edge
-- **Node.js**: >= 18.14.0
-- **Redis**: >= 5.0.0
-- **包管理器**: pnpm (推荐) / npm / yarn
+| 组件 | 版本 |
+|------|------|
+| Node.js | ≥ 18.14.0 |
+| Redis | ≥ 5.0.0（支持 RESP3） |
+| 浏览器 | Chrome / Chromium / Edge（渲染或 Web 面板需要） |
+| 包管理器 | 推荐 pnpm（npm/yarn 亦可） |
 
 ### 安装
 
-```sh
-# 使用Gitcode
+```bash
+# Gitcode（国内）
 git clone --depth=1 https://gitcode.com/Xrkseek/XRK-Yunzai.git
-cd XRK-Yunzai 
 
-# 使用Gitee
+# Gitee
 git clone --depth=1 https://gitee.com/xrkseek/XRK-Yunzai.git
-cd XRK-Yunzai 
 
-# 使用Github
+# GitHub
 git clone --depth=1 https://github.com/Xrkseek/XRK-Yunzai.git
-cd XRK-Yunzai 
+
+cd XRK-Yunzai
+pnpm install   # 或 npm install / yarn
 ```
 
-### 运行
+### 首次运行
 
-```sh
-node app
+```bash
+node app   # 自动检查依赖 & 引导登录
 ```
 
-首次运行按提示输入登录信息。
+按提示完成登录后即可在 `plugins/` 中开发工作流或 API。
 
-## 部署方式
+---
 
-### 方式一：直接运行
+## 🧱 Deployment Options
 
-```sh
-# 1. 安装依赖（自动）
-node app
+| 方式 | 步骤 | 适用场景 |
+|------|------|---------|
+| 原生 Node | `node app` | 开发/调试最快捷，自动检查依赖与 Redis 连接。 |
+| Docker Compose | `docker-compose up -d` | 推荐；可一键启 Redis 与主程序、Volume 保留数据。 |
+| Dockerfile | `docker build -t xrk-yunzai:latest .` → `docker run ...` | 适合 CI/CD、自托管。 |
+| PM2 | `pm2 start app.js --name xrk-yunzai` | 持续运行、日志切割、自动拉起。 |
 
-# 2. 首次运行会提示登录
-# 3. 登录成功后即可使用
-```
+> **提示**：容器化部署务必映射 `data/ config/ plugins/ logs/ resources/`，首次登录可本地完成后再挂载。
 
-### 方式二：Docker部署
+---
 
-#### 使用 Docker Compose（推荐）
-
-```sh
-# 1. 构建并启动
-docker-compose up -d
-
-# 2. 查看日志
-docker-compose logs -f xrk-yunzai
-
-# 3. 停止服务
-docker-compose down
-```
-
-#### 使用 Dockerfile
-
-```sh
-# 1. 构建镜像
-docker build -t xrk-yunzai:latest .
-
-# 2. 运行容器
-docker run -d \
-  --name xrk-yunzai \
-  -p 3000:3000 \
-  -v $(pwd)/data:/app/data \
-  -v $(pwd)/config:/app/config \
-  -v $(pwd)/plugins:/app/plugins \
-  xrk-yunzai:latest
-
-# 3. 查看日志
-docker logs -f xrk-yunzai
-```
-
-**注意事项：**
-- 确保 `data/`、`config/`、`plugins/` 目录存在
-- 首次运行需要登录，建议先本地运行完成登录后再使用Docker
-- Redis数据会持久化到 `redis-data` volume
-
-### 方式三：PM2部署
-
-```sh
-# 1. 全局安装PM2
-npm install -g pm2
-
-# 2. 启动应用
-pm2 start app.js --name xrk-yunzai
-
-# 3. 查看状态
-pm2 status
-
-# 4. 查看日志
-pm2 logs xrk-yunzai
-
-# 5. 停止应用
-pm2 stop xrk-yunzai
-```
-
-## 项目结构
+## 🗂 Architecture Snapshot
 
 ```
 XRK-Yunzai/
-├── app.js                 # 应用入口（依赖检查和引导）
-├── start.js              # 主启动文件
-├── package.json          # 项目配置
-├── docker-compose.yml    # Docker Compose配置
-├── Dockerfile            # Docker镜像配置
-│
-├── lib/                  # 核心库
-│   ├── bot.js           # Bot主类（HTTP服务器、WebSocket、插件管理）
-│   ├── aistream/        # 工作流核心库
-│   │   ├── aistream.js  # 工作流基类
-│   │   ├── memory.js    # 记忆系统
-│   │   ├── workflow-manager.js  # 多工作流管理器
-│   │   └── loader.js    # 工作流加载器
-│   ├── plugins/         # 插件系统
-│   │   ├── plugin.js    # 插件基类
-│   │   └── loader.js    # 插件加载器
-│   ├── http/            # HTTP API系统
-│   │   ├── http.js      # HTTP API基类
-│   │   └── loader.js    # API加载器
-│   ├── listener/        # 事件监听系统
-│   │   ├── listener.js  # 事件监听基类
-│   │   └── loader.js    # 监听器加载器
-│   ├── renderer/        # 渲染器系统
-│   │   ├── Renderer.js  # 渲染器基类
-│   │   └── loader.js    # 渲染器加载器
-│   ├── config/          # 配置系统
-│   ├── common/          # 通用工具
-│   └── modules/         # 模块（oicq等）
-│
-├── plugins/              # 插件目录
-│   ├── stream/          # 工作流插件
-│   │   ├── chat.js      # 聊天工作流
-│   │   └── device.js    # 设备工作流
-│   ├── api/             # API路由插件
-│   ├── events/          # 事件处理插件
-│   ├── adapter/         # 适配器插件
-│   └── system/          # 系统插件
-│
-├── config/              # 配置文件
-│   ├── default_config/  # 默认配置
-│   │   ├── kuizai.yaml  # AI配置
-│   │   ├── bot.yaml     # Bot配置
-│   │   └── server.yaml   # 服务器配置
-│   └── server_config/   # 服务器配置（登录信息等）
-│
-├── data/                # 数据目录
-│   ├── bots/           # Bot数据（登录信息）
-│   ├── wav/            # 音频文件
-│   └── models/         # 模型文件
-│
-├── www/                 # 静态文件
-│   └── xrk/            # 前端界面
-│
-├── renderers/           # 渲染器
-│   ├── puppeteer/      # Puppeteer渲染器
-│   └── playwright/     # Playwright渲染器
-│
-└── docs/                # 文档目录
-    ├── WORKFLOW_BASE_CLASS.md  # 工作流基类文档
-    ├── PLUGIN_BASE_CLASS.md    # 插件基类文档
-    ├── HTTP_API_BASE_CLASS.md  # HTTP API基类文档
-    └── BASE_CLASSES.md         # 项目基类总览
+├── app.js / start.js         # 引导入口
+├── lib/
+│   ├── bot.js                # Bot 对象
+│   ├── aistream/             # 工作流引擎、记忆、WorkflowManager
+│   ├── plugins/              # 插件加载器与 runtime
+│   ├── http/                 # API 注册 & WS 通道
+│   ├── listener/             # 事件监听装配
+│   ├── renderer/             # 渲染驱动
+│   └── common/               # BotUtil 等工具
+├── plugins/
+│   ├── stream/               # 工作流（chat/device/...）
+│   ├── api/                  # REST/SSE
+│   ├── adapter/              # 协议适配（OneBot 等）
+│   └── system/events/...     # 业务插件
+├── config/                   # 默认 & 端口隔离配置
+├── docs/                     # 模块化文档
+└── www/ renderers/ data/ ... # Web 面板、渲染、静态资源
 ```
 
-## 配置说明
+---
 
-### AI配置
+## 📘 Documentation Hub
 
-配置文件：`config/default_config/kuizai.yaml`
+| 主题 | 入口 |
+|------|------|
+| 技术栈说明 | [`docs/TECH_STACK.md`](./docs/TECH_STACK.md) |
+| 核心对象 & Redis | [`docs/CORE_OBJECTS.md`](./docs/CORE_OBJECTS.md) |
+| Bot 函数手册 | [`docs/reference/BOT.md`](./docs/reference/BOT.md) |
+| 工作流引擎 & 记忆 | [`docs/reference/WORKFLOWS.md`](./docs/reference/WORKFLOWS.md) |
+| 插件运行时 | [`docs/reference/PLUGINS.md`](./docs/reference/PLUGINS.md) |
+| HTTP / WebSocket API | [`docs/reference/HTTP.md`](./docs/reference/HTTP.md) |
+| 配置 & Redis 客户端 | [`docs/reference/CONFIG_AND_REDIS.md`](./docs/reference/CONFIG_AND_REDIS.md) |
+| 用户向文档 | [`stdin.md`](./stdin.md) |
 
-```yaml
-kuizai:
-  ai:
-    enabled: true
-    baseUrl: 'https://api.gptgod.online/v1'
-    apiKey: 'your-api-key'
-    chatModel: 'deepseek-r1-0528'
-    temperature: 0.8
-    max_tokens: 2000
-    
-  responsePolish:
-    enabled: true
-    maxTokens: 400
-    temperature: 0.3
-    
-  reasoning:
-    enabled: false
-    maxIterations: 3
-    temperature: 0.8
-    
-  workflows:
-    enabled: true
-    allowMultiple: true
-    defaultWorkflow: 'device'
-```
+所有 reference 文件均针对源码中每个函数提供签名、参数类型、返回值与示例，不再遗漏。
 
-### 服务器配置
+---
 
-配置文件：`config/default_config/server.yaml`
+## ⚙️ Configuration Quick View
 
-主要配置项：
-- `server.host`: 监听地址（默认0.0.0.0）
-- `server.url`: 外部访问URL
-- `proxy.enabled`: 是否启用反向代理
-- `https.enabled`: 是否启用HTTPS
+主要配置位于 `config/default_config/*.yaml`，首次运行自动复制到 `data/server_bots/<port>/`。
 
-## 开发文档
+- `kuizai.yaml`：AI 接口、推理、润色、工作流默认值。
+- `server.yaml`：HTTP/HTTPS、CORS、安全策略、静态目录。
+- `redis.yaml`：Redis 连接信息与数据库序号。
+- `device.yaml` / `group.yaml` / `notice.yaml`：设备、群、通知策略。
 
-### 基类文档
+> 优先级：运行时传入 > `cfg` 实例化时覆盖 > `data/server_bots/<port>` > `config/default_config` > 内置默认值。详情见 `docs/reference/CONFIG_AND_REDIS.md#配置优先级`。
 
-- [工作流基类开发文档](./docs/WORKFLOW_BASE_CLASS.md) - 如何创建自定义工作流
-- [插件基类开发文档](./docs/PLUGIN_BASE_CLASS.md) - 如何创建插件
-- [HTTP API基类开发文档](./docs/HTTP_API_BASE_CLASS.md) - 如何创建API路由
-- [项目基类总览](./docs/BASE_CLASSES.md) - 所有基类的概览
+---
 
-### 其他文档
+## 🧪 Code Examples
 
-- [葵崽重要特性](./stdin.md) - 用户功能说明
+<details>
+<summary>插件内调用 Chat 工作流</summary>
 
-## 快速示例
-
-### 创建插件
-
-```javascript
-// plugins/my-plugin.js
+```js
+// plugins/example/workflow-demo.js
 import plugin from '../../lib/plugins/plugin.js';
 
-export default class MyPlugin extends plugin {
+export default class WorkflowDemo extends plugin {
   constructor() {
     super({
-      name: 'my-plugin',
-      dsc: '我的插件',
+      name: 'workflow-demo',
       event: 'message',
-      rule: [
-        { reg: '^#测试$', fnc: 'test' }
-      ]
+      rule: [{ reg: '^#ai (.+)$', fnc: 'chat' }]
     });
   }
 
-  async test(e) {
-    // 调用工作流
-    const result = await this.callWorkflow('chat', {
-      question: e.msg
-    }, { e });
-    
-    return this.reply(result.content);
+  async chat(e) {
+    const question = e.msg.replace(/^#ai\s+/, '');
+    const result = await this.callWorkflow('chat', { question }, { e });
+    return this.reply(result?.content || '暂无回复');
   }
 }
 ```
 
-### 创建API
+</details>
 
-```javascript
-// plugins/api/my-api.js
+<details>
+<summary>独立 REST API</summary>
+
+```js
+// plugins/api/ping.js
 export default {
-  name: 'my-api',
-  dsc: '我的API',
-  routes: [
-    {
-      method: 'GET',
-      path: '/api/test',
-      handler: async (req, res, Bot) => {
-        res.json({ success: true });
-      }
+  name: 'ping-api',
+  dsc: '健康检查',
+  routes: [{
+    method: 'GET',
+    path: '/api/ping',
+    handler: async (req, res) => {
+      res.json({ success: true, pong: Date.now() });
     }
-  ]
+  }]
 };
 ```
 
-### 创建工作流
+</details>
 
-```javascript
-// plugins/stream/my-workflow.js
+<details>
+<summary>自定义工作流</summary>
+
+```js
+// plugins/stream/file-builder.js
 import AIStream from '../../lib/aistream/aistream.js';
 
-export default class MyWorkflow extends AIStream {
+export default class FileBuilder extends AIStream {
   constructor() {
     super({
-      name: 'my-workflow',
-      description: '我的工作流'
+      name: 'file-builder',
+      description: '根据提示生成文本，落地为文件',
+      config: { temperature: 0.6 }
     });
   }
 
-  buildSystemPrompt(context) {
-    return '系统提示';
+  buildSystemPrompt() {
+    return '你是文件生成器，只输出可写入文件的纯文本。';
   }
 
   async buildChatContext(e, question) {
     return [
       { role: 'system', content: this.buildSystemPrompt({ e, question }) },
-      { role: 'user', content: question }
+      { role: 'user', content: question?.text || String(question) }
     ];
   }
 }
 ```
 
-## 后续计划
+</details>
 
-- ✅ pm2启动方式
-- ✅ 开源对接任务处理器
-- ✅ 投入农业实践使用
-- ✅ 完善任务处理逻辑
-- 🔄 将icqq等相关底层剥离
-- 🔄 类型扩展和开发规范化
+---
 
-## 致谢
+## 🧭 Roadmap
 
-| Nickname | name | Contribution |
-|:--------:|------|--------------|
-| [Yunzai v3.0](https://gitee.com/le-niao/Yunzai-Bot) | 乐神的Yunzai-Bot V3 | 元老级项目 |
-| [Miao-Yunzai v3.1.3](https://gitee.com/yoimiya-kokomi/Miao-Yunzai) | 喵喵的Miao-Yunzai | 项目基础，提供了优化方向和原神功能适配 |
-| [TRSS-Yunzai v3.1.3](https://gitee.com/TimeRainStarSky/Yunzai) | 时雨的Yunzai | 为葵崽底层设计提供了不可磨灭的贡献，时雨崽是当之无愧的node项目的艺术品 |
+- ✅ PM2 支持
+- ✅ 任务处理器开源化（MySQL、公众号等）
+- ✅ 农业场景设备工作流
+- ✅ 任务类型体系与安全能力
+- 🔄 拆分底层协议依赖、精简适配
+- 🔄 更多工作流模板与智能体互操作
+
+---
+
+## 🙏 Credits
+
+| 项目 | 作者 | 贡献 |
+|:----:|:-----|:-----|
+| [Yunzai v3.0](https://gitee.com/le-niao/Yunzai-Bot) | 乐神 | 元老级项目基座 |
+| [Miao-Yunzai v3.1.3](https://gitee.com/yoimiya-kokomi/Miao-Yunzai) | 喵喵 | 功能优化与原神适配 |
+| [TRSS-Yunzai v3.1.3](https://gitee.com/TimeRainStarSky/Yunzai) | 时雨 | Node 端底层设计灵感 |
+
+> 感谢贡献者、测试者与使用者。欢迎提交 Issue / PR，共建更强大的 XRK-Yunzai！
