@@ -171,7 +171,7 @@ XRK-Yunzai/
 | 配置 & Redis | [`docs/reference/CONFIG_AND_REDIS.md`](./docs/reference/CONFIG_AND_REDIS.md) | `cfg` API、Redis 初始化/事件。 |
 | Logger 完整手册 | [`docs/reference/LOGGER.md`](./docs/reference/LOGGER.md) | `logger` 全部方法、颜色工具、格式化、计时器等。 |
 | 适配器 & 路由 | [`docs/reference/ADAPTER_AND_ROUTING.md`](./docs/reference/ADAPTER_AND_ROUTING.md) | 适配器与路由系统如何与Bot交互、完整方法列表。 |
-| 用户向文档 | [`stdin.md`](./stdin.md) | 面板/功能简介。 |
+| 用户使用指南 | [`USER_GUIDE.md`](./USER_GUIDE.md) | Web界面访问、API接口使用、curl示例、WebSocket通信。 |
 
 > 基类的开发策略、调用顺序与示例在导航页集中展示，可从 README 直接跳转到子文档。
 
