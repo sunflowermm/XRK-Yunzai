@@ -616,7 +616,7 @@ export default class ChatStream extends AIStream {
       enabled: true
     });
 
-    // 5. 表情回应
+    // 5. 表情回应（适配新API，默认false用于调试）
     this.registerFunction('emojiReaction', {
       description: '表情回应',
       prompt: `[回应:消息ID:表情类型] - 给消息添加表情回应
@@ -642,21 +642,90 @@ export default class ChatStream extends AIStream {
         return { functions, cleanText };
       },
       handler: async (params, context) => {
-        if (context.e?.isGroup && EMOJI_REACTIONS[params.emojiType]) {
-          const emojiIds = EMOJI_REACTIONS[params.emojiType];
-          const emojiId = emojiIds[Math.floor(Math.random() * emojiIds.length)];
-          try {
+        if (!context.e?.isGroup || !EMOJI_REACTIONS[params.emojiType]) {
+          return;
+        }
+        
+        const emojiIds = EMOJI_REACTIONS[params.emojiType];
+        const emojiId = emojiIds[Math.floor(Math.random() * emojiIds.length)];
+        
+        try {
+          // 优先使用新的Napcat API
+          if (context.e.bot && typeof context.e.bot.setMessageReaction === 'function') {
+            const result = await context.e.bot.setMessageReaction(params.msgId, emojiId);
+            if (result && result.success === false) {
+              // API不支持，尝试旧方法
+              if (context.e.group && typeof context.e.group.setEmojiLike === 'function') {
+                await context.e.group.setEmojiLike(params.msgId, emojiId);
+              }
+            }
+          } else if (context.e.group && typeof context.e.group.setEmojiLike === 'function') {
+            // 回退到旧方法
             await context.e.group.setEmojiLike(params.msgId, emojiId);
-            await BotUtil.sleep(200);
-          } catch (error) {
-            // 静默失败
           }
+          await BotUtil.sleep(200);
+        } catch (error) {
+          BotUtil.makeLog('debug', `表情回应失败: ${error.message}`, 'ChatStream');
         }
       },
-      enabled: false
+      enabled: false // 默认false，用于调试
     });
 
-    // 6. 扩展工作流
+    // 6. 联网搜索功能
+    this.registerFunction('webSearch', {
+      description: '联网搜索',
+      prompt: `[搜索:关键词] - 联网搜索实时信息，获取最新资讯
+示例：[搜索:2024年最新AI技术]`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[搜索:([^\]]+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          functions.push({ 
+            type: 'webSearch', 
+            params: { keyword: match[1].trim() },
+            raw: match[0]
+          });
+        }
+        
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (!params.keyword) {
+          return { type: 'text', content: '搜索关键词不能为空' };
+        }
+        
+        try {
+          BotUtil.makeLog('info', `开始联网搜索: ${params.keyword}`, 'ChatStream');
+          
+          // 执行搜索流程：搜索 -> 分析（3次） -> 润色（1次）
+          const searchResult = await this.runWebSearch(params.keyword, context);
+          
+          if (!searchResult || !searchResult.content) {
+            return { type: 'text', content: '搜索未找到相关信息，请尝试其他关键词' };
+          }
+          
+          // 将搜索结果整合到聊天记录中
+          if (context.e?.isGroup) {
+            await this.recordSearchResult(context.e, params.keyword, searchResult);
+          }
+          
+          return searchResult;
+        } catch (error) {
+          BotUtil.makeLog('error', `联网搜索失败: ${error.message}`, 'ChatStream');
+          return { type: 'text', content: `搜索过程中出现错误: ${error.message}` };
+        }
+      },
+      enabled: true
+    });
+
+    // 7. 扩展工作流
     this.registerFunction('workflow', {
       description: '调用扩展工作流（热点资讯等）',
       prompt: `[工作流:类型:可选参数] - 触发扩展动作，如 [工作流:hot-news] 或 [工作流:memory:长期|group|用户喜欢原神] 或 [工作流:memory-forget:要删除的内容]`,
@@ -1685,6 +1754,341 @@ export default class ChatStream extends AIStream {
   }
 
   /**
+   * 执行联网搜索流程
+   * 流程：搜索 -> 分析（3次） -> 润色（1次）
+   */
+  async runWebSearch(keyword, context) {
+    try {
+      // 步骤1: 执行搜索
+      const searchResults = await this.performWebSearch(keyword);
+      
+      if (!searchResults || searchResults.length === 0) {
+        return { type: 'text', content: '未找到相关搜索结果' };
+      }
+      
+      // 步骤2-4: 三次分析
+      const analysis1 = await this.analyzeSearchResults(searchResults, keyword, context, 1);
+      const analysis2 = await this.analyzeSearchResults(searchResults, keyword, context, 2, analysis1);
+      const analysis3 = await this.analyzeSearchResults(searchResults, keyword, context, 3, analysis2);
+      
+      // 步骤5: 润色最终回复
+      const polishedResult = await this.polishSearchResponse(analysis3, keyword, context);
+      
+      return {
+        type: 'text',
+        content: polishedResult,
+        metadata: {
+          keyword,
+          searchCount: searchResults.length,
+          searchResults: searchResults.slice(0, 5) // 保留前5个结果用于展示
+        }
+      };
+    } catch (error) {
+      BotUtil.makeLog('error', `搜索流程失败: ${error.message}`, 'ChatStream');
+      throw error;
+    }
+  }
+
+  /**
+   * 执行网页搜索（使用DuckDuckGo）
+   */
+  async performWebSearch(keyword) {
+    try {
+      // 使用DuckDuckGo HTML搜索（无需API key）
+      const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(keyword)}`;
+      
+      // 使用AbortController实现超时
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
+      const response = await fetch(searchUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        },
+        signal: controller.signal
+      }).finally(() => clearTimeout(timeoutId));
+      
+      if (!response.ok) {
+        throw new Error(`搜索请求失败: ${response.status}`);
+      }
+      
+      const html = await response.text();
+      const cheerio = (await import('cheerio')).default;
+      const $ = cheerio.load(html);
+      
+      const results = [];
+      
+      // 解析DuckDuckGo搜索结果
+      $('.result').each((index, element) => {
+        if (results.length >= 10) return false; // 最多10个结果
+        
+        const $el = $(element);
+        const title = $el.find('.result__title a').text().trim();
+        const link = $el.find('.result__title a').attr('href') || '';
+        const snippet = $el.find('.result__snippet').text().trim();
+        
+        if (title && link) {
+          results.push({
+            title,
+            url: link,
+            snippet: snippet || '暂无摘要',
+            index: results.length + 1
+          });
+        }
+      });
+      
+      // 如果DuckDuckGo解析失败，尝试备用方案：使用Bing搜索
+      if (results.length === 0) {
+        return await this.performBingSearch(keyword);
+      }
+      
+      return results;
+    } catch (error) {
+      BotUtil.makeLog('warn', `DuckDuckGo搜索失败，尝试备用方案: ${error.message}`, 'ChatStream');
+      // 尝试备用搜索方案
+      return await this.performBingSearch(keyword);
+    }
+  }
+
+  /**
+   * 备用搜索方案：使用Bing搜索（通过HTML解析）
+   */
+  async performBingSearch(keyword) {
+    try {
+      const searchUrl = `https://www.bing.com/search?q=${encodeURIComponent(keyword)}`;
+      
+      // 使用AbortController实现超时
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
+      const response = await fetch(searchUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        },
+        signal: controller.signal
+      }).finally(() => clearTimeout(timeoutId));
+      
+      if (!response.ok) {
+        throw new Error(`Bing搜索请求失败: ${response.status}`);
+      }
+      
+      const html = await response.text();
+      const cheerio = (await import('cheerio')).default;
+      const $ = cheerio.load(html);
+      
+      const results = [];
+      
+      // 解析Bing搜索结果
+      $('.b_algo').each((index, element) => {
+        if (results.length >= 10) return false;
+        
+        const $el = $(element);
+        const title = $el.find('h2 a').text().trim();
+        const link = $el.find('h2 a').attr('href') || '';
+        const snippet = $el.find('.b_caption p').text().trim() || $el.find('.b_caption').text().trim();
+        
+        if (title && link) {
+          results.push({
+            title,
+            url: link,
+            snippet: snippet || '暂无摘要',
+            index: results.length + 1
+          });
+        }
+      });
+      
+      return results;
+    } catch (error) {
+      BotUtil.makeLog('error', `Bing搜索失败: ${error.message}`, 'ChatStream');
+      return [];
+    }
+  }
+
+  /**
+   * 分析搜索结果（三次分析中的一次）
+   */
+  async analyzeSearchResults(searchResults, keyword, context, round, previousAnalysis = null) {
+    if (!this.callAI) {
+      return this.formatSearchResults(searchResults);
+    }
+    
+    const resultsText = searchResults.slice(0, 8).map(item => 
+      `${item.index}. ${item.title}\n   链接: ${item.url}\n   摘要: ${item.snippet}`
+    ).join('\n\n');
+    
+    let analysisPrompt = '';
+    if (round === 1) {
+      analysisPrompt = `请分析以下搜索结果，提取与"${keyword}"最相关的关键信息：
+      
+${resultsText}
+
+要求：
+1. 提取最重要的3-5个关键点
+2. 标注信息来源
+3. 用简洁的语言总结`;
+    } else if (round === 2) {
+      analysisPrompt = `基于第一轮分析，深入分析以下搜索结果，找出更深层次的信息：
+
+第一轮分析：
+${previousAnalysis}
+
+搜索结果：
+${resultsText}
+
+要求：
+1. 补充第一轮分析遗漏的重要信息
+2. 评估信息的可靠性和时效性
+3. 找出不同来源的一致性和差异性`;
+    } else if (round === 3) {
+      analysisPrompt = `综合前两轮分析，形成最终的综合分析：
+
+第一轮分析：
+${previousAnalysis}
+
+搜索结果：
+${resultsText}
+
+要求：
+1. 整合所有关键信息
+2. 去除重复和冗余
+3. 按照重要性排序
+4. 准备用于最终回复`;
+    }
+    
+    const messages = [
+      {
+        role: 'system',
+        content: `你是信息分析专家，擅长从搜索结果中提取和整理关键信息。
+要求：
+1. 使用纯文本格式，不要使用Markdown
+2. 语言简洁明了
+3. 标注信息来源
+4. 突出重点信息`
+      },
+      {
+        role: 'user',
+        content: analysisPrompt
+      }
+    ];
+    
+    const apiConfig = context?.config || context?.question?.config || {};
+    const result = await this.callAI(messages, {
+      ...apiConfig,
+      maxTokens: 1500,
+      temperature: 0.7
+    });
+    
+    return result || this.formatSearchResults(searchResults);
+  }
+
+  /**
+   * 润色搜索结果回复
+   */
+  async polishSearchResponse(analysis, keyword, context) {
+    if (!this.callAI) {
+      return `根据搜索"${keyword}"的结果：\n\n${analysis}`;
+    }
+    
+    const persona = context?.question?.persona || context?.persona || '我是AI助手';
+    
+    const messages = [
+      {
+        role: 'system',
+        content: `${persona}
+
+你是QQ聊天助手，需要将搜索结果整理成自然、友好的回复。
+
+【重要要求】
+1. 必须使用纯文本，绝对不要使用Markdown格式
+2. 禁止使用星号(*)、下划线(_)、反引号(backtick)、井号(#)、方括号([])用于标题
+3. 语气要自然轻松，像QQ聊天一样
+4. 开头要说明"我搜索了一下"或类似表达，体现使用了搜索工具
+5. 将搜索结果整合成流畅的对话
+6. 保持简洁，控制在3-5句话内
+7. 可以适当引用具体数据或事实`
+      },
+      {
+        role: 'user',
+        content: `请将以下搜索结果整理成友好的聊天回复：
+
+${analysis}
+
+要求：
+1. 开头说明使用了搜索工具
+2. 自然整合信息
+3. 纯文本格式
+4. 语气轻松友好`
+      }
+    ];
+    
+    const apiConfig = context?.config || context?.question?.config || {};
+    const result = await this.callAI(messages, {
+      ...apiConfig,
+      maxTokens: 800,
+      temperature: 0.8
+    });
+    
+    return result || `我搜索了一下"${keyword}"，找到以下信息：\n\n${analysis}`;
+  }
+
+  /**
+   * 格式化搜索结果（备用方法）
+   */
+  formatSearchResults(searchResults) {
+    if (!searchResults || searchResults.length === 0) {
+      return '未找到相关搜索结果';
+    }
+    
+    const formatted = searchResults.slice(0, 5).map(item => 
+      `${item.index}. ${item.title}\n   ${item.snippet}`
+    ).join('\n\n');
+    
+    return `搜索结果：\n\n${formatted}`;
+  }
+
+  /**
+   * 记录搜索结果到聊天记录
+   */
+  async recordSearchResult(e, keyword, searchResult) {
+    if (!e?.isGroup || !e.group_id) return;
+    
+    try {
+      const groupId = String(e.group_id);
+      const MAX_HISTORY = 50;
+      
+      if (!ChatStream.messageHistory.has(groupId)) {
+        ChatStream.messageHistory.set(groupId, []);
+      }
+      
+      const history = ChatStream.messageHistory.get(groupId);
+      const timestamp = Math.floor(Date.now() / 1000);
+      
+      // 记录搜索工具使用
+      const searchRecord = {
+        user_id: String(e.self_id || ''),
+        nickname: (typeof Bot !== 'undefined' && Bot.nickname) || 'Bot',
+        message: `[工具:搜索] 搜索关键词: ${keyword}`,
+        message_id: `search_${Date.now()}`,
+        timestamp,
+        time: Date.now(),
+        hasImage: false,
+        isBot: true,
+        isTool: true,
+        toolType: 'webSearch',
+        toolResult: searchResult.metadata
+      };
+      
+      history.push(searchRecord);
+      
+      if (history.length > MAX_HISTORY) {
+        history.shift();
+      }
+    } catch (error) {
+      BotUtil.makeLog('debug', `记录搜索结果失败: ${error.message}`, 'ChatStream');
+    }
+  }
+
+  /**
    * 格式化聊天记录供AI阅读（美观易读）
    */
   formatHistoryForAI(messages, isGlobalTrigger = false) {
@@ -1707,14 +2111,23 @@ export default class ChatStream extends AIStream {
       }
       
       const displayName = msg.nickname || '未知';
-      const msgContent = msg.message || '(空消息)';
+      let msgContent = msg.message || '(空消息)';
       const imageTag = msg.hasImage ? '[含图片]' : '';
       const roleTag = msg.isBot ? '[机器人]' : '[成员]';
+      const toolTag = msg.isTool ? `[工具:${msg.toolType || 'unknown'}]` : '';
       const msgIdTag = msg.message_id ? ` 消息ID:${msg.message_id}` : '';
       
-      // 统一格式：角色 标识 + 昵称(QQ) + 时间 + 可选图片/消息ID
+      // 如果是工具使用记录，添加工具结果摘要
+      if (msg.isTool && msg.toolResult) {
+        const toolInfo = msg.toolType === 'webSearch' 
+          ? `搜索了"${msg.toolResult.keyword}"，找到${msg.toolResult.searchCount}个结果`
+          : `使用了${msg.toolType}工具`;
+        msgContent = `${msgContent} → ${toolInfo}`;
+      }
+      
+      // 统一格式：角色 标识 + 昵称(QQ) + 时间 + 可选图片/工具/消息ID
       lines.push(
-        `${roleTag} ${displayName}(${msg.user_id}) [${timeStr}]${imageTag}${msgIdTag}: ${msgContent}`
+        `${roleTag}${toolTag} ${displayName}(${msg.user_id}) [${timeStr}]${imageTag}${msgIdTag}: ${msgContent}`
       );
     }
     
@@ -1848,6 +2261,25 @@ ${polishConfig.instructions || RESPONSE_POLISH_DEFAULT.instructions}`
       ? `\n【记忆提示】\n${question.memorySummary}\n`
       : '';
 
+    // 添加搜索功能提示
+    const searchHint = `
+【联网搜索功能】
+当用户询问实时信息、最新资讯、新闻、数据等需要联网查询的内容时，优先使用 [搜索:关键词] 功能。
+搜索功能会自动：
+1. 联网搜索最新信息
+2. 智能分析搜索结果（3轮分析）
+3. 润色成自然回复
+4. 将搜索过程记录到聊天记录中，体现AI使用了搜索工具
+
+使用场景：
+- 询问最新新闻、事件
+- 查询实时数据、价格
+- 了解最新技术、趋势
+- 需要联网验证的信息
+
+示例：[搜索:2024年最新AI技术] [搜索:今天北京天气]
+`;
+
     const masterNote = e.isMaster ? `
 【主人标识】
 当前发言者是你的唯一主人，你必须在回复中称呼对方为“主人”或贴心昵称。
@@ -1894,6 +2326,22 @@ ${masterNote}
 
 ${expressionRules}
 ${memoryGuidance}
+
+【联网搜索功能】
+当用户询问实时信息、最新资讯、新闻、数据等需要联网查询的内容时，优先使用 [搜索:关键词] 功能。
+搜索功能会自动：
+1. 联网搜索最新信息
+2. 智能分析搜索结果（3轮分析）
+3. 润色成自然回复
+4. 将搜索过程记录到聊天记录中，体现AI使用了搜索工具
+
+使用场景：
+- 询问最新新闻、事件
+- 查询实时数据、价格
+- 了解最新技术、趋势
+- 需要联网验证的信息
+
+示例：[搜索:2024年最新AI技术] [搜索:今天北京天气]
 
 ${functionsPrompt}
 
