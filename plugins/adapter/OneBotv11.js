@@ -854,6 +854,106 @@ Bot.adapter.push(
       })
     }
 
+    /**
+     * Napcat Stream API: 清理临时文件
+     * @param {Object} data - Bot数据对象
+     * @param {string} file_id - 临时文件ID
+     * @returns {Promise} API响应
+     */
+    cleanStreamTempFile(data, file_id) {
+      Bot.makeLog("info", `清理临时文件：${file_id}`, data.self_id);
+      return data.bot.sendApi("clean_stream_temp_file", {
+        file_id,
+      });
+    }
+
+    /**
+     * Napcat Stream API: 测试下载流
+     * @param {Object} data - Bot数据对象
+     * @param {Object} params - 测试参数
+     * @returns {Promise} API响应
+     */
+    testDownloadStream(data, params = {}) {
+      Bot.makeLog("debug", "测试下载流", data.self_id);
+      return data.bot.sendApi("test_download_stream", params);
+    }
+
+    /**
+     * Napcat Stream API: 文件下载流
+     * 用于大文件下载，支持流式传输
+     * @param {Object} data - Bot数据对象
+     * @param {string} url - 文件URL
+     * @param {number} thread_count - 线程数（可选）
+     * @param {Object} headers - 请求头（可选）
+     * @param {string} file_id - 文件ID（可选，用于断点续传）
+     * @returns {Promise} API响应（流式响应）
+     */
+    downloadFileStream(data, url, thread_count, headers, file_id) {
+      Bot.makeLog("info", `下载文件流：${url}`, data.self_id);
+      return data.bot.sendApi("download_file_stream", {
+        url,
+        thread_count,
+        headers,
+        file_id,
+      });
+    }
+
+    /**
+     * Napcat Stream API: 文件上传流
+     * 用于大文件上传，支持流式传输
+     * @param {Object} data - Bot数据对象
+     * @param {string} file - 文件路径或base64数据
+     * @param {string} name - 文件名（可选）
+     * @param {string} folder - 文件夹路径（可选，仅群文件）
+     * @param {string} group_id - 群ID（可选，群文件上传）
+     * @param {string} user_id - 用户ID（可选，私聊文件上传）
+     * @returns {Promise} API响应（流式响应）
+     */
+    async uploadFileStream(data, file, name, folder, group_id, user_id) {
+      const fileData = await this.makeFile(file, { file: true });
+      const params = {
+        file: fileData.replace("file://", ""),
+        name: name || path.basename(file),
+      };
+
+      if (folder) params.folder = folder;
+      if (group_id) {
+        params.group_id = group_id;
+        Bot.makeLog("info", `上传群文件流：${params.name}`, `${data.self_id} => ${group_id}`);
+        return data.bot.sendApi("upload_file_stream", params);
+      } else if (user_id) {
+        params.user_id = user_id;
+        Bot.makeLog("info", `上传私聊文件流：${params.name}`, `${data.self_id} => ${user_id}`);
+        return data.bot.sendApi("upload_file_stream", params);
+      } else {
+        Bot.makeLog("info", `上传文件流：${params.name}`, data.self_id);
+        return data.bot.sendApi("upload_file_stream", params);
+      }
+    }
+
+    /**
+     * Napcat Stream API: 发送好友文件（使用流式上传）
+     * @param {Object} data - Bot数据对象
+     * @param {string} file - 文件路径
+     * @param {string} name - 文件名（可选）
+     * @returns {Promise} API响应
+     */
+    async sendFriendFileStream(data, file, name = path.basename(file)) {
+      return this.uploadFileStream(data, file, name, null, null, data.user_id);
+    }
+
+    /**
+     * Napcat Stream API: 发送群文件（使用流式上传）
+     * @param {Object} data - Bot数据对象
+     * @param {string} file - 文件路径
+     * @param {string} folder - 文件夹路径（可选）
+     * @param {string} name - 文件名（可选）
+     * @returns {Promise} API响应
+     */
+    async sendGroupFileStream(data, file, folder, name = path.basename(file)) {
+      return this.uploadFileStream(data, file, name, folder, data.group_id, null);
+    }
+
     getGroupFs(data) {
       return {
         upload: this.sendGroupFile.bind(this, data),
@@ -906,6 +1006,164 @@ Bot.adapter.push(
     }
 
     /**
+     * Napcat API: 设置消息表情回应
+     * @param {Object} data - Bot数据对象
+     * @param {string|number} message_id - 消息ID
+     * @param {string} emoji_id - 表情ID（如 "1" 表示👍）
+     * @returns {Promise} API响应
+     */
+    setMessageReaction(data, message_id, emoji_id) {
+      Bot.makeLog("info", `设置消息表情回应：${message_id} ${emoji_id}`, data.self_id);
+      return data.bot.sendApi("set_message_reaction", {
+        message_id: String(message_id),
+        emoji_id: String(emoji_id),
+      });
+    }
+
+    /**
+     * Napcat API: 删除消息表情回应
+     * @param {Object} data - Bot数据对象
+     * @param {string|number} message_id - 消息ID
+     * @param {string} emoji_id - 表情ID（可选，不传则删除所有表情）
+     * @returns {Promise} API响应
+     */
+    deleteMessageReaction(data, message_id, emoji_id) {
+      const params = { message_id: String(message_id) };
+      if (emoji_id) params.emoji_id = String(emoji_id);
+      Bot.makeLog("info", `删除消息表情回应：${message_id} ${emoji_id || "全部"}`, data.self_id);
+      return data.bot.sendApi("delete_message_reaction", params);
+    }
+
+    /**
+     * Napcat API: 获取自定义表情
+     * @param {Object} data - Bot数据对象
+     * @param {string|number} face_id - 表情ID
+     * @returns {Promise} API响应
+     */
+    fetchCustomFace(data, face_id) {
+      Bot.makeLog("debug", `获取自定义表情：${face_id}`, data.self_id);
+      return data.bot.sendApi("fetch_custom_face", {
+        face_id: String(face_id),
+      });
+    }
+
+    /**
+     * Napcat API: 获取 AI 语音角色列表
+     * @param {Object} data - Bot数据对象
+     * @returns {Promise} API响应，包含 AI 语音角色列表
+     */
+    getAiCharacters(data) {
+      Bot.makeLog("debug", "获取 AI 语音角色列表", data.self_id);
+      return data.bot.sendApi("get_ai_characters");
+    }
+
+    /**
+     * Napcat API: 群聊发送 AI 语音
+     * @param {Object} data - Bot数据对象
+     * @param {string} text - 要转换的文本
+     * @param {string|number} character_id - AI 语音角色ID（可选）
+     * @param {string|number} character_name - AI 语音角色名称（可选）
+     * @returns {Promise} API响应
+     */
+    sendGroupAiRecord(data, text, character_id, character_name) {
+      const params = {
+        group_id: data.group_id,
+        text: String(text),
+      };
+      if (character_id) params.character_id = String(character_id);
+      if (character_name) params.character_name = String(character_name);
+      Bot.makeLog("info", `发送群 AI 语音：${text.substring(0, 20)}...`, `${data.self_id} => ${data.group_id}`);
+      return data.bot.sendApi("send_group_ai_record", params);
+    }
+
+    /**
+     * Napcat API: 私聊发送 AI 语音
+     * @param {Object} data - Bot数据对象
+     * @param {string} text - 要转换的文本
+     * @param {string|number} character_id - AI 语音角色ID（可选）
+     * @param {string|number} character_name - AI 语音角色名称（可选）
+     * @returns {Promise} API响应
+     */
+    sendPrivateAiRecord(data, text, character_id, character_name) {
+      const params = {
+        user_id: data.user_id,
+        text: String(text),
+      };
+      if (character_id) params.character_id = String(character_id);
+      if (character_name) params.character_name = String(character_name);
+      Bot.makeLog("info", `发送私聊 AI 语音：${text.substring(0, 20)}...`, `${data.self_id} => ${data.user_id}`);
+      return data.bot.sendApi("send_private_ai_record", params);
+    }
+
+    /**
+     * Napcat API: 获取消息表情回应列表
+     * @param {Object} data - Bot数据对象
+     * @param {string|number} message_id - 消息ID
+     * @returns {Promise} API响应，包含表情回应列表
+     */
+    getMessageReactions(data, message_id) {
+      Bot.makeLog("debug", `获取消息表情回应列表：${message_id}`, data.self_id);
+      return data.bot.sendApi("get_message_reactions", {
+        message_id: String(message_id),
+      });
+    }
+
+    /**
+     * Napcat API: 获取群公告列表
+     * @param {Object} data - Bot数据对象
+     * @param {string|number} group_id - 群ID（可选，默认使用 data.group_id）
+     * @returns {Promise} API响应
+     */
+    getGroupAnnouncements(data, group_id) {
+      const targetGroupId = group_id || data.group_id;
+      Bot.makeLog("debug", `获取群公告列表：${targetGroupId}`, data.self_id);
+      return data.bot.sendApi("get_group_announcements", {
+        group_id: String(targetGroupId),
+      });
+    }
+
+    /**
+     * Napcat API: 设置群公告
+     * @param {Object} data - Bot数据对象
+     * @param {string} content - 公告内容
+     * @param {string|number} group_id - 群ID（可选，默认使用 data.group_id）
+     * @param {boolean} pinned - 是否置顶（可选，默认 false）
+     * @param {boolean} show_edit_card - 是否显示编辑名片（可选，默认 false）
+     * @param {boolean} show_popup - 是否弹窗显示（可选，默认 false）
+     * @param {boolean} require_confirmation - 是否需要确认（可选，默认 false）
+     * @returns {Promise} API响应
+     */
+    setGroupAnnouncement(data, content, group_id, pinned, show_edit_card, show_popup, require_confirmation) {
+      const targetGroupId = group_id || data.group_id;
+      const params = {
+        group_id: String(targetGroupId),
+        content: String(content),
+      };
+      if (pinned !== undefined) params.pinned = Boolean(pinned);
+      if (show_edit_card !== undefined) params.show_edit_card = Boolean(show_edit_card);
+      if (show_popup !== undefined) params.show_popup = Boolean(show_popup);
+      if (require_confirmation !== undefined) params.require_confirmation = Boolean(require_confirmation);
+      Bot.makeLog("info", `设置群公告：${content.substring(0, 20)}...`, `${data.self_id} => ${targetGroupId}`);
+      return data.bot.sendApi("set_group_announcement", params);
+    }
+
+    /**
+     * Napcat API: 删除群公告
+     * @param {Object} data - Bot数据对象
+     * @param {string|number} announcement_id - 公告ID
+     * @param {string|number} group_id - 群ID（可选，默认使用 data.group_id）
+     * @returns {Promise} API响应
+     */
+    deleteGroupAnnouncement(data, announcement_id, group_id) {
+      const targetGroupId = group_id || data.group_id;
+      Bot.makeLog("info", `删除群公告：${announcement_id}`, `${data.self_id} => ${targetGroupId}`);
+      return data.bot.sendApi("delete_group_announcement", {
+        group_id: String(targetGroupId),
+        announcement_id: String(announcement_id),
+      });
+    }
+
+    /**
      * 创建好友对象
      */
     pickFriend(data, user_id) {
@@ -922,6 +1180,9 @@ Bot.adapter.push(
         getForwardMsg: this.getForwardMsg.bind(this, i),
         sendForwardMsg: this.sendFriendForwardMsg.bind(this, i),
         sendFile: this.sendFriendFile.bind(this, i),
+        sendFileStream: this.sendFriendFileStream.bind(this, i),
+        sendAiRecord: (text, character_id, character_name) => 
+          this.sendPrivateAiRecord(i, text, character_id, character_name),
         getInfo: this.getFriendInfo.bind(this, i),
         getAvatarUrl() {
           return this.avatar || `https://q.qlogo.cn/g?b=qq&s=0&nk=${user_id}`
@@ -1025,6 +1286,7 @@ Bot.adapter.push(
         getForwardMsg: this.getForwardMsg.bind(this, i),
         sendForwardMsg: this.sendGroupForwardMsg.bind(this, i),
         sendFile: (file, name) => this.sendGroupFile(i, file, undefined, name),
+        sendFileStream: (file, folder, name) => this.sendGroupFileStream(i, file, folder, name),
         getInfo: this.getGroupInfo.bind(this, i),
         getAvatarUrl() {
           return this.avatar || `https://p.qlogo.cn/gh/${group_id}/${group_id}/0`
@@ -1048,6 +1310,28 @@ Bot.adapter.push(
         kickMember: this.setGroupKick.bind(this, i),
         quit: this.setGroupLeave.bind(this, i),
         fs: this.getGroupFs(i),
+        // Napcat Stream API 方法
+        cleanStreamTempFile: this.cleanStreamTempFile.bind(this, i),
+        testDownloadStream: this.testDownloadStream.bind(this, i),
+        downloadFileStream: this.downloadFileStream.bind(this, i),
+        uploadFileStream: (file, name, folder) => this.uploadFileStream(i, file, name, folder, group_id, null),
+        // Napcat 表情回应 API
+        setMessageReaction: (message_id, emoji_id) => 
+          this.setMessageReaction(i, message_id, emoji_id),
+        deleteMessageReaction: (message_id, emoji_id) => 
+          this.deleteMessageReaction(i, message_id, emoji_id),
+        getMessageReactions: (message_id) => 
+          this.getMessageReactions(i, message_id),
+        // Napcat 其他 API
+        sendAiRecord: (text, character_id, character_name) => 
+          this.sendGroupAiRecord(i, text, character_id, character_name),
+        fetchCustomFace: (face_id) => this.fetchCustomFace(i, face_id),
+        getAiCharacters: () => this.getAiCharacters(i),
+        getAnnouncements: () => this.getGroupAnnouncements(i),
+        setAnnouncement: (content, pinned, show_edit_card, show_popup, require_confirmation) => 
+          this.setGroupAnnouncement(i, content, null, pinned, show_edit_card, show_popup, require_confirmation),
+        deleteAnnouncement: (announcement_id) => 
+          this.deleteGroupAnnouncement(i, announcement_id),
         get is_owner() {
           const botMemberInfo = data.bot.gml?.get(group_id)?.get(data.self_id)
           return botMemberInfo?.role === "owner"
@@ -1137,6 +1421,28 @@ Bot.adapter.push(
 
         setEssenceMessage: this.setEssenceMsg.bind(this, data),
         removeEssenceMessage: this.deleteEssenceMsg.bind(this, data),
+
+        // Napcat 表情回应 API
+        setMessageReaction: (message_id, emoji_id) => 
+          this.setMessageReaction(data, message_id, emoji_id),
+        deleteMessageReaction: (message_id, emoji_id) => 
+          this.deleteMessageReaction(data, message_id, emoji_id),
+        getMessageReactions: (message_id) => 
+          this.getMessageReactions(data, message_id),
+
+        // Napcat 其他 API
+        fetchCustomFace: (face_id) => this.fetchCustomFace(data, face_id),
+        getAiCharacters: () => this.getAiCharacters(data),
+        sendGroupAiRecord: (text, character_id, character_name) => 
+          this.sendGroupAiRecord(data, text, character_id, character_name),
+        sendPrivateAiRecord: (text, character_id, character_name) => 
+          this.sendPrivateAiRecord(data, text, character_id, character_name),
+        getGroupAnnouncements: (group_id) => 
+          this.getGroupAnnouncements(data, group_id),
+        setGroupAnnouncement: (content, group_id, pinned, show_edit_card, show_popup, require_confirmation) => 
+          this.setGroupAnnouncement(data, content, group_id, pinned, show_edit_card, show_popup, require_confirmation),
+        deleteGroupAnnouncement: (announcement_id, group_id) => 
+          this.deleteGroupAnnouncement(data, announcement_id, group_id),
 
         cookies: {},
         getCookies(domain) {
