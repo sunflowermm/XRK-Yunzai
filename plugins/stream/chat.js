@@ -1837,16 +1837,16 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 执行联网搜索流程（智能体流程：爬虫 -> AI分析 -> 人设回应 -> 润色）
+   * 执行联网搜索流程（优化版：爬虫主动筛选 -> AI快速分析 -> 人设回应 -> 润色）
    * 流程：
-   * 1. 爬虫：直接执行搜索，获取精简优化结果
-   * 2. AI分析：分析爬虫结果，推理筛选
+   * 1. 爬虫：执行搜索，主动推理筛选，提取关键信息
+   * 2. AI分析：快速分析已筛选的精简结果
    * 3. 人设回应：根据人设和工作流给出回应
    * 4. 润色：润色最终回复
    */
   async runWebSearch(keyword, context) {
     try {
-      // 步骤1: 直接执行搜索（爬虫）
+      // 步骤1: 执行搜索（爬虫）并主动筛选
       BotUtil.makeLog('info', `[搜索] 开始爬虫搜索: ${keyword}`, 'ChatStream');
       const searchResults = await this.executeSearch(keyword);
       
@@ -1858,39 +1858,39 @@ export default class ChatStream extends AIStream {
         };
       }
       
-      // 精简结果，只保留前6个，确保AI能够分析
-      const topResults = searchResults.slice(0, 6);
-      BotUtil.makeLog('info', `[搜索] 爬虫找到${topResults.length}个结果（已精简）`, 'ChatStream');
+      // 爬虫阶段主动筛选：只保留最相关的前3-4个结果，并提取关键信息
+      const filteredResults = this.filterAndExtractResults(searchResults, keyword);
+      BotUtil.makeLog('info', `[搜索] 爬虫筛选后保留${filteredResults.length}个结果`, 'ChatStream');
       
       if (!this.callAI) {
         // 如果没有AI，直接返回格式化结果
         return {
           type: 'text',
-          content: this.formatSearchResults(topResults),
-          metadata: { keyword, searchCount: topResults.length }
+          content: this.formatSearchResults(filteredResults),
+          metadata: { keyword, searchCount: filteredResults.length }
         };
       }
       
-      // 步骤2: AI分析爬虫结果，推理筛选
-      BotUtil.makeLog('info', `[分析] AI分析爬虫结果`, 'ChatStream');
-      const filteredAnalysis = await this.analyzeCrawlerResults(topResults, keyword, context);
+      // 步骤2: AI快速分析已筛选的精简结果
+      BotUtil.makeLog('info', `[分析] AI快速分析筛选结果`, 'ChatStream');
+      const quickAnalysis = await this.quickAnalyzeResults(filteredResults, keyword, context);
       
-      if (!filteredAnalysis || filteredAnalysis.trim().length === 0) {
-        BotUtil.makeLog('warn', `[分析] AI分析失败，使用原始结果`, 'ChatStream');
+      if (!quickAnalysis || quickAnalysis.trim().length === 0) {
+        BotUtil.makeLog('warn', `[分析] AI分析失败，使用筛选结果`, 'ChatStream');
         return {
           type: 'text',
-          content: this.formatSearchResults(topResults),
-          metadata: { keyword, searchCount: topResults.length }
+          content: this.formatSearchResults(filteredResults),
+          metadata: { keyword, searchCount: filteredResults.length }
         };
       }
       
       // 步骤3: 根据人设和工作流生成回应
       BotUtil.makeLog('info', `[回应] AI生成人设回应`, 'ChatStream');
-      let personaResponse = await this.generatePersonaResponse(filteredAnalysis, keyword, context);
+      let personaResponse = await this.generatePersonaResponse(quickAnalysis, keyword, context);
       
       if (!personaResponse || personaResponse.trim().length === 0) {
         BotUtil.makeLog('warn', `[回应] AI生成回应失败，使用分析结果`, 'ChatStream');
-        personaResponse = `我搜索了一下"${keyword}"，找到以下信息：\n\n${filteredAnalysis}`;
+        personaResponse = `我搜索了一下"${keyword}"，找到以下信息：\n\n${quickAnalysis}`;
       }
       
       // 步骤4: 润色最终回复
@@ -1908,8 +1908,8 @@ export default class ChatStream extends AIStream {
         content: polishedResult || personaResponse,
         metadata: {
           keyword,
-          searchCount: topResults.length,
-          searchResults: topResults.slice(0, 5)
+          searchCount: filteredResults.length,
+          searchResults: filteredResults.slice(0, 3)
         }
       };
     } catch (error) {
@@ -1919,6 +1919,100 @@ export default class ChatStream extends AIStream {
         content: `搜索过程中出现错误，请稍后再试。如果问题持续，可以尝试换个关键词搜索。` 
       };
     }
+  }
+
+  /**
+   * 爬虫阶段主动筛选和提取关键信息（减少传给AI的内容）
+   */
+  filterAndExtractResults(searchResults, keyword) {
+    if (!searchResults || searchResults.length === 0) return [];
+    
+    // 1. 相关性评分（简单规则）
+    const scoredResults = searchResults.map(item => {
+      let score = 0;
+      const titleLower = item.title.toLowerCase();
+      const snippetLower = (item.snippet || '').toLowerCase();
+      const keywordLower = keyword.toLowerCase();
+      const keywords = keywordLower.split(/\s+/);
+      
+      // 标题匹配
+      keywords.forEach(kw => {
+        if (titleLower.includes(kw)) score += 3;
+        if (snippetLower.includes(kw)) score += 1;
+      });
+      
+      // 官方来源加分
+      if (titleLower.includes('政府') || titleLower.includes('官方') || 
+          titleLower.includes('国务院') || titleLower.includes('gov.cn')) {
+        score += 2;
+      }
+      
+      // 时间相关加分
+      if (titleLower.includes('最新') || titleLower.includes('2024') || 
+          titleLower.includes('2025') || snippetLower.includes('最新')) {
+        score += 1;
+      }
+      
+      return { ...item, score };
+    });
+    
+    // 2. 按分数排序，取前3-4个
+    const topResults = scoredResults
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 4)
+      .map(item => {
+        // 提取关键信息：精简标题和摘要
+        const title = item.title.length > 60 ? item.title.substring(0, 60) + '...' : item.title;
+        const snippet = (item.snippet || '').length > 100 ? item.snippet.substring(0, 100) + '...' : item.snippet;
+        
+        return {
+          title,
+          snippet: snippet || '暂无摘要',
+          url: item.url,
+          index: item.index || 1
+        };
+      });
+    
+    return topResults;
+  }
+
+  /**
+   * AI快速分析已筛选的精简结果（减少token，提高速度）
+   */
+  async quickAnalyzeResults(filteredResults, keyword, context) {
+    // 构建精简的输入（只包含关键信息）
+    const resultsText = filteredResults.map((item, idx) => 
+      `${idx + 1}. ${item.title}\n   ${item.snippet}`
+    ).join('\n\n');
+    
+    const messages = [
+      {
+        role: 'system',
+        content: `你是信息提取专家。从已筛选的搜索结果中快速提取最核心的信息。
+
+要求：
+1. 只提取与"${keyword}"最直接相关的2-3个要点
+2. 用一句话概括每个要点
+3. 纯文本，不用Markdown
+4. 总长度控制在150字以内
+5. 如果信息不足，如实说明`
+      },
+      {
+        role: 'user',
+        content: `快速提取以下搜索结果的核心信息（2-3个要点，150字以内）：
+
+${resultsText}`
+      }
+    ];
+    
+    const apiConfig = context?.config || context?.question?.config || {};
+    const result = await this.callAI(messages, {
+      ...apiConfig,
+      maxTokens: 300, // 大幅减少token，提高速度
+      temperature: 0.5
+    });
+    
+    return result || filteredResults.map(r => r.title).join('、');
   }
 
   /**
@@ -1948,104 +2042,50 @@ export default class ChatStream extends AIStream {
     }
   }
 
-  /**
-   * 分析爬虫结果，推理筛选（精简结果，确保AI能够分析）
-   */
-  async analyzeCrawlerResults(searchResults, keyword, context) {
-    // 精简搜索结果文本，确保AI能够分析（限制每个结果的长度）
-    const resultsText = searchResults.map((item, idx) => {
-      const title = item.title.length > 80 ? item.title.substring(0, 80) + '...' : item.title;
-      const snippet = item.snippet.length > 150 ? item.snippet.substring(0, 150) + '...' : item.snippet;
-      return `[结果${idx + 1}] 标题: ${title}\n摘要: ${snippet}`;
-    }).join('\n\n');
-    
-      const messages = [
-        {
-          role: 'system',
-          content: `你是信息分析专家。从爬虫搜索结果中提取、推理、筛选出最相关、最有价值的信息。
-
-要求：
-1. 分析每个结果与"${keyword}"的相关性
-2. 筛选出最相关、最权威的信息（3-5个要点）
-3. 去除重复、低质量、不相关信息
-4. 提取关键事实、数据、观点
-5. 用简洁语言总结，纯文本格式，不用Markdown
-6. 如果信息不足，如实说明
-7. 控制输出长度，确保精简（300-500字）`
-        },
-        {
-          role: 'user',
-          content: `分析以下爬虫搜索结果，提取与"${keyword}"最相关的信息（3-5个要点，精简总结）：
-
-${resultsText}`
-        }
-      ];
-      
-      const apiConfig = context?.config || context?.question?.config || {};
-      const result = await this.callAI(messages, {
-        ...apiConfig,
-        maxTokens: 800, // 减少token，确保精简
-        temperature: 0.6
-      });
-    
-    return result || this.formatSearchResults(searchResults);
-  }
 
   /**
-   * 根据人设和工作流生成回应
+   * 根据人设和工作流生成回应（优化版：减少输入，提高速度）
    */
-  async generatePersonaResponse(filteredAnalysis, keyword, context) {
+  async generatePersonaResponse(quickAnalysis, keyword, context) {
     const persona = context?.question?.persona || context?.persona || '我是AI助手';
     const e = context?.e;
     const isGroup = e?.isGroup || false;
-    const botRole = context?.question?.botRole || '成员';
     
     const messages = [
       {
         role: 'system',
         content: `${persona}
 
-你是QQ聊天助手，需要将搜索分析结果转换成符合你人设的友好回复。
+你是QQ聊天助手，将搜索信息转换成符合人设的友好回复。
 
-【重要要求】
-1. 必须使用纯文本，绝对不要使用Markdown格式
-2. 禁止使用星号(*)、下划线(_)、反引号(backtick)、井号(#)、方括号([])用于标题
-3. 语气要自然轻松，像QQ聊天一样
-4. 开头要说明"我搜索了一下"或类似表达，体现使用了搜索工具
-5. 将分析结果整合成流畅的对话，符合你的人设
-6. 保持简洁，控制在3-5句话内
-7. 可以适当引用具体数据或事实
-8. 如果是群聊，语气要更轻松；如果是私聊，可以更详细
-
-${isGroup ? `当前在群聊中，身份：${botRole}` : '当前在私聊中'}`
+要求：
+1. 纯文本，不用Markdown
+2. 语气自然轻松，像QQ聊天
+3. 开头说明"我搜索了一下"或类似表达
+4. 整合信息，符合人设
+5. 控制在2-3句话内
+6. 简洁明了`
       },
       {
         role: 'user',
-        content: `请将以下搜索分析结果转换成符合你人设的友好回复：
+        content: `将以下信息转换成符合你人设的友好回复（2-3句话）：
 
-${filteredAnalysis}
-
-要求：
-1. 开头说明使用了搜索工具
-2. 自然整合信息，符合人设
-3. 纯文本格式
-4. 语气轻松友好
-5. 控制在3-5句话`
+${quickAnalysis}`
       }
     ];
     
     const apiConfig = context?.config || context?.question?.config || {};
     const result = await this.callAI(messages, {
       ...apiConfig,
-      maxTokens: 800,
-      temperature: 0.8
+      maxTokens: 400, // 减少token，提高速度
+      temperature: 0.7
     });
     
-    return result || `我搜索了一下"${keyword}"，找到以下信息：\n\n${filteredAnalysis}`;
+    return result || `我搜索了一下"${keyword}"，${quickAnalysis}`;
   }
 
   /**
-   * 润色最终回复
+   * 润色最终回复（优化版：快速润色）
    */
   async polishFinalResponse(response, keyword, context) {
     const persona = context?.question?.persona || context?.persona || '保持原角色语气';
@@ -2055,11 +2095,7 @@ ${filteredAnalysis}
         role: 'system',
         content: `${persona}
 
-你是QQ聊天润色器，只能做轻微整理：
-1. 删除舞台提示、括号或方括号里未执行的工具描述（例如[回复:xxx]、(正在... )等）
-2. 保留原意，语气自然，像正常聊天，尽量简短，用常用标点分句
-3. 不要添加新信息或Markdown，只输出纯文本
-4. 确保回复流畅、自然、符合人设`
+快速润色：删除工具描述、舞台提示，保留原意，语气自然，纯文本。`
       },
       {
         role: 'user',
@@ -2070,7 +2106,7 @@ ${filteredAnalysis}
     const apiConfig = context?.config || context?.question?.config || {};
     const result = await this.callAI(messages, {
       ...apiConfig,
-      maxTokens: 600,
+      maxTokens: 300, // 减少token，提高速度
       temperature: 0.3
     });
     
