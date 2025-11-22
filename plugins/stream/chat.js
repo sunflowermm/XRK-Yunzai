@@ -86,7 +86,7 @@ const _path = process.cwd();
 // 统一路径处理：使用path.resolve确保跨平台兼容
 const EMOTIONS_DIR = path.resolve(_path, 'resources', 'aiimages');
 const EMOTION_TYPES = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
-const CHAT_RESPONSE_TIMEOUT = 120000; // 缩短到120秒，提高响应速度
+const CHAT_RESPONSE_TIMEOUT = 190000; // 缩短到120秒，提高响应速度
 
 // 表情回应映射
 const EMOJI_REACTIONS = {
