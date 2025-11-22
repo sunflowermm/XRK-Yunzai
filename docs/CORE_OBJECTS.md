@@ -1,20 +1,34 @@
 # 核心对象与全局依赖
 
-本文档详细介绍 XRK-Yunzai 的核心对象，包括它们在技术栈中的作用、特性、API 和使用示例。
+<div align="center">
 
-> **架构概览**: 如需了解系统整体架构和各对象的关系，请参阅 [技术架构文档](./ARCHITECTURE.md)
+![Core Objects](https://img.shields.io/badge/Core%20Objects-7-blue?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Active-success?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-3.1.3-informational?style=for-the-badge)
+
+> 📚 本文档详细介绍 XRK-Yunzai 的核心对象，包括它们在技术栈中的作用、特性、API 和使用示例。
+
+</div>
+
+> 💡 **架构概览**: 如需了解系统整体架构和各对象的关系，请参阅 [技术架构文档](./ARCHITECTURE.md)
 
 ---
 
-## 文档导航
+## 📑 文档导航
 
-- [1. Bot 对象](#1-bot-对象) - 系统核心控制器
-- [2. 事件对象 e](#2-事件对象-e) - 统一的事件数据结构
-- [3. logger 对象](#3-logger-对象) - 日志系统
-- [4. cfg 对象](#4-cfg-对象) - 配置管理系统
-- [5. segment 对象](#5-segment-对象) - 消息段构造器
-- [6. redis 客户端](#6-redis-客户端) - Redis 缓存服务
-- [7. BotUtil 工具集](#7-botutil-工具集) - 工具函数集合
+<div align="left">
+
+| # | 📦 对象 | 📝 说明 |
+|:---:|---|:---:|
+| 1️⃣ | [Bot 对象](#1-bot-对象-libbotjs) | 🤖 系统核心控制器 |
+| 2️⃣ | [事件对象 e](#2-事件对象-e) | 📨 统一的事件数据结构 |
+| 3️⃣ | [logger 对象](#3-logger-对象-libconfiglogjs) | 📊 日志系统 |
+| 4️⃣ | [cfg 对象](#4-cfg-对象-libconfigconfigjs) | ⚙️ 配置管理系统 |
+| 5️⃣ | [segment 对象](#5-segment-对象) | 📝 消息段构造器 |
+| 6️⃣ | [redis 客户端](#6-redis-客户端-libconfigredisjs) | 🔴 Redis 缓存服务 |
+| 7️⃣ | [BotUtil 工具集](#7-botutil-工具集-libcommonutiljs) | 🛠️ 工具函数集合 |
+
+</div>
 
 ---
 

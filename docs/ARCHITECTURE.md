@@ -1,41 +1,59 @@
 # XRK-Yunzai 技术架构文档
 
-本文档详细说明 XRK-Yunzai 的技术栈架构、核心对象的作用与特性，以及它们在整个系统中的位置和关系。
+<div align="center">
+
+![Architecture](https://img.shields.io/badge/Architecture-Document-blue?style=for-the-badge)
+![Event-Driven](https://img.shields.io/badge/Event--Driven-✓-success?style=for-the-badge)
+![Modular](https://img.shields.io/badge/Modular-Design-blueviolet?style=for-the-badge)
+
+> 🏗️ 本文档详细说明 XRK-Yunzai 的技术栈架构、核心对象的作用与特性，以及它们在整个系统中的位置和关系。
+
+</div>
 
 ---
 
 ## 1. 系统架构概览
 
-XRK-Yunzai 采用事件驱动、模块化的架构设计，核心组件包括：
+<div align="center">
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     应用入口层                                │
-│  app.js / start.js / debug.js                                │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-┌──────────────────────▼──────────────────────────────────────┐
-│                    Bot 核心层                                 │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │ HTTP/HTTPS   │  │  WebSocket    │  │   代理服务   │      │
-│  │   服务器     │  │    服务器     │  │              │      │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
-│                                                               │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │   插件系统   │  │   工作流系统  │  │   路由系统   │      │
-│  │ PluginsLoader│  │  AIStream     │  │  ApiLoader   │      │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
-│                                                               │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │   配置系统   │  │   Redis客户端 │  │   日志系统   │      │
-│  │     Cfg      │  │   redisInit   │  │    logger    │      │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
-└───────────────────────────────────────────────────────────────┘
-                       │
-┌──────────────────────▼──────────────────────────────────────┐
-│                   适配器层                                     │
-│  OneBotv11 / StdinBot / DeviceAdapter / ...                   │
-└───────────────────────────────────────────────────────────────┘
+XRK-Yunzai 采用 **事件驱动、模块化** 的架构设计，核心组件包括：
+
+</div>
+
+```mermaid
+graph TB
+    subgraph Entry["🚀 应用入口层"]
+        App["app.js"]
+        Start["start.js"]
+        Debug["debug.js"]
+    end
+    
+    subgraph Core["🤖 Bot 核心层"]
+        HTTP["HTTP/HTTPS<br/>服务器"]
+        WS["WebSocket<br/>服务器"]
+        Proxy["代理服务"]
+        
+        PluginSys["插件系统<br/>PluginsLoader"]
+        WorkflowSys["工作流系统<br/>AIStream"]
+        RouteSys["路由系统<br/>ApiLoader"]
+        
+        ConfigSys["配置系统<br/>Cfg"]
+        RedisSys["Redis客户端<br/>redisInit"]
+        LogSys["日志系统<br/>logger"]
+    end
+    
+    subgraph Adapter["🔌 适配器层"]
+        OneBot["OneBotv11"]
+        Stdin["StdinBot"]
+        Device["DeviceAdapter"]
+    end
+    
+    Entry --> Core
+    Core --> Adapter
+    
+    style Core fill:#4a90e2,stroke:#2c5aa0,color:#fff
+    style Entry fill:#50c878,stroke:#2d8659,color:#fff
+    style Adapter fill:#feca57,stroke:#d68910,color:#000
 ```
 
 ---

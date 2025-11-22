@@ -1,6 +1,16 @@
-# Logger 对象完整手册 (`lib/config/log.js`)
+# Logger 对象完整手册
 
-> 全局注入的日志系统，基于 Pino 高性能日志库，提供丰富的日志方法和格式化工具。
+<div align="center">
+
+![Logger](https://img.shields.io/badge/Logger-Complete%20API-blue?style=for-the-badge)
+![Pino](https://img.shields.io/badge/Based%20on-Pino-success?style=for-the-badge)
+![Performance](https://img.shields.io/badge/Performance-High-brightgreen?style=for-the-badge)
+
+> 📊 全局注入的日志系统，基于 Pino 高性能日志库，提供丰富的日志方法和格式化工具。
+
+**📁 文件路径**: `lib/config/log.js`
+
+</div>
 
 ---
 

@@ -1,12 +1,28 @@
 # 插件基类开发文档
 
-## 概述
+<div align="center">
 
-`Plugin` 是所有插件的基类，提供工作流集成、上下文管理、消息回复等功能。所有插件都应继承此类。
+![Plugin Base](https://img.shields.io/badge/Plugin%20Base-Class-blue?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Stable-success?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-3.1.3-informational?style=for-the-badge)
 
-**文件路径**: `lib/plugins/plugin.js`
+</div>
 
-## 类结构
+## 📖 概述
+
+<div align="left">
+
+> 🔌 `Plugin` 是所有插件的基类，提供工作流集成、上下文管理、消息回复等功能。所有插件都应继承此类。
+
+**📁 文件路径**: `lib/plugins/plugin.js`
+
+</div>
+
+## 🏗️ 类结构
+
+<div align="left">
+
+### 基础示例
 
 ```javascript
 import plugin from '../../lib/plugins/plugin.js';
@@ -32,6 +48,10 @@ export default class MyPlugin extends plugin {
   }
 }
 ```
+
+> 💡 **提示**: 所有插件都应继承 `plugin` 基类，并实现相应的处理函数。
+
+</div>
 
 ## 构造函数参数
 

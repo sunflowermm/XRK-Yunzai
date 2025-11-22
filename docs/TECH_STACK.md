@@ -1,6 +1,15 @@
 # XRK-Yunzai 技术栈全景
 
-本文档盘点 XRK-Yunzai 的核心技术栈、依赖与关键决策，帮助开发者快速理解系统边界与可扩展点。
+<div align="center">
+
+![Tech Stack](https://img.shields.io/badge/Tech%20Stack-Overview-blue?style=for-the-badge)
+![Node.js](https://img.shields.io/badge/Node.js-18%2B-green?style=for-the-badge&logo=node.js)
+![Redis](https://img.shields.io/badge/Redis-7-red?style=for-the-badge&logo=redis)
+![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
+
+> 🛠️ 本文档盘点 XRK-Yunzai 的核心技术栈、依赖与关键决策，帮助开发者快速理解系统边界与可扩展点。
+
+</div>
 
 ---
 
