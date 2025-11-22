@@ -118,49 +118,86 @@ const RESPONSE_POLISH_DEFAULT = {
  * @param {Object} extra 可选扩展字段，覆盖默认的模拟事件属性
  */
 async function simulateUserMessageEvent(e, simulatedMessage, extra = {}) {
-  if (!e || !simulatedMessage) return;
+  if (!e) {
+    BotUtil.makeLog('warn', '[ChatStream] 模拟用户消息事件：缺少事件对象', 'ChatStream');
+    return false;
+  }
+
+  if (!simulatedMessage || typeof simulatedMessage !== 'string' || !simulatedMessage.trim()) {
+    BotUtil.makeLog('warn', '[ChatStream] 模拟用户消息事件：消息内容无效', 'ChatStream');
+    return false;
+  }
 
   try {
     const now = Date.now();
+    const trimmedMessage = simulatedMessage.trim();
+
+    // 确保必要字段存在，提高健壮性
+    const userId = e.user_id || e.sender?.user_id;
+    const selfId = e.self_id || (typeof Bot !== 'undefined' && Bot.uin) || 0;
+    const groupId = e.group_id || null;
+    const isGroup = e.isGroup !== undefined ? e.isGroup : !!groupId;
+
+    if (!userId) {
+      BotUtil.makeLog('warn', '[ChatStream] 模拟用户消息事件：无法获取用户ID', 'ChatStream');
+      return false;
+    }
 
     const simulatedEvent = {
       ...e,
-      raw_message: simulatedMessage,
-      message: [{ type: 'text', text: simulatedMessage }],
-      msg: simulatedMessage,
-      message_id: now.toString(),
+      raw_message: trimmedMessage,
+      message: [{ type: 'text', text: trimmedMessage }],
+      msg: trimmedMessage,
+      message_id: `${now}_${Math.random().toString(36).slice(2, 9)}`,
       time: now,
-      user_id: e.user_id,
-      self_id: e.self_id,
+      user_id: userId,
+      self_id: selfId,
       post_type: 'message',
-      message_type: e.isGroup ? 'group' : 'private',
-      sub_type: e.isGroup ? 'normal' : 'friend',
-      group_id: e.group_id,
+      message_type: isGroup ? 'group' : 'private',
+      sub_type: isGroup ? 'normal' : 'friend',
+      group_id: groupId,
+      isGroup: isGroup,
       sender: {
-        ...e.sender,
-        nickname: e.sender?.nickname || '用户'
+        ...(e.sender || {}),
+        user_id: userId,
+        nickname: e.sender?.nickname || e.nickname || '用户',
+        card: e.sender?.card || e.card || ''
       },
       ...extra
     };
 
     if (typeof Bot !== 'undefined' && Bot.em) {
-      const eventType = e.isGroup
+      const eventType = isGroup
         ? 'message.group.normal'
         : 'message.private.friend';
 
       BotUtil.makeLog(
         'info',
-        `[ChatStream] 模拟用户消息事件: ${eventType} -> ${simulatedMessage}`,
+        `[ChatStream] 模拟用户消息事件: ${eventType} -> ${trimmedMessage} (用户: ${userId})`,
         'ChatStream'
       );
 
-      Bot.em(eventType, simulatedEvent);
+      // 使用setTimeout确保事件异步触发，避免阻塞
+      setTimeout(() => {
+        try {
+          Bot.em(eventType, simulatedEvent);
+        } catch (emitError) {
+          BotUtil.makeLog(
+            'error',
+            `[ChatStream] 触发事件失败: ${emitError.message}`,
+            'ChatStream'
+          );
+        }
+      }, 0);
+
+      return true;
     } else {
       BotUtil.makeLog(
         'warn',
         '[ChatStream] Bot.em 不可用，无法触发模拟 message 事件',
         'ChatStream'
       );
+      return false;
     }
   } catch (error) {
     BotUtil.makeLog(
@@ -168,6 +205,7 @@ async function simulateUserMessageEvent(e, simulatedMessage, extra = {}) {
       `[ChatStream] 模拟用户消息事件失败: ${error.message}`,
       'ChatStream'
     );
+    return false;
   }
 }
 
@@ -1460,10 +1498,13 @@ export default class ChatStream extends AIStream {
         return { functions, cleanText };
       },
       handler: async (params, context) => {
-        if (!context.e) return;
+        if (!context.e) {
+          BotUtil.makeLog('warn', '点歌功能：缺少事件对象', 'ChatStream');
+          return;
+        }
         
         try {
-          const songName = params.songName;
+          const songName = params?.songName?.trim();
           if (!songName) {
             BotUtil.makeLog('warn', '点歌功能：歌曲名为空', 'ChatStream');
             return;
@@ -1471,9 +1512,21 @@ export default class ChatStream extends AIStream {
 
           // 模拟用户发送 #点歌 指令，触发 message 事件
           const simulatedMessage = `#点歌${songName}`;
-          await simulateUserMessageEvent(context.e, simulatedMessage);
+          const success = await simulateUserMessageEvent(context.e, simulatedMessage);
+          if (!success) {
+            BotUtil.makeLog('warn', '点歌功能：触发消息事件失败', 'ChatStream');
+          }
         } catch (error) {
           BotUtil.makeLog('error', `点歌功能失败: ${error.message}`, 'ChatStream');
+          // 尝试重试一次
+          try {
+            const songName = params?.songName?.trim();
+            if (songName) {
+              await simulateUserMessageEvent(context.e, `#点歌${songName}`);
+            }
+          } catch (retryError) {
+            BotUtil.makeLog('error', `点歌功能重试失败: ${retryError.message}`, 'ChatStream');
+          }
         }
       },
       enabled: true
@@ -1505,10 +1558,13 @@ export default class ChatStream extends AIStream {
         return { functions, cleanText };
       },
       handler: async (params, context) => {
-        if (!context.e) return;
+        if (!context.e) {
+          BotUtil.makeLog('warn', '网易点歌功能：缺少事件对象', 'ChatStream');
+          return;
+        }
 
         try {
-        const songName = params.songName;
+          const songName = params?.songName?.trim();
           if (!songName) {
             BotUtil.makeLog('warn', '网易点歌功能：歌曲名为空', 'ChatStream');
             return;
@@ -1516,9 +1572,21 @@ export default class ChatStream extends AIStream {
 
           // 模拟用户发送 #网易点歌 指令，触发 message 事件
           const simulatedMessage = `#网易点歌${songName}`;
-          await simulateUserMessageEvent(context.e, simulatedMessage);
+          const success = await simulateUserMessageEvent(context.e, simulatedMessage);
+          if (!success) {
+            BotUtil.makeLog('warn', '网易点歌功能：触发消息事件失败', 'ChatStream');
+          }
         } catch (error) {
           BotUtil.makeLog('error', `网易点歌功能失败: ${error.message}`, 'ChatStream');
+          // 尝试重试一次
+          try {
+            const songName = params?.songName?.trim();
+            if (songName) {
+              await simulateUserMessageEvent(context.e, `#网易点歌${songName}`);
+            }
+          } catch (retryError) {
+            BotUtil.makeLog('error', `网易点歌功能重试失败: ${retryError.message}`, 'ChatStream');
+          }
         }
       },
       enabled: true
@@ -1550,10 +1618,13 @@ export default class ChatStream extends AIStream {
         return { functions, cleanText };
       },
       handler: async (params, context) => {
-        if (!context.e) return;
+        if (!context.e) {
+          BotUtil.makeLog('warn', '查天气功能：缺少事件对象', 'ChatStream');
+          return;
+        }
 
         try {
-        const cityName = params.cityName;
+          const cityName = params?.cityName?.trim();
           if (!cityName) {
             BotUtil.makeLog('warn', '查天气功能：城市名为空', 'ChatStream');
             return;
@@ -1561,9 +1632,21 @@ export default class ChatStream extends AIStream {
 
           // 模拟用户发送 #查天气 指令，触发 message 事件
           const simulatedMessage = `#查天气${cityName}`;
-          await simulateUserMessageEvent(context.e, simulatedMessage);
+          const success = await simulateUserMessageEvent(context.e, simulatedMessage);
+          if (!success) {
+            BotUtil.makeLog('warn', '查天气功能：触发消息事件失败', 'ChatStream');
+          }
         } catch (error) {
           BotUtil.makeLog('error', `查天气功能失败: ${error.message}`, 'ChatStream');
+          // 尝试重试一次
+          try {
+            const cityName = params?.cityName?.trim();
+            if (cityName) {
+              await simulateUserMessageEvent(context.e, `#查天气${cityName}`);
+            }
+          } catch (retryError) {
+            BotUtil.makeLog('error', `查天气功能重试失败: ${retryError.message}`, 'ChatStream');
+          }
         }
       },
       enabled: true
@@ -1595,14 +1678,125 @@ export default class ChatStream extends AIStream {
         return { functions, cleanText };
       },
       handler: async (params, context) => {
-        if (!context.e) return;
+        if (!context.e) {
+          BotUtil.makeLog('warn', '今日运势功能：缺少事件对象', 'ChatStream');
+          return;
+        }
 
         try {
           // 模拟用户发送 #今日运势 指令，触发 message 事件
           const simulatedMessage = '#今日运势';
-          await simulateUserMessageEvent(context.e, simulatedMessage);
+          const success = await simulateUserMessageEvent(context.e, simulatedMessage);
+          if (!success) {
+            BotUtil.makeLog('warn', '今日运势功能：触发消息事件失败', 'ChatStream');
+          }
         } catch (error) {
           BotUtil.makeLog('error', `今日运势功能失败: ${error.message}`, 'ChatStream');
+          // 尝试重试一次
+          try {
+            await simulateUserMessageEvent(context.e, '#今日运势');
+          } catch (retryError) {
+            BotUtil.makeLog('error', `今日运势功能重试失败: ${retryError.message}`, 'ChatStream');
+          }
+        }
+      },
+      enabled: true
+    });
+
+    // 26. 基于记忆触发指令（智能体记忆触发）
+    this.registerFunction('triggerCommand', {
+      description: '基于记忆触发指令',
+      prompt: `[当前:指令] - 根据记忆触发用户指令，AI可以通过记忆自动触发指令
+示例：[当前:#帮助] 会以事件记录的这个人的名义发送#帮助指令
+使用场景：当AI记住了"我想看帮助就触发#帮助"时，AI可以发送[当前:#帮助]来触发帮助指令
+支持所有指令格式，如 [当前:#点歌南山南]、[当前:#查天气北京] 等`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[当前:([^\]]+)\]/g;
+        let match;
+        
+        while ((match = regex.exec(text))) {
+          const command = match[1].trim();
+          if (command) {
+            functions.push({ 
+              type: 'triggerCommand', 
+              params: { command: command },
+              raw: match[0]
+            });
+          }
+        }
+        
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+        
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (!context.e) {
+          BotUtil.makeLog('warn', '触发指令功能：缺少事件对象', 'ChatStream');
+          return;
+        }
+        
+        try {
+          const command = params.command;
+          if (!command) {
+            BotUtil.makeLog('warn', '触发指令功能：指令为空', 'ChatStream');
+            return;
+          }
+
+          // 从记忆系统中查找相关记忆
+          const memorySystem = this.getMemorySystem();
+          if (memorySystem?.isEnabled()) {
+            const { ownerId, scene } = memorySystem.extractScene(context.e);
+            const memories = await memorySystem.getMemories(ownerId, scene, { 
+              limit: 10, 
+              layers: ['long', 'short', 'master'] 
+            });
+            
+            // 查找与当前指令相关的记忆
+            const relevantMemories = memories.filter(mem => {
+              const memContent = mem.content?.toLowerCase() || '';
+              const cmdLower = command.toLowerCase();
+              return memContent.includes(cmdLower) || 
+                     memContent.includes('触发') || 
+                     memContent.includes('发送');
+            });
+            
+            if (relevantMemories.length > 0) {
+              BotUtil.makeLog('info', 
+                `[触发指令] 找到${relevantMemories.length}条相关记忆，触发指令: ${command}`, 
+                'ChatStream'
+              );
+            }
+          }
+
+          // 模拟用户发送指令，触发 message 事件
+          // 确保指令以#开头（如果没有的话）
+          const simulatedMessage = command.startsWith('#') ? command : `#${command}`;
+          await simulateUserMessageEvent(context.e, simulatedMessage);
+          
+          BotUtil.makeLog('info', 
+            `[触发指令] 已触发指令: ${simulatedMessage} (用户: ${context.e.user_id})`, 
+            'ChatStream'
+          );
+        } catch (error) {
+          BotUtil.makeLog('error', 
+            `触发指令功能失败: ${error.message}`, 
+            'ChatStream'
+          );
+          // 即使出错也尝试触发，提高健壮性
+          try {
+            const command = params.command;
+            const simulatedMessage = command.startsWith('#') ? command : `#${command}`;
+            await simulateUserMessageEvent(context.e, simulatedMessage);
+          } catch (retryError) {
+            BotUtil.makeLog('error', 
+              `触发指令重试失败: ${retryError.message}`, 
+              'ChatStream'
+            );
+          }
         }
       },
       enabled: true
@@ -2927,10 +3121,16 @@ ${polishConfig.instructions || RESPONSE_POLISH_DEFAULT.instructions}`
       ? '\n记忆：如需记住关键信息，可调用 [工作流:memory:层级|内容]（层级支持 长期/短期，默认长期；加 group 表示群记忆；所有记忆至多保留3天）。如需删除记忆，可调用 [工作流:memory-forget:内容或id:xxx]。\n'
       : '';
 
+    // 添加基于记忆触发指令的说明
+    const memoryTriggerGuidance = memorySystem?.isEnabled()
+      ? '\n【智能记忆触发指令】\n当你记住了用户的偏好或习惯（如"我想看帮助就触发#帮助"），可以通过 [当前:指令] 来自动触发对应的指令。\n示例：如果记住了"用户想看帮助就触发#帮助"，当用户需要帮助时，你可以发送 [当前:#帮助] 来触发帮助指令。\n支持所有指令格式，如 [当前:#点歌南山南]、[当前:#查天气北京] 等。\n'
+      : '';
+
     return `【人设设定】
 ${persona}
 
 ${memorySection}
+${memoryTriggerGuidance}
 【身份信息】
 名字：${Bot.nickname}
 QQ号：${e.self_id}
