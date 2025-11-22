@@ -12,14 +12,6 @@
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-green?style=flat-square&logo=node.js)
 ![Redis](https://img.shields.io/badge/Redis-5%2B-red?style=flat-square&logo=redis)
 
-[![GitHub Stars](https://img.shields.io/github/stars/Xrkseek/XRK-Yunzai?style=flat-square&logo=github&label=Stars)](https://github.com/Xrkseek/XRK-Yunzai/stargazers)
-[![GitHub Forks](https://img.shields.io/github/forks/Xrkseek/XRK-Yunzai?style=flat-square&logo=github&label=Forks)](https://github.com/Xrkseek/XRK-Yunzai/network/members)
-[![GitHub Issues](https://img.shields.io/github/issues/Xrkseek/XRK-Yunzai?style=flat-square&logo=github&label=Issues)](https://github.com/Xrkseek/XRK-Yunzai/issues)
-[![GitHub Pull Requests](https://img.shields.io/github/issues-pr/Xrkseek/XRK-Yunzai?style=flat-square&logo=github&label=PRs)](https://github.com/Xrkseek/XRK-Yunzai/pulls)
-
-[![Gitee Stars](https://img.shields.io/badge/Gitee-Stars-red?style=flat-square&logo=gitee&logoColor=red&link=https://gitee.com/xrkseek/XRK-Yunzai/stargazers)](https://gitee.com/xrkseek/XRK-Yunzai/stargazers)
-[![Gitee Forks](https://img.shields.io/badge/Gitee-Forks-red?style=flat-square&logo=gitee&logoColor=red&link=https://gitee.com/xrkseek/XRK-Yunzai/members)](https://gitee.com/xrkseek/XRK-Yunzai/members)
-
 </div>
 
 ---
