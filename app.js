@@ -549,13 +549,25 @@ process.on('uncaughtException', async (error) => {
   process.exit(1);
 });
 
-process.on('unhandledRejection', async (reason) => {
+process.on('unhandledRejection', async (reason, promise) => {
   const logger = new BootstrapLogger();
   const errorMessage = reason instanceof Error 
     ? `${reason.message}\n${reason.stack}` 
     : String(reason);
+  
+  // 对于 API 不支持的错误，只记录警告，不退出进程
+  if (errorMessage.includes('不支持的Api') || 
+      errorMessage.includes('API_NOT_SUPPORTED') ||
+      (reason instanceof Error && reason.message && reason.message.includes('不支持的Api'))) {
+    await logger.warning(`API不支持（已忽略）: ${errorMessage}`);
+    return; // 不退出进程
+  }
+  
+  // 对于其他严重错误，记录并退出
   await logger.error(`未处理的Promise拒绝: ${errorMessage}`);
-  process.exit(1);
+  // 注意：这里不直接退出，让应用继续运行，但记录错误
+  // 如果确实需要退出，可以取消下面的注释
+  // process.exit(1);
 });
 
 /**

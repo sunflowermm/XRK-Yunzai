@@ -33,13 +33,25 @@ Bot.adapter.push(
 
       return cache.promise
         .then(data => {
-          if (data.retcode !== 0 && data.retcode !== 1)
-            throw Bot.makeError(data.msg || data.wording, request, { error: data })
+          if (data.retcode !== 0 && data.retcode !== 1) {
+            const error = Bot.makeError(data.msg || data.wording, request, { error: data })
+            // 对于不支持的 API，记录警告但不抛出错误，避免循环重启
+            if (data.retcode === 1404 || (data.msg && data.msg.includes('不支持的Api'))) {
+              Bot.makeLog("warn", `API不支持: ${action} (retcode: ${data.retcode})`, data.self_id)
+              return Promise.reject(error)
+            }
+            throw error
+          }
           return data.data
             ? new Proxy(data, {
               get: (target, prop) => target.data[prop] ?? target[prop],
             })
             : data
+        })
+        .catch(error => {
+          // 捕获错误并记录，避免未处理的 Promise 拒绝
+          Bot.makeLog("error", `API调用失败: ${action} - ${error.message}`, data.self_id)
+          throw error
         })
         .finally(() => {
           clearTimeout(timeout)
@@ -1007,31 +1019,56 @@ Bot.adapter.push(
 
     /**
      * Napcat API: 设置消息表情回应
+     * 注意：此 API 可能在某些版本中不支持，会返回 1404 错误
      * @param {Object} data - Bot数据对象
      * @param {string|number} message_id - 消息ID
      * @param {string} emoji_id - 表情ID（如 "1" 表示👍）
      * @returns {Promise} API响应
      */
-    setMessageReaction(data, message_id, emoji_id) {
-      Bot.makeLog("info", `设置消息表情回应：${message_id} ${emoji_id}`, data.self_id);
-      return data.bot.sendApi("set_message_reaction", {
-        message_id: String(message_id),
-        emoji_id: String(emoji_id),
-      });
+    async setMessageReaction(data, message_id, emoji_id) {
+      try {
+        Bot.makeLog("info", `设置消息表情回应：${message_id} ${emoji_id}`, data.self_id);
+        return await data.bot.sendApi("set_message_reaction", {
+          message_id: String(message_id),
+          emoji_id: String(emoji_id),
+        }).catch(error => {
+          // 如果 API 不支持，返回友好的错误信息而不是抛出异常
+          if (error.message && error.message.includes('不支持的Api')) {
+            Bot.makeLog("warn", `表情回应 API 不支持，可能需要更新 Napcat 版本`, data.self_id);
+            return { success: false, error: 'API_NOT_SUPPORTED', message: '表情回应功能不支持' };
+          }
+          throw error;
+        });
+      } catch (error) {
+        Bot.makeLog("error", `设置消息表情回应失败: ${error.message}`, data.self_id);
+        return { success: false, error: error.message };
+      }
     }
 
     /**
      * Napcat API: 删除消息表情回应
+     * 注意：此 API 可能在某些版本中不支持，会返回 1404 错误
      * @param {Object} data - Bot数据对象
      * @param {string|number} message_id - 消息ID
      * @param {string} emoji_id - 表情ID（可选，不传则删除所有表情）
      * @returns {Promise} API响应
      */
-    deleteMessageReaction(data, message_id, emoji_id) {
-      const params = { message_id: String(message_id) };
-      if (emoji_id) params.emoji_id = String(emoji_id);
-      Bot.makeLog("info", `删除消息表情回应：${message_id} ${emoji_id || "全部"}`, data.self_id);
-      return data.bot.sendApi("delete_message_reaction", params);
+    async deleteMessageReaction(data, message_id, emoji_id) {
+      try {
+        const params = { message_id: String(message_id) };
+        if (emoji_id) params.emoji_id = String(emoji_id);
+        Bot.makeLog("info", `删除消息表情回应：${message_id} ${emoji_id || "全部"}`, data.self_id);
+        return await data.bot.sendApi("delete_message_reaction", params).catch(error => {
+          if (error.message && error.message.includes('不支持的Api')) {
+            Bot.makeLog("warn", `表情回应 API 不支持，可能需要更新 Napcat 版本`, data.self_id);
+            return { success: false, error: 'API_NOT_SUPPORTED', message: '表情回应功能不支持' };
+          }
+          throw error;
+        });
+      } catch (error) {
+        Bot.makeLog("error", `删除消息表情回应失败: ${error.message}`, data.self_id);
+        return { success: false, error: error.message };
+      }
     }
 
     /**
@@ -1040,11 +1077,19 @@ Bot.adapter.push(
      * @param {string|number} face_id - 表情ID
      * @returns {Promise} API响应
      */
-    fetchCustomFace(data, face_id) {
-      Bot.makeLog("debug", `获取自定义表情：${face_id}`, data.self_id);
-      return data.bot.sendApi("fetch_custom_face", {
-        face_id: String(face_id),
-      });
+    async fetchCustomFace(data, face_id) {
+      try {
+        Bot.makeLog("debug", `获取自定义表情：${face_id}`, data.self_id);
+        return await data.bot.sendApi("fetch_custom_face", {
+          face_id: String(face_id),
+        }).catch(error => {
+          Bot.makeLog("warn", `获取自定义表情失败: ${error.message}`, data.self_id);
+          return { success: false, error: error.message };
+        });
+      } catch (error) {
+        Bot.makeLog("error", `获取自定义表情失败: ${error.message}`, data.self_id);
+        return { success: false, error: error.message };
+      }
     }
 
     /**
@@ -1052,9 +1097,17 @@ Bot.adapter.push(
      * @param {Object} data - Bot数据对象
      * @returns {Promise} API响应，包含 AI 语音角色列表
      */
-    getAiCharacters(data) {
-      Bot.makeLog("debug", "获取 AI 语音角色列表", data.self_id);
-      return data.bot.sendApi("get_ai_characters");
+    async getAiCharacters(data) {
+      try {
+        Bot.makeLog("debug", "获取 AI 语音角色列表", data.self_id);
+        return await data.bot.sendApi("get_ai_characters").catch(error => {
+          Bot.makeLog("warn", `获取 AI 语音角色列表失败: ${error.message}`, data.self_id);
+          return { success: false, error: error.message, data: [] };
+        });
+      } catch (error) {
+        Bot.makeLog("error", `获取 AI 语音角色列表失败: ${error.message}`, data.self_id);
+        return { success: false, error: error.message, data: [] };
+      }
     }
 
     /**
@@ -1065,15 +1118,23 @@ Bot.adapter.push(
      * @param {string|number} character_name - AI 语音角色名称（可选）
      * @returns {Promise} API响应
      */
-    sendGroupAiRecord(data, text, character_id, character_name) {
-      const params = {
-        group_id: data.group_id,
-        text: String(text),
-      };
-      if (character_id) params.character_id = String(character_id);
-      if (character_name) params.character_name = String(character_name);
-      Bot.makeLog("info", `发送群 AI 语音：${text.substring(0, 20)}...`, `${data.self_id} => ${data.group_id}`);
-      return data.bot.sendApi("send_group_ai_record", params);
+    async sendGroupAiRecord(data, text, character_id, character_name) {
+      try {
+        const params = {
+          group_id: data.group_id,
+          text: String(text),
+        };
+        if (character_id) params.character_id = String(character_id);
+        if (character_name) params.character_name = String(character_name);
+        Bot.makeLog("info", `发送群 AI 语音：${text.substring(0, 20)}...`, `${data.self_id} => ${data.group_id}`);
+        return await data.bot.sendApi("send_group_ai_record", params).catch(error => {
+          Bot.makeLog("warn", `发送群 AI 语音失败: ${error.message}`, data.self_id);
+          return { success: false, error: error.message };
+        });
+      } catch (error) {
+        Bot.makeLog("error", `发送群 AI 语音失败: ${error.message}`, data.self_id);
+        return { success: false, error: error.message };
+      }
     }
 
     /**
@@ -1084,28 +1145,48 @@ Bot.adapter.push(
      * @param {string|number} character_name - AI 语音角色名称（可选）
      * @returns {Promise} API响应
      */
-    sendPrivateAiRecord(data, text, character_id, character_name) {
-      const params = {
-        user_id: data.user_id,
-        text: String(text),
-      };
-      if (character_id) params.character_id = String(character_id);
-      if (character_name) params.character_name = String(character_name);
-      Bot.makeLog("info", `发送私聊 AI 语音：${text.substring(0, 20)}...`, `${data.self_id} => ${data.user_id}`);
-      return data.bot.sendApi("send_private_ai_record", params);
+    async sendPrivateAiRecord(data, text, character_id, character_name) {
+      try {
+        const params = {
+          user_id: data.user_id,
+          text: String(text),
+        };
+        if (character_id) params.character_id = String(character_id);
+        if (character_name) params.character_name = String(character_name);
+        Bot.makeLog("info", `发送私聊 AI 语音：${text.substring(0, 20)}...`, `${data.self_id} => ${data.user_id}`);
+        return await data.bot.sendApi("send_private_ai_record", params).catch(error => {
+          Bot.makeLog("warn", `发送私聊 AI 语音失败: ${error.message}`, data.self_id);
+          return { success: false, error: error.message };
+        });
+      } catch (error) {
+        Bot.makeLog("error", `发送私聊 AI 语音失败: ${error.message}`, data.self_id);
+        return { success: false, error: error.message };
+      }
     }
 
     /**
      * Napcat API: 获取消息表情回应列表
+     * 注意：此 API 可能在某些版本中不支持，会返回 1404 错误
      * @param {Object} data - Bot数据对象
      * @param {string|number} message_id - 消息ID
      * @returns {Promise} API响应，包含表情回应列表
      */
-    getMessageReactions(data, message_id) {
-      Bot.makeLog("debug", `获取消息表情回应列表：${message_id}`, data.self_id);
-      return data.bot.sendApi("get_message_reactions", {
-        message_id: String(message_id),
-      });
+    async getMessageReactions(data, message_id) {
+      try {
+        Bot.makeLog("debug", `获取消息表情回应列表：${message_id}`, data.self_id);
+        return await data.bot.sendApi("get_message_reactions", {
+          message_id: String(message_id),
+        }).catch(error => {
+          if (error.message && error.message.includes('不支持的Api')) {
+            Bot.makeLog("warn", `表情回应 API 不支持，可能需要更新 Napcat 版本`, data.self_id);
+            return { success: false, error: 'API_NOT_SUPPORTED', message: '表情回应功能不支持', data: [] };
+          }
+          throw error;
+        });
+      } catch (error) {
+        Bot.makeLog("error", `获取消息表情回应列表失败: ${error.message}`, data.self_id);
+        return { success: false, error: error.message, data: [] };
+      }
     }
 
     /**
@@ -1133,18 +1214,26 @@ Bot.adapter.push(
      * @param {boolean} require_confirmation - 是否需要确认（可选，默认 false）
      * @returns {Promise} API响应
      */
-    setGroupAnnouncement(data, content, group_id, pinned, show_edit_card, show_popup, require_confirmation) {
-      const targetGroupId = group_id || data.group_id;
-      const params = {
-        group_id: String(targetGroupId),
-        content: String(content),
-      };
-      if (pinned !== undefined) params.pinned = Boolean(pinned);
-      if (show_edit_card !== undefined) params.show_edit_card = Boolean(show_edit_card);
-      if (show_popup !== undefined) params.show_popup = Boolean(show_popup);
-      if (require_confirmation !== undefined) params.require_confirmation = Boolean(require_confirmation);
-      Bot.makeLog("info", `设置群公告：${content.substring(0, 20)}...`, `${data.self_id} => ${targetGroupId}`);
-      return data.bot.sendApi("set_group_announcement", params);
+    async setGroupAnnouncement(data, content, group_id, pinned, show_edit_card, show_popup, require_confirmation) {
+      try {
+        const targetGroupId = group_id || data.group_id;
+        const params = {
+          group_id: String(targetGroupId),
+          content: String(content),
+        };
+        if (pinned !== undefined) params.pinned = Boolean(pinned);
+        if (show_edit_card !== undefined) params.show_edit_card = Boolean(show_edit_card);
+        if (show_popup !== undefined) params.show_popup = Boolean(show_popup);
+        if (require_confirmation !== undefined) params.require_confirmation = Boolean(require_confirmation);
+        Bot.makeLog("info", `设置群公告：${content.substring(0, 20)}...`, `${data.self_id} => ${targetGroupId}`);
+        return await data.bot.sendApi("set_group_announcement", params).catch(error => {
+          Bot.makeLog("warn", `设置群公告失败: ${error.message}`, data.self_id);
+          return { success: false, error: error.message };
+        });
+      } catch (error) {
+        Bot.makeLog("error", `设置群公告失败: ${error.message}`, data.self_id);
+        return { success: false, error: error.message };
+      }
     }
 
     /**
@@ -1154,13 +1243,21 @@ Bot.adapter.push(
      * @param {string|number} group_id - 群ID（可选，默认使用 data.group_id）
      * @returns {Promise} API响应
      */
-    deleteGroupAnnouncement(data, announcement_id, group_id) {
-      const targetGroupId = group_id || data.group_id;
-      Bot.makeLog("info", `删除群公告：${announcement_id}`, `${data.self_id} => ${targetGroupId}`);
-      return data.bot.sendApi("delete_group_announcement", {
-        group_id: String(targetGroupId),
-        announcement_id: String(announcement_id),
-      });
+    async deleteGroupAnnouncement(data, announcement_id, group_id) {
+      try {
+        const targetGroupId = group_id || data.group_id;
+        Bot.makeLog("info", `删除群公告：${announcement_id}`, `${data.self_id} => ${targetGroupId}`);
+        return await data.bot.sendApi("delete_group_announcement", {
+          group_id: String(targetGroupId),
+          announcement_id: String(announcement_id),
+        }).catch(error => {
+          Bot.makeLog("warn", `删除群公告失败: ${error.message}`, data.self_id);
+          return { success: false, error: error.message };
+        });
+      } catch (error) {
+        Bot.makeLog("error", `删除群公告失败: ${error.message}`, data.self_id);
+        return { success: false, error: error.message };
+      }
     }
 
     /**
