@@ -6,6 +6,21 @@ import { WorkflowManager } from '../../lib/aistream/workflow-manager.js';
 import BotUtil from '../../lib/common/util.js';
 import cfg from '../../lib/config/config.js';
 
+// 动态导入cheerio（避免在文件顶部导入，支持按需加载）
+let cheerioModule = null;
+async function getCheerio() {
+  if (!cheerioModule) {
+    try {
+      cheerioModule = await import('cheerio');
+      return cheerioModule.default || cheerioModule;
+    } catch (error) {
+      BotUtil.makeLog('error', `cheerio导入失败: ${error.message}`, 'ChatStream');
+      throw new Error('cheerio模块未安装，请运行: pnpm add cheerio');
+    }
+  }
+  return cheerioModule.default || cheerioModule;
+}
+
 const _path = process.cwd();
 // 统一路径处理：使用path.resolve确保跨平台兼容
 const EMOTIONS_DIR = path.resolve(_path, 'resources', 'aiimages');
@@ -707,19 +722,26 @@ export default class ChatStream extends AIStream {
           // 执行搜索流程：搜索 -> 分析（3次） -> 润色（1次）
           const searchResult = await this.runWebSearch(params.keyword, context);
           
+          // 确保返回有效结果
           if (!searchResult || !searchResult.content) {
-            return { type: 'text', content: '搜索未找到相关信息，请尝试其他关键词' };
+            return { 
+              type: 'text', 
+              content: `抱歉，搜索"${params.keyword}"未找到相关信息。可能是关键词不够准确，建议尝试更具体的关键词或换个说法。` 
+            };
           }
           
           // 将搜索结果整合到聊天记录中
-          if (context.e?.isGroup) {
+          if (context.e?.isGroup && searchResult.metadata) {
             await this.recordSearchResult(context.e, params.keyword, searchResult);
           }
           
           return searchResult;
         } catch (error) {
           BotUtil.makeLog('error', `联网搜索失败: ${error.message}`, 'ChatStream');
-          return { type: 'text', content: `搜索过程中出现错误: ${error.message}` };
+          return { 
+            type: 'text', 
+            content: `搜索过程中出现错误，请稍后再试。如果问题持续，可以尝试换个关键词搜索。` 
+          };
         }
       },
       enabled: true
@@ -1759,24 +1781,70 @@ export default class ChatStream extends AIStream {
    */
   async runWebSearch(keyword, context) {
     try {
-      // 步骤1: 执行搜索
-      const searchResults = await this.performWebSearch(keyword);
+      // 步骤1: 执行搜索（带重试机制）
+      let searchResults = [];
+      let lastError = null;
       
-      if (!searchResults || searchResults.length === 0) {
-        return { type: 'text', content: '未找到相关搜索结果' };
+      // 尝试多种搜索方案
+      const searchMethods = [
+        () => this.performWebSearch(keyword),
+        () => this.performBingSearch(keyword),
+        () => this.performGoogleSearch(keyword)
+      ];
+      
+      for (const method of searchMethods) {
+        try {
+          searchResults = await method();
+          if (searchResults && searchResults.length > 0) {
+            break; // 找到结果就停止
+          }
+        } catch (error) {
+          lastError = error;
+          BotUtil.makeLog('debug', `搜索方法失败: ${error.message}`, 'ChatStream');
+          continue; // 尝试下一个方法
+        }
       }
       
-      // 步骤2-4: 三次分析
-      const analysis1 = await this.analyzeSearchResults(searchResults, keyword, context, 1);
-      const analysis2 = await this.analyzeSearchResults(searchResults, keyword, context, 2, analysis1);
-      const analysis3 = await this.analyzeSearchResults(searchResults, keyword, context, 3, analysis2);
+      // 如果所有搜索方法都失败，返回友好的错误信息
+      if (!searchResults || searchResults.length === 0) {
+        BotUtil.makeLog('warn', `所有搜索方法均失败，关键词: ${keyword}`, 'ChatStream');
+        return { 
+          type: 'text', 
+          content: `抱歉，暂时无法搜索到"${keyword}"的相关信息。可能是网络问题或搜索服务暂时不可用，请稍后再试或换个关键词搜索。` 
+        };
+      }
       
-      // 步骤5: 润色最终回复
-      const polishedResult = await this.polishSearchResponse(analysis3, keyword, context);
+      // 步骤2-4: 三次分析（如果AI可用）
+      let analysis3 = null;
+      if (this.callAI) {
+        try {
+          const analysis1 = await this.analyzeSearchResults(searchResults, keyword, context, 1);
+          const analysis2 = await this.analyzeSearchResults(searchResults, keyword, context, 2, analysis1);
+          analysis3 = await this.analyzeSearchResults(searchResults, keyword, context, 3, analysis2);
+        } catch (error) {
+          BotUtil.makeLog('warn', `搜索结果分析失败: ${error.message}，使用简化格式`, 'ChatStream');
+          analysis3 = this.formatSearchResults(searchResults);
+        }
+      } else {
+        analysis3 = this.formatSearchResults(searchResults);
+      }
+      
+      // 步骤5: 润色最终回复（如果AI可用）
+      let polishedResult = null;
+      if (this.callAI && analysis3) {
+        try {
+          polishedResult = await this.polishSearchResponse(analysis3, keyword, context);
+        } catch (error) {
+          BotUtil.makeLog('warn', `回复润色失败: ${error.message}，使用原始分析结果`, 'ChatStream');
+          polishedResult = `我搜索了一下"${keyword}"，找到以下信息：\n\n${analysis3}`;
+        }
+      } else {
+        polishedResult = `我搜索了一下"${keyword}"，找到以下信息：\n\n${analysis3}`;
+      }
       
       return {
         type: 'text',
-        content: polishedResult,
+        content: polishedResult || `搜索"${keyword}"找到${searchResults.length}个相关结果`,
         metadata: {
           keyword,
           searchCount: searchResults.length,
@@ -1785,7 +1853,10 @@ export default class ChatStream extends AIStream {
       };
     } catch (error) {
       BotUtil.makeLog('error', `搜索流程失败: ${error.message}`, 'ChatStream');
-      throw error;
+      return { 
+        type: 'text', 
+        content: `搜索过程中出现错误，请稍后再试。如果问题持续，可以尝试换个关键词搜索。` 
+      };
     }
   }
 
@@ -1813,32 +1884,61 @@ export default class ChatStream extends AIStream {
       }
       
       const html = await response.text();
-      const cheerio = (await import('cheerio')).default;
+      
+      if (!html || html.length < 100) {
+        throw new Error('搜索返回内容为空或过短');
+      }
+      
+      const cheerio = await getCheerio();
       const $ = cheerio.load(html);
       
       const results = [];
       
-      // 解析DuckDuckGo搜索结果
-      $('.result').each((index, element) => {
-        if (results.length >= 10) return false; // 最多10个结果
-        
-        const $el = $(element);
-        const title = $el.find('.result__title a').text().trim();
-        const link = $el.find('.result__title a').attr('href') || '';
-        const snippet = $el.find('.result__snippet').text().trim();
-        
-        if (title && link) {
-          results.push({
-            title,
-            url: link,
-            snippet: snippet || '暂无摘要',
-            index: results.length + 1
-          });
-        }
-      });
+      // 解析DuckDuckGo搜索结果（尝试多种选择器）
+      const selectors = [
+        { container: '.result', title: '.result__title a', snippet: '.result__snippet' },
+        { container: '.web-result', title: 'a.result__a', snippet: '.result__snippet' },
+        { container: 'div[class*="result"]', title: 'a[class*="title"]', snippet: 'div[class*="snippet"]' }
+      ];
       
-      // 如果DuckDuckGo解析失败，尝试备用方案：使用Bing搜索
+      for (const selector of selectors) {
+        $(selector.container).each((index, element) => {
+          if (results.length >= 10) return false; // 最多10个结果
+          
+          const $el = $(element);
+          const title = $el.find(selector.title).first().text().trim();
+          const link = $el.find(selector.title).first().attr('href') || '';
+          const snippet = $el.find(selector.snippet).first().text().trim();
+          
+          if (title && link && !results.some(r => r.url === link)) {
+            // 清理链接（DuckDuckGo可能返回重定向链接）
+            let cleanUrl = link;
+            if (link.startsWith('/l/?kh=') || link.includes('uddg=')) {
+              try {
+                const urlMatch = link.match(/uddg=([^&]+)/);
+                if (urlMatch) {
+                  cleanUrl = decodeURIComponent(urlMatch[1]);
+                }
+              } catch (e) {
+                // 忽略URL解析错误
+              }
+            }
+            
+            results.push({
+              title,
+              url: cleanUrl,
+              snippet: snippet || '暂无摘要',
+              index: results.length + 1
+            });
+          }
+        });
+        
+        if (results.length > 0) break; // 找到结果就停止尝试其他选择器
+      }
+      
+      // 如果DuckDuckGo解析失败，尝试备用方案
       if (results.length === 0) {
+        BotUtil.makeLog('debug', 'DuckDuckGo解析无结果，尝试备用方案', 'ChatStream');
         return await this.performBingSearch(keyword);
       }
       
@@ -1847,6 +1947,69 @@ export default class ChatStream extends AIStream {
       BotUtil.makeLog('warn', `DuckDuckGo搜索失败，尝试备用方案: ${error.message}`, 'ChatStream');
       // 尝试备用搜索方案
       return await this.performBingSearch(keyword);
+    }
+  }
+
+  /**
+   * 备用搜索方案：使用Google搜索（通过HTML解析）
+   */
+  async performGoogleSearch(keyword) {
+    try {
+      // 使用Google搜索（需要处理反爬虫）
+      const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(keyword)}&num=10`;
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
+      const response = await fetch(searchUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+        },
+        signal: controller.signal
+      }).finally(() => clearTimeout(timeoutId));
+      
+      if (!response.ok) {
+        throw new Error(`Google搜索请求失败: ${response.status}`);
+      }
+      
+      const html = await response.text();
+      
+      if (!html || html.length < 100) {
+        throw new Error('Google搜索返回内容为空或过短');
+      }
+      
+      const cheerio = await getCheerio();
+      const $ = cheerio.load(html);
+      
+      const results = [];
+      
+      // 解析Google搜索结果
+      $('.g, div[data-ved]').each((index, element) => {
+        if (results.length >= 10) return false;
+        
+        const $el = $(element);
+        const titleEl = $el.find('h3').first();
+        const title = titleEl.text().trim();
+        const linkEl = $el.find('a').first();
+        const link = linkEl.attr('href') || '';
+        const snippet = $el.find('.VwiC3b, .s').first().text().trim();
+        
+        if (title && link && !results.some(r => r.url === link)) {
+          results.push({
+            title,
+            url: link.startsWith('/url?q=') ? decodeURIComponent(link.split('&')[0].replace('/url?q=', '')) : link,
+            snippet: snippet || '暂无摘要',
+            index: results.length + 1
+          });
+        }
+      });
+      
+      return results;
+    } catch (error) {
+      BotUtil.makeLog('debug', `Google搜索失败: ${error.message}`, 'ChatStream');
+      return [];
     }
   }
 
@@ -1873,33 +2036,50 @@ export default class ChatStream extends AIStream {
       }
       
       const html = await response.text();
-      const cheerio = (await import('cheerio')).default;
+      
+      if (!html || html.length < 100) {
+        throw new Error('Bing搜索返回内容为空或过短');
+      }
+      
+      const cheerio = await getCheerio();
       const $ = cheerio.load(html);
       
       const results = [];
       
-      // 解析Bing搜索结果
-      $('.b_algo').each((index, element) => {
-        if (results.length >= 10) return false;
+      // 解析Bing搜索结果（尝试多种选择器）
+      const selectors = [
+        { container: '.b_algo', title: 'h2 a', snippet: '.b_caption p, .b_caption' },
+        { container: 'li[class*="b_algo"]', title: 'h2 a, a[class*="title"]', snippet: 'p, div[class*="caption"]' },
+        { container: 'div[data-bm]', title: 'h2 a, a', snippet: 'p' }
+      ];
+      
+      for (const selector of selectors) {
+        $(selector.container).each((index, element) => {
+          if (results.length >= 10) return false;
+          
+          const $el = $(element);
+          const titleEl = $el.find(selector.title).first();
+          const title = titleEl.text().trim();
+          const link = titleEl.attr('href') || '';
+          const snippet = $el.find(selector.snippet).first().text().trim();
+          
+          if (title && link && !results.some(r => r.url === link)) {
+            results.push({
+              title,
+              url: link,
+              snippet: snippet || '暂无摘要',
+              index: results.length + 1
+            });
+          }
+        });
         
-        const $el = $(element);
-        const title = $el.find('h2 a').text().trim();
-        const link = $el.find('h2 a').attr('href') || '';
-        const snippet = $el.find('.b_caption p').text().trim() || $el.find('.b_caption').text().trim();
-        
-        if (title && link) {
-          results.push({
-            title,
-            url: link,
-            snippet: snippet || '暂无摘要',
-            index: results.length + 1
-          });
-        }
-      });
+        if (results.length > 0) break; // 找到结果就停止尝试其他选择器
+      }
       
       return results;
     } catch (error) {
-      BotUtil.makeLog('error', `Bing搜索失败: ${error.message}`, 'ChatStream');
+      BotUtil.makeLog('warn', `Bing搜索失败: ${error.message}`, 'ChatStream');
+      // 如果Bing也失败，返回空数组，让上层尝试其他方法
       return [];
     }
   }
