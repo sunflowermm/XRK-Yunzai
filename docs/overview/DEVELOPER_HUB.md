@@ -46,11 +46,14 @@ flowchart LR
 | 分类 | 文档 | 内容摘要 |
 |------|------|----------|
 | 核心对象 | [`docs/CORE_OBJECTS.md`](../CORE_OBJECTS.md) | `Bot` / 事件 `e` / `logger` / `cfg` / `segment` / `redis`。 |
+| 技术架构 | [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md) | 系统架构、核心对象作用、数据流、技术栈依赖关系。 |
 | Bot API | [`docs/reference/BOT.md`](../reference/BOT.md) | 生命周期、HTTP/HTTPS/代理、好友/群、消息工具、WS。 |
 | 工作流 | [`docs/reference/WORKFLOWS.md`](../reference/WORKFLOWS.md) | `AIStream` 全部方法、Embedding、MemorySystem、WorkflowManager。 |
 | 插件基类 | [`docs/reference/PLUGINS.md`](../reference/PLUGINS.md) | 构造、规则、上下文管理、工作流调用、渲染。 |
 | HTTP 基类 | [`docs/reference/HTTP.md`](../reference/HTTP.md) | REST/WS 注册、middleware、热重载。 |
 | 配置/Redis | [`docs/reference/CONFIG_AND_REDIS.md`](../reference/CONFIG_AND_REDIS.md) | `cfg` getters、watcher、Redis 初始化/事件。 |
+| Logger 完整手册 | [`docs/reference/LOGGER.md`](../reference/LOGGER.md) | `logger` 全部方法、颜色工具、格式化、计时器等。 |
+| 适配器 & 路由 | [`docs/reference/ADAPTER_AND_ROUTING.md`](../reference/ADAPTER_AND_ROUTING.md) | 适配器与路由系统如何与Bot交互、完整方法列表。 |
 | 技术栈 | [`docs/TECH_STACK.md`](../TECH_STACK.md) | Node 运行时、Web 服务、缓存、DevOps。 |
 
 ---

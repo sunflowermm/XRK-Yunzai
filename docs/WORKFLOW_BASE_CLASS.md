@@ -17,20 +17,91 @@ import cfg from '../../lib/config/config.js';
 export default class MyWorkflow extends AIStream {
   constructor() {
     super({
-      name: 'myworkflow',
-      description: '我的工作流',
-      version: '1.0.0',
-      author: 'YourName',
-      priority: 100,
-      config: {
-        enabled: true,
-        temperature: 0.7,
-        maxTokens: 2000
+      name: 'myworkflow',              // 工作流名称（必填）
+      description: '我的工作流',        // 工作流描述
+      version: '1.0.0',                // 版本号
+      author: 'YourName',              // 作者
+      priority: 100,                   // 优先级（数字越小优先级越高）
+      config: {                        // AI配置（可选，会与kuizai.yaml合并）
+        enabled: true,                 // 是否启用
+        baseUrl: '',                   // API基础URL
+        apiKey: '',                    // API密钥
+        chatModel: 'deepseek-r1-0528', // 模型名称
+        temperature: 0.7,              // 温度参数
+        maxTokens: 2000,               // 最大token数
+        topP: 0.9,                     // top_p采样
+        presencePenalty: 0.6,          // 存在惩罚
+        frequencyPenalty: 0.6,         // 频率惩罚
+        timeout: 30000                 // 超时时间（毫秒）
+      },
+      functionToggles: {},              // 功能开关（可选）
+      embedding: {                     // Embedding配置（可选）
+        enabled: false,                // 是否启用embedding
+        provider: 'lightweight',       // 提供商：'lightweight'/'onnx'/'hf'/'fasttext'/'api'
+        maxContexts: 5,               // 最大上下文数量
+        similarityThreshold: 0.6,      // 相似度阈值
+        cacheExpiry: 86400,            // 缓存过期时间（秒）
+        cachePath: './data/models',    // 缓存路径
+        onnxModel: 'Xenova/all-MiniLM-L6-v2', // ONNX模型
+        onnxQuantized: true,           // 是否使用量化模型
+        hfToken: null,                  // HuggingFace Token
+        hfModel: 'sentence-transformers/all-MiniLM-L6-v2', // HF模型
+        fasttextModel: 'cc.zh.300.bin', // FastText模型
+        apiUrl: null,                  // API URL
+        apiKey: null,                  // API密钥
+        apiModel: 'text-embedding-3-small' // API模型
       }
     });
   }
 }
 ```
+
+**构造函数参数说明：**
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `name` | `string` | 是 | `'base-stream'` | 工作流名称，用于标识 |
+| `description` | `string` | 否 | `'基础工作流'` | 工作流描述 |
+| `version` | `string` | 否 | `'1.0.0'` | 版本号 |
+| `author` | `string` | 否 | `'unknown'` | 作者名称 |
+| `priority` | `number` | 否 | `100` | 优先级，数字越小优先级越高 |
+| `config` | `object` | 否 | 见下方 | AI配置对象 |
+| `functionToggles` | `object` | 否 | `{}` | 功能开关，用于控制注册的功能是否启用 |
+| `embedding` | `object` | 否 | 见下方 | Embedding配置对象 |
+
+**config 对象字段：**
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `enabled` | `boolean` | `true` | 是否启用工作流 |
+| `baseUrl` | `string` | `''` | API基础URL |
+| `apiKey` | `string` | `''` | API密钥 |
+| `chatModel` | `string` | `'deepseek-r1-0528'` | 聊天模型名称 |
+| `temperature` | `number` | `0.8` | 温度参数（0-2） |
+| `maxTokens` | `number` | `6000` | 最大token数 |
+| `topP` | `number` | `0.9` | top_p采样（0-1） |
+| `presencePenalty` | `number` | `0.6` | 存在惩罚（-2到2） |
+| `frequencyPenalty` | `number` | `0.6` | 频率惩罚（-2到2） |
+| `timeout` | `number` | `30000` | 超时时间（毫秒） |
+
+**embedding 对象字段：**
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `enabled` | `boolean` | `false` | 是否启用embedding |
+| `provider` | `string` | `'lightweight'` | 提供商：`'lightweight'`/`'onnx'`/`'hf'`/`'fasttext'`/`'api'` |
+| `maxContexts` | `number` | `5` | 最大上下文数量 |
+| `similarityThreshold` | `number` | `0.6` | 相似度阈值（0-1） |
+| `cacheExpiry` | `number` | `86400` | 缓存过期时间（秒） |
+| `cachePath` | `string` | `'./data/models'` | 缓存路径 |
+| `onnxModel` | `string` | `'Xenova/all-MiniLM-L6-v2'` | ONNX模型名称 |
+| `onnxQuantized` | `boolean` | `true` | 是否使用量化模型 |
+| `hfToken` | `string\|null` | `null` | HuggingFace Token |
+| `hfModel` | `string` | `'sentence-transformers/all-MiniLM-L6-v2'` | HuggingFace模型 |
+| `fasttextModel` | `string` | `'cc.zh.300.bin'` | FastText模型文件名 |
+| `apiUrl` | `string\|null` | `null` | API URL |
+| `apiKey` | `string\|null` | `null` | API密钥 |
+| `apiModel` | `string` | `'text-embedding-3-small'` | API模型名称 |
 
 ## 参数优先级
 

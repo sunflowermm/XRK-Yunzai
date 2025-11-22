@@ -154,12 +154,15 @@ XRK-Yunzai/
 |------|------|------|
 | 技术栈全景 | [`docs/TECH_STACK.md`](./docs/TECH_STACK.md) | 框架栈、依赖、部署策略。 |
 | 开发者导航（可视化） | [`docs/overview/DEVELOPER_HUB.md`](./docs/overview/DEVELOPER_HUB.md) | Mermaid 拓扑展示 `Bot → Plugins → Workflows` 关系及基类入口。 |
-| 核心对象 | [`docs/CORE_OBJECTS.md`](./docs/CORE_OBJECTS.md) | Bot / 事件 `e` / 全局对象速查。 |
+| 核心对象 | [`docs/CORE_OBJECTS.md`](./docs/CORE_OBJECTS.md) | Bot / 事件 `e` / `logger` / `cfg` / `segment` / `redis` 速查。 |
+| 技术架构 | [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | 系统架构、核心对象作用、数据流、技术栈依赖关系。 |
 | Bot 函数全集 | [`docs/reference/BOT.md`](./docs/reference/BOT.md) | Server 生命周期、代理、好友/群等全部方法。 |
 | 工作流 & 记忆 | [`docs/reference/WORKFLOWS.md`](./docs/reference/WORKFLOWS.md) | `AIStream` / `MemorySystem` / `WorkflowManager` 全函数。 |
 | 插件运行时 | [`docs/reference/PLUGINS.md`](./docs/reference/PLUGINS.md) | 上下文管理、工作流调用、渲染。 |
 | HTTP / WS API | [`docs/reference/HTTP.md`](./docs/reference/HTTP.md) | `HttpApi` 生命周期、路由/WS 注册。 |
 | 配置 & Redis | [`docs/reference/CONFIG_AND_REDIS.md`](./docs/reference/CONFIG_AND_REDIS.md) | `cfg` API、Redis 初始化/事件。 |
+| Logger 完整手册 | [`docs/reference/LOGGER.md`](./docs/reference/LOGGER.md) | `logger` 全部方法、颜色工具、格式化、计时器等。 |
+| 适配器 & 路由 | [`docs/reference/ADAPTER_AND_ROUTING.md`](./docs/reference/ADAPTER_AND_ROUTING.md) | 适配器与路由系统如何与Bot交互、完整方法列表。 |
 | 用户向文档 | [`stdin.md`](./stdin.md) | 面板/功能简介。 |
 
 > 基类的开发策略、调用顺序与示例在导航页集中展示，可从 README 直接跳转到子文档。

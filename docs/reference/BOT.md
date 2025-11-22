@@ -320,5 +320,236 @@
 
 ---
 
+---
+
+## 11. Bot 对象属性
+
+### 核心属性
+
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| `stat` | `Object` | 统计信息，包含 `start_time` |
+| `bot` | `Bot` | Bot自身引用 |
+| `bots` | `Object` | 子Bot实例映射 `{ bot_id: BotInstance }` |
+| `adapter` | `Array` | 适配器数组 |
+| `uin` | `Proxy<Array>` | 账号列表代理，支持 `toJSON()`, `toString()`, `includes()` |
+| `express` | `Express` | Express应用实例 |
+| `server` | `http.Server` | HTTP服务器实例 |
+| `httpsServer` | `https.Server\|http2.Http2SecureServer` | HTTPS服务器实例 |
+| `wss` | `WebSocketServer` | WebSocket服务器实例 |
+| `wsf` | `Object` | WebSocket处理器映射 `{ path: Array<Function> }` |
+| `fs` | `Object` | 文件服务映射 |
+| `apiKey` | `string` | API密钥 |
+| `_cache` | `Map` | 内部缓存 |
+| `_rateLimiters` | `Map` | 速率限制器映射 |
+| `httpPort` | `number\|null` | HTTP端口 |
+| `httpsPort` | `number\|null` | HTTPS端口 |
+| `actualPort` | `number\|null` | 实际HTTP端口 |
+| `actualHttpsPort` | `number\|null` | 实际HTTPS端口 |
+| `url` | `string` | 服务器URL |
+| `proxyEnabled` | `boolean` | 是否启用代理 |
+| `proxyApp` | `Express\|null` | 代理Express应用 |
+| `proxyServer` | `http.Server\|null` | HTTP代理服务器 |
+| `proxyHttpsServer` | `https.Server\|http2.Http2SecureServer\|null` | HTTPS代理服务器 |
+| `proxyMiddlewares` | `Map` | 代理中间件映射 |
+| `domainConfigs` | `Map` | 域名配置映射 |
+| `sslContexts` | `Map` | SSL证书上下文映射 |
+| `ApiLoader` | `ApiLoader` | API加载器引用 |
+
+### 属性访问说明
+
+Bot 对象通过 Proxy 实现方法查找：
+
+1. 首先查找 `Bot.bots[prop]`
+2. 然后查找 `Bot[prop]`
+3. 最后查找 `BotUtil[prop]`
+
+这意味着可以直接调用 `Bot.makeLog()`、`Bot.String()` 等工具方法。
+
+---
+
+## 12. 适配器与路由集成
+
+### 适配器集成
+
+适配器通过以下方式与 Bot 交互：
+
+- **注册**: `Bot.adapter.push(adapterInstance)`
+- **事件触发**: `Bot.em(eventName, data)`
+- **账号管理**: `Bot.uin.push(self_id)`, `Bot.bots[self_id] = botInstance`
+- **WebSocket注册**: `Bot.wsf[path] = [handler1, handler2, ...]`
+- **工具方法**: `Bot.makeLog()`, `Bot.String()`, `Bot.Buffer()`, `Bot.makeError()`
+
+详细说明请参阅 [`docs/reference/ADAPTER_AND_ROUTING.md`](./ADAPTER_AND_ROUTING.md#适配器系统)
+
+### 路由集成
+
+路由通过以下方式与 Bot 交互：
+
+- **Bot访问**: 路由处理器中通过 `req.bot` 或参数 `Bot` 访问
+- **事件触发**: `Bot.em(eventName, data)`
+- **消息发送**: `Bot.sendFriendMsg()`, `Bot.sendGroupMsg()`
+- **配置访问**: `import cfg from '../../lib/config/config.js'`
+
+详细说明请参阅 [`docs/reference/ADAPTER_AND_ROUTING.md`](./ADAPTER_AND_ROUTING.md#路由系统)
+
+---
+
+## 13. 事件系统
+
+### 事件命名规则
+
+事件名称采用层级结构：`<post_type>.<type>.<sub_type>`
+
+- **post_type**: `message` | `notice` | `request` | `meta_event`
+- **type**: `private` | `group` | `guild` | `friend` | `group` | `friend` | `group` | `lifecycle` | `heartbeat`
+- **sub_type**: `friend` | `group` | `normal` | `anonymous` | `increase` | `decrease` | `add` | `invite` 等
+
+### 事件触发流程
+
+```
+适配器/插件调用 Bot.em(name, data)
+    ↓
+Bot.prepareEvent(data)  ← 补全 bot/friend/group/member
+    ↓
+Bot._extendEventMethods(data)  ← 注入方法
+    ↓
+Bot.emit(name, data)  ← 触发事件
+    ↓
+层级事件触发 (foo.bar.baz → foo.bar → foo)
+    ↓
+监听器处理
+```
+
+### 常用事件
+
+| 事件名 | 说明 | 数据字段 |
+|--------|------|----------|
+| `connect.${bot_id}` | Bot连接事件 | `{ self_id, bot, adapter }` |
+| `ready.${bot_id}` | Bot就绪事件 | `{ self_id, bot }` |
+| `message.private.friend` | 私聊消息 | `{ self_id, user_id, message, bot, friend }` |
+| `message.group.normal` | 群聊消息 | `{ self_id, group_id, user_id, message, bot, group, member }` |
+| `notice.group.increase` | 群成员增加 | `{ self_id, group_id, user_id, bot, group }` |
+| `notice.group.decrease` | 群成员减少 | `{ self_id, group_id, user_id, bot, group }` |
+| `request.friend.add` | 好友请求 | `{ self_id, user_id, flag, bot }` |
+| `request.group.add` | 加群请求 | `{ self_id, group_id, user_id, flag, bot }` |
+| `online` | 服务器上线 | `{ bot, url, apis, proxyEnabled }` |
+
+---
+
+## 14. 使用示例
+
+### 示例1: 在适配器中使用 Bot
+
+```javascript
+// plugins/adapter/MyAdapter.js
+Bot.adapter.push(
+  new class MyAdapter {
+    id = "MY_PROTOCOL"
+    name = "MyProtocol"
+    
+    connect(ws, req) {
+      const self_id = 'my_bot';
+      
+      // 注册账号
+      if (!Bot.uin.includes(self_id)) {
+        Bot.uin.push(self_id);
+      }
+      
+      // 创建子Bot实例
+      Bot.bots[self_id] = {
+        uin: self_id,
+        fl: new Map(),
+        gl: new Map(),
+        adapter: this
+      };
+      
+      // 触发连接事件
+      Bot.em(`connect.${self_id}`, {
+        self_id: self_id,
+        bot: Bot.bots[self_id]
+      });
+      
+      // 处理消息
+      ws.on('message', (raw) => {
+        const data = JSON.parse(raw);
+        Bot.em('message.private.friend', {
+          self_id: self_id,
+          user_id: data.user_id,
+          message: data.message,
+          bot: Bot.bots[self_id]
+        });
+      });
+    }
+  }
+);
+```
+
+### 示例2: 在路由中使用 Bot
+
+```javascript
+// plugins/api/my-api.js
+export default {
+  routes: [{
+    method: 'POST',
+    path: '/api/send',
+    handler: async (req, res, Bot) => {
+      const { user_id, message } = req.body;
+      
+      // 发送消息
+      const result = await Bot.sendFriendMsg(null, user_id, message);
+      
+      res.json({ success: true, result });
+    }
+  }, {
+    method: 'GET',
+    path: '/api/friends',
+    handler: async (req, res, Bot) => {
+      // 获取好友列表
+      const friends = Bot.getFriendArray();
+      
+      res.json({ friends });
+    }
+  }]
+};
+```
+
+### 示例3: 在插件中使用 Bot
+
+```javascript
+// plugins/example/my-plugin.js
+import plugin from '../../lib/plugins/plugin.js';
+
+export default class MyPlugin extends plugin {
+  constructor() {
+    super({
+      name: 'my-plugin',
+      event: 'message',
+      rule: [{ reg: '^#测试$', fnc: 'test' }]
+    });
+  }
+  
+  async test(e) {
+    // 访问Bot
+    const url = Bot.getServerUrl();
+    const friends = Bot.getFriendList();
+    
+    // 发送消息
+    await Bot.sendMasterMsg('测试消息');
+    
+    return this.reply(`服务器: ${url}, 好友数: ${friends.length}`);
+  }
+}
+```
+
+---
+
+## 15. 相关文档
+
+- [适配器与路由系统文档](./ADAPTER_AND_ROUTING.md) - 适配器和路由如何与Bot交互
+- [核心对象文档](../CORE_OBJECTS.md) - Bot对象的快速参考
+- [插件运行时文档](./PLUGINS.md) - 插件如何使用Bot
+- [HTTP API基类文档](../HTTP_API_BASE_CLASS.md) - 路由开发指南
+
 所有函数的源代码与逻辑细节可直接参阅 `lib/bot.js`。如需扩展/重写，可在自定义模块中继承 `Bot` 或通过 Proxy 拓展。***
 
