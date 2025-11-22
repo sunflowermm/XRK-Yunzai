@@ -1,6 +1,7 @@
 import path from 'path';
 import fs from 'fs';
 import fetch from 'node-fetch';
+import axios from 'axios';
 import AIStream from '../../lib/aistream/aistream.js';
 import { WorkflowManager } from '../../lib/aistream/workflow-manager.js';
 import BotUtil from '../../lib/common/util.js';
@@ -21,11 +22,71 @@ async function getCheerio() {
   return cheerioModule.default || cheerioModule;
 }
 
+/**
+ * 提取HTML中的纯文本内容（去除标签、脚本、样式等）
+ */
+function extractPlainText(html, maxLength = 5000) {
+  if (!html) return '';
+  
+  try {
+    // 快速去除脚本和样式
+    let text = html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '')
+      .replace(/<!--[\s\S]*?-->/g, '');
+    
+    // 提取文本内容
+    text = text
+      .replace(/<[^>]+>/g, ' ') // 移除所有HTML标签
+      .replace(/\s+/g, ' ') // 合并多个空格
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .trim();
+    
+    // 限制长度
+    if (text.length > maxLength) {
+      text = text.substring(0, maxLength) + '...';
+    }
+    
+    return text;
+  } catch (error) {
+    return '';
+  }
+}
+
+/**
+ * 使用cheerio提取结构化文本
+ */
+async function extractStructuredText(html, selector) {
+  try {
+    const cheerio = await getCheerio();
+    const $ = cheerio.load(html);
+    const elements = $(selector);
+    const texts = [];
+    
+    elements.each((index, element) => {
+      const text = $(element).text().trim();
+      if (text && text.length > 10) {
+        texts.push(text);
+      }
+    });
+    
+    return texts.join('\n\n');
+  } catch (error) {
+    return extractPlainText(html);
+  }
+}
+
 const _path = process.cwd();
 // 统一路径处理：使用path.resolve确保跨平台兼容
 const EMOTIONS_DIR = path.resolve(_path, 'resources', 'aiimages');
 const EMOTION_TYPES = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
-const CHAT_RESPONSE_TIMEOUT = 60000;
+const CHAT_RESPONSE_TIMEOUT = 30000; // 缩短到30秒，提高响应速度
 
 // 表情回应映射
 const EMOJI_REACTIONS = {
@@ -1776,70 +1837,67 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 执行联网搜索流程
-   * 流程：搜索 -> 分析（3次） -> 润色（1次）
+   * 执行联网搜索流程（优化版：并行搜索 + 快速文本提取）
+   * 流程：并行搜索 -> 快速文本提取 -> 分析（2次简化） -> 润色（1次）
    */
   async runWebSearch(keyword, context) {
     try {
-      // 步骤1: 执行搜索（带重试机制）
-      let searchResults = [];
-      let lastError = null;
+      // 步骤1: 并行执行多个搜索（提高速度和成功率）
+      BotUtil.makeLog('info', `开始并行搜索: ${keyword}`, 'ChatStream');
       
-      // 尝试多种搜索方案
-      const searchMethods = [
-        () => this.performWebSearch(keyword),
-        () => this.performBingSearch(keyword),
-        () => this.performGoogleSearch(keyword)
+      const searchPromises = [
+        this.performFastSearch(keyword, 'baidu'),
+        this.performFastSearch(keyword, 'bing'),
+        this.performFastSearch(keyword, 'sogou')
       ];
       
-      for (const method of searchMethods) {
-        try {
-          searchResults = await method();
-          if (searchResults && searchResults.length > 0) {
-            break; // 找到结果就停止
-          }
-        } catch (error) {
-          lastError = error;
-          BotUtil.makeLog('debug', `搜索方法失败: ${error.message}`, 'ChatStream');
-          continue; // 尝试下一个方法
+      // 使用Promise.race和Promise.allSettled，取最快成功的结果
+      const results = await Promise.allSettled(searchPromises);
+      
+      let searchResults = [];
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value && result.value.length > 0) {
+          searchResults = result.value;
+          BotUtil.makeLog('info', `搜索成功，找到${searchResults.length}个结果`, 'ChatStream');
+          break; // 使用第一个成功的结果
         }
       }
       
-      // 如果所有搜索方法都失败，返回友好的错误信息
+      // 如果所有搜索都失败，返回友好提示
       if (!searchResults || searchResults.length === 0) {
         BotUtil.makeLog('warn', `所有搜索方法均失败，关键词: ${keyword}`, 'ChatStream');
         return { 
           type: 'text', 
-          content: `抱歉，暂时无法搜索到"${keyword}"的相关信息。可能是网络问题或搜索服务暂时不可用，请稍后再试或换个关键词搜索。` 
+          content: `抱歉，暂时无法搜索到"${keyword}"的相关信息。可能是网络问题，请稍后再试或换个关键词。` 
         };
       }
       
-      // 步骤2-4: 三次分析（如果AI可用）
-      let analysis3 = null;
+      // 步骤2-3: 简化分析流程（2次分析，提高速度）
+      let analysis2 = null;
       if (this.callAI) {
         try {
-          const analysis1 = await this.analyzeSearchResults(searchResults, keyword, context, 1);
-          const analysis2 = await this.analyzeSearchResults(searchResults, keyword, context, 2, analysis1);
-          analysis3 = await this.analyzeSearchResults(searchResults, keyword, context, 3, analysis2);
+          // 快速分析：只做2轮分析
+          const analysis1 = await this.analyzeSearchResultsFast(searchResults, keyword, context, 1);
+          analysis2 = await this.analyzeSearchResultsFast(searchResults, keyword, context, 2, analysis1);
         } catch (error) {
           BotUtil.makeLog('warn', `搜索结果分析失败: ${error.message}，使用简化格式`, 'ChatStream');
-          analysis3 = this.formatSearchResults(searchResults);
+          analysis2 = this.formatSearchResults(searchResults);
         }
       } else {
-        analysis3 = this.formatSearchResults(searchResults);
+        analysis2 = this.formatSearchResults(searchResults);
       }
       
-      // 步骤5: 润色最终回复（如果AI可用）
+      // 步骤4: 润色最终回复
       let polishedResult = null;
-      if (this.callAI && analysis3) {
+      if (this.callAI && analysis2) {
         try {
-          polishedResult = await this.polishSearchResponse(analysis3, keyword, context);
+          polishedResult = await this.polishSearchResponse(analysis2, keyword, context);
         } catch (error) {
-          BotUtil.makeLog('warn', `回复润色失败: ${error.message}，使用原始分析结果`, 'ChatStream');
-          polishedResult = `我搜索了一下"${keyword}"，找到以下信息：\n\n${analysis3}`;
+          BotUtil.makeLog('warn', `回复润色失败: ${error.message}，使用原始结果`, 'ChatStream');
+          polishedResult = `我搜索了一下"${keyword}"，找到以下信息：\n\n${analysis2}`;
         }
       } else {
-        polishedResult = `我搜索了一下"${keyword}"，找到以下信息：\n\n${analysis3}`;
+        polishedResult = `我搜索了一下"${keyword}"，找到以下信息：\n\n${analysis2}`;
       }
       
       return {
@@ -1848,7 +1906,7 @@ export default class ChatStream extends AIStream {
         metadata: {
           keyword,
           searchCount: searchResults.length,
-          searchResults: searchResults.slice(0, 5) // 保留前5个结果用于展示
+          searchResults: searchResults.slice(0, 5)
         }
       };
     } catch (error) {
@@ -1857,6 +1915,115 @@ export default class ChatStream extends AIStream {
         type: 'text', 
         content: `搜索过程中出现错误，请稍后再试。如果问题持续，可以尝试换个关键词搜索。` 
       };
+    }
+  }
+
+  /**
+   * 快速搜索（使用axios + cheerio，超时5秒）
+   */
+  async performFastSearch(keyword, engine = 'baidu') {
+    const timeout = 5000; // 5秒超时
+    
+    try {
+      let searchUrl = '';
+      let selectors = {};
+      
+      switch (engine) {
+        case 'baidu':
+          searchUrl = `https://www.baidu.com/s?wd=${encodeURIComponent(keyword)}`;
+          selectors = {
+            container: '.result, .c-container',
+            title: 'h3 a, .t a',
+            link: 'h3 a, .t a',
+            snippet: '.content-right_8Zs40, .c-abstract, .c-span9'
+          };
+          break;
+        case 'bing':
+          searchUrl = `https://www.bing.com/search?q=${encodeURIComponent(keyword)}&count=10`;
+          selectors = {
+            container: '.b_algo',
+            title: 'h2 a',
+            link: 'h2 a',
+            snippet: '.b_caption p, .b_caption'
+          };
+          break;
+        case 'sogou':
+          searchUrl = `https://www.sogou.com/web?query=${encodeURIComponent(keyword)}`;
+          selectors = {
+            container: '.vrwrap, .rb',
+            title: 'h3 a, .vr-title a',
+            link: 'h3 a, .vr-title a',
+            snippet: '.str-text, .str-info'
+          };
+          break;
+        default:
+          return [];
+      }
+      
+      // 使用axios快速请求（比fetch更快）
+      const response = await axios.get(searchUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+        },
+        timeout: timeout,
+        maxRedirects: 3
+      });
+      
+      if (!response.data || response.data.length < 100) {
+        return [];
+      }
+      
+      const cheerio = await getCheerio();
+      const $ = cheerio.load(response.data);
+      const results = [];
+      
+      // 快速解析搜索结果
+      $(selectors.container).each((index, element) => {
+        if (results.length >= 8) return false; // 最多8个结果
+        
+        const $el = $(element);
+        const titleEl = $el.find(selectors.title).first();
+        const title = titleEl.text().trim();
+        let link = titleEl.attr('href') || '';
+        const snippet = $el.find(selectors.snippet).first().text().trim();
+        
+        // 清理链接
+        if (link) {
+          if (link.startsWith('/link?url=')) {
+            try {
+              const urlMatch = link.match(/url=([^&]+)/);
+              if (urlMatch) {
+                link = decodeURIComponent(urlMatch[1]);
+              }
+            } catch (e) {}
+          }
+          if (!link.startsWith('http')) {
+            link = '';
+          }
+        }
+        
+        if (title && link) {
+          // 提取纯文本摘要（如果snippet太长）
+          let cleanSnippet = snippet || '暂无摘要';
+          if (cleanSnippet.length > 200) {
+            cleanSnippet = cleanSnippet.substring(0, 200) + '...';
+          }
+          
+          results.push({
+            title,
+            url: link,
+            snippet: cleanSnippet,
+            index: results.length + 1
+          });
+        }
+      });
+      
+      return results;
+    } catch (error) {
+      BotUtil.makeLog('debug', `${engine}搜索失败: ${error.message}`, 'ChatStream');
+      return [];
     }
   }
 
@@ -2085,7 +2252,61 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 分析搜索结果（三次分析中的一次）
+   * 快速分析搜索结果（优化版：减少AI调用次数，提高速度）
+   */
+  async analyzeSearchResultsFast(searchResults, keyword, context, round, previousAnalysis = null) {
+    if (!this.callAI) {
+      return this.formatSearchResults(searchResults);
+    }
+    
+    // 只取前5个结果进行分析，提高速度
+    const topResults = searchResults.slice(0, 5);
+    const resultsText = topResults.map(item => 
+      `${item.index}. ${item.title}\n   链接: ${item.url}\n   摘要: ${item.snippet}`
+    ).join('\n\n');
+    
+    let analysisPrompt = '';
+    if (round === 1) {
+      analysisPrompt = `请快速分析以下搜索结果，提取与"${keyword}"最相关的关键信息（3-5个要点）：
+      
+${resultsText}
+
+要求：简洁明了，纯文本格式，标注信息来源`;
+    } else if (round === 2) {
+      analysisPrompt = `综合以下信息，形成最终回复：
+
+第一轮分析：
+${previousAnalysis}
+
+搜索结果：
+${resultsText}
+
+要求：整合关键信息，去除冗余，准备用于最终回复（纯文本格式）`;
+    }
+    
+    const messages = [
+      {
+        role: 'system',
+        content: `你是信息分析专家。要求：1. 纯文本格式，不用Markdown 2. 语言简洁 3. 突出重点`
+      },
+      {
+        role: 'user',
+        content: analysisPrompt
+      }
+    ];
+    
+    const apiConfig = context?.config || context?.question?.config || {};
+    const result = await this.callAI(messages, {
+      ...apiConfig,
+      maxTokens: 1000, // 减少token，提高速度
+      temperature: 0.7
+    });
+    
+    return result || this.formatSearchResults(searchResults);
+  }
+
+  /**
+   * 分析搜索结果（三次分析中的一次）（保留原方法作为备用）
    */
   async analyzeSearchResults(searchResults, keyword, context, round, previousAnalysis = null) {
     if (!this.callAI) {
