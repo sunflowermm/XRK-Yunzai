@@ -1837,74 +1837,87 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 执行联网搜索流程（优化版：并行搜索 + 快速文本提取）
-   * 流程：并行搜索 -> 快速文本提取 -> 分析（2次简化） -> 润色（1次）
+   * 执行联网搜索流程（智能4步AI分析流程）
+   * 流程：
+   * 1. 第一次AI：分析调用什么工具（搜索引擎选择）
+   * 2. 爬虫：执行搜索，获取精简优化结果
+   * 3. 第二次AI：分析爬虫结果，推理筛选
+   * 4. 第三次AI：根据人设和工作流给出回应
+   * 5. 第四次AI：润色最终回复
    */
   async runWebSearch(keyword, context) {
     try {
-      // 步骤1: 并行执行多个搜索（提高速度和成功率）
-      BotUtil.makeLog('info', `开始并行搜索: ${keyword}`, 'ChatStream');
-      
-      const searchPromises = [
-        this.performFastSearch(keyword, 'baidu'),
-        this.performFastSearch(keyword, 'bing'),
-        this.performFastSearch(keyword, 'sogou')
-      ];
-      
-      // 使用Promise.race和Promise.allSettled，取最快成功的结果
-      const results = await Promise.allSettled(searchPromises);
-      
-      let searchResults = [];
-      for (const result of results) {
-        if (result.status === 'fulfilled' && result.value && result.value.length > 0) {
-          searchResults = result.value;
-          BotUtil.makeLog('info', `搜索成功，找到${searchResults.length}个结果`, 'ChatStream');
-          break; // 使用第一个成功的结果
-        }
-      }
-      
-      // 如果所有搜索都失败，返回友好提示
-      if (!searchResults || searchResults.length === 0) {
-        BotUtil.makeLog('warn', `所有搜索方法均失败，关键词: ${keyword}`, 'ChatStream');
-        return { 
-          type: 'text', 
-          content: `抱歉，暂时无法搜索到"${keyword}"的相关信息。可能是网络问题，请稍后再试或换个关键词。` 
+      if (!this.callAI) {
+        // 如果没有AI，直接执行搜索
+        const searchResults = await this.executeSearch(keyword);
+        return {
+          type: 'text',
+          content: this.formatSearchResults(searchResults),
+          metadata: { keyword, searchCount: searchResults.length }
         };
       }
       
-      // 步骤2-3: 简化分析流程（2次分析，提高速度）
-      let analysis2 = null;
-      if (this.callAI) {
-        try {
-          // 快速分析：只做2轮分析
-          const analysis1 = await this.analyzeSearchResultsFast(searchResults, keyword, context, 1);
-          analysis2 = await this.analyzeSearchResultsFast(searchResults, keyword, context, 2, analysis1);
-        } catch (error) {
-          BotUtil.makeLog('warn', `搜索结果分析失败: ${error.message}，使用简化格式`, 'ChatStream');
-          analysis2 = this.formatSearchResults(searchResults);
-        }
-      } else {
-        analysis2 = this.formatSearchResults(searchResults);
+      // 步骤1: 第一次AI - 分析调用什么工具
+      BotUtil.makeLog('info', `[步骤1] AI分析搜索策略: ${keyword}`, 'ChatStream');
+      const searchStrategy = await this.analyzeSearchStrategy(keyword, context);
+      const selectedEngine = searchStrategy.engine || 'baidu'; // 默认百度
+      const optimizedKeyword = searchStrategy.optimizedKeyword || keyword;
+      
+      BotUtil.makeLog('info', `[步骤1] 选择引擎: ${selectedEngine}, 优化关键词: ${optimizedKeyword}`, 'ChatStream');
+      
+      // 步骤2: 执行搜索（爬虫）
+      BotUtil.makeLog('info', `[步骤2] 开始爬虫搜索: ${optimizedKeyword}`, 'ChatStream');
+      const searchResults = await this.executeSearch(optimizedKeyword, selectedEngine);
+      
+      if (!searchResults || searchResults.length === 0) {
+        BotUtil.makeLog('warn', `[步骤2] 搜索无结果`, 'ChatStream');
+        return { 
+          type: 'text', 
+          content: `抱歉，搜索"${keyword}"未找到相关信息。建议换个关键词或稍后再试。` 
+        };
       }
       
-      // 步骤4: 润色最终回复
+      BotUtil.makeLog('info', `[步骤2] 爬虫找到${searchResults.length}个结果`, 'ChatStream');
+      
+      // 步骤3: 第二次AI - 分析爬虫结果，推理筛选
+      BotUtil.makeLog('info', `[步骤3] AI分析爬虫结果`, 'ChatStream');
+      const filteredAnalysis = await this.analyzeCrawlerResults(searchResults, keyword, context);
+      
+      if (!filteredAnalysis || filteredAnalysis.trim().length === 0) {
+        BotUtil.makeLog('warn', `[步骤3] AI分析失败，使用原始结果`, 'ChatStream');
+        return {
+          type: 'text',
+          content: this.formatSearchResults(searchResults),
+          metadata: { keyword, searchCount: searchResults.length }
+        };
+      }
+      
+      // 步骤4: 第三次AI - 根据人设和工作流给出回应
+      BotUtil.makeLog('info', `[步骤4] AI生成人设回应`, 'ChatStream');
+      const personaResponse = await this.generatePersonaResponse(filteredAnalysis, keyword, context);
+      
+      if (!personaResponse || personaResponse.trim().length === 0) {
+        BotUtil.makeLog('warn', `[步骤4] AI生成回应失败，使用分析结果`, 'ChatStream');
+        personaResponse = `我搜索了一下"${keyword}"，找到以下信息：\n\n${filteredAnalysis}`;
+      }
+      
+      // 步骤5: 第四次AI - 润色最终回复
+      BotUtil.makeLog('info', `[步骤5] AI润色最终回复`, 'ChatStream');
       let polishedResult = null;
-      if (this.callAI && analysis2) {
-        try {
-          polishedResult = await this.polishSearchResponse(analysis2, keyword, context);
-        } catch (error) {
-          BotUtil.makeLog('warn', `回复润色失败: ${error.message}，使用原始结果`, 'ChatStream');
-          polishedResult = `我搜索了一下"${keyword}"，找到以下信息：\n\n${analysis2}`;
-        }
-      } else {
-        polishedResult = `我搜索了一下"${keyword}"，找到以下信息：\n\n${analysis2}`;
+      try {
+        polishedResult = await this.polishFinalResponse(personaResponse, keyword, context);
+      } catch (error) {
+        BotUtil.makeLog('warn', `[步骤5] 润色失败: ${error.message}，使用原始回应`, 'ChatStream');
+        polishedResult = personaResponse;
       }
       
       return {
         type: 'text',
-        content: polishedResult || `搜索"${keyword}"找到${searchResults.length}个相关结果`,
+        content: polishedResult || personaResponse,
         metadata: {
           keyword,
+          optimizedKeyword,
+          engine: selectedEngine,
           searchCount: searchResults.length,
           searchResults: searchResults.slice(0, 5)
         }
@@ -1916,6 +1929,225 @@ export default class ChatStream extends AIStream {
         content: `搜索过程中出现错误，请稍后再试。如果问题持续，可以尝试换个关键词搜索。` 
       };
     }
+  }
+
+  /**
+   * 步骤1: 分析搜索策略（选择搜索引擎和优化关键词）
+   */
+  async analyzeSearchStrategy(keyword, context) {
+    const messages = [
+      {
+        role: 'system',
+        content: `你是搜索策略分析师。根据用户的关键词，分析应该使用哪个搜索引擎，并优化搜索关键词。
+
+可用搜索引擎：
+- baidu: 适合中文内容、国内信息、政策文件、新闻
+- bing: 适合国际内容、技术文档、英文资料
+- sogou: 适合中文内容、备用选择
+
+要求：
+1. 根据关键词内容选择最合适的搜索引擎
+2. 优化关键词，使其更精确（去除冗余词，添加必要限定词）
+3. 返回JSON格式：{"engine": "baidu", "optimizedKeyword": "优化后的关键词"}
+4. 如果关键词已经很精确，optimizedKeyword可以与原关键词相同`
+      },
+      {
+        role: 'user',
+        content: `分析以下搜索关键词，选择搜索引擎并优化关键词：\n\n"${keyword}"`
+      }
+    ];
+    
+    const apiConfig = context?.config || context?.question?.config || {};
+    const result = await this.callAI(messages, {
+      ...apiConfig,
+      maxTokens: 200,
+      temperature: 0.3
+    });
+    
+    // 解析JSON结果
+    try {
+      const jsonMatch = result.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+    } catch (e) {
+      BotUtil.makeLog('debug', `解析搜索策略失败: ${e.message}`, 'ChatStream');
+    }
+    
+    // 默认策略
+    return {
+      engine: keyword.includes('国务院') || keyword.includes('政策') || keyword.includes('文件') ? 'baidu' : 'baidu',
+      optimizedKeyword: keyword
+    };
+  }
+
+  /**
+   * 步骤2: 执行搜索（爬虫）
+   */
+  async executeSearch(keyword, engine = 'baidu') {
+    try {
+      // 并行搜索多个引擎（如果指定了引擎，优先使用该引擎）
+      const searchPromises = engine === 'baidu' 
+        ? [
+            this.performFastSearch(keyword, 'baidu'),
+            this.performFastSearch(keyword, 'bing'),
+            this.performFastSearch(keyword, 'sogou')
+          ]
+        : engine === 'bing'
+        ? [
+            this.performFastSearch(keyword, 'bing'),
+            this.performFastSearch(keyword, 'baidu'),
+            this.performFastSearch(keyword, 'sogou')
+          ]
+        : [
+            this.performFastSearch(keyword, 'sogou'),
+            this.performFastSearch(keyword, 'baidu'),
+            this.performFastSearch(keyword, 'bing')
+          ];
+      
+      const results = await Promise.allSettled(searchPromises);
+      
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value && result.value.length > 0) {
+          return result.value;
+        }
+      }
+      
+      return [];
+    } catch (error) {
+      BotUtil.makeLog('error', `执行搜索失败: ${error.message}`, 'ChatStream');
+      return [];
+    }
+  }
+
+  /**
+   * 步骤3: 分析爬虫结果，推理筛选
+   */
+  async analyzeCrawlerResults(searchResults, keyword, context) {
+    // 精简搜索结果，只取前8个
+    const topResults = searchResults.slice(0, 8);
+    const resultsText = topResults.map(item => 
+      `[结果${item.index}]\n标题: ${item.title}\n链接: ${item.url}\n摘要: ${item.snippet}`
+    ).join('\n\n');
+    
+    const messages = [
+      {
+        role: 'system',
+        content: `你是信息分析专家。你的任务是从爬虫搜索结果中提取、推理、筛选出最相关、最有价值的信息。
+
+要求：
+1. 仔细分析每个搜索结果与关键词"${keyword}"的相关性
+2. 筛选出最相关、最权威、最及时的信息（3-5个要点）
+3. 去除重复、低质量、不相关的信息
+4. 提取关键事实、数据、观点
+5. 用简洁明了的语言总结，纯文本格式，不用Markdown
+6. 如果信息不足或相关性低，如实说明
+7. 标注信息来源（标题或链接）`
+      },
+      {
+        role: 'user',
+        content: `请分析以下爬虫搜索结果，提取与"${keyword}"最相关的信息：
+
+${resultsText}
+
+要求：筛选出3-5个最相关的要点，去除冗余，用简洁语言总结。`
+      }
+    ];
+    
+    const apiConfig = context?.config || context?.question?.config || {};
+    const result = await this.callAI(messages, {
+      ...apiConfig,
+      maxTokens: 1500,
+      temperature: 0.6
+    });
+    
+    return result || this.formatSearchResults(searchResults);
+  }
+
+  /**
+   * 步骤4: 根据人设和工作流生成回应
+   */
+  async generatePersonaResponse(filteredAnalysis, keyword, context) {
+    const persona = context?.question?.persona || context?.persona || '我是AI助手';
+    const e = context?.e;
+    const isGroup = e?.isGroup || false;
+    const botRole = context?.question?.botRole || '成员';
+    
+    const messages = [
+      {
+        role: 'system',
+        content: `${persona}
+
+你是QQ聊天助手，需要将搜索分析结果转换成符合你人设的友好回复。
+
+【重要要求】
+1. 必须使用纯文本，绝对不要使用Markdown格式
+2. 禁止使用星号(*)、下划线(_)、反引号(backtick)、井号(#)、方括号([])用于标题
+3. 语气要自然轻松，像QQ聊天一样
+4. 开头要说明"我搜索了一下"或类似表达，体现使用了搜索工具
+5. 将分析结果整合成流畅的对话，符合你的人设
+6. 保持简洁，控制在3-5句话内
+7. 可以适当引用具体数据或事实
+8. 如果是群聊，语气要更轻松；如果是私聊，可以更详细
+
+${isGroup ? `当前在群聊中，身份：${botRole}` : '当前在私聊中'}`
+      },
+      {
+        role: 'user',
+        content: `请将以下搜索分析结果转换成符合你人设的友好回复：
+
+${filteredAnalysis}
+
+要求：
+1. 开头说明使用了搜索工具
+2. 自然整合信息，符合人设
+3. 纯文本格式
+4. 语气轻松友好
+5. 控制在3-5句话`
+      }
+    ];
+    
+    const apiConfig = context?.config || context?.question?.config || {};
+    const result = await this.callAI(messages, {
+      ...apiConfig,
+      maxTokens: 800,
+      temperature: 0.8
+    });
+    
+    return result || `我搜索了一下"${keyword}"，找到以下信息：\n\n${filteredAnalysis}`;
+  }
+
+  /**
+   * 步骤5: 润色最终回复
+   */
+  async polishFinalResponse(response, keyword, context) {
+    const persona = context?.question?.persona || context?.persona || '保持原角色语气';
+    
+    const messages = [
+      {
+        role: 'system',
+        content: `${persona}
+
+你是QQ聊天润色器，只能做轻微整理：
+1. 删除舞台提示、括号或方括号里未执行的工具描述（例如[回复:xxx]、(正在... )等）
+2. 保留原意，语气自然，像正常聊天，尽量简短，用常用标点分句
+3. 不要添加新信息或Markdown，只输出纯文本
+4. 确保回复流畅、自然、符合人设`
+      },
+      {
+        role: 'user',
+        content: response
+      }
+    ];
+    
+    const apiConfig = context?.config || context?.question?.config || {};
+    const result = await this.callAI(messages, {
+      ...apiConfig,
+      maxTokens: 600,
+      temperature: 0.3
+    });
+    
+    return result || response;
   }
 
   /**
