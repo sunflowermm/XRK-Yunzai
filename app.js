@@ -361,9 +361,11 @@ class EnvironmentValidator {
     const nodeVersion = process.version;
     const majorVersion = parseInt(nodeVersion.slice(1).split('.')[0]);
     
-    if (majorVersion < 14) {
-      throw new Error(`Node.js版本过低: ${nodeVersion}, 需要 v14.0.0 或更高版本`);
+    if (majorVersion < 18) {
+      throw new Error(`Node.js版本过低: ${nodeVersion}, 需要 v18.0.0 或更高版本`);
     }
+    
+    await this.logger.log(`Node.js 版本检查通过: ${nodeVersion}`);
   }
 
   /**
@@ -454,10 +456,17 @@ class Bootstrap {
    */
   async initialize() {
     await this.logger.ensureLogDir();
+    await this.logger.log('='.repeat(50));
+    await this.logger.log('XRK-Yunzai 启动引导');
+    await this.logger.log('='.repeat(50));
+    
     /** 验证环境 */
+    await this.logger.log('步骤 1/4: 验证运行环境...');
     await this.environmentValidator.validate();
+    await this.logger.success('环境验证通过');
     
     /** 检查并安装依赖 */
+    await this.logger.log('步骤 2/4: 检查项目依赖...');
     const packageJsonPath = path.join(process.cwd(), 'package.json');
     const nodeModulesPath = path.join(process.cwd(), 'node_modules');
     
@@ -465,12 +474,21 @@ class Bootstrap {
       packageJsonPath,
       nodeModulesPath
     });
+    await this.logger.success('项目依赖检查完成');
 
-    // 新增：插件依赖检查与安装，防止加载期卡死
+    // 插件依赖检查与安装，防止加载期卡死
+    await this.logger.log('步骤 3/4: 检查插件依赖...');
     await this.dependencyManager.ensurePluginDependencies(process.cwd());
+    await this.logger.success('插件依赖检查完成');
 
     /** 加载动态imports */
+    await this.logger.log('步骤 4/4: 加载动态配置...');
     await this.loadDynamicImports(packageJsonPath);
+    await this.logger.success('动态配置加载完成');
+    
+    await this.logger.log('='.repeat(50));
+    await this.logger.success('引导流程完成，正在启动主程序...');
+    await this.logger.log('='.repeat(50));
   }
 
   /**
@@ -499,12 +517,22 @@ class Bootstrap {
     } catch (error) {
       await this.logger.error(`引导失败: ${error.message}`);
       
+      if (error.stack) {
+        await this.logger.error(`堆栈追踪:\n${error.stack}`);
+      }
+      
       /** 提供故障排除建议 */
-      await this.logger.log('\n故障排除建议:');
-      await this.logger.log('1. 确保Node.js版本 >= 14.0.0');
-      await this.logger.log('2. 手动运行: pnpm install (或 npm install)');
-      await this.logger.log('3. 检查网络连接');
-      await this.logger.log('4. 查看日志文件: ./logs/bootstrap.log');
+      console.log('\n' + '='.repeat(50));
+      console.log('故障排除建议:');
+      console.log('='.repeat(50));
+      console.log('1. 确保 Node.js 版本 >= 18.0.0 (当前: ' + process.version + ')');
+      console.log('2. 手动运行: pnpm install (或 npm install / yarn install)');
+      console.log('3. 检查网络连接和代理设置');
+      console.log('4. 查看详细日志: ./logs/bootstrap.log');
+      console.log('5. 如果问题持续，尝试:');
+      console.log('   - 删除 node_modules 和 pnpm-lock.yaml');
+      console.log('   - 重新运行: pnpm install');
+      console.log('='.repeat(50));
       
       process.exit(1);
     }

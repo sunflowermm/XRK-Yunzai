@@ -2,8 +2,10 @@ version: '3.8'
 
 services:
   xrk-yunzai:
-    build: .
-    container_name: xrk-yunzai
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: xrk-multibot
     restart: unless-stopped
     environment:
       - NODE_ENV=production
@@ -11,45 +13,83 @@ services:
       - USE_FILE_LOG=true
       - DEBUG=false
       - XRK_SERVER_PORT=3000
-      - NODE_OPTIONS=--no-warnings --no-deprecation
+      - NODE_OPTIONS=--no-warnings --no-deprecation --max-old-space-size=1024
+      # Redis 连接配置（自动连接到 redis 服务）
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
     ports:
       - "3000-3100:3000-3100"
     volumes:
+      # 数据持久化
       - ./data:/app/data
       - ./logs:/app/logs
       - ./config:/app/config
       - ./plugins:/app/plugins
       - ./resources:/app/resources
+      - ./renderers:/app/renderers
+      # 排除 node_modules 以提升性能
+      - /app/node_modules
     networks:
       - xrk-network
+    depends_on:
+      redis:
+        condition: service_healthy
     deploy:
       resources:
         limits:
           cpus: '2.0'
-          memory: 1024M
+          memory: 2048M
         reservations:
           cpus: '0.5'
           memory: 512M
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
-  # 如果需要Redis
+  # Redis 服务（必需，用于 AI 记忆、Embedding 缓存等）
   redis:
     image: redis:7-alpine
     container_name: xrk-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
     volumes:
       - redis-data:/data
     networks:
       - xrk-network
+    ports:
+      - "6379:6379"  # 可选：暴露端口以便外部访问
     deploy:
       resources:
         limits:
           cpus: '0.5'
-          memory: 256M
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 networks:
   xrk-network:
     driver: bridge
+    name: xrk-network
 
 volumes:
   redis-data:
+    name: xrk-redis-data
+    driver: local

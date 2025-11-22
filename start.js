@@ -671,7 +671,11 @@ class MenuManager {
    * @returns {Promise<void>}
    */
   async run() {
-    console.log(chalk.cyan('\n🤖 葵崽多端口服务器管理系统\n'));
+    console.log(chalk.cyan('\n' + '='.repeat(50)));
+    console.log(chalk.cyan.bold('  🤖 XRK-Yunzai 多端口服务器管理系统'));
+    console.log(chalk.cyan('='.repeat(50)));
+    console.log(chalk.gray(`  版本: 3.1.3 | Node.js: ${process.version}`));
+    console.log(chalk.cyan('='.repeat(50) + '\n'));
     
     let shouldExit = false;
     
@@ -681,10 +685,14 @@ class MenuManager {
         shouldExit = await this.handleMenuAction(selected);
       } catch (error) {
         if (error.isTtyError) {
-          console.error('无法在当前环境中渲染菜单');
+          console.error(chalk.red('无法在当前环境中渲染菜单'));
+          console.error(chalk.yellow('提示: 请确保终端支持交互式输入'));
           break;
         }
         await this.serverManager.logger.error(`菜单操作出错: ${error.message}`);
+        if (error.stack) {
+          console.error(chalk.red(error.stack));
+        }
       }
     }
   }
@@ -698,12 +706,18 @@ class MenuManager {
     const availablePorts = await this.serverManager.getAvailablePorts();
     
     const choices = [
+      ...(availablePorts.length > 0 ? [
+        new inquirer.Separator(chalk.gray('─── 服务器管理 ───'))
+      ] : []),
       ...availablePorts.map(port => ({
         name: `${chalk.green('▶')} 启动服务器 (端口: ${chalk.yellow(port)})`,
         value: { action: 'start_server', port }
       })),
+      new inquirer.Separator(),
       { name: `${chalk.blue('+')} 添加新端口`, value: { action: 'add_port' } },
-      { name: `${chalk.magenta('⚙')} PM2管理`, value: { action: 'pm2_menu' } },
+      { name: `${chalk.magenta('⚙')} PM2 进程管理`, value: { action: 'pm2_menu' } },
+      new inquirer.Separator(),
+      { name: `${chalk.gray('ℹ')} 查看系统信息`, value: { action: 'system_info' } },
       new inquirer.Separator(),
       { name: `${chalk.red('✖')} 退出`, value: { action: 'exit' } }
     ];
@@ -711,9 +725,10 @@ class MenuManager {
     const { selected } = await inquirer.prompt([{
       type: 'list',
       name: 'selected',
-      message: '请选择操作:',
+      message: chalk.cyan('请选择操作:'),
       choices,
-      loop: false
+      loop: false,
+      pageSize: 15
     }]);
     
     return selected;
@@ -728,6 +743,7 @@ class MenuManager {
   async handleMenuAction(selected) {
     switch (selected.action) {
       case 'start_server':
+        console.log(chalk.blue(`\n正在启动端口 ${selected.port} 的服务器...\n`));
         await this.serverManager.startWithAutoRestart(selected.port);
         break;
         
@@ -739,8 +755,15 @@ class MenuManager {
         await this.showPM2Menu();
         break;
         
+      case 'system_info':
+        await this.showSystemInfo();
+        break;
+        
       case 'exit':
-        console.log(chalk.cyan('\n再见！👋\n'));
+        console.log(chalk.cyan('\n' + '='.repeat(50)));
+        console.log(chalk.cyan.bold('  感谢使用 XRK-Yunzai！'));
+        console.log(chalk.cyan('='.repeat(50)));
+        console.log(chalk.gray('  再见！👋\n'));
         if (globalSignalHandler) {
           await globalSignalHandler.cleanup();
         }
@@ -748,6 +771,40 @@ class MenuManager {
     }
     
     return false;
+  }
+  
+  /**
+   * 显示系统信息
+   * @private
+   * @returns {Promise<void>}
+   */
+  async showSystemInfo() {
+    const os = await import('os');
+    const systemInfo = {
+      'Node.js 版本': process.version,
+      '平台': `${os.platform()} ${os.arch()}`,
+      'CPU 核心数': os.cpus().length,
+      '总内存': `${(os.totalmem() / 1024 / 1024 / 1024).toFixed(2)} GB`,
+      '可用内存': `${(os.freemem() / 1024 / 1024 / 1024).toFixed(2)} GB`,
+      '工作目录': process.cwd(),
+      '运行时间': `${(process.uptime() / 60).toFixed(2)} 分钟`
+    };
+    
+    console.log(chalk.cyan('\n' + '='.repeat(50)));
+    console.log(chalk.cyan.bold('  系统信息'));
+    console.log(chalk.cyan('='.repeat(50)));
+    
+    for (const [key, value] of Object.entries(systemInfo)) {
+      console.log(chalk.gray(`  ${key.padEnd(15)}: ${chalk.yellow(value)}`));
+    }
+    
+    console.log(chalk.cyan('='.repeat(50) + '\n'));
+    
+    await inquirer.prompt([{
+      type: 'input',
+      name: 'continue',
+      message: '按 Enter 键返回主菜单...'
+    }]);
   }
 
   /**
@@ -759,17 +816,22 @@ class MenuManager {
     const newPort = await this.serverManager.addNewPort();
     
     if (newPort) {
-      console.log(chalk.green(`✓ 端口 ${newPort} 已添加`));
+      console.log(chalk.green(`\n✓ 端口 ${newPort} 已添加`));
+      console.log(chalk.gray(`  配置文件已创建: data/server_bots/${newPort}/`));
       
       const { startNow } = await inquirer.prompt([{
         type: 'confirm',
         name: 'startNow',
-        message: `是否立即启动端口 ${newPort} 的服务器?`,
+        message: chalk.cyan(`是否立即启动端口 ${newPort} 的服务器?`),
         default: true
       }]);
       
       if (startNow) {
+        console.log(chalk.blue(`\n正在启动端口 ${newPort} 的服务器...\n`));
         await this.serverManager.startWithAutoRestart(newPort);
+      } else {
+        console.log(chalk.yellow(`\n提示: 稍后可以通过主菜单启动端口 ${newPort} 的服务器`));
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
   }
