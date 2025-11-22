@@ -1,17 +1,41 @@
+<div align="center">
+
 # 项目基类文档
 
-本文档介绍 XRK-Yunzai 项目中的所有基类及其使用方法。
+> 📚 本文档介绍 XRK-Yunzai 项目中的所有基类及其使用方法。
 
-## 目录
+</div>
 
-- [工作流基类 (AIStream)](#工作流基类-aistream)
-- [插件基类 (Plugin)](#插件基类-plugin)
-- [HTTP API基类 (HttpApi)](#http-api基类-httpapi)
-- [事件监听基类 (EventListener)](#事件监听基类-eventlistener)
-- [渲染器基类 (Renderer)](#渲染器基类-renderer)
-- [Bot主类](#bot主类)
+---
 
-## 详细文档
+<div align="center">
+
+## 📑 目录
+
+</div>
+
+<div align="center">
+
+| 基类 | 说明 |
+|:---:|---|
+| ⚡ [工作流基类 (AIStream)](#工作流基类-aistream) | AI工作流基类 |
+| 🔌 [插件基类 (Plugin)](#插件基类-plugin) | 插件基类 |
+| 🌐 [HTTP API基类 (HttpApi)](#http-api基类-httpapi) | HTTP API基类 |
+| 👂 [事件监听基类 (EventListener)](#事件监听基类-eventlistener) | 事件监听基类 |
+| 🎨 [渲染器基类 (Renderer)](#渲染器基类-renderer) | 渲染器基类 |
+| 🤖 [Bot主类](#bot主类) | Bot主类 |
+
+</div>
+
+---
+
+<div align="center">
+
+## 📖 详细文档
+
+</div>
+
+<div align="center">
 
 每个基类都有独立的详细开发文档：
 
@@ -19,9 +43,15 @@
 - [插件基类开发文档](./PLUGIN_BASE_CLASS.md) - 如何创建插件
 - [HTTP API基类开发文档](./HTTP_API_BASE_CLASS.md) - 如何创建API路由
 
+</div>
+
 ---
 
-## 工作流基类 (AIStream)
+<div align="center">
+
+## ⚡ 工作流基类 (AIStream)
+
+</div>
 
 **路径**: `lib/aistream/aistream.js`
 
@@ -67,7 +97,11 @@ export default class MyWorkflow extends AIStream {
 
 ---
 
-## 插件基类 (Plugin)
+<div align="center">
+
+## 🔌 插件基类 (Plugin)
+
+</div>
 
 **路径**: `lib/plugins/plugin.js`
 
@@ -135,7 +169,11 @@ export default class MyPlugin extends plugin {
 
 ---
 
-## HTTP API基类 (HttpApi)
+<div align="center">
+
+## 🌐 HTTP API基类 (HttpApi)
+
+</div>
 
 **路径**: `lib/http/http.js`
 
@@ -190,7 +228,11 @@ export default class MyApi extends HttpApi {
 
 ---
 
-## 事件监听基类 (EventListener)
+<div align="center">
+
+## 👂 事件监听基类 (EventListener)
+
+</div>
 
 **路径**: `lib/listener/listener.js`
 
@@ -230,7 +272,11 @@ export default class MyListener extends EventListener {
 
 ---
 
-## 渲染器基类 (Renderer)
+<div align="center">
+
+## 🎨 渲染器基类 (Renderer)
+
+</div>
 
 **路径**: `lib/renderer/Renderer.js`
 
@@ -274,7 +320,11 @@ export default class MyRenderer extends Renderer {
 
 ---
 
-## Bot主类
+<div align="center">
+
+## 🤖 Bot主类
+
+</div>
 
 **路径**: `lib/bot.js`
 
@@ -311,7 +361,11 @@ await Bot.sendMasterMsg(message);
 
 ---
 
-## 基类关系图
+<div align="center">
+
+## 📊 基类关系图
+
+</div>
 
 ```
 Bot (主类)
@@ -334,7 +388,11 @@ Bot (主类)
 
 ---
 
-## 快速参考
+<div align="center">
+
+## ⚡ 快速参考
+
+</div>
 
 | 基类 | 路径 | 用途 |
 |------|------|------|
@@ -347,7 +405,11 @@ Bot (主类)
 
 ---
 
-## 相关文档
+<div align="center">
+
+## 📚 相关文档
+
+</div>
 
 - [工作流基类开发文档](./WORKFLOW_BASE_CLASS.md)
 - [项目README](../README.md)

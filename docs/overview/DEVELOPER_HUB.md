@@ -12,7 +12,13 @@
 
 ---
 
+<div align="center">
+
 ## 📊 对象关系可视化
+
+</div>
+
+<div align="center">
 
 ```mermaid
 flowchart TB
@@ -51,6 +57,8 @@ flowchart TB
     style WorkflowBase fill:#ff6b6b,stroke:#c92a2a,color:#fff
     style HttpApi fill:#feca57,stroke:#d68910,color:#000
 ```
+
+</div>
 
 ---
 

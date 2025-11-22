@@ -4,66 +4,141 @@
 
 跨平台、多适配器的智能工作流机器人；承接 [Yunzai v3.0](https://gitee.com/le-niao/Yunzai-Bot) / [Miao-Yunzai](https://gitee.com/yoimiya-kokomi/Miao-Yunzai) / [TRSS-Yunzai](https://gitee.com/TimeRainStarSky/Yunzai) 的积累并持续现代化。
 
+---
+
+## 📊 项目统计
+
+<div align="center">
+
+![GitHub stars](https://img.shields.io/github/stars/Xrkseek/XRK-Yunzai?style=for-the-badge&logo=github&color=yellow)
+![GitHub forks](https://img.shields.io/github/forks/Xrkseek/XRK-Yunzai?style=for-the-badge&logo=github&color=blue)
+![GitHub issues](https://img.shields.io/github/issues/Xrkseek/XRK-Yunzai?style=for-the-badge&logo=github&color=green)
+![GitHub license](https://img.shields.io/github/license/Xrkseek/XRK-Yunzai?style=for-the-badge&logo=github&color=orange)
+
+![Gitee stars](https://gitee.com/xrkseek/XRK-Yunzai/badge/star.svg?theme=white)
+![Gitee forks](https://gitee.com/xrkseek/XRK-Yunzai/badge/fork.svg?theme=white)
+![Gitee watchers](https://gitee.com/xrkseek/XRK-Yunzai/badge/watch.svg?theme=white)
+
+![访问量](https://visitor-badge.laobi.icu/badge?page_id=Xrkseek.XRK-Yunzai&left_color=green&right_color=blue&left_text=访问量)
+![GitHub last commit](https://img.shields.io/github/last-commit/Xrkseek/XRK-Yunzai?style=flat-square&logo=git&color=purple)
+![GitHub repo size](https://img.shields.io/github/repo-size/Xrkseek/XRK-Yunzai?style=flat-square&logo=github&color=teal)
+
 </div>
 
 ---
 
-## ✨ Highlights
+## 🌟 项目亮点
 
-| 分类 | 能力 |
-|------|------|
-| 模块化工作流 | Chat / Device / File 等工作流并行、串行、管线化执行；内置记忆、推理、润色与语义检索。 |
-| 统一对象 | `Bot`、事件 `e`、`logger`、`cfg`、`segment` 与全局 `redis` 客户端开箱即用，协议与设备场景一致。 |
-| 现代 HTTP 栈 | Express + WebSocket + 反向代理 + HTTPS/HTTP2 + CORS + 限流 + 静态资源热重载。 |
-| 插件生态 | 热重载、权限/优先级、上下文管理、多账号发送、转发消息、工作流调用。 |
-| 渲染/面板 | Puppeteer / Playwright 渲染、Web 控制台、API 面板与静态站点。 |
-| DevOps 友好 | Docker / Compose / PM2 / 原生 Node 统一入口，Redis 探活与自动拉起。 |
+<div align="center">
+
+![Node.js](https://img.shields.io/badge/Node.js-18%2B-green?style=for-the-badge&logo=node.js)
+![Redis](https://img.shields.io/badge/Redis-7-red?style=for-the-badge&logo=redis)
+![License](https://img.shields.io/badge/License-向日葵工作室开源许可证-yellow?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-3.1.3-blue?style=for-the-badge)
+
+</div>
+
+</div>
 
 ---
+
+<div align="center">
+
+## ✨ Highlights
+
+</div>
+
+<div align="center">
+
+| 分类 | 能力 |
+|:---:|---|
+| 🔄 **模块化工作流** | Chat / Device / File 等工作流并行、串行、管线化执行；内置记忆、推理、润色与语义检索。 |
+| 🎯 **统一对象** | `Bot`、事件 `e`、`logger`、`cfg`、`segment` 与全局 `redis` 客户端开箱即用，协议与设备场景一致。 |
+| 🌐 **现代 HTTP 栈** | Express + WebSocket + 反向代理 + HTTPS/HTTP2 + CORS + 限流 + 静态资源热重载。 |
+| 🔌 **插件生态** | 热重载、权限/优先级、上下文管理、多账号发送、转发消息、工作流调用。 |
+| 🎨 **渲染/面板** | Puppeteer / Playwright 渲染、Web 控制台、API 面板与静态站点。 |
+| 🚀 **DevOps 友好** | Docker / Compose / PM2 / 原生 Node 统一入口，Redis 探活与自动拉起。 |
+
+</div>
+
+---
+
+<div align="center">
 
 ## 🧰 Tech Stack Overview
 
-| 层级 | 组件 | 说明 |
-|------|------|------|
-| 运行时 | Node.js 18+、pnpm | ESM + 顶级 await，pnpm workspaces 管理插件依赖。 |
-| Web 服务 | Express 4、`ws`、`http-proxy-middleware` | HTTP/WS、一体化代理、Helmet 安全头、独立速率限制器。 |
-| 数据缓存 | Redis 5+（官方 client） | 记忆系统、会话缓存、API 限流、工作流 embedding、跨进程通信。 |
-| 语义能力 | `node-fetch` + 第三方 LLM API | Chat Completions、流式输出、向量检索、轻量 BM25/ONNX/HF/fastText。 |
-| 渲染与自动化 | Puppeteer / Playwright | 图像渲染、设备工作流截图、Web 控制台。 |
-| 配置管理 | YAML + chokidar | 多端口隔离配置、热更新、默认值自动回写。 |
+</div>
 
-更多技术细节见 `docs/TECH_STACK.md`。
+<div align="center">
+
+| 层级 | 组件 | 说明 |
+|:---:|---|:---:|
+| ⚡ **运行时** | Node.js 18+、pnpm | ESM + 顶级 await，pnpm workspaces 管理插件依赖。 |
+| 🌐 **Web 服务** | Express 4、`ws`、`http-proxy-middleware` | HTTP/WS、一体化代理、Helmet 安全头、独立速率限制器。 |
+| 💾 **数据缓存** | Redis 5+（官方 client） | 记忆系统、会话缓存、API 限流、工作流 embedding、跨进程通信。 |
+| 🤖 **语义能力** | `node-fetch` + 第三方 LLM API | Chat Completions、流式输出、向量检索、轻量 BM25/ONNX/HF/fastText。 |
+| 🎨 **渲染与自动化** | Puppeteer / Playwright | 图像渲染、设备工作流截图、Web 控制台。 |
+| ⚙️ **配置管理** | YAML + chokidar | 多端口隔离配置、热更新、默认值自动回写。 |
+
+</div>
+
+<div align="center">
+
+> 📖 更多技术细节见 [`docs/TECH_STACK.md`](./docs/TECH_STACK.md)
+
+</div>
 
 ---
+
+<div align="center">
 
 ## 🧩 Runtime Objects & Redis
 
-- **Bot**：事件驱动总线、HTTP/WS 服务、插件/工作流加载、代理协商、消息转发。
-- **事件 `e`**：统一的消息/设备事件，内置 `reply`、`group`、`friend`、`member` 快捷方法。
-- **`logger`**：多级别打印，配合 `BotUtil.makeLog()` 输出彩色日志。
-- **`cfg`**：多层配置读取器，支持默认配置 + 端口隔离目录 + 热监听。
-- **`segment`**：OneBot 消息片段构造器（图片、语音、转发等）。
-- **`redis`**：由 `lib/config/redis.js` 初始化的全局客户端，职责包含：
-  - AI 记忆：`ai:memory:*` / `ai:embedding:*`
-  - 速率限制 / 缓存 / 会话锁
-  - 状态持久化（如工作流上下文）
+</div>
 
-详细 API 请查阅 `docs/CORE_OBJECTS.md` 与各 reference 文档。
+<div align="center">
+
+| 对象 | 说明 |
+|:---:|---|
+| 🤖 **Bot** | 事件驱动总线、HTTP/WS 服务、插件/工作流加载、代理协商、消息转发。 |
+| 📨 **事件 `e`** | 统一的消息/设备事件，内置 `reply`、`group`、`friend`、`member` 快捷方法。 |
+| 📊 **`logger`** | 多级别打印，配合 `BotUtil.makeLog()` 输出彩色日志。 |
+| ⚙️ **`cfg`** | 多层配置读取器，支持默认配置 + 端口隔离目录 + 热监听。 |
+| 📝 **`segment`** | OneBot 消息片段构造器（图片、语音、转发等）。 |
+| 🔴 **`redis`** | 由 `lib/config/redis.js` 初始化的全局客户端，职责包含：<br/>• AI 记忆：`ai:memory:*` / `ai:embedding:*`<br/>• 速率限制 / 缓存 / 会话锁<br/>• 状态持久化（如工作流上下文） |
+
+</div>
+
+<div align="center">
+
+> 📚 详细 API 请查阅 [`docs/CORE_OBJECTS.md`](./docs/CORE_OBJECTS.md) 与各 reference 文档。
+
+</div>
 
 ---
 
+<div align="center">
+
 ## 🚀 Quick Start
+
+</div>
 
 ### 环境要求
 
+<div align="center">
+
 | 组件 | 版本 |
-|------|------|
+|:---:|:---:|
 | Node.js | ≥ 18.14.0 |
 | Redis | ≥ 5.0.0（支持 RESP3） |
 | 浏览器 | Chrome / Chromium / Edge（渲染或 Web 面板需要） |
 | 包管理器 | 推荐 pnpm（npm/yarn 亦可） |
 
+</div>
+
 ### 安装
+
+<div align="center">
 
 ```bash
 # Gitcode（国内）
@@ -79,30 +154,58 @@ cd XRK-Yunzai
 pnpm install   # 或 npm install / yarn
 ```
 
+</div>
+
 ### 首次运行
+
+<div align="center">
 
 ```bash
 node app   # 自动检查依赖 & 引导登录
 ```
 
-按提示完成登录后即可在 `plugins/` 中开发工作流或 API。
+</div>
+
+<div align="center">
+
+> 💡 按提示完成登录后即可在 `plugins/` 中开发工作流或 API。
+
+</div>
 
 ---
+
+<div align="center">
 
 ## 🧱 Deployment Options
 
-| 方式 | 步骤 | 适用场景 |
-|------|------|---------|
-| 原生 Node | `node app` | 开发/调试最快捷，自动检查依赖与 Redis 连接。 |
-| Docker Compose | `docker-compose up -d` | 推荐；可一键启 Redis 与主程序、Volume 保留数据。 |
-| Dockerfile | `docker build -t xrk-yunzai:latest .` → `docker run ...` | 适合 CI/CD、自托管。 |
-| PM2 | `pm2 start app.js --name xrk-yunzai` | 持续运行、日志切割、自动拉起。 |
+</div>
 
-> **提示**：容器化部署务必映射 `data/ config/ plugins/ logs/ resources/`，首次登录可本地完成后再挂载。
+<div align="center">
+
+| 方式 | 步骤 | 适用场景 |
+|:---:|---|:---:|
+| 🖥️ **原生 Node** | `node app` | 开发/调试最快捷，自动检查依赖与 Redis 连接。 |
+| 🐳 **Docker Compose** | `docker-compose up -d` | 推荐；可一键启 Redis 与主程序、Volume 保留数据。 |
+| 📦 **Dockerfile** | `docker build -t xrk-yunzai:latest .` → `docker run ...` | 适合 CI/CD、自托管。 |
+| ⚡ **PM2** | `pm2 start app.js --name xrk-yunzai` | 持续运行、日志切割、自动拉起。 |
+
+</div>
+
+<div align="center">
+
+> 💡 **提示**：容器化部署务必映射 `data/ config/ plugins/ logs/ resources/`，首次登录可本地完成后再挂载。
+
+</div>
 
 ---
 
-## 🗂 Architecture Snapshot（已修订）
+<div align="center">
+
+## 🗂 Architecture Snapshot
+
+</div>
+
+<div align="center">
 
 ```
 XRK-Yunzai/
@@ -123,7 +226,7 @@ XRK-Yunzai/
 │   │   └── loader.js
 │   ├── http/              # API 基类 + loader
 │   ├── listener/          # 事件监听 loader
-│   ├── renderer/          # 渲染器 loader
+│   ├── renderer/           # 渲染器 loader
 │   ├── common/            # BotUtil, common helpers
 │   └── config/            # cfg, redis, log
 │
@@ -146,41 +249,71 @@ XRK-Yunzai/
 └── components/            # TTS/ASR/Utility 组件
 ```
 
+</div>
+
 ---
+
+<div align="center">
 
 ## 📘 Documentation Hub & 导航
 
+</div>
+
+<div align="center">
+
 | 主题 | 入口 | 说明 |
-|------|------|------|
-| 技术栈全景 | [`docs/TECH_STACK.md`](./docs/TECH_STACK.md) | 框架栈、依赖、部署策略。 |
-| 开发者导航（可视化） | [`docs/overview/DEVELOPER_HUB.md`](./docs/overview/DEVELOPER_HUB.md) | Mermaid 拓扑展示 `Bot → Plugins → Workflows` 关系及基类入口。 |
-| 核心对象 | [`docs/CORE_OBJECTS.md`](./docs/CORE_OBJECTS.md) | Bot / 事件 `e` / `logger` / `cfg` / `segment` / `redis` 速查。 |
-| 技术架构 | [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | 系统架构、核心对象作用、数据流、技术栈依赖关系。 |
-| Bot 函数全集 | [`docs/reference/BOT.md`](./docs/reference/BOT.md) | Server 生命周期、代理、好友/群等全部方法。 |
-| 工作流 & 记忆 | [`docs/reference/WORKFLOWS.md`](./docs/reference/WORKFLOWS.md) | `AIStream` / `MemorySystem` / `WorkflowManager` 全函数。 |
-| 插件运行时 | [`docs/reference/PLUGINS.md`](./docs/reference/PLUGINS.md) | 上下文管理、工作流调用、渲染。 |
-| HTTP / WS API | [`docs/reference/HTTP.md`](./docs/reference/HTTP.md) | `HttpApi` 生命周期、路由/WS 注册。 |
-| 配置 & Redis | [`docs/reference/CONFIG_AND_REDIS.md`](./docs/reference/CONFIG_AND_REDIS.md) | `cfg` API、Redis 初始化/事件。 |
-| Logger 完整手册 | [`docs/reference/LOGGER.md`](./docs/reference/LOGGER.md) | `logger` 全部方法、颜色工具、格式化、计时器等。 |
-| 适配器 & 路由 | [`docs/reference/ADAPTER_AND_ROUTING.md`](./docs/reference/ADAPTER_AND_ROUTING.md) | 适配器与路由系统如何与Bot交互、完整方法列表。 |
-| 用户向文档 | [`stdin.md`](./stdin.md) | 面板/功能简介。 |
+|:---:|---|:---:|
+| 🛠️ **技术栈全景** | [`docs/TECH_STACK.md`](./docs/TECH_STACK.md) | 框架栈、依赖、部署策略。 |
+| 🗺️ **开发者导航** | [`docs/overview/DEVELOPER_HUB.md`](./docs/overview/DEVELOPER_HUB.md) | Mermaid 拓扑展示 `Bot → Plugins → Workflows` 关系及基类入口。 |
+| 🎯 **核心对象** | [`docs/CORE_OBJECTS.md`](./docs/CORE_OBJECTS.md) | Bot / 事件 `e` / `logger` / `cfg` / `segment` / `redis` 速查。 |
+| 🏗️ **技术架构** | [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | 系统架构、核心对象作用、数据流、技术栈依赖关系。 |
+| 🤖 **Bot 函数全集** | [`docs/reference/BOT.md`](./docs/reference/BOT.md) | Server 生命周期、代理、好友/群等全部方法。 |
+| ⚡ **工作流 & 记忆** | [`docs/reference/WORKFLOWS.md`](./docs/reference/WORKFLOWS.md) | `AIStream` / `MemorySystem` / `WorkflowManager` 全函数。 |
+| 🔌 **插件运行时** | [`docs/reference/PLUGINS.md`](./docs/reference/PLUGINS.md) | 上下文管理、工作流调用、渲染。 |
+| 🌐 **HTTP / WS API** | [`docs/reference/HTTP.md`](./docs/reference/HTTP.md) | `HttpApi` 生命周期、路由/WS 注册。 |
+| ⚙️ **配置 & Redis** | [`docs/reference/CONFIG_AND_REDIS.md`](./docs/reference/CONFIG_AND_REDIS.md) | `cfg` API、Redis 初始化/事件。 |
+| 📊 **Logger 完整手册** | [`docs/reference/LOGGER.md`](./docs/reference/LOGGER.md) | `logger` 全部方法、颜色工具、格式化、计时器等。 |
+| 🔗 **适配器 & 路由** | [`docs/reference/ADAPTER_AND_ROUTING.md`](./docs/reference/ADAPTER_AND_ROUTING.md) | 适配器与路由系统如何与Bot交互、完整方法列表。 |
+| 📖 **用户向文档** | [`stdin.md`](./stdin.md) | 面板/功能简介。 |
 
-> 基类的开发策略、调用顺序与示例在导航页集中展示，可从 README 直接跳转到子文档。
+</div>
 
-所有 reference 文件均针对源码中每个函数提供签名、参数类型、返回值与示例，不再遗漏。
+<div align="center">
+
+> 💡 基类的开发策略、调用顺序与示例在导航页集中展示，可从 README 直接跳转到子文档。
+
+> 📝 所有 reference 文件均针对源码中每个函数提供签名、参数类型、返回值与示例，不再遗漏。
+
+</div>
 
 ---
 
+<div align="center">
+
 ## ⚙️ Configuration Quick View
+
+</div>
+
+<div align="center">
 
 主要配置位于 `config/default_config/*.yaml`，首次运行自动复制到 `data/server_bots/<port>/`。
 
-- `kuizai.yaml`：AI 接口、推理、润色、工作流默认值。
-- `server.yaml`：HTTP/HTTPS、CORS、安全策略、静态目录。
-- `redis.yaml`：Redis 连接信息与数据库序号。
-- `device.yaml` / `group.yaml` / `notice.yaml`：设备、群、通知策略。
+| 配置文件 | 说明 |
+|:---:|---|
+| `kuizai.yaml` | AI 接口、推理、润色、工作流默认值。 |
+| `server.yaml` | HTTP/HTTPS、CORS、安全策略、静态目录。 |
+| `redis.yaml` | Redis 连接信息与数据库序号。 |
+| `device.yaml` | 设备相关配置。 |
+| `group.yaml` | 群组相关配置。 |
+| `notice.yaml` | 通知策略配置。 |
 
-> 优先级：运行时传入 > `cfg` 实例化时覆盖 > `data/server_bots/<port>` > `config/default_config` > 内置默认值。详情见 `docs/reference/CONFIG_AND_REDIS.md#配置优先级`。
+</div>
+
+<div align="center">
+
+> 📋 优先级：运行时传入 > `cfg` 实例化时覆盖 > `data/server_bots/<port>` > `config/default_config` > 内置默认值。详情见 [`docs/reference/CONFIG_AND_REDIS.md`](./docs/reference/CONFIG_AND_REDIS.md#配置优先级)。
+
+</div>
 
 ---
 
@@ -265,23 +398,47 @@ export default class FileBuilder extends AIStream {
 
 ---
 
+<div align="center">
+
 ## 🧭 Roadmap
 
-- ✅ PM2 支持
-- ✅ 任务处理器开源化（MySQL、公众号等）
-- ✅ 农业场景设备工作流
-- ✅ 任务类型体系与安全能力
-- 🔄 拆分底层协议依赖、精简适配
-- 🔄 更多工作流模板与智能体互操作
+</div>
+
+<div align="center">
+
+| 状态 | 功能 |
+|:---:|---|
+| ✅ | PM2 支持 |
+| ✅ | 任务处理器开源化（MySQL、公众号等） |
+| ✅ | 农业场景设备工作流 |
+| ✅ | 任务类型体系与安全能力 |
+| 🔄 | 拆分底层协议依赖、精简适配 |
+| 🔄 | 更多工作流模板与智能体互操作 |
+
+</div>
 
 ---
 
+<div align="center">
+
 ## 🙏 Credits
 
+</div>
+
+<div align="center">
+
 | 项目 | 作者 | 贡献 |
-|:----:|:-----|:-----|
+|:---:|---|:---:|
 | [Yunzai v3.0](https://gitee.com/le-niao/Yunzai-Bot) | 乐神 | 元老级项目基座 |
 | [Miao-Yunzai v3.1.3](https://gitee.com/yoimiya-kokomi/Miao-Yunzai) | 喵喵 | 功能优化与原神适配 |
 | [TRSS-Yunzai v3.1.3](https://gitee.com/TimeRainStarSky/Yunzai) | 时雨 | Node 端底层设计灵感 |
 
-> 感谢贡献者、测试者与使用者。欢迎提交 Issue / PR，共建更强大的 XRK-Yunzai！
+</div>
+
+<div align="center">
+
+> 🙏 感谢贡献者、测试者与使用者。欢迎提交 Issue / PR，共建更强大的 XRK-Yunzai！
+
+> 📄 本项目采用 [向日葵工作室开源许可证](./LICENSE)，感谢 Yunzai 等项目的卓越贡献！
+
+</div>

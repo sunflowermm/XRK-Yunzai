@@ -1,10 +1,18 @@
+<div align="center">
+
 # 适配器与路由系统关系文档
 
 > 本文档详细说明适配器（Adapter）和路由系统（Routing）如何与 Bot 主对象交互，以及它们之间的关系。
 
+</div>
+
 ---
 
+<div align="center">
+
 ## 1. 适配器（Adapter）系统
+
+</div>
 
 ### 1.1 适配器概述
 
@@ -292,7 +300,11 @@ Bot.wsf['MyProtocol'].push((conn, req, bot, socket, head) => {
 
 ---
 
+<div align="center">
+
 ## 2. 路由（Routing）系统
+
+</div>
 
 ### 2.1 路由系统概述
 
@@ -475,7 +487,11 @@ export default {
 
 ---
 
+<div align="center">
+
 ## 3. Bot 对象完整方法列表
+
+</div>
 
 ### 3.1 生命周期方法
 
@@ -607,7 +623,11 @@ export default {
 
 ---
 
+<div align="center">
+
 ## 4. 适配器与路由的协作
+
+</div>
 
 ### 4.1 事件流
 
@@ -650,7 +670,11 @@ API路由 ← Bot.sendFriendMsg() ← 插件
 
 ---
 
+<div align="center">
+
 ## 5. 最佳实践
+
+</div>
 
 ### 5.1 适配器开发
 
@@ -677,7 +701,11 @@ API路由 ← Bot.sendFriendMsg() ← 插件
 
 ---
 
+<div align="center">
+
 ## 6. 相关文档
+
+</div>
 
 - [Bot对象函数手册](./BOT.md) - Bot对象的完整API
 - [HTTP API基类文档](../HTTP_API_BASE_CLASS.md) - 路由开发指南

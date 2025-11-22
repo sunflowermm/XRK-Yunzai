@@ -1,6 +1,6 @@
-# Logger 对象完整手册
-
 <div align="center">
+
+# Logger 对象完整手册
 
 ![Logger](https://img.shields.io/badge/Logger-Complete%20API-blue?style=for-the-badge)
 ![Pino](https://img.shields.io/badge/Based%20on-Pino-success?style=for-the-badge)
@@ -14,7 +14,11 @@
 
 ---
 
+<div align="center">
+
 ## 1. 基础日志方法
+
+</div>
 
 ### trace(...args)
 - **签名**: `(...args: any[]) => void`
@@ -53,7 +57,11 @@
 
 ---
 
+<div align="center">
+
 ## 2. 颜色工具方法
+
+</div>
 
 ### chalk
 - **类型**: `Chalk` 实例
@@ -102,7 +110,11 @@
 
 ---
 
+<div align="center">
+
 ## 3. 渐变色工具
+
+</div>
 
 ### xrkyzGradient(text)
 - **签名**: `(text: string) => string`
@@ -124,7 +136,11 @@
 
 ---
 
+<div align="center">
+
 ## 4. 特殊日志方法
+
+</div>
 
 ### success(...args)
 - **签名**: `(...args: any[]) => void`
@@ -156,7 +172,11 @@
 
 ---
 
+<div align="center">
+
 ## 5. 计时器方法
+
+</div>
 
 ### time(label = 'default')
 - **签名**: `(label?: string) => void`
@@ -179,7 +199,11 @@
 
 ---
 
+<div align="center">
+
 ## 6. 格式化方法
+
+</div>
 
 ### title(text, color = 'yellow')
 - **签名**: `(text: string, color?: string) => void`
@@ -224,7 +248,11 @@
 
 ---
 
+<div align="center">
+
 ## 7. 数据展示方法
+
+</div>
 
 ### json(obj, title?)
 - **签名**: `(obj: any, title?: string) => void`
@@ -261,7 +289,11 @@
 
 ---
 
+<div align="center">
+
 ## 8. 状态方法
+
+</div>
 
 ### status(message, status, statusColor = 'green')
 - **签名**: `(message: string, status: string, statusColor?: string) => void`
@@ -303,7 +335,11 @@
 
 ---
 
+<div align="center">
+
 ## 9. 系统方法
+
+</div>
 
 ### platform()
 - **签名**: `() => Object`
@@ -354,7 +390,11 @@
 
 ---
 
+<div align="center">
+
 ## 10. 配置说明
+
+</div>
 
 Logger 的行为可以通过 `config/default_config/bot.yaml` 中的以下配置项控制：
 
@@ -382,7 +422,11 @@ bot:
 
 ---
 
+<div align="center">
+
 ## 11. 日志文件
+
+</div>
 
 Logger 会自动创建以下日志文件：
 
@@ -393,7 +437,11 @@ Logger 会自动创建以下日志文件：
 
 ---
 
+<div align="center">
+
 ## 12. 使用示例
+
+</div>
 
 ### 基础使用
 
@@ -452,7 +500,11 @@ logger.info(logger.gradient('自定义渐变', ['#FF0000', '#00FF00']));
 
 ---
 
+<div align="center">
+
 ## 13. 最佳实践
+
+</div>
 
 1. **日志级别选择**：
    - 开发环境使用 `debug` 或 `trace`
@@ -476,7 +528,11 @@ logger.info(logger.gradient('自定义渐变', ['#FF0000', '#00FF00']));
 
 ---
 
+<div align="center">
+
 ## 14. 相关文档
+
+</div>
 
 - [核心对象文档](../CORE_OBJECTS.md) - logger 的快速参考
 - [配置系统文档](./CONFIG_AND_REDIS.md) - 日志配置说明

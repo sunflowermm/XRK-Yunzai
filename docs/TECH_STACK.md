@@ -1,11 +1,11 @@
-# XRK-Yunzai 技术栈全景
-
 <div align="center">
+
+# XRK-Yunzai 技术栈全景
 
 ![Tech Stack](https://img.shields.io/badge/Tech%20Stack-Overview-blue?style=for-the-badge)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-green?style=for-the-badge&logo=node.js)
 ![Redis](https://img.shields.io/badge/Redis-7-red?style=for-the-badge&logo=redis)
-![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
+![License](https://img.shields.io/badge/License-向日葵工作室开源许可证-yellow?style=for-the-badge)
 
 > 🛠️ 本文档盘点 XRK-Yunzai 的核心技术栈、依赖与关键决策，帮助开发者快速理解系统边界与可扩展点。
 
@@ -13,7 +13,11 @@
 
 ---
 
+<div align="center">
+
 ## 1. 运行时 & 语言特性
+
+</div>
 
 | 模块 | 说明 |
 |------|------|
@@ -23,7 +27,11 @@
 
 ---
 
+<div align="center">
+
 ## 2. Web 服务层
+
+</div>
 
 | 组件 | 用途 |
 |------|------|
@@ -40,7 +48,11 @@
 
 ---
 
+<div align="center">
+
 ## 3. 数据与缓存
+
+</div>
 
 | 技术 | 描述 |
 |------|------|
@@ -56,7 +68,11 @@ Redis 连接策略：
 
 ---
 
+<div align="center">
+
 ## 4. 工作流 & AI 能力
+
+</div>
 
 | 组件 | 说明 |
 |------|------|
@@ -73,7 +89,11 @@ Redis 连接策略：
 
 ---
 
+<div align="center">
+
 ## 5. 插件/模块体系
+
+</div>
 
 | 目录 | 说明 |
 |------|------|
@@ -90,7 +110,11 @@ Redis 连接策略：
 
 ---
 
+<div align="center">
+
 ## 6. 渲染与前端
+
+</div>
 
 | 组件 | 用途 |
 |------|------|
@@ -100,7 +124,11 @@ Redis 连接策略：
 
 ---
 
+<div align="center">
+
 ## 7. DevOps & 工具
+
+</div>
 
 | 文件 | 描述 |
 |------|------|
@@ -112,7 +140,11 @@ Redis 连接策略：
 
 ---
 
+<div align="center">
+
 ## 8. 扩展建议
+
+</div>
 
 - **更多协议**：在 `plugins/adapter` 新增适配器，复用 `Bot`/`e` API，可参考 OneBotv11 实现。
 - **任务编排**：基于 Workflow Manager 快速构建多工作流协作（串行/并行/条件触发）。
