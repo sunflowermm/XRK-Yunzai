@@ -1837,17 +1837,17 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 执行联网搜索流程（优化版：爬虫主动筛选 -> AI快速分析 -> 人设回应 -> 润色）
+   * 执行联网搜索流程（优化版：抓取实际内容 -> 单次AI分析生成回应）
    * 流程：
-   * 1. 爬虫：执行搜索，主动推理筛选，提取关键信息
-   * 2. AI分析：快速分析已筛选的精简结果
-   * 3. 人设回应：根据人设和工作流给出回应
-   * 4. 润色：润色最终回复
+   * 1. 爬虫：执行搜索，筛选最相关结果
+   * 2. 抓取：抓取实际网页内容，清洗HTML提取正文
+   * 3. AI分析：一次性分析内容并生成符合人设的回应（合并分析和回应）
+   * 4. 快速润色：简单清理工具描述
    */
   async runWebSearch(keyword, context) {
     try {
-      // 步骤1: 执行搜索（爬虫）并主动筛选
-      BotUtil.makeLog('info', `[搜索] 开始爬虫搜索: ${keyword}`, 'ChatStream');
+      // 步骤1: 执行搜索并筛选
+      BotUtil.makeLog('info', `[搜索] 开始搜索: ${keyword}`, 'ChatStream');
       const searchResults = await this.executeSearch(keyword);
       
       if (!searchResults || searchResults.length === 0) {
@@ -1858,58 +1858,45 @@ export default class ChatStream extends AIStream {
         };
       }
       
-      // 爬虫阶段主动筛选：只保留最相关的前3-4个结果，并提取关键信息
-      const filteredResults = this.filterAndExtractResults(searchResults, keyword);
-      BotUtil.makeLog('info', `[搜索] 爬虫筛选后保留${filteredResults.length}个结果`, 'ChatStream');
+      // 筛选最相关的前2-3个结果
+      const topResults = this.filterAndExtractResults(searchResults, keyword).slice(0, 3);
+      BotUtil.makeLog('info', `[搜索] 筛选出${topResults.length}个最相关结果`, 'ChatStream');
       
       if (!this.callAI) {
-        // 如果没有AI，直接返回格式化结果
         return {
           type: 'text',
-          content: this.formatSearchResults(filteredResults),
-          metadata: { keyword, searchCount: filteredResults.length }
+          content: this.formatSearchResults(topResults),
+          metadata: { keyword, searchCount: topResults.length }
         };
       }
       
-      // 步骤2: AI快速分析已筛选的精简结果
-      BotUtil.makeLog('info', `[分析] AI快速分析筛选结果`, 'ChatStream');
-      const quickAnalysis = await this.quickAnalyzeResults(filteredResults, keyword, context);
+      // 步骤2: 抓取实际网页内容（只抓取前2个，提高速度）
+      BotUtil.makeLog('info', `[抓取] 开始抓取网页内容`, 'ChatStream');
+      const webContents = await this.fetchWebContents(topResults.slice(0, 2), keyword);
       
-      if (!quickAnalysis || quickAnalysis.trim().length === 0) {
-        BotUtil.makeLog('warn', `[分析] AI分析失败，使用筛选结果`, 'ChatStream');
+      // 步骤3: AI一次性分析并生成回应（合并分析和回应步骤）
+      BotUtil.makeLog('info', `[AI] 分析内容并生成回应`, 'ChatStream');
+      const finalResponse = await this.analyzeAndGenerateResponse(webContents, keyword, context);
+      
+      if (!finalResponse || finalResponse.trim().length === 0) {
+        BotUtil.makeLog('warn', `[AI] 生成失败，使用格式化结果`, 'ChatStream');
         return {
           type: 'text',
-          content: this.formatSearchResults(filteredResults),
-          metadata: { keyword, searchCount: filteredResults.length }
+          content: this.formatSearchResults(topResults),
+          metadata: { keyword, searchCount: topResults.length }
         };
       }
       
-      // 步骤3: 根据人设和工作流生成回应
-      BotUtil.makeLog('info', `[回应] AI生成人设回应`, 'ChatStream');
-      let personaResponse = await this.generatePersonaResponse(quickAnalysis, keyword, context);
-      
-      if (!personaResponse || personaResponse.trim().length === 0) {
-        BotUtil.makeLog('warn', `[回应] AI生成回应失败，使用分析结果`, 'ChatStream');
-        personaResponse = `我搜索了一下"${keyword}"，找到以下信息：\n\n${quickAnalysis}`;
-      }
-      
-      // 步骤4: 润色最终回复
-      BotUtil.makeLog('info', `[润色] AI润色最终回复`, 'ChatStream');
-      let polishedResult = null;
-      try {
-        polishedResult = await this.polishFinalResponse(personaResponse, keyword, context);
-      } catch (error) {
-        BotUtil.makeLog('warn', `[润色] 润色失败: ${error.message}，使用原始回应`, 'ChatStream');
-        polishedResult = personaResponse;
-      }
+      // 步骤4: 快速清理工具描述
+      const cleanedResponse = this.quickCleanResponse(finalResponse);
       
       return {
         type: 'text',
-        content: polishedResult || personaResponse,
+        content: cleanedResponse,
         metadata: {
           keyword,
-          searchCount: filteredResults.length,
-          searchResults: filteredResults.slice(0, 3)
+          searchCount: topResults.length,
+          fetchedPages: webContents.length
         }
       };
     } catch (error) {
@@ -1922,12 +1909,12 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 爬虫阶段主动筛选和提取关键信息（减少传给AI的内容）
+   * 爬虫阶段主动筛选和提取关键信息
    */
   filterAndExtractResults(searchResults, keyword) {
     if (!searchResults || searchResults.length === 0) return [];
     
-    // 1. 相关性评分（简单规则）
+    // 相关性评分
     const scoredResults = searchResults.map(item => {
       let score = 0;
       const titleLower = item.title.toLowerCase();
@@ -1935,7 +1922,6 @@ export default class ChatStream extends AIStream {
       const keywordLower = keyword.toLowerCase();
       const keywords = keywordLower.split(/\s+/);
       
-      // 标题匹配
       keywords.forEach(kw => {
         if (titleLower.includes(kw)) score += 3;
         if (snippetLower.includes(kw)) score += 1;
@@ -1956,64 +1942,177 @@ export default class ChatStream extends AIStream {
       return { ...item, score };
     });
     
-    // 2. 按分数排序，取前3-4个
-    const topResults = scoredResults
+    // 按分数排序，取前3个
+    return scoredResults
       .sort((a, b) => b.score - a.score)
-      .slice(0, 4)
-      .map(item => {
-        // 提取关键信息：精简标题和摘要
-        const title = item.title.length > 60 ? item.title.substring(0, 60) + '...' : item.title;
-        const snippet = (item.snippet || '').length > 100 ? item.snippet.substring(0, 100) + '...' : item.snippet;
-        
-        return {
-          title,
-          snippet: snippet || '暂无摘要',
-          url: item.url,
-          index: item.index || 1
-        };
-      });
-    
-    return topResults;
+      .slice(0, 3);
   }
 
   /**
-   * AI快速分析已筛选的精简结果（减少token，提高速度）
+   * 抓取实际网页内容并清洗（提取正文，去除广告和导航）
    */
-  async quickAnalyzeResults(filteredResults, keyword, context) {
-    // 构建精简的输入（只包含关键信息）
-    const resultsText = filteredResults.map((item, idx) => 
-      `${idx + 1}. ${item.title}\n   ${item.snippet}`
-    ).join('\n\n');
+  async fetchWebContents(searchResults, keyword) {
+    const contents = [];
+    
+    for (const result of searchResults) {
+      try {
+        BotUtil.makeLog('debug', `[抓取] 正在抓取: ${result.url}`, 'ChatStream');
+        
+        // 使用axios抓取，5秒超时
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        
+        const response = await axios.get(result.url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+          },
+          timeout: 5000,
+          signal: controller.signal,
+          maxRedirects: 3
+        }).finally(() => clearTimeout(timeoutId));
+        
+        if (!response.data || response.data.length < 100) continue;
+        
+        // 使用cheerio解析HTML
+        const cheerio = await getCheerio();
+        const $ = cheerio.load(response.data);
+        
+        // 移除脚本、样式、广告等
+        $('script, style, nav, header, footer, aside, .ad, .advertisement, .ads').remove();
+        
+        // 尝试提取主要内容（优先选择article、main、.content等标签）
+        let mainContent = '';
+        const contentSelectors = [
+          'article',
+          'main',
+          '.content',
+          '.article-content',
+          '.post-content',
+          '#content',
+          '.main-content',
+          '[role="main"]'
+        ];
+        
+        for (const selector of contentSelectors) {
+          const element = $(selector).first();
+          if (element.length > 0) {
+            mainContent = element.text().trim();
+            if (mainContent.length > 200) break; // 找到足够长的内容就停止
+          }
+        }
+        
+        // 如果没找到，尝试提取body中的文本（排除导航等）
+        if (mainContent.length < 200) {
+          $('nav, header, footer, .menu, .navigation').remove();
+          mainContent = $('body').text().trim();
+        }
+        
+        // 清洗文本：去除多余空白，限制长度
+        mainContent = mainContent
+          .replace(/\s+/g, ' ')
+          .replace(/\n\s*\n/g, '\n')
+          .trim();
+        
+        // 限制长度（2000字，确保AI能处理）
+        if (mainContent.length > 2000) {
+          mainContent = mainContent.substring(0, 2000) + '...';
+        }
+        
+        if (mainContent.length > 100) {
+          contents.push({
+            title: result.title,
+            url: result.url,
+            content: mainContent
+          });
+          BotUtil.makeLog('debug', `[抓取] 成功提取${mainContent.length}字内容`, 'ChatStream');
+        }
+      } catch (error) {
+        BotUtil.makeLog('debug', `[抓取] 失败: ${result.url} - ${error.message}`, 'ChatStream');
+        // 如果抓取失败，至少保留标题和摘要
+        contents.push({
+          title: result.title,
+          url: result.url,
+          content: result.snippet || '无法获取内容'
+        });
+      }
+    }
+    
+    return contents;
+  }
+
+  /**
+   * AI一次性分析内容并生成符合人设的回应（合并分析和回应步骤）
+   */
+  async analyzeAndGenerateResponse(webContents, keyword, context) {
+    if (!webContents || webContents.length === 0) {
+      return null;
+    }
+    
+    const persona = context?.question?.persona || context?.persona || '我是AI助手';
+    const e = context?.e;
+    const isGroup = e?.isGroup || false;
+    
+    // 构建内容文本（精简格式）
+    const contentsText = webContents.map((item, idx) => 
+      `[来源${idx + 1}] ${item.title}\n${item.content.substring(0, 1500)}`
+    ).join('\n\n---\n\n');
     
     const messages = [
       {
         role: 'system',
-        content: `你是信息提取专家。从已筛选的搜索结果中快速提取最核心的信息。
+        content: `${persona}
+
+你是QQ聊天助手，需要分析网页内容并生成符合人设的友好回复。
 
 要求：
-1. 只提取与"${keyword}"最直接相关的2-3个要点
-2. 用一句话概括每个要点
-3. 纯文本，不用Markdown
-4. 总长度控制在150字以内
-5. 如果信息不足，如实说明`
+1. 分析网页内容，提取与"${keyword}"最相关的2-3个核心要点
+2. 用简洁明了的语言总结（控制在150字以内）
+3. 生成符合你人设的友好回复（2-3句话）
+4. 纯文本格式，不用Markdown
+5. 语气自然轻松，像QQ聊天一样
+6. 开头可以说明"我搜索了一下"或类似表达
+
+${isGroup ? '当前在群聊中' : '当前在私聊中'}`
       },
       {
         role: 'user',
-        content: `快速提取以下搜索结果的核心信息（2-3个要点，150字以内）：
+        content: `请分析以下网页内容，提取与"${keyword}"相关的核心信息，并生成符合你人设的友好回复：
 
-${resultsText}`
+${contentsText}
+
+要求：提取2-3个核心要点，生成2-3句话的友好回复。`
       }
     ];
     
     const apiConfig = context?.config || context?.question?.config || {};
     const result = await this.callAI(messages, {
       ...apiConfig,
-      maxTokens: 300, // 大幅减少token，提高速度
-      temperature: 0.5
+      maxTokens: 500, // 适中的token，确保质量
+      temperature: 0.7
     });
     
-    return result || filteredResults.map(r => r.title).join('、');
+    return result;
   }
+
+  /**
+   * 快速清理工具描述（不需要AI，直接正则替换）
+   */
+  quickCleanResponse(response) {
+    if (!response) return response;
+    
+    // 删除工具描述、舞台提示等
+    let cleaned = response
+      .replace(/\[(?:回复|回应|工具|命令|搜索)[^\]]*\]/gi, '')
+      .replace(/\((?:正在|过了一会儿?|稍等)[^)]*\)/g, '')
+      .replace(/（(?:正在|过了一会儿?|稍等)[^）]*）/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    
+    return cleaned;
+  }
+
 
   /**
    * 执行搜索（爬虫）
@@ -2043,75 +2142,7 @@ ${resultsText}`
   }
 
 
-  /**
-   * 根据人设和工作流生成回应（优化版：减少输入，提高速度）
-   */
-  async generatePersonaResponse(quickAnalysis, keyword, context) {
-    const persona = context?.question?.persona || context?.persona || '我是AI助手';
-    const e = context?.e;
-    const isGroup = e?.isGroup || false;
-    
-    const messages = [
-      {
-        role: 'system',
-        content: `${persona}
 
-你是QQ聊天助手，将搜索信息转换成符合人设的友好回复。
-
-要求：
-1. 纯文本，不用Markdown
-2. 语气自然轻松，像QQ聊天
-3. 开头说明"我搜索了一下"或类似表达
-4. 整合信息，符合人设
-5. 控制在2-3句话内
-6. 简洁明了`
-      },
-      {
-        role: 'user',
-        content: `将以下信息转换成符合你人设的友好回复（2-3句话）：
-
-${quickAnalysis}`
-      }
-    ];
-    
-    const apiConfig = context?.config || context?.question?.config || {};
-    const result = await this.callAI(messages, {
-      ...apiConfig,
-      maxTokens: 400, // 减少token，提高速度
-      temperature: 0.7
-    });
-    
-    return result || `我搜索了一下"${keyword}"，${quickAnalysis}`;
-  }
-
-  /**
-   * 润色最终回复（优化版：快速润色）
-   */
-  async polishFinalResponse(response, keyword, context) {
-    const persona = context?.question?.persona || context?.persona || '保持原角色语气';
-    
-    const messages = [
-      {
-        role: 'system',
-        content: `${persona}
-
-快速润色：删除工具描述、舞台提示，保留原意，语气自然，纯文本。`
-      },
-      {
-        role: 'user',
-        content: response
-      }
-    ];
-    
-    const apiConfig = context?.config || context?.question?.config || {};
-    const result = await this.callAI(messages, {
-      ...apiConfig,
-      maxTokens: 300, // 减少token，提高速度
-      temperature: 0.3
-    });
-    
-    return result || response;
-  }
 
   /**
    * 快速搜索（使用axios + cheerio，超时5秒）
