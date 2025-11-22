@@ -1,38 +1,20 @@
+<h1 align="center">插件基类开发文档</h1>
+
 <div align="center">
 
-# 插件基类开发文档
-
-![Plugin Base](https://img.shields.io/badge/Plugin%20Base-Class-blue?style=for-the-badge)
-![Status](https://img.shields.io/badge/Status-Stable-success?style=for-the-badge)
-![Version](https://img.shields.io/badge/Version-3.1.3-informational?style=for-the-badge)
+![Plugin Base](https://img.shields.io/badge/Plugin%20Base-Class-blue?style=flat-square)
+![Status](https://img.shields.io/badge/Status-Stable-success?style=flat-square)
+![Version](https://img.shields.io/badge/Version-3.1.3-informational?style=flat-square)
 
 </div>
-
----
-
-<div align="center">
 
 ## 📖 概述
-
-</div>
-
-<div align="center">
 
 > 🔌 `Plugin` 是所有插件的基类，提供工作流集成、上下文管理、消息回复等功能。所有插件都应继承此类。
 
 **📁 文件路径**: `lib/plugins/plugin.js`
 
-</div>
-
----
-
-<div align="center">
-
 ## 🏗️ 类结构
-
-</div>
-
-<div align="left">
 
 ### 基础示例
 
@@ -63,13 +45,7 @@ export default class MyPlugin extends plugin {
 
 > 💡 **提示**: 所有插件都应继承 `plugin` 基类，并实现相应的处理函数。
 
-</div>
-
-<div align="center">
-
 ## 构造函数参数
-
-</div>
 
 ```javascript
 constructor(options = {})
@@ -134,11 +110,7 @@ rule: [
 3. 最后检查权限（`permission` 字段）
 4. 全部通过后，调用对应的处理函数（`fnc` 字段）
 
-<div align="center">
-
 ## 插件特性
-
-</div>
 
 ### 1. 工作流集成
 
@@ -193,11 +165,7 @@ rule: [
 - 高优先级插件
 - 需要实时响应的场景
 
-<div align="center">
-
 ## 核心方法
-
-</div>
 
 ### 工作流相关方法
 
@@ -399,11 +367,7 @@ this.markNeedReparse();
 const img = await this.renderImg('my-plugin', './template.html', { data: 'value' });
 ```
 
-<div align="center">
-
 ## 完整示例
-
-</div>
 
 ### 示例1: 基础插件
 
@@ -545,11 +509,7 @@ export default class ContextPlugin extends plugin {
 }
 ```
 
-<div align="center">
-
 ## 插件存放路径
-
-</div>
 
 插件应存放在以下目录：
 
@@ -563,11 +523,7 @@ plugins/
 
 **注意:** 插件文件名即为插件标识，建议使用小写字母和连字符。
 
-<div align="center">
-
 ## 权限控制
-
-</div>
 
 在 `rule` 中可以设置权限要求：
 
@@ -586,11 +542,7 @@ rule: [
 - `admin`: 管理员
 - `owner`: 群主
 
-<div align="center">
-
 ## 最佳实践
-
-</div>
 
 1. **命名规范**: 使用小写字母和连字符，如 `my-plugin.js`
 2. **错误处理**: 所有异步操作都要有错误处理
@@ -599,11 +551,7 @@ rule: [
 5. **上下文管理**: 及时清理上下文，避免内存泄漏
 6. **权限检查**: 敏感操作要检查权限
 
-<div align="center">
-
 ## 常见问题
-
-</div>
 
 **Q: 如何获取Bot实例？**
 A: 在插件方法中，`this.e.bot` 或全局 `Bot` 对象可用。
@@ -617,11 +565,7 @@ A: 使用 `Bot.em()` 触发事件，或直接调用插件方法。
 **Q: 工作流调用失败怎么办？**
 A: 检查工作流名称是否正确，确保工作流已加载，查看日志获取详细错误信息。
 
-<div align="center">
-
 ## 相关文档
-
-</div>
 
 - [工作流基类文档](./WORKFLOW_BASE_CLASS.md)
 - [HTTP API基类文档](./HTTP_API_BASE_CLASS.md)

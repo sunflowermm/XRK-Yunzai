@@ -1,32 +1,12 @@
-<div align="center">
-
 # HTTP API基类开发文档
 
-</div>
+## 概述
 
----
+`HttpApi` 是所有HTTP API模块的基类，提供路由注册、WebSocket处理、中间件等功能。所有API模块应继承此类或使用对象导出。
 
-<div align="center">
+**文件路径**: `lib/http/http.js`
 
-## 📖 概述
-
-</div>
-
-<div align="center">
-
-> 🌐 `HttpApi` 是所有HTTP API模块的基类，提供路由注册、WebSocket处理、中间件等功能。所有API模块应继承此类或使用对象导出。
-
-**📁 文件路径**: `lib/http/http.js`
-
-</div>
-
----
-
-<div align="center">
-
-## 🚀 使用方式
-
-</div>
+## 使用方式
 
 ### 方式1: 对象导出（推荐）
 

@@ -1,24 +1,18 @@
-# XRK-Yunzai 开发者导航
+<h1 align="center">XRK-Yunzai 开发者导航</h1>
 
 <div align="center">
 
-![XRK-Yunzai](https://img.shields.io/badge/XRK--Yunzai-v3.1.3-blue?style=for-the-badge)
-![Node.js](https://img.shields.io/badge/Node.js-18%2B-green?style=for-the-badge&logo=node.js)
-![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
+![XRK-Yunzai](https://img.shields.io/badge/XRK--Yunzai-v3.1.3-blue?style=flat-square)
+![Node.js](https://img.shields.io/badge/Node.js-18%2B-green?style=flat-square&logo=node.js)
+![License](https://img.shields.io/badge/License-向日葵工作室开源许可证-yellow?style=flat-square)
+
+</div>
 
 > 🎯 **目标**：一眼看清核心对象、基类与参考文档位置。此页作为 README 与子文档之间的"索引页"。
 
-</div>
-
 ---
 
-<div align="center">
-
-## 📊 对象关系可视化
-
-</div>
-
-<div align="center">
+<h2 align="center">📊 对象关系可视化</h2>
 
 ```mermaid
 flowchart TB
@@ -58,13 +52,9 @@ flowchart TB
     style HttpApi fill:#feca57,stroke:#d68910,color:#000
 ```
 
-</div>
-
 ---
 
-## 📚 文档地图
-
-<div align="center">
+<h2 align="center">📚 文档地图</h2>
 
 | 📖 分类 | 📄 文档 | 📝 内容摘要 |
 |:---:|:---:|---|
@@ -79,13 +69,9 @@ flowchart TB
 | 🔗 **适配器 & 路由** | [`reference/ADAPTER_AND_ROUTING.md`](../reference/ADAPTER_AND_ROUTING.md) | 适配器与路由系统如何与Bot交互、完整方法列表 |
 | 🛠️ **技术栈** | [`TECH_STACK.md`](../TECH_STACK.md) | Node 运行时、Web 服务、缓存、DevOps |
 
-</div>
-
 ---
 
-## 🚀 开发流程指北
-
-<div align="left">
+<h2 align="center">🚀 开发流程指北</h2>
 
 ### 1️⃣ 扩展 Bot 行为
 
@@ -173,9 +159,7 @@ export default {
 
 ---
 
-## 🔧 常见扩展入口
-
-<div align="left">
+<h2 align="center">🔧 常见扩展入口</h2>
 
 | 🎯 扩展类型 | 📁 路径 | 📖 参考示例 |
 |:---:|---|:---:|
@@ -183,13 +167,6 @@ export default {
 | **🎨 渲染器** | `renderers/puppeteer`<br/>`renderers/playwright` | 可新增自定义渲染流程 |
 | **📱 设备工作流** | `plugins/stream/device.js` | 结合 `plugins/api/device.js` 与事件 `e.isDevice` |
 
-</div>
-
 ---
 
-<div align="center">
-
 > 💡 **提示**：如需进一步细化某一类函数，可在 `docs/reference/` 目录补充新文件，并在本导航中添加条目。
-
-</div>
-

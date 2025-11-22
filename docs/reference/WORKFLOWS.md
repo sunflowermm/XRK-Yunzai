@@ -1,18 +1,10 @@
-<div align="center">
-
 # 工作流引擎 & 记忆系统手册
 
 > 覆盖 `lib/aistream/aistream.js`, `lib/aistream/memory.js`, `lib/aistream/workflow-manager.js` 全部导出函数。
 
-</div>
-
 ---
 
-<div align="center">
-
 ## 1. `AIStream`（工作流基架）
-
-</div>
 
 ### LightweightSimilarity 工具
 - **`tokenize(text)`**：将字符串拆分为字符与双字符数组。
@@ -162,11 +154,7 @@
 
 ---
 
-<div align="center">
-
 ## 2. `MemorySystem`
-
-</div>
 
 ### constructor(options = {})
 - **参数**: `baseKey`, `maxPerOwner`, `longTTL`, `shortTTL`.
@@ -206,11 +194,7 @@
 
 ---
 
-<div align="center">
-
 ## 3. `WorkflowManager`
-
-</div>
 
 ### constructor()
 - **作用**: 初始化 `workflows` Map 与 `activeCalls` 追踪表。

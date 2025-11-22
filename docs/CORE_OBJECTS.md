@@ -1,26 +1,20 @@
+<h1 align="center">核心对象与全局依赖</h1>
+
 <div align="center">
 
-# 核心对象与全局依赖
+![Core Objects](https://img.shields.io/badge/Core%20Objects-7-blue?style=flat-square)
+![Status](https://img.shields.io/badge/Status-Active-success?style=flat-square)
+![Version](https://img.shields.io/badge/Version-3.1.3-informational?style=flat-square)
 
-![Core Objects](https://img.shields.io/badge/Core%20Objects-7-blue?style=for-the-badge)
-![Status](https://img.shields.io/badge/Status-Active-success?style=for-the-badge)
-![Version](https://img.shields.io/badge/Version-3.1.3-informational?style=for-the-badge)
+</div>
 
 > 📚 本文档详细介绍 XRK-Yunzai 的核心对象，包括它们在技术栈中的作用、特性、API 和使用示例。
 
 > 💡 **架构概览**: 如需了解系统整体架构和各对象的关系，请参阅 [技术架构文档](./ARCHITECTURE.md)
 
-</div>
-
 ---
 
-<div align="center">
-
-## 📑 文档导航
-
-</div>
-
-<div align="left">
+<h2 align="center">📑 文档导航</h2>
 
 | # | 📦 对象 | 📝 说明 |
 |:---:|---|:---:|
@@ -32,15 +26,9 @@
 | 6️⃣ | [redis 客户端](#6-redis-客户端-libconfigredisjs) | 🔴 Redis 缓存服务 |
 | 7️⃣ | [BotUtil 工具集](#7-botutil-工具集-libcommonutiljs) | 🛠️ 工具函数集合 |
 
-</div>
-
 ---
 
-<div align="center">
-
-## 1. Bot 对象 (`lib/bot.js`)
-
-</div>
+<h2 align="center">1. Bot 对象 (`lib/bot.js`)</h2>
 
 ### 1.1 在技术栈中的作用
 
@@ -107,11 +95,7 @@
 
 ---
 
-<div align="center">
-
-## 2. 事件对象 `e`
-
-</div>
+<h2 align="center">2. 事件对象 `e`</h2>
 
 ### 2.1 在技术栈中的作用
 
@@ -300,11 +284,7 @@ PluginsLoader.setupReply(e)  // 设置回复方法
 
 ---
 
-<div align="center">
-
-## 3. logger 对象 (`lib/config/log.js`)
-
-</div>
+<h2 align="center">3. logger 对象 (`lib/config/log.js`)</h2>
 
 ### 3.1 在技术栈中的作用
 
@@ -417,11 +397,7 @@ bot:
 
 ---
 
-<div align="center">
-
-## 4. cfg 对象 (`lib/config/config.js`)
-
-</div>
+<h2 align="center">4. cfg 对象 (`lib/config/config.js`)</h2>
 
 ### 4.1 在技术栈中的作用
 
@@ -459,11 +435,7 @@ bot:
 
 ---
 
-<div align="center">
-
-## 5. segment 对象
-
-</div>
+<h2 align="center">5. segment 对象</h2>
 
 ### 5.1 在技术栈中的作用
 
@@ -505,11 +477,7 @@ await e.reply(msg);
 
 ---
 
-<div align="center">
-
-## 6. redis 客户端 (`lib/config/redis.js`)
-
-</div>
+<h2 align="center">6. redis 客户端 (`lib/config/redis.js`)</h2>
 
 ### 6.1 在技术栈中的作用
 
@@ -574,11 +542,7 @@ Redis 连接参数来自 `cfg.redis`，包括：
 
 ---
 
-<div align="center">
-
-## 7. BotUtil 工具集 (`lib/common/util.js`)
-
-</div>
+<h2 align="center">7. BotUtil 工具集 (`lib/common/util.js`)</h2>
 
 ### 7.1 在技术栈中的作用
 
@@ -621,11 +585,7 @@ const map = Bot.getMap('my-cache', { ttl: 60000 });
 
 ---
 
-<div align="center">
-
-## 8. 对象关系图
-
-</div>
+<h2 align="center">8. 对象关系图</h2>
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -657,11 +617,7 @@ const map = Bot.getMap('my-cache', { ttl: 60000 });
 
 ---
 
-<div align="center">
-
-## 9. 参考文档
-
-</div>
+<h2 align="center">9. 参考文档</h2>
 
 ### 9.1 详细 API 文档
 
@@ -684,11 +640,7 @@ const map = Bot.getMap('my-cache', { ttl: 60000 });
 
 ---
 
-<div align="center">
-
-## 10. 快速参考
-
-</div>
+<h2 align="center">10. 快速参考</h2>
 
 ### 10.1 在插件中访问核心对象
 

@@ -1,18 +1,10 @@
-<div align="center">
-
 # HTTP / WebSocket API 手册 (`lib/http/http.js`)
 
 > 适用于 `plugins/api/*.js`，无论是对象式导出还是继承类方式，本文件涵盖所有方法。
 
-</div>
-
 ---
 
-<div align="center">
-
 ## 1. 构造函数
-
-</div>
 
 ### constructor(data = {})
 - **签名**: `new HttpApi({ name, dsc, routes, priority, enable, init, ws, middleware })`
@@ -24,11 +16,7 @@
 
 ---
 
-<div align="center">
-
 ## 2. 生命周期
-
-</div>
 
 ### init(app, bot)
 - **签名**: `async init(app: Express, bot: Bot): Promise<boolean>`
@@ -60,11 +48,7 @@
 
 ---
 
-<div align="center">
-
 ## 3. 元数据
-
-</div>
 
 ### getInfo()
 - **返回**: `{ name, dsc, priority, routes: number, enable, createTime }`
@@ -72,11 +56,7 @@
 
 ---
 
-<div align="center">
-
 ## 4. 定义示例
-
-</div>
 
 ```js
 // plugins/api/example.js

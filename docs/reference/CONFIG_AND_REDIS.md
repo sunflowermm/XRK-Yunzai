@@ -1,18 +1,10 @@
-<div align="center">
-
 # 配置系统 & Redis 客户端完整手册
 
 > 包含 `lib/config/config.js` 与 `lib/config/redis.js` 的所有导出/工具函数、属性与方法。
 
-</div>
-
 ---
 
-<div align="center">
-
 ## 1. `Cfg` 单例 (`lib/config/config.js`)
-
-</div>
 
 `Cfg` 是配置管理类的单例实例，负责加载、缓存和监听 YAML 配置文件。支持多端口隔离配置，自动热更新。
 
@@ -278,11 +270,7 @@ cfg.setOther({
 
 ---
 
-<div align="center">
-
 ## 2. Redis 客户端 (`lib/config/redis.js`)
-
-</div>
 
 Redis 客户端基于 `redis` 官方库（v4+），支持 RESP3 协议、连接池、自动重连和健康检查。
 
@@ -562,11 +550,7 @@ redis:
 
 ---
 
-<div align="center">
-
 ## 3. 使用提示与最佳实践
-
-</div>
 
 ### 3.1 配置系统
 

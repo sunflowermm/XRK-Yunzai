@@ -1,16 +1,6 @@
-<div align="center">
-
 # 配置优先级说明
 
-</div>
-
----
-
-<div align="center">
-
-## ⚙️ 配置优先级规则
-
-</div>
+## 配置优先级规则
 
 **execute传入参数 > 构造函数config > kuizai.yaml配置 > 默认值**
 

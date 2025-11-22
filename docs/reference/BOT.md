@@ -1,35 +1,17 @@
-<div align="center">
-
 # Bot 对象函数手册
 
 > 基于 `lib/bot.js`（2025-11-21）。所有方法默认已绑定到 `Bot` 实例/Proxy，可直接在插件、适配器、API 中调用。
 
-</div>
-
----
-
-<div align="center">
-
-## 📖 阅读指引
-
-</div>
-
-<div align="center">
+## 阅读指引
 
 - **签名** 字段采用 JSDoc 风格，列出参数类型与返回值。
-- **参数** 块列出关键字段；若为可选项会以 "(可选)" 标注。
+- **参数** 块列出关键字段；若为可选项会以 “(可选)” 标注。
 - **用法** 仅提供调用场景提示，具体示例可在插件/适配器中套用。
 - 以 `_` 开头的方法虽然是内部实现，但对调试/扩展常有帮助，故一并列出。
 
-</div>
-
 ---
 
-<div align="center">
-
 ## 1. 生命周期 & 代理
-
-</div>
 
 ### constructor()
 - **签名**: `new Bot()`
@@ -59,11 +41,7 @@
 
 ---
 
-<div align="center">
-
 ## 2. HTTP / 中间件 / 静态资源
-
-</div>
 
 ### _initHttpServer()
 - **签名**: `void`
@@ -127,11 +105,7 @@
 
 ---
 
-<div align="center">
-
 ## 3. 身份验证 & API Key
-
-</div>
 
 ### generateApiKey()
 - **签名**: `async generateApiKey(): Promise<string|null>`
@@ -157,11 +131,7 @@
 
 ---
 
-<div align="center">
-
 ## 4. 代理 / HTTPS / 网络
-
-</div>
 
 ### _initProxyApp()
 - **签名**: `async _initProxyApp(): Promise<void>`
@@ -225,11 +195,7 @@
 
 ---
 
-<div align="center">
-
 ## 5. WebSocket
-
-</div>
 
 ### wsConnect(req, socket, head)
 - **签名**: `(req: IncomingMessage, socket: Duplex, head: Buffer) => void`
@@ -237,11 +203,7 @@
 
 ---
 
-<div align="center">
-
 ## 6. 事件增强 & 触发
-
-</div>
 
 ### prepareEvent(data)
 - **签名**: `(data: Record<string, any>) => void`
@@ -261,11 +223,7 @@
 
 ---
 
-<div align="center">
-
 ## 7. 联系人 & 群组工具
-
-</div>
 
 ### getFriendArray()
 - **签名**: `(): Array<{ user_id: number, nickname: string, bot_id: number }>`
@@ -311,11 +269,7 @@
 
 ---
 
-<div align="center">
-
 ## 8. 消息发送 / 转发
-
-</div>
 
 ### sendFriendMsg(bot_id, user_id, ...args)
 - **签名**: `async sendFriendMsg(bot_id: number|string|null, user_id: number|string, ...payload): Promise<any>`
@@ -341,11 +295,7 @@
 
 ---
 
-<div align="center">
-
 ## 9. Redis / 文件工具
-
-</div>
 
 ### redisExit()
 - **签名**: `async redisExit(): Promise<boolean>`
@@ -357,11 +307,7 @@
 
 ---
 
-<div align="center">
-
 ## 10. 服务器信息 & 实用函数
-
-</div>
 
 ### _statusHandler / _healthHandler / _fileHandler
 - 详见 2. 静态与系统路由。
@@ -376,11 +322,7 @@
 
 ---
 
-<div align="center">
-
 ## 11. Bot 对象属性
-
-</div>
 
 ### 核心属性
 
@@ -426,11 +368,7 @@ Bot 对象通过 Proxy 实现方法查找：
 
 ---
 
-<div align="center">
-
 ## 12. 适配器与路由集成
-
-</div>
 
 ### 适配器集成
 
@@ -457,11 +395,7 @@ Bot 对象通过 Proxy 实现方法查找：
 
 ---
 
-<div align="center">
-
 ## 13. 事件系统
-
-</div>
 
 ### 事件命名规则
 
@@ -503,11 +437,7 @@ Bot.emit(name, data)  ← 触发事件
 
 ---
 
-<div align="center">
-
 ## 14. 使用示例
-
-</div>
 
 ### 示例1: 在适配器中使用 Bot
 
@@ -614,11 +544,7 @@ export default class MyPlugin extends plugin {
 
 ---
 
-<div align="center">
-
 ## 15. 相关文档
-
-</div>
 
 - [适配器与路由系统文档](./ADAPTER_AND_ROUTING.md) - 适配器和路由如何与Bot交互
 - [核心对象文档](../CORE_OBJECTS.md) - Bot对象的快速参考

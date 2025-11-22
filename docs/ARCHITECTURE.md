@@ -1,30 +1,20 @@
+<h1 align="center">XRK-Yunzai 技术架构文档</h1>
+
 <div align="center">
 
-# XRK-Yunzai 技术架构文档
+![Architecture](https://img.shields.io/badge/Architecture-Document-blue?style=flat-square)
+![Event-Driven](https://img.shields.io/badge/Event--Driven-✓-success?style=flat-square)
+![Modular](https://img.shields.io/badge/Modular-Design-blueviolet?style=flat-square)
 
-![Architecture](https://img.shields.io/badge/Architecture-Document-blue?style=for-the-badge)
-![Event-Driven](https://img.shields.io/badge/Event--Driven-✓-success?style=for-the-badge)
-![Modular](https://img.shields.io/badge/Modular-Design-blueviolet?style=for-the-badge)
+</div>
 
 > 🏗️ 本文档详细说明 XRK-Yunzai 的技术栈架构、核心对象的作用与特性，以及它们在整个系统中的位置和关系。
 
-</div>
-
 ---
 
-<div align="center">
-
-## 1. 系统架构概览
-
-</div>
-
-<div align="center">
+<h2 align="center">1. 系统架构概览</h2>
 
 XRK-Yunzai 采用 **事件驱动、模块化** 的架构设计，核心组件包括：
-
-</div>
-
-<div align="center">
 
 ```mermaid
 graph TB
@@ -62,15 +52,9 @@ graph TB
     style Adapter fill:#feca57,stroke:#d68910,color:#000
 ```
 
-</div>
-
 ---
 
-<div align="center">
-
-## 2. 核心对象与技术特性
-
-</div>
+<h2 align="center">2. 核心对象与技术特性</h2>
 
 ### 2.1 Bot 对象 (`lib/bot.js`)
 
@@ -257,11 +241,7 @@ graph TB
 
 ---
 
-<div align="center">
-
-## 3. 数据流与事件流
-
-</div>
+<h2 align="center">3. 数据流与事件流</h2>
 
 ### 3.1 消息处理流程
 
@@ -337,11 +317,7 @@ startHealthCheck()  // 启动健康检查
 
 ---
 
-<div align="center">
-
-## 4. 技术栈依赖关系
-
-</div>
+<h2 align="center">4. 技术栈依赖关系</h2>
 
 ```
 Bot (核心)
@@ -362,11 +338,7 @@ Bot (核心)
 
 ---
 
-<div align="center">
-
-## 5. 扩展点与集成方式
-
-</div>
+<h2 align="center">5. 扩展点与集成方式</h2>
 
 ### 5.1 适配器集成
 
@@ -436,11 +408,7 @@ export default class MyPlugin extends plugin {
 
 ---
 
-<div align="center">
-
-## 6. 性能优化特性
-
-</div>
+<h2 align="center">6. 性能优化特性</h2>
 
 1. **连接池**: Redis 连接池根据系统资源自动调整
 2. **缓存机制**: 配置、工作流等使用内存缓存
@@ -451,11 +419,7 @@ export default class MyPlugin extends plugin {
 
 ---
 
-<div align="center">
-
-## 7. 安全特性
-
-</div>
+<h2 align="center">7. 安全特性</h2>
 
 1. **API 认证**: API Key + 白名单 + 本地地址三层认证
 2. **HTTPS 支持**: 支持 SSL/TLS 加密
@@ -466,11 +430,7 @@ export default class MyPlugin extends plugin {
 
 ---
 
-<div align="center">
-
-## 8. 相关文档
-
-</div>
+<h2 align="center">8. 相关文档</h2>
 
 - [核心对象文档](./CORE_OBJECTS.md) - 详细的对象API说明
 - [Bot对象手册](./reference/BOT.md) - Bot对象的完整方法

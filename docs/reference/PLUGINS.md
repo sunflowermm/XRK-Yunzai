@@ -1,18 +1,10 @@
-<div align="center">
-
 # 插件运行时手册 (`lib/plugins/plugin.js`)
 
 > 任何插件文件（如 `plugins/example/*.js`）只需 `extends plugin` 即可获得以下方法。
 
-</div>
-
 ---
 
-<div align="center">
-
 ## 1. 构造函数
-
-</div>
 
 ### constructor(options = {})
 - **签名**: `new plugin({ name?, dsc?, event?, priority?, task?, rule?, bypassThrottle?, handler?, namespace? })`
@@ -27,11 +19,7 @@
 
 ---
 
-<div align="center">
-
 ## 2. 工作流调用
-
-</div>
 
 ### getStream(name)
 - **签名**: `(name: string) => AIStream | undefined`
@@ -62,11 +50,7 @@
 
 ---
 
-<div align="center">
-
 ## 3. 消息 & 回复
-
-</div>
 
 ### reply(msg = "", quote = false, data = {})
 - **作用**: 调用 `this.e.reply`（优先群→好友），若 `msg` 为空返回 `false`。
@@ -76,11 +60,7 @@
 
 ---
 
-<div align="center">
-
 ## 4. 上下文管理
-
-</div>
 
 插件运行时维护一个 `stateArr` 对象（按 `name + self_id + target_id` 区分）。以下函数用于多轮对话：
 
@@ -106,11 +86,7 @@
 
 ---
 
-<div align="center">
-
 ## 5. 渲染能力
-
-</div>
 
 ### renderImg(pluginName, tpl, data, cfg)
 - **签名**: `async renderImg(pluginName: string, tpl: string, data: object, cfg?: object): Promise<Buffer|null>`
@@ -118,11 +94,7 @@
 
 ---
 
-<div align="center">
-
 ## 6. 约定字段
-
-</div>
 
 - `this.e`: 当前事件对象，由 `PluginsLoader` 注入。
 - `this.rule`: 匹配规则数组，`fnc` 对应类方法名称。

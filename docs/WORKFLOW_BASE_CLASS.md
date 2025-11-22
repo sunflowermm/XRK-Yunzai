@@ -1,34 +1,14 @@
-<div align="center">
-
 # 工作流基类开发文档
 
-</div>
+## 概述
 
----
+`AIStream` 是所有工作流的基类，提供了统一的AI调用、记忆系统、功能管理等能力。继承此基类可以快速创建自定义工作流。
 
-<div align="center">
+**文件路径**: `lib/aistream/aistream.js`
 
-## 📖 概述
+**工作流存放路径**: `plugins/stream/`
 
-</div>
-
-<div align="center">
-
-> ⚡ `AIStream` 是所有工作流的基类，提供了统一的AI调用、记忆系统、功能管理等能力。继承此基类可以快速创建自定义工作流。
-
-**📁 文件路径**: `lib/aistream/aistream.js`
-
-**📂 工作流存放路径**: `plugins/stream/`
-
-</div>
-
----
-
-<div align="center">
-
-## 🏗️ 类结构
-
-</div>
+## 类结构
 
 ```javascript
 import AIStream from '../../lib/aistream/aistream.js';
@@ -123,11 +103,7 @@ export default class MyWorkflow extends AIStream {
 | `apiKey` | `string\|null` | `null` | API密钥 |
 | `apiModel` | `string` | `'text-embedding-3-small'` | API模型名称 |
 
-<div align="center">
-
-## ⚙️ 参数优先级
-
-</div>
+## 参数优先级
 
 **execute传入参数 > 构造函数config > kuizai.yaml配置 > 默认值**
 
@@ -163,11 +139,7 @@ const finalConfig = {
 };
 ```
 
-<div align="center">
-
-## 🔧 核心方法
-
-</div>
+## 核心方法
 
 ### 1. buildSystemPrompt(context)
 
@@ -217,11 +189,7 @@ async execute(e, question, config) {
 - 字符串：AI回复文本
 - null：执行失败
 
-<div align="center">
-
-## 🧠 记忆系统
-
-</div>
+## 记忆系统
 
 所有工作流自动获得记忆系统：
 
@@ -246,11 +214,7 @@ await memorySystem.remember({
 await memorySystem.forget(ownerId, scene, memoryId, content);
 ```
 
-<div align="center">
-
-## 🤖 AI调用
-
-</div>
+## AI调用
 
 ### callAI(messages, apiConfig)
 
@@ -280,11 +244,7 @@ await this.callAIStream(messages, this.config, (delta) => {
 });
 ```
 
-<div align="center">
-
-## ⚙️ 功能管理
-
-</div>
+## 功能管理
 
 ### registerFunction(name, options)
 
@@ -315,11 +275,7 @@ this.registerFunction('createFile', {
 });
 ```
 
-<div align="center">
-
-## 📊 工作流调用效果
-
-</div>
+## 工作流调用效果
 
 ### 单个工作流调用
 
@@ -401,11 +357,7 @@ const results = await workflowManager.runMultiple([
 // 结果：file工作流创建文件，chat工作流回复，各司其职，模块化清晰
 ```
 
-<div align="center">
-
-## 📝 完整示例
-
-</div>
+## 完整示例
 
 ```javascript
 import AIStream from '../../lib/aistream/aistream.js';
@@ -491,11 +443,7 @@ ${this.buildFunctionsPrompt()}`;
 }
 ```
 
-<div align="center">
-
-## ✅ 最佳实践
-
-</div>
+## 最佳实践
 
 1. **参数合并**：在execute中使用 `{ ...this.config, ...cfg.kuizai?.ai, ...config }` 确保优先级
 2. **记忆系统**：在 `buildChatContext` 中使用 `buildMemorySummary` 增强上下文
@@ -504,11 +452,7 @@ ${this.buildFunctionsPrompt()}`;
 5. **场景隔离**：记忆系统自动场景隔离，无需手动处理
 6. **模块化设计**：每个工作流专注特定功能，通过组合实现复杂需求
 
-<div align="center">
-
-## ⚙️ 配置参考
-
-</div>
+## 配置参考
 
 ```yaml
 # config/default_config/kuizai.yaml
@@ -526,11 +470,7 @@ kuizai:
     timeout: 30000
 ```
 
-<div align="center">
-
-## 📂 工作流存放路径
-
-</div>
+## 工作流存放路径
 
 工作流文件应存放在以下目录：
 
@@ -546,11 +486,7 @@ plugins/stream/
 - 建议使用小写字母和连字符
 - 工作流会自动被 `StreamLoader` 加载
 
-<div align="center">
-
-## ❓ 常见问题
-
-</div>
+## 常见问题
 
 **Q: 如何让AI看到多个工作流的功能？**
 A: 不能。每个工作流独立执行，AI只能看到当前工作流的功能。如果需要多个功能，使用 `WorkflowManager.runMultiple()` 并行调用多个工作流，每个工作流处理自己的部分。
@@ -570,11 +506,7 @@ A: 不能。每个工作流独立执行，AI只能看到当前工作流的功能
 **Q: 工作流如何被加载？**
 A: 工作流由 `lib/aistream/loader.js` 自动扫描 `plugins/stream/` 目录并加载。确保文件导出默认类并继承 `AIStream`。
 
-<div align="center">
-
-## 📚 相关文档
-
-</div>
+## 相关文档
 
 - [插件基类文档](./PLUGIN_BASE_CLASS.md) - 如何在插件中使用工作流
 - [HTTP API基类文档](./HTTP_API_BASE_CLASS.md) - 如何在API中使用工作流
