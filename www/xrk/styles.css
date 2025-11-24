@@ -3233,22 +3233,41 @@ body.light .bot-card {
 
     .config-form-scroll {
         padding: 16px;
+        padding-left: 12px; /* 减小左右内边距，给按钮更多空间 */
+        padding-right: 12px;
         padding-bottom: 140px; /* 确保底部有足够空间，避免被键盘遮挡 */
         min-height: 100%;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+        overflow-x: hidden; /* 防止水平滚动 */
     }
     
     .sub-config-list-scroll {
         padding: 16px;
+        padding-left: 12px; /* 减小左右内边距 */
+        padding-right: 12px;
         padding-bottom: 140px;
         min-height: 100%;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+        overflow-x: hidden; /* 防止水平滚动 */
     }
 
     .config-form-field {
         padding: 20px 16px;
+        padding-left: 12px; /* 减小左右内边距 */
+        padding-right: 12px;
         margin-bottom: 12px;
+        margin-left: 0;
+        margin-right: 0;
         background: var(--bg-card);
         border-radius: var(--radius-md);
         border: 1px solid var(--border-light);
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
     }
 
     .config-form-label {
@@ -3304,35 +3323,60 @@ body.light .bot-card {
         padding: 14px 20px;
         font-size: 15px;
         width: 100%;
+        max-width: 100%;
         margin-top: 12px;
+        margin-left: 0;
+        margin-right: 0;
         min-height: 48px; /* 确保按钮足够大，易于点击 */
         touch-action: manipulation; /* 优化触摸响应 */
+        box-sizing: border-box; /* 确保padding包含在宽度内 */
     }
 
     .config-form-subform {
         padding: 16px;
+        padding-left: 12px; /* 减小左右内边距 */
+        padding-right: 12px;
         margin-top: 12px;
+        margin-left: 0;
+        margin-right: 0;
         background: var(--bg-secondary);
         border-radius: var(--radius-md);
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
     }
 
     .config-form-subfield {
         margin-bottom: 16px;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
     }
 
     .config-form-subfield:last-child {
         margin-bottom: 0;
     }
+    
+    /* 确保子字段内的所有元素都不超出容器 */
+    .config-form-subfield * {
+        max-width: 100%;
+        box-sizing: border-box;
+    }
 
     .config-form-arrayform-item {
         padding: 16px;
         margin-bottom: 16px;
+        margin-left: 0;
+        margin-right: 0;
         background: var(--bg-secondary);
         border-radius: var(--radius-md);
         min-height: 60px; /* 确保卡片不会太小 */
         display: flex;
         flex-direction: column;
         gap: 12px;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box; /* 确保padding包含在宽度内 */
     }
 
     .config-form-arrayform-actions {
@@ -3340,12 +3384,16 @@ body.light .bot-card {
         display: flex;
         gap: 8px;
         justify-content: flex-end;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
     }
     
     .config-form-arrayform-remove {
         min-height: 44px; /* 确保删除按钮足够大 */
         padding: 12px 20px;
         touch-action: manipulation;
+        flex-shrink: 0; /* 防止按钮被压缩 */
     }
 
     .config-form-switch {
@@ -3364,24 +3412,40 @@ body.light .bot-card {
 
     .config-form-tags {
         margin-top: 12px;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+    
+    .config-form-tags-list {
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
     }
 
     .config-form-tags-input-wrapper {
         margin-top: 12px;
         display: flex;
         gap: 10px;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
     }
-
+    
     .config-form-tags-input {
         flex: 1;
         padding: 14px 16px;
         font-size: 16px;
+        min-width: 0; /* 允许flex item缩小 */
+        box-sizing: border-box;
     }
-
+    
     .config-form-tags-add {
         padding: 14px 20px;
         font-size: 14px;
         min-width: 80px;
+        flex-shrink: 0; /* 防止按钮被压缩 */
+        box-sizing: border-box;
     }
 
     .config-form-hint {
@@ -3654,6 +3718,57 @@ body.light .bot-card {
     .btn {
         font-size: 14px;
         padding: 14px 24px;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+    
+    /* 配置表单容器优化 */
+    .config-form {
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+        overflow-x: hidden; /* 防止水平滚动 */
+    }
+    
+    /* 确保所有表单元素都在容器内 */
+    .config-form * {
+        max-width: 100%;
+    }
+    
+    /* 优化ArrayForm在移动端的显示 */
+    .config-form-arrayform {
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+        padding: 0;
+        margin: 12px 0;
+    }
+    
+    /* 优化SubForm在移动端的显示 */
+    .config-form-subform {
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+    
+    /* 优化输入组件的移动端体验 */
+    .config-form-input,
+    .config-form-select,
+    .config-form-textarea,
+    .config-form-number {
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+        -webkit-appearance: none;
+        appearance: none;
+    }
+    
+    /* 优化多选组件 */
+    .config-form-multiselect {
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
     }
 }
 
@@ -4796,6 +4911,7 @@ body.light .config-form-field {
 .config-form-input,
 .config-form-select {
     width: 100%;
+    max-width: 100%;
     padding: 12px 16px;
     background: rgba(255, 255, 255, 0.2);
     backdrop-filter: blur(10px);
@@ -4807,6 +4923,9 @@ body.light .config-form-field {
     font-family: inherit;
     transition: all var(--transition-base);
     outline: none;
+    box-sizing: border-box; /* 确保padding包含在宽度内 */
+    -webkit-appearance: none; /* 移除iOS默认样式 */
+    appearance: none;
 }
 
 .config-form-input:focus,
@@ -4935,6 +5054,10 @@ body.light .config-form-field {
 /* ============ ArrayForm（对象数组） ============ */
 .config-form-arrayform {
     margin-top: 12px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow-x: hidden; /* 防止内容溢出 */
 }
 
 .config-form-arrayform-item {
@@ -4945,11 +5068,16 @@ body.light .config-form-field {
     border-radius: var(--radius-md);
     border: 1px solid var(--border);
     margin-bottom: 16px;
+    margin-left: 0;
+    margin-right: 0;
     min-height: 80px; /* 确保卡片不会太小 */
     display: flex;
     flex-direction: column;
     gap: 12px;
     transition: all var(--transition-base);
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box; /* 确保padding包含在宽度内 */
 }
 
 .config-form-arrayform-item:hover {
@@ -4971,16 +5099,25 @@ body.light .config-form-field {
     justify-content: flex-end;
     gap: 8px;
     margin-top: 8px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    flex-wrap: wrap; /* 移动端允许换行 */
 }
 
 .config-form-arrayform-add {
     margin-top: 12px;
+    margin-left: 0;
+    margin-right: 0;
     min-height: 48px; /* 确保添加按钮足够大 */
     padding: 14px 24px;
     font-size: 15px;
     font-weight: 500;
     touch-action: manipulation; /* 优化触摸响应 */
     transition: all var(--transition-base);
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box; /* 确保padding包含在宽度内 */
 }
 
 .config-form-arrayform-add:active {
@@ -5054,6 +5191,9 @@ body.light .config-form-field {
     display: flex;
     gap: 8px;
     align-items: center;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 .config-form-tags-input {
@@ -5069,6 +5209,9 @@ body.light .config-form-field {
     font-family: inherit;
     transition: all var(--transition-base);
     outline: none;
+    min-width: 0; /* 允许flex item缩小 */
+    box-sizing: border-box;
+    width: 100%;
 }
 
 .config-form-tags-input:focus {
@@ -5081,6 +5224,8 @@ body.light .config-form-field {
 
 .config-form-tags-add {
     flex-shrink: 0;
+    box-sizing: border-box;
+    min-width: 80px; /* 确保按钮有最小宽度 */
 }
 
 .sub-config-list-scroll {
