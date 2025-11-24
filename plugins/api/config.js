@@ -52,13 +52,19 @@ function cleanConfigData(data, config) {
         }
         
         // 递归处理数组中的对象
-        if (expectedType === 'array' && Array.isArray(value) && fieldSchema.itemType === 'object') {
-          cleaned[field] = value.map(item => {
-            if (item && typeof item === 'object') {
-              return cleanConfigData(item, { schema: { fields: fieldSchema.itemSchema?.fields || {} } });
-            }
-            return item;
-          });
+        if (expectedType === 'array' && Array.isArray(value)) {
+          if (fieldSchema.itemType === 'object' && fieldSchema.itemSchema) {
+            // 对象数组：递归清理每个对象
+            cleaned[field] = value.map(item => {
+              if (item && typeof item === 'object' && !Array.isArray(item)) {
+                return cleanConfigData(item, { schema: { fields: fieldSchema.itemSchema.fields || {} } });
+              }
+              return item;
+            });
+          } else {
+            // 标量数组：直接保留
+            cleaned[field] = value;
+          }
         }
       }
     }

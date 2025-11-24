@@ -32,14 +32,15 @@ class APIControlCenter {
         this._ttsPlaying = false;
         this._lastAsrFinal = '';
         this._chatHistory = this._loadChatHistory();
-        this.deviceWsPaths = ['/device', '/ws/device', '/ws'];
-        this._deviceWsPathIndex = 0;
+        // WebSocket路径：后端注册为'device'，匹配路径为'/device'
         this._deviceWsConnectingPromise = null;
         this._codeMirrorAvailable = true;
         this.init();
     }
 
     updateEmotionDisplay(emotion) {
+        console.log('[WebClient] updateEmotionDisplay 被调用，表情:', emotion);
+        
         // 内置表情配置
         const EMOTION_ICONS = {
             happy: '😀', excited: '🤩', sad: '😢', angry: '😠', surprise: '😮',
@@ -147,7 +148,7 @@ class APIControlCenter {
                 el.style.animation = '';
             }, animConfig.duration || 300);
             
-
+            console.log('[WebClient] 表情图标已更新:', emotionCode, '->', icon);
         }, 100);
     }
     
@@ -1402,7 +1403,7 @@ class APIControlCenter {
             return;
         }
         
-
+        console.log('[WebClient] 发送消息:', text);
         this.appendChat('user', text);
         input.value = '';
 
@@ -1562,54 +1563,68 @@ class APIControlCenter {
 
     // ============== Streaming ASR via /device WebSocket ==============
     async ensureDeviceWs() {
+        // 如果已经连接，直接返回
         if (this._deviceWs && this._deviceWs.readyState === WebSocket.OPEN) {
             return this._deviceWs;
         }
+        // 如果正在连接，返回连接中的Promise
         if (this._deviceWsConnectingPromise) {
             return this._deviceWsConnectingPromise;
         }
-        const candidates = (this.deviceWsPaths && this.deviceWsPaths.length > 0)
-            ? this.deviceWsPaths
-            : ['/device'];
-        let attempt = 0;
-        const tryConnect = async () => {
-            const path = candidates[this._deviceWsPathIndex % candidates.length] || '/device';
-            const wsUrl = this._buildDeviceWsUrl(path);
-            console.debug('[WebClient] 尝试连接WebSocket:', wsUrl.replace(/api_key=[^&]+/, 'api_key=***'));
-            try {
-                const ws = await this._connectDeviceWs(wsUrl);
+        // 开始新的连接
+        const path = '/device'; // 固定使用/device路径
+        const wsUrl = this._buildDeviceWsUrl(path);
+        console.log('[WebClient] 尝试连接WebSocket:', wsUrl.replace(/api_key=[^&]+/, 'api_key=***'));
+        
+        this._deviceWsConnectingPromise = this._connectDeviceWs(wsUrl)
+            .then((ws) => {
                 this._activeDeviceWsPath = path;
-                this._deviceWsPathIndex = 0;
                 return ws;
-            } catch (err) {
-                attempt += 1;
-                this._deviceWsPathIndex = (this._deviceWsPathIndex + 1) % candidates.length;
-                if (attempt >= candidates.length) {
-                    throw err;
-                }
-                await new Promise(r => setTimeout(r, 800));
-                return tryConnect();
-            }
-        };
-        this._deviceWsConnectingPromise = tryConnect()
+            })
             .catch((err) => {
+                console.error('[WebClient] WebSocket连接失败:', err);
+                // 如果是302错误，可能是路径或认证问题
+                if (err.message && err.message.includes('302')) {
+                    console.error('[WebClient] WebSocket返回302重定向，请检查：');
+                    console.error('  1. WebSocket路径是否正确（应为 /device）');
+                    console.error('  2. API密钥是否正确');
+                    console.error('  3. 服务器是否配置了反向代理重定向');
+                }
                 throw err;
             })
             .finally(() => {
                 this._deviceWsConnectingPromise = null;
             });
+        
         return this._deviceWsConnectingPromise;
     }
 
     _buildDeviceWsUrl(path = '/device') {
-        const origin = this.serverUrl.replace(/^http/, 'ws');
+        // 确保正确转换协议：http -> ws, https -> wss
+        let origin = this.serverUrl;
+        if (origin.startsWith('https://')) {
+            origin = origin.replace('https://', 'wss://');
+        } else if (origin.startsWith('http://')) {
+            origin = origin.replace('http://', 'ws://');
+        } else {
+            // 如果没有协议，默认使用wss（生产环境通常使用HTTPS）
+            origin = `wss://${origin}`;
+        }
+        
+        // 规范化路径
         const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-        const url = new URL(normalizedPath, origin.endsWith('/') ? origin : `${origin}/`);
+        
+        // 构建完整URL
+        const baseUrl = origin.endsWith('/') ? origin.slice(0, -1) : origin;
+        const url = new URL(normalizedPath, baseUrl);
+        
+        // 添加查询参数
         const apiKey = this._getSanitizedApiKey();
         if (apiKey) {
             url.searchParams.set('api_key', apiKey);
         }
         url.searchParams.set('client', 'web');
+        
         return url.toString();
     }
 
@@ -1622,43 +1637,73 @@ class APIControlCenter {
 
     _connectDeviceWs(wsUrl) {
         return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                if (ws && ws.readyState === WebSocket.CONNECTING) {
-                    ws.close();
-                    this._deviceWs = null;
-                    reject(new Error('WebSocket连接超时（30秒）'));
-                }
-            }, 30000);
-            
+            let ws;
             try {
-                this._deviceWs = new WebSocket(wsUrl);
+                ws = new WebSocket(wsUrl);
+                this._deviceWs = ws;
             } catch (error) {
                 this._deviceWs = null;
-                clearTimeout(timeout);
                 return reject(error);
             }
-            const ws = this._deviceWs;
+            
+            // 设置超时，避免长时间等待
+            const timeout = setTimeout(() => {
+                if (ws.readyState !== WebSocket.OPEN) {
+                    ws.close();
+                    this._deviceWs = null;
+                    reject(new Error('WebSocket连接超时'));
+                }
+            }, 10000); // 10秒超时
+            
             const handleOpen = () => {
                 clearTimeout(timeout);
                 ws.removeEventListener('error', handleInitialError);
+                ws.removeEventListener('close', handleInitialClose);
                 this._afterDeviceWsOpen(ws);
                 resolve(ws);
             };
+            
             const handleInitialError = (event) => {
                 clearTimeout(timeout);
                 ws.removeEventListener('open', handleOpen);
+                ws.removeEventListener('close', handleInitialClose);
                 this._deviceWs = null;
-                const errorMsg = event?.message || event?.reason || '未知错误';
-                reject(new Error(`WebSocket连接失败: ${errorMsg}`));
+                
+                // 尝试从错误事件中获取更多信息
+                let errorMessage = 'WebSocket连接失败';
+                if (event instanceof Error) {
+                    errorMessage = event.message;
+                } else if (event.target && event.target.readyState === WebSocket.CLOSED) {
+                    // 检查是否是302重定向
+                    const url = event.target.url || wsUrl;
+                    errorMessage = `WebSocket连接失败 (状态: ${event.target.readyState})`;
+                }
+                reject(new Error(errorMessage));
             };
+            
+            const handleInitialClose = (event) => {
+                clearTimeout(timeout);
+                ws.removeEventListener('open', handleOpen);
+                ws.removeEventListener('error', handleInitialError);
+                this._deviceWs = null;
+                
+                // 如果关闭代码是1006（异常关闭），可能是302重定向
+                if (event.code === 1006) {
+                    reject(new Error('WebSocket连接异常关闭，可能是302重定向或路径不匹配'));
+                } else {
+                    reject(new Error(`WebSocket连接关闭 (code: ${event.code}, reason: ${event.reason || '未知'})`));
+                }
+            };
+            
             ws.addEventListener('open', handleOpen, { once: true });
             ws.addEventListener('error', handleInitialError, { once: true });
+            ws.addEventListener('close', handleInitialClose, { once: true });
             this._attachDeviceWsHandlers(ws);
         });
     }
 
     _afterDeviceWsOpen(ws) {
-        console.debug('[WebClient] WebSocket connected:', ws.url);
+        console.log('[WebClient] WebSocket connected:', ws.url);
         this._deviceWsConnected = true;
         this._wsReconnectAttempt = 0;
         this._stopHeartbeat();
@@ -1700,7 +1745,7 @@ class APIControlCenter {
             }
         });
         ws.addEventListener('close', (event) => {
-            console.debug('[WebClient] WebSocket关闭:', {
+            console.log('[WebClient] WebSocket关闭:', {
                 code: event.code,
                 reason: event.reason,
                 wasClean: event.wasClean
@@ -1741,7 +1786,7 @@ class APIControlCenter {
         if (data.type === 'command') {
             const cmd = data.command ? [data.command] : [];
             if (cmd.length) {
-                console.debug('[WebClient] 收到命令:', cmd);
+                console.log('[WebClient] 收到命令:', cmd);
                 this._handleDeviceCommands(cmd);
             }
             return;
@@ -1761,7 +1806,7 @@ class APIControlCenter {
         }
         if (data.type === 'register_response') {
             if (data.success) {
-                console.debug('[WebClient] 设备注册成功:', data.device);
+                console.log('[WebClient] 设备注册成功:', data.device);
                 this.showToast('已连接设备: webclient', 'success');
                 this.loadStats();
                 this._deviceWsReady = true;
@@ -1786,7 +1831,7 @@ class APIControlCenter {
         // 指数退避：1s, 2s, 4s, 8s, 16s, 30s (max)
         const backoff = Math.min(30000, 1000 * Math.pow(2, attempt - 1)) + Math.floor(Math.random() * 500);
         
-        console.debug(`[WebClient] WebSocket将在 ${(backoff / 1000).toFixed(1)}s 后重连 (尝试 ${attempt}/10)`);
+        console.log(`[WebClient] WebSocket将在 ${(backoff / 1000).toFixed(1)}s 后重连 (尝试 ${attempt}/10)`);
         
         clearTimeout(this._wsReconnectTimer);
         this._wsReconnectTimer = setTimeout(() => {
@@ -1908,9 +1953,11 @@ class APIControlCenter {
                     result = { ok: true };
                 } else if (command === 'display_emotion' && parameters.emotion) {
                     try {
+                        console.log('[WebClient] 收到表情命令:', parameters.emotion, '完整命令:', cmd);
                         this.updateEmotionDisplay(parameters.emotion);
-                        this.showToast(`表情: ${parameters.emotion}`, 'info');
-                        result = { ok: true };
+                        console.log('[WebClient] 表情已更新为:', parameters.emotion);
+                    this.showToast(`表情: ${parameters.emotion}`, 'info');
+                    result = { ok: true };
                     } catch (e) {
                         console.error('[WebClient] 更新表情失败:', e);
                         result = { ok: false, message: e?.message || '更新表情失败' };
@@ -2486,14 +2533,13 @@ class APIControlCenter {
 
     _loadCodeMirror() {
         if (this._codeMirrorLoading) return this._codeMirrorLoading;
-        // 使用多个CDN备用方案，优先使用国内稳定源
+        // 使用国内稳定CDN源，优先使用国内CDN
         const cdnBases = [
-            'https://cdn.jsdelivr.net/npm/codemirror@5.65.2',
-            'https://jsd.cdn.zzko.cn/npm/codemirror@5.65.2',
             'https://cdn.bootcdn.net/ajax/libs/codemirror/5.65.2',
             'https://cdn.staticfile.org/codemirror/5.65.2',
+            'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2',
             'https://unpkg.com/codemirror@5.65.2',
-            'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2'
+            'https://cdn.jsdelivr.net/npm/codemirror@5.65.2'
         ];
         const cssList = [
             'codemirror.min.css',
@@ -4152,7 +4198,7 @@ class APIControlCenter {
         configData = this._normalizeConfigData(configData);
 
         try {
-            console.debug('保存配置:', { configName, configData });
+            console.log('保存配置:', { configName, configData });
             const response = await fetch(`${this.serverUrl}/api/config/${configName}/write`, {
                 method: 'POST',
                 headers: {
@@ -4705,29 +4751,102 @@ class APIControlCenter {
                             } else {
                                 el.value = '';
                             }
+                            // 更新ID，确保唯一性
+                            if (el.id) {
+                                const oldId = el.id;
+                                const newId = oldId.replace(/\d+$/, index) || `${oldId}-${index}`;
+                                el.id = newId;
+                                // 更新label的for属性
+                                const label = formContainer.querySelector(`label[for="${oldId}"]`);
+                                if (label) {
+                                    label.setAttribute('for', newId);
+                                }
+                            }
                         });
                         // 更新删除按钮的索引
                         const rmBtn = clone.querySelector('.config-form-arrayform-remove');
                         if (rmBtn) {
                             rmBtn.dataset.index = String(index);
-                            rmBtn.addEventListener('click', () => item.remove());
-                    }
+                        }
                         item.innerHTML = clone.innerHTML;
                     } else {
-                        // 如果没有第一个item，创建一个空的结构
+                        // 如果没有第一个item，尝试从schema创建结构
+                        // 这需要访问schema信息，但当前没有直接访问方式
+                        // 所以创建一个最小结构，至少包含删除按钮
                         item.innerHTML = `<div class="config-form-arrayform-actions"><button type="button" class="btn btn-sm btn-danger config-form-arrayform-remove" data-index="${index}">删除</button></div>`;
+                        console.warn(`[ConfigEditor] 无法为字段 ${fieldName} 创建新项结构：缺少模板项`);
                     }
                     
                     arrayForm.insertBefore(item, addBtn);
+                    
+                    // 重新绑定删除按钮事件
                     const rm = item.querySelector('.config-form-arrayform-remove');
-                    if (rm) rm.addEventListener('click', () => item.remove());
+                    if (rm) {
+                        rm.addEventListener('click', () => item.remove());
+                    }
+                    
+                    // 重新绑定新添加项内的所有表单事件（如Switch、Select等）
+                    this._bindItemFormEvents(item, formContainer);
                 });
             }
+            
+            // 绑定已有项的删除按钮
             arrayForm.querySelectorAll('.config-form-arrayform-remove').forEach(btn => {
                 btn.addEventListener('click', function() {
                     this.closest('.config-form-arrayform-item')?.remove();
                 });
             });
+        });
+    }
+
+    /**
+     * 绑定单个ArrayForm项内的表单事件
+     * @private
+     */
+    _bindItemFormEvents(itemElement, formContainer) {
+        // 绑定Switch组件
+        itemElement.querySelectorAll('.config-form-switch').forEach(switchEl => {
+            const checkbox = switchEl.querySelector('input[type="checkbox"]');
+            if (checkbox && !checkbox.dataset.bound) {
+                checkbox.dataset.bound = 'true';
+                checkbox.addEventListener('change', () => {
+                    switchEl.classList.toggle('checked', checkbox.checked);
+                });
+            }
+        });
+        
+        // 绑定MultiSelect组件
+        itemElement.querySelectorAll('.config-form-multiselect').forEach(multiSelect => {
+            const toggle = multiSelect.querySelector('.config-form-multiselect-toggle');
+            const dropdown = multiSelect.querySelector('.config-form-multiselect-dropdown');
+            const checkboxes = multiSelect.querySelectorAll('input[type="checkbox"]');
+            
+            if (toggle && dropdown && !toggle.dataset.bound) {
+                toggle.dataset.bound = 'true';
+                toggle.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const isOpen = dropdown.style.display !== 'none';
+                    dropdown.style.display = isOpen ? 'none' : 'block';
+                });
+                
+                // 点击外部关闭下拉框
+                document.addEventListener('click', (e) => {
+                    if (!multiSelect.contains(e.target)) {
+                        dropdown.style.display = 'none';
+                    }
+                });
+                
+                // 绑定复选框变化
+                checkboxes.forEach(cb => {
+                    if (!cb.dataset.bound) {
+                        cb.dataset.bound = 'true';
+                        cb.addEventListener('change', () => {
+                            const selected = Array.from(checkboxes).filter(c => c.checked).map(c => c.value);
+                            this.updateMultiSelectTags(multiSelect, selected);
+                        });
+                    }
+                });
+            }
         });
 
         // Tags 组件操作
@@ -4935,13 +5054,21 @@ class APIControlCenter {
             arrayForm.querySelectorAll('.config-form-arrayform-item').forEach(itemEl => {
                 const itemObj = {};
                 // 查找所有有data-field属性的元素，包括嵌套的
+                // 只查找直接子元素和子元素内的字段，避免查找到ArrayForm容器本身
                 const itemFields = itemEl.querySelectorAll('[data-field]');
                 itemFields.forEach(f => {
                     const name = f.dataset.field;
                     if (!name) return;
                     
                     // 跳过ArrayForm容器本身的data-field
-                    if (f.classList.contains('config-form-arrayform')) return;
+                    if (f.closest('.config-form-arrayform') === arrayForm && f !== arrayForm) {
+                        // 确保字段在item内，而不是在ArrayForm容器上
+                        if (f.closest('.config-form-arrayform-item') !== itemEl) return;
+                    }
+                    
+                    // 跳过删除按钮等非输入元素
+                    if (f.classList.contains('config-form-arrayform-remove') || 
+                        f.classList.contains('config-form-arrayform-add')) return;
                     
                     const path = name.split('.');
                     let cur = itemObj;
@@ -4973,6 +5100,12 @@ class APIControlCenter {
                         } else {
                             cur[last] = null;
                         }
+                    } else if (f.closest('.config-form-multiselect')) {
+                        // MultiSelect：收集所有选中的值
+                        const multiSelect = f.closest('.config-form-multiselect');
+                        const checkboxes = multiSelect.querySelectorAll('input[type="checkbox"]');
+                        const selected = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
+                        cur[last] = selected.length > 0 ? selected : [];
                     } else {
                         // 文本输入：保留实际值，空字符串也保留（避免配置丢失）
                         const value = f.value || '';
@@ -4986,7 +5119,7 @@ class APIControlCenter {
                 // 不要过滤掉空对象，因为用户可能正在填写
                 // 只有当对象完全没有字段时才跳过
                 if (Object.keys(itemObj).length > 0) {
-                items.push(itemObj);
+                    items.push(itemObj);
                 }
                 // 注意：不添加完全空的对象，但保留有字段但值为空的对象
             });
