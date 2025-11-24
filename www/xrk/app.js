@@ -40,23 +40,7 @@ class APIControlCenter {
     }
 
     updateEmotionDisplay(emotion) {
-        console.log('[WebClient] updateEmotionDisplay 被调用，表情:', emotion);
-        
-        // 动态导入表情配置（如果可用）
-        let getEmotionIcon, getEmotionAnimation, smartMatchEmotion;
-        try {
-            // 尝试使用外部表情配置
-            if (typeof getEmotionIcon === 'function') {
-                const icon = getEmotionIcon(emotion);
-                const anim = getEmotionAnimation(emotion);
-                this._applyEmotionWithAnimation(icon, anim);
-                return;
-            }
-        } catch (e) {
-            // 如果导入失败，使用内置配置
-        }
-        
-        // 内置表情配置（完整版）
+        // 内置表情配置
         const EMOTION_ICONS = {
             happy: '😀', excited: '🤩', sad: '😢', angry: '😠', surprise: '😮',
             love: '❤️', cool: '😎', sleep: '😴', think: '🤔', wink: '😉', laugh: '😂',
@@ -163,7 +147,7 @@ class APIControlCenter {
                 el.style.animation = '';
             }, animConfig.duration || 300);
             
-            console.log('[WebClient] 表情图标已更新:', emotionCode, '->', icon);
+
         }, 100);
     }
     
@@ -1418,7 +1402,7 @@ class APIControlCenter {
             return;
         }
         
-        console.log('[WebClient] 发送消息:', text);
+
         this.appendChat('user', text);
         input.value = '';
 
@@ -1591,7 +1575,7 @@ class APIControlCenter {
         const tryConnect = async () => {
             const path = candidates[this._deviceWsPathIndex % candidates.length] || '/device';
             const wsUrl = this._buildDeviceWsUrl(path);
-            console.log('[WebClient] 尝试连接WebSocket:', wsUrl.replace(/api_key=[^&]+/, 'api_key=***'));
+            console.debug('[WebClient] 尝试连接WebSocket:', wsUrl.replace(/api_key=[^&]+/, 'api_key=***'));
             try {
                 const ws = await this._connectDeviceWs(wsUrl);
                 this._activeDeviceWsPath = path;
@@ -1638,22 +1622,34 @@ class APIControlCenter {
 
     _connectDeviceWs(wsUrl) {
         return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                if (ws && ws.readyState === WebSocket.CONNECTING) {
+                    ws.close();
+                    this._deviceWs = null;
+                    reject(new Error('WebSocket连接超时（30秒）'));
+                }
+            }, 30000);
+            
             try {
                 this._deviceWs = new WebSocket(wsUrl);
             } catch (error) {
                 this._deviceWs = null;
+                clearTimeout(timeout);
                 return reject(error);
             }
             const ws = this._deviceWs;
             const handleOpen = () => {
+                clearTimeout(timeout);
                 ws.removeEventListener('error', handleInitialError);
                 this._afterDeviceWsOpen(ws);
                 resolve(ws);
             };
             const handleInitialError = (event) => {
+                clearTimeout(timeout);
                 ws.removeEventListener('open', handleOpen);
                 this._deviceWs = null;
-                reject(event instanceof Error ? event : new Error('WebSocket连接失败'));
+                const errorMsg = event?.message || event?.reason || '未知错误';
+                reject(new Error(`WebSocket连接失败: ${errorMsg}`));
             };
             ws.addEventListener('open', handleOpen, { once: true });
             ws.addEventListener('error', handleInitialError, { once: true });
@@ -1662,7 +1658,7 @@ class APIControlCenter {
     }
 
     _afterDeviceWsOpen(ws) {
-        console.log('[WebClient] WebSocket connected:', ws.url);
+        console.debug('[WebClient] WebSocket connected:', ws.url);
         this._deviceWsConnected = true;
         this._wsReconnectAttempt = 0;
         this._stopHeartbeat();
@@ -1704,7 +1700,7 @@ class APIControlCenter {
             }
         });
         ws.addEventListener('close', (event) => {
-            console.log('[WebClient] WebSocket关闭:', {
+            console.debug('[WebClient] WebSocket关闭:', {
                 code: event.code,
                 reason: event.reason,
                 wasClean: event.wasClean
@@ -1745,7 +1741,7 @@ class APIControlCenter {
         if (data.type === 'command') {
             const cmd = data.command ? [data.command] : [];
             if (cmd.length) {
-                console.log('[WebClient] 收到命令:', cmd);
+                console.debug('[WebClient] 收到命令:', cmd);
                 this._handleDeviceCommands(cmd);
             }
             return;
@@ -1765,7 +1761,7 @@ class APIControlCenter {
         }
         if (data.type === 'register_response') {
             if (data.success) {
-                console.log('[WebClient] 设备注册成功:', data.device);
+                console.debug('[WebClient] 设备注册成功:', data.device);
                 this.showToast('已连接设备: webclient', 'success');
                 this.loadStats();
                 this._deviceWsReady = true;
@@ -1790,7 +1786,7 @@ class APIControlCenter {
         // 指数退避：1s, 2s, 4s, 8s, 16s, 30s (max)
         const backoff = Math.min(30000, 1000 * Math.pow(2, attempt - 1)) + Math.floor(Math.random() * 500);
         
-        console.log(`[WebClient] WebSocket将在 ${(backoff / 1000).toFixed(1)}s 后重连 (尝试 ${attempt}/10)`);
+        console.debug(`[WebClient] WebSocket将在 ${(backoff / 1000).toFixed(1)}s 后重连 (尝试 ${attempt}/10)`);
         
         clearTimeout(this._wsReconnectTimer);
         this._wsReconnectTimer = setTimeout(() => {
@@ -1912,11 +1908,9 @@ class APIControlCenter {
                     result = { ok: true };
                 } else if (command === 'display_emotion' && parameters.emotion) {
                     try {
-                        console.log('[WebClient] 收到表情命令:', parameters.emotion, '完整命令:', cmd);
                         this.updateEmotionDisplay(parameters.emotion);
-                        console.log('[WebClient] 表情已更新为:', parameters.emotion);
-                    this.showToast(`表情: ${parameters.emotion}`, 'info');
-                    result = { ok: true };
+                        this.showToast(`表情: ${parameters.emotion}`, 'info');
+                        result = { ok: true };
                     } catch (e) {
                         console.error('[WebClient] 更新表情失败:', e);
                         result = { ok: false, message: e?.message || '更新表情失败' };
@@ -2492,14 +2486,14 @@ class APIControlCenter {
 
     _loadCodeMirror() {
         if (this._codeMirrorLoading) return this._codeMirrorLoading;
-        // 使用多个CDN备用方案，提高加载成功率（添加更多可用源）
+        // 使用多个CDN备用方案，优先使用国内稳定源
         const cdnBases = [
             'https://cdn.jsdelivr.net/npm/codemirror@5.65.2',
-            'https://fastly.jsdelivr.net/npm/codemirror@5.65.2',
-            'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2',
+            'https://jsd.cdn.zzko.cn/npm/codemirror@5.65.2',
             'https://cdn.bootcdn.net/ajax/libs/codemirror/5.65.2',
+            'https://cdn.staticfile.org/codemirror/5.65.2',
             'https://unpkg.com/codemirror@5.65.2',
-            'https://cdn.staticfile.org/codemirror/5.65.2'
+            'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2'
         ];
         const cssList = [
             'codemirror.min.css',
@@ -4158,7 +4152,7 @@ class APIControlCenter {
         configData = this._normalizeConfigData(configData);
 
         try {
-            console.log('保存配置:', { configName, configData });
+            console.debug('保存配置:', { configName, configData });
             const response = await fetch(`${this.serverUrl}/api/config/${configName}/write`, {
                 method: 'POST',
                 headers: {
