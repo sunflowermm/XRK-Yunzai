@@ -3232,10 +3232,8 @@ body.light .bot-card {
     }
 
     .config-form-scroll {
-        padding: 16px;
-        padding-left: 12px; /* 减小左右内边距，给按钮更多空间 */
-        padding-right: 12px;
-        padding-bottom: 140px; /* 确保底部有足够空间，避免被键盘遮挡 */
+        padding: 8px 6px; /* 大幅减小内边距，增加可操作区域 */
+        padding-bottom: 120px; /* 减小底部内边距 */
         min-height: 100%;
         width: 100%;
         max-width: 100%;
@@ -3244,10 +3242,8 @@ body.light .bot-card {
     }
     
     .sub-config-list-scroll {
-        padding: 16px;
-        padding-left: 12px; /* 减小左右内边距 */
-        padding-right: 12px;
-        padding-bottom: 140px;
+        padding: 8px 6px; /* 大幅减小内边距 */
+        padding-bottom: 120px; /* 减小底部内边距 */
         min-height: 100%;
         width: 100%;
         max-width: 100%;
@@ -3256,14 +3252,12 @@ body.light .bot-card {
     }
 
     .config-form-field {
-        padding: 20px 16px;
-        padding-left: 12px; /* 减小左右内边距 */
-        padding-right: 12px;
-        margin-bottom: 12px;
+        padding: 12px 8px; /* 大幅减小内边距，增加可操作区域 */
+        margin-bottom: 10px; /* 减小间距 */
         margin-left: 0;
         margin-right: 0;
         background: var(--bg-card);
-        border-radius: var(--radius-md);
+        border-radius: var(--radius-sm); /* 使用更小的圆角 */
         border: 1px solid var(--border-light);
         width: 100%;
         max-width: 100%;
@@ -3271,18 +3265,18 @@ body.light .bot-card {
     }
 
     .config-form-label {
-        font-size: 15px;
+        font-size: 13px; /* 减小字体 */
         font-weight: 500;
-        margin-bottom: 10px;
+        margin-bottom: 6px; /* 减小间距 */
         display: block;
     }
 
     .config-form-input,
     .config-form-select {
-        padding: 14px 16px;
-        font-size: 16px; /* 增大字体，提高可读性 */
+        padding: 10px 12px; /* 减小内边距 */
+        font-size: 14px; /* 减小字体，更适合手机 */
         width: 100%;
-        border-radius: var(--radius-md);
+        border-radius: var(--radius-sm); /* 使用更小的圆角 */
         border: 1px solid var(--border);
         background: var(--bg-secondary);
         transition: all var(--transition-base);
@@ -3333,21 +3327,20 @@ body.light .bot-card {
     }
 
     .config-form-subform {
-        padding: 16px;
-        padding-left: 12px; /* 减小左右内边距 */
-        padding-right: 12px;
-        margin-top: 12px;
+        padding: 10px 8px; /* 大幅减小内边距 */
+        margin-top: 8px; /* 减小间距 */
         margin-left: 0;
         margin-right: 0;
+        margin-bottom: 8px;
         background: var(--bg-secondary);
-        border-radius: var(--radius-md);
+        border-radius: var(--radius-sm); /* 使用更小的圆角 */
         width: 100%;
         max-width: 100%;
         box-sizing: border-box;
     }
 
     .config-form-subfield {
-        margin-bottom: 16px;
+        margin-bottom: 10px; /* 减小间距 */
         width: 100%;
         max-width: 100%;
         box-sizing: border-box;
@@ -3362,18 +3355,23 @@ body.light .bot-card {
         max-width: 100%;
         box-sizing: border-box;
     }
+    
+    .config-form-subfield .config-form-label {
+        font-size: 12px; /* 减小标签字体 */
+        margin-bottom: 4px; /* 减小间距 */
+    }
 
     .config-form-arrayform-item {
-        padding: 16px;
-        margin-bottom: 16px;
+        padding: 10px 8px; /* 大幅减小内边距 */
+        margin-bottom: 10px; /* 减小间距 */
         margin-left: 0;
         margin-right: 0;
         background: var(--bg-secondary);
-        border-radius: var(--radius-md);
-        min-height: 60px; /* 确保卡片不会太小 */
+        border-radius: var(--radius-sm); /* 使用更小的圆角 */
+        min-height: 50px; /* 减小最小高度 */
         display: flex;
         flex-direction: column;
-        gap: 12px;
+        gap: 8px; /* 减小间距 */
         width: 100%;
         max-width: 100%;
         box-sizing: border-box; /* 确保padding包含在宽度内 */
@@ -3585,25 +3583,26 @@ body.light .bot-card {
     
     /* 配置管理器手机端优化 */
     .config-item {
-        padding: 20px;
-        margin-bottom: 16px;
+        padding: 12px 10px; /* 减小内边距，增加可操作区域 */
+        margin-bottom: 12px; /* 减小间距 */
         text-align: center;
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 12px;
+        gap: 8px; /* 减小间距 */
     }
     
     .config-item-title,
     .config-item-name {
-        font-size: 16px;
+        font-size: 14px; /* 减小字体 */
         text-align: center;
         width: 100%;
+        font-weight: 500;
     }
     
     .config-item-desc {
-        font-size: 13px;
+        font-size: 12px; /* 减小字体 */
         text-align: center;
         width: 100%;
     }
@@ -3625,29 +3624,43 @@ body.light .bot-card {
     
     .sub-config-item {
         width: 100%;
-        max-width: 400px;
+        max-width: 100%;
         text-align: center;
-        padding: 16px;
+        padding: 12px 10px; /* 减小内边距 */
+        margin-bottom: 10px; /* 减小间距 */
+    }
+    
+    .sub-config-name {
+        font-size: 14px; /* 减小字体 */
+        font-weight: 500;
+    }
+    
+    .sub-config-desc {
+        font-size: 12px; /* 减小字体 */
     }
     
     /* 系统状态卡片手机端优化 */
     .system-status-grid {
         display: flex;
         flex-direction: column;
-        align-items: center;
-        gap: 16px;
-        padding: 8px; /* 减小内边距，充分利用屏幕 */
+        align-items: stretch; /* 拉伸填满宽度 */
+        gap: 10px; /* 减小间距 */
+        padding: 8px 6px; /* 减小左右内边距，增加可操作区域 */
     }
     
     .status-card-large {
         width: 100%;
-        max-width: 400px;
+        max-width: 100%;
         text-align: center;
+        padding: 12px 10px; /* 减小内边距 */
+        margin: 0; /* 移除外边距 */
     }
     
     .status-card-header h3 {
-        font-size: 16px;
+        font-size: 14px; /* 减小字体 */
         text-align: center;
+        font-weight: 500;
+        margin-bottom: 8px; /* 减小间距 */
     }
     
     .status-card-content {
@@ -3656,23 +3669,27 @@ body.light .bot-card {
     
     /* 手机端标题缩小，给操作区更多空间 */
     .welcome-title {
-        font-size: clamp(24px, 4vw, 32px); /* 缩小标题 */
-        margin-bottom: 12px; /* 减少底部间距 */
+        font-size: clamp(20px, 3.5vw, 28px); /* 进一步缩小标题 */
+        margin-bottom: 8px; /* 减少底部间距 */
+        line-height: 1.3;
     }
     
     .welcome-desc {
-        font-size: 16px; /* 缩小描述文字 */
-        margin-bottom: 24px; /* 减少底部间距 */
+        font-size: 13px; /* 进一步缩小描述文字 */
+        margin-bottom: 16px; /* 减少底部间距 */
+        line-height: 1.4;
     }
     
     .system-status-header h1 {
-        font-size: clamp(24px, 4vw, 32px); /* 缩小系统状态标题 */
-        margin-bottom: 16px; /* 减少底部间距 */
+        font-size: clamp(20px, 3.5vw, 28px); /* 进一步缩小系统状态标题 */
+        margin-bottom: 10px; /* 减少底部间距 */
+        line-height: 1.3;
     }
     
     .system-status-header p {
-        font-size: 14px; /* 缩小描述文字 */
-        margin-bottom: 20px; /* 减少底部间距 */
+        font-size: 12px; /* 进一步缩小描述文字 */
+        margin-bottom: 12px; /* 减少底部间距 */
+        line-height: 1.4;
     }
     
     /* 文字颜色优化，确保可见性 */
@@ -3712,15 +3729,20 @@ body.light .bot-card {
     
     /* 减小基础字体 */
     :root {
-        font-size: 14px;
+        font-size: 13px; /* 进一步减小基础字体 */
+    }
+    
+    body {
+        font-size: 13px; /* 确保body字体也减小 */
     }
     
     .btn {
-        font-size: 14px;
-        padding: 14px 24px;
+        font-size: 13px; /* 减小按钮字体 */
+        padding: 10px 16px; /* 减小按钮内边距 */
         width: 100%;
         max-width: 100%;
         box-sizing: border-box;
+        min-height: 40px; /* 保持足够的点击区域 */
     }
     
     /* 配置表单容器优化 */

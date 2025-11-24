@@ -204,21 +204,39 @@ class APIControlCenter {
             console.warn('CodeMirror预加载失败:', err);
         });
         
-        // 每分钟更新一次系统状态
-        setInterval(() => {
-            if (this.currentPage === 'home') {
+        // 每分钟更新一次系统状态（只在页面可见时）
+        this._statusUpdateInterval = setInterval(() => {
+            if (this.currentPage === 'home' && !document.hidden) {
                 this.loadSystemStatus();
             }
         }, 60000);
         
+        // 优化：只在真正需要时才刷新，避免频繁刷新
+        let lastVisibilityChange = 0;
+        const VISIBILITY_DEBOUNCE = 1000; // 1秒防抖
+        
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) {
-                this.checkConnection();
-                if (this.currentPage === 'home') {
-                    this.loadSystemStatus();
+                const now = Date.now();
+                // 防抖：如果距离上次切换时间太短，不执行刷新
+                if (now - lastVisibilityChange < VISIBILITY_DEBOUNCE) {
+                    return;
                 }
+                lastVisibilityChange = now;
+                
+                // 只检查连接，不强制刷新数据
+                this.checkConnection();
+                // 只在首页且数据过期时才刷新状态
+                if (this.currentPage === 'home') {
+                    const lastStatusTime = this._lastStatusTime || 0;
+                    const STATUS_CACHE_TIME = 30000; // 30秒缓存
+                    if (Date.now() - lastStatusTime > STATUS_CACHE_TIME) {
+                        this.loadSystemStatus();
+                    }
+                }
+                // 确保WebSocket连接，但不强制重连
                 this.ensureDeviceWs();
-                this._applyRoute();
+                // 不强制应用路由，保持当前状态
             }
         });
     }
@@ -854,6 +872,7 @@ class APIControlCenter {
         const grid = document.getElementById('systemStatusGrid');
         if (!grid) return;
         this._lastStatusData = data;
+        this._lastStatusTime = Date.now(); // 记录更新时间
 
         const { system, bot, bots } = data;
         
@@ -1581,6 +1600,7 @@ class APIControlCenter {
         }
         this._deviceWs.addEventListener('open', () => {
             console.log('[WebClient] WebSocket connected to /device');
+            this._deviceWsConnected = true; // 标记已连接
             this._wsReconnectAttempt = 0;
             this._startHeartbeat();
             // 注册为webclient设备
@@ -1632,6 +1652,7 @@ class APIControlCenter {
                 wasClean: event.wasClean
             });
             this._deviceWs = null;
+            this._deviceWsConnected = false; // 标记已断开
             this._stopHeartbeat();
             
             // 如果不是正常关闭（code 1000），则重连
@@ -3844,6 +3865,9 @@ class APIControlCenter {
         if (!configData || typeof configData !== 'object') {
             configData = {};
         }
+        
+        // 数据清理和验证：确保数组字段是数组类型（修复headers.join错误）
+        configData = this._normalizeConfigData(configData);
 
         // SystemConfig 的子配置保存：使用 path 参数指定子配置名称
         const response = await fetch(`${this.serverUrl}/api/config/${configName}/write`, {
@@ -3979,6 +4003,9 @@ class APIControlCenter {
         if (!configData || typeof configData !== 'object') {
             configData = {};
         }
+        
+        // 数据清理和验证：确保数组字段是数组类型（修复headers.join错误）
+        configData = this._normalizeConfigData(configData);
 
         try {
             console.log('保存配置:', { configName, configData });
@@ -4846,6 +4873,41 @@ class APIControlCenter {
         });
         
         return data;
+    }
+
+    /**
+     * 规范化配置数据，确保类型正确
+     * 修复headers等数组字段可能不是数组的问题
+     */
+    _normalizeConfigData(data) {
+        if (!data || typeof data !== 'object') {
+            return data;
+        }
+        
+        const normalized = Array.isArray(data) ? [...data] : { ...data };
+        
+        // 递归处理嵌套对象
+        for (const [key, value] of Object.entries(normalized)) {
+            if (value && typeof value === 'object' && !Array.isArray(value)) {
+                normalized[key] = this._normalizeConfigData(value);
+            } else if (key === 'headers' || key === 'methods' || key === 'origins') {
+                // 确保这些字段是数组
+                if (!Array.isArray(value)) {
+                    if (typeof value === 'string') {
+                        // 如果是字符串，尝试分割
+                        normalized[key] = value.split(',').map(s => s.trim()).filter(s => s);
+                    } else if (value === null || value === undefined) {
+                        // 如果是null或undefined，设为空数组
+                        normalized[key] = [];
+                    } else {
+                        // 其他情况，尝试转换为数组
+                        normalized[key] = [value];
+                    }
+                }
+            }
+        }
+        
+        return normalized;
     }
 
     /**
