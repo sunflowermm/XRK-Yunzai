@@ -3305,6 +3305,8 @@ body.light .bot-card {
         font-size: 15px;
         width: 100%;
         margin-top: 12px;
+        min-height: 48px; /* 确保按钮足够大，易于点击 */
+        touch-action: manipulation; /* 优化触摸响应 */
     }
 
     .config-form-subform {
@@ -3327,10 +3329,23 @@ body.light .bot-card {
         margin-bottom: 16px;
         background: var(--bg-secondary);
         border-radius: var(--radius-md);
+        min-height: 60px; /* 确保卡片不会太小 */
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
     }
 
     .config-form-arrayform-actions {
         margin-top: 12px;
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+    }
+    
+    .config-form-arrayform-remove {
+        min-height: 44px; /* 确保删除按钮足够大 */
+        padding: 12px 20px;
+        touch-action: manipulation;
     }
 
     .config-form-switch {
@@ -4923,13 +4938,24 @@ body.light .config-form-field {
 }
 
 .config-form-arrayform-item {
-    padding: 12px;
+    padding: 16px;
     background: rgba(255, 255, 255, 0.2);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     border: 1px solid var(--border);
-    margin-bottom: 12px;
+    margin-bottom: 16px;
+    min-height: 80px; /* 确保卡片不会太小 */
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    transition: all var(--transition-base);
+}
+
+.config-form-arrayform-item:hover {
+    background: rgba(255, 255, 255, 0.25);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-sm);
 }
 
 .config-form-arrayform-item .config-form-subfield {
@@ -4949,6 +4975,16 @@ body.light .config-form-field {
 
 .config-form-arrayform-add {
     margin-top: 12px;
+    min-height: 48px; /* 确保添加按钮足够大 */
+    padding: 14px 24px;
+    font-size: 15px;
+    font-weight: 500;
+    touch-action: manipulation; /* 优化触摸响应 */
+    transition: all var(--transition-base);
+}
+
+.config-form-arrayform-add:active {
+    transform: scale(0.98);
 }
 
 /* ==================== Tags 组件样式 ==================== */

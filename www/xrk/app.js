@@ -4511,28 +4511,42 @@ class APIControlCenter {
                 addBtn.addEventListener('click', () => {
                     const index = arrayForm.querySelectorAll('.config-form-arrayform-item').length;
                     const fieldName = arrayForm.dataset.field;
-                    // 生成空项
-                    const tempDiv = document.createElement('div');
-                    tempDiv.innerHTML = this.renderArrayForm(`${fieldName}-${index}`, fieldName, { fields: {} }, []);
-                    // 只取一项结构：根据当前 arrayForm 的子字段渲染
-                    const subFields = arrayForm.querySelector('.config-form-arrayform-item .config-form-subfield')
-                        ? Array.from(arrayForm.querySelectorAll('.config-form-arrayform-item .config-form-subfield')).map(el => el.querySelector('[data-field]')?.dataset.field?.split('.')?.[0]).filter(Boolean)
-                        : [];
+                    
+                    // 获取schema信息（从第一个item或从全局schema）
+                    const first = arrayForm.querySelector('.config-form-arrayform-item');
                     const item = document.createElement('div');
                     item.className = 'config-form-arrayform-item';
                     item.dataset.index = String(index);
-                    let inner = '';
-                    // 基于第一项的结构克隆外观（简化：克隆第一个item的innerHTML）
-                    const first = arrayForm.querySelector('.config-form-arrayform-item');
+                    
                     if (first) {
-                        inner = first.innerHTML;
+                        // 克隆第一个item的结构，但清空值
+                        const clone = first.cloneNode(true);
+                        // 更新所有data-field属性，确保它们保持正确的字段名
+                        clone.querySelectorAll('[data-field]').forEach(el => {
+                            // 保持原有的data-field值（如 "domain", "ssl.enabled" 等）
+                            // 只清空输入值
+                            if (el.type === 'checkbox') {
+                                el.checked = false;
+                            } else if (el.type === 'number') {
+                                el.value = '';
+                            } else if (el.tagName === 'SELECT') {
+                                el.selectedIndex = 0;
+                            } else {
+                                el.value = '';
+                            }
+                        });
+                        // 更新删除按钮的索引
+                        const rmBtn = clone.querySelector('.config-form-arrayform-remove');
+                        if (rmBtn) {
+                            rmBtn.dataset.index = String(index);
+                            rmBtn.addEventListener('click', () => item.remove());
+                        }
+                        item.innerHTML = clone.innerHTML;
+                    } else {
+                        // 如果没有第一个item，创建一个空的结构
+                        item.innerHTML = `<div class="config-form-arrayform-actions"><button type="button" class="btn btn-sm btn-danger config-form-arrayform-remove" data-index="${index}">删除</button></div>`;
                     }
-                    item.innerHTML = inner || `<div class="config-form-arrayform-actions"><button type="button" class="btn btn-sm btn-danger config-form-arrayform-remove" data-index="${index}">删除</button></div>`;
-                    // 清空其中的值
-                    item.querySelectorAll('[data-field]').forEach(el => {
-                        if (el.type === 'checkbox') el.checked = false;
-                        else el.value = '';
-                    });
+                    
                     arrayForm.insertBefore(item, addBtn);
                     const rm = item.querySelector('.config-form-arrayform-remove');
                     if (rm) rm.addEventListener('click', () => item.remove());
@@ -4749,10 +4763,15 @@ class APIControlCenter {
             const items = [];
             arrayForm.querySelectorAll('.config-form-arrayform-item').forEach(itemEl => {
                 const itemObj = {};
+                // 查找所有有data-field属性的元素，包括嵌套的
                 const itemFields = itemEl.querySelectorAll('[data-field]');
                 itemFields.forEach(f => {
                     const name = f.dataset.field;
                     if (!name) return;
+                    
+                    // 跳过ArrayForm容器本身的data-field
+                    if (f.classList.contains('config-form-arrayform')) return;
+                    
                     const path = name.split('.');
                     let cur = itemObj;
                     for (let i = 0; i < path.length - 1; i++) {
@@ -4761,10 +4780,13 @@ class APIControlCenter {
                         cur = cur[key];
                     }
                     const last = path[path.length - 1];
-                    if (f.type === 'checkbox') cur[last] = f.checked;
-                    else if (f.type === 'number') {
+                    
+                    // 处理不同类型的输入
+                    if (f.type === 'checkbox') {
+                        cur[last] = f.checked;
+                    } else if (f.type === 'number') {
                         const numVal = f.value !== '' && f.value !== null && f.value !== undefined ? Number(f.value) : null;
-                        cur[last] = (numVal !== null && !isNaN(numVal)) ? numVal : null;
+                        cur[last] = (numVal !== null && !isNaN(numVal)) ? numVal : (f.value === '' ? null : f.value);
                     } else if (f.tagName === 'SELECT') {
                         // Select：根据字段类型转换值
                         const selectValue = f.value || null;
@@ -4780,10 +4802,21 @@ class APIControlCenter {
                         } else {
                             cur[last] = null;
                         }
-                    } else cur[last] = f.value || '';
+                    } else {
+                        // 文本输入：保留空字符串，但如果是必填字段且为空，设为null
+                        const value = f.value || '';
+                        cur[last] = value === '' ? null : value;
+                    }
                 });
+                
+                // 确保至少有一个空对象（即使没有字段被填写）
+                if (Object.keys(itemObj).length === 0) {
+                    itemObj.domain = null; // 为domains数组提供默认字段
+                }
+                
                 items.push(itemObj);
             });
+            // 即使数组为空，也保留键（空数组）
             data[fieldName] = items;
         });
         

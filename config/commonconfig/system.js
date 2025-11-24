@@ -478,6 +478,7 @@ export default class SystemConfig extends ConfigBase {
                 index: {
                   type: 'array',
                   label: '默认首页文件',
+                  description: '按顺序查找，返回第一个存在的文件',
                   itemType: 'string',
                   default: ['index.html', 'index.htm', 'default.html'],
                   component: 'Tags'
@@ -485,13 +486,14 @@ export default class SystemConfig extends ConfigBase {
                 extensions: {
                   type: 'boolean',
                   label: '自动添加扩展名',
+                  description: '例如：/page 会尝试 /page.html',
                   default: false,
                   component: 'Switch'
                 },
                 cacheTime: {
                   type: 'string',
                   label: '缓存时间',
-                  description: '支持格式：1d = 1天, 1h = 1小时',
+                  description: '支持格式：1d = 1天, 1h = 1小时, 1w = 1周',
                   default: '1d',
                   component: 'Input'
                 }
@@ -939,6 +941,38 @@ export default class SystemConfig extends ConfigBase {
         description: '群聊相关配置',
         filePath: getConfigPath('group'),
         fileType: 'yaml',
+        // 特殊处理：支持数字键（群号）和groups数组的转换
+        transformRead: (data) => {
+          if (!data || typeof data !== 'object') return data;
+          const result = { ...data };
+          // 将数字键转换为groups数组
+          const groups = [];
+          for (const [key, value] of Object.entries(result)) {
+            if (key !== 'default' && /^\d+$/.test(key)) {
+              groups.push({ groupId: key, ...value });
+              delete result[key];
+            }
+          }
+          if (groups.length > 0) {
+            result.groups = groups;
+          }
+          return result;
+        },
+        transformWrite: (data) => {
+          if (!data || typeof data !== 'object') return data;
+          const result = { ...data };
+          // 将groups数组转换回数字键
+          if (Array.isArray(result.groups)) {
+            for (const group of result.groups) {
+              if (group.groupId) {
+                const { groupId, ...config } = group;
+                result[groupId] = config;
+              }
+            }
+            delete result.groups;
+          }
+          return result;
+        },
         schema: {
           fields: {
             default: {
@@ -975,6 +1009,74 @@ export default class SystemConfig extends ConfigBase {
                   label: '机器人别名',
                   itemType: 'string',
                   default: ['葵崽', '葵葵'],
+                  component: 'Tags'
+                },
+                addPrivate: {
+                  type: 'number',
+                  label: '私聊添加',
+                  enum: [0, 1],
+                  default: 1,
+                  component: 'Select'
+                },
+                enable: {
+                  type: 'array',
+                  label: '功能白名单',
+                  itemType: 'string',
+                  default: [],
+                  component: 'Tags'
+                },
+                disable: {
+                  type: 'array',
+                  label: '功能黑名单',
+                  itemType: 'string',
+                  default: [],
+                  component: 'Tags'
+                }
+              }
+            },
+            groups: {
+              type: 'array',
+              label: '群组单独配置',
+              description: '为特定群组设置单独的配置，会覆盖默认配置',
+              component: 'ArrayForm',
+              itemType: 'object',
+              fields: {
+                groupId: {
+                  type: 'string',
+                  label: '群号',
+                  required: true,
+                  component: 'Input',
+                  placeholder: '123456'
+                },
+                groupGlobalCD: {
+                  type: 'number',
+                  label: '整体冷却时间',
+                  description: '群聊中所有指令操作冷却时间（毫秒），0则无限制',
+                  min: 0,
+                  default: 500,
+                  component: 'InputNumber'
+                },
+                singleCD: {
+                  type: 'number',
+                  label: '个人冷却时间',
+                  description: '群聊中个人操作冷却时间（毫秒）',
+                  min: 0,
+                  default: 500,
+                  component: 'InputNumber'
+                },
+                onlyReplyAt: {
+                  type: 'number',
+                  label: '只关注At',
+                  description: '0-否 1-是 2-触发用户非主人只回复@',
+                  enum: [0, 1, 2],
+                  default: 0,
+                  component: 'Select'
+                },
+                botAlias: {
+                  type: 'array',
+                  label: '机器人别名',
+                  itemType: 'string',
+                  default: [],
                   component: 'Tags'
                 },
                 addPrivate: {
@@ -1585,6 +1687,98 @@ export default class SystemConfig extends ConfigBase {
                   component: 'InputNumber'
                 }
               }
+            },
+            responsePolish: {
+              type: 'object',
+              label: 'AI响应润色配置',
+              component: 'SubForm',
+              fields: {
+                enabled: {
+                  type: 'boolean',
+                  label: '启用响应润色',
+                  default: true,
+                  component: 'Switch'
+                },
+                maxTokens: {
+                  type: 'number',
+                  label: '最大Token数',
+                  min: 1,
+                  default: 400,
+                  component: 'InputNumber'
+                },
+                temperature: {
+                  type: 'number',
+                  label: '温度参数',
+                  description: '控制润色的随机性，范围0-2',
+                  min: 0,
+                  max: 2,
+                  step: 0.1,
+                  default: 0.3,
+                  component: 'InputNumber'
+                },
+                instructions: {
+                  type: 'string',
+                  label: '润色指令',
+                  default: '你是QQ聊天润色器，只能做轻微整理：1. 删除舞台提示、括号或方括号里未执行的工具描述（例如[回复:xxx]、(正在... )等）2. 保留原意，语气自然，像正常聊天，尽量简短，用常用标点分句3. 不要添加新信息或Markdown，只输出纯文本',
+                  component: 'Textarea'
+                }
+              }
+            },
+            reasoning: {
+              type: 'object',
+              label: 'AI推理调优配置',
+              component: 'SubForm',
+              fields: {
+                enabled: {
+                  type: 'boolean',
+                  label: '启用推理调优',
+                  default: false,
+                  component: 'Switch'
+                },
+                maxIterations: {
+                  type: 'number',
+                  label: '最大迭代次数',
+                  min: 1,
+                  max: 10,
+                  default: 3,
+                  component: 'InputNumber'
+                },
+                temperature: {
+                  type: 'number',
+                  label: '温度参数',
+                  description: '控制推理的随机性，范围0-2',
+                  min: 0,
+                  max: 2,
+                  step: 0.1,
+                  default: 0.8,
+                  component: 'InputNumber'
+                }
+              }
+            },
+            workflows: {
+              type: 'object',
+              label: '工作流系统配置',
+              component: 'SubForm',
+              fields: {
+                enabled: {
+                  type: 'boolean',
+                  label: '启用工作流',
+                  default: true,
+                  component: 'Switch'
+                },
+                allowMultiple: {
+                  type: 'boolean',
+                  label: '允许多个工作流',
+                  default: true,
+                  component: 'Switch'
+                },
+                defaultWorkflow: {
+                  type: 'string',
+                  label: '默认工作流',
+                  default: 'device',
+                  component: 'Input'
+                }
+              }
             }
           }
         }
@@ -1820,6 +2014,23 @@ export default class SystemConfig extends ConfigBase {
     const configMeta = this.configFiles[name];
     if (!configMeta) {
       throw new Error(`未知的配置: ${name}`);
+    }
+
+    // 为 group 配置创建特殊实例，支持数字键转换
+    if (name === 'group') {
+      const GroupConfig = class extends ConfigBase {
+        constructor(configMeta) {
+          super(configMeta);
+          // 设置转换函数
+          if (configMeta.transformRead) {
+            this.transformRead = configMeta.transformRead;
+          }
+          if (configMeta.transformWrite) {
+            this.transformWrite = configMeta.transformWrite;
+          }
+        }
+      };
+      return new GroupConfig(configMeta);
     }
 
     // 为 renderer 配置创建特殊实例，支持读取默认配置
