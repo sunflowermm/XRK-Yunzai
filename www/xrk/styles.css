@@ -3429,7 +3429,7 @@ body.light .bot-card {
         max-width: 100%;
         box-sizing: border-box;
     }
-    
+
     .config-form-tags-input {
         flex: 1;
         padding: 14px 16px;
@@ -3437,7 +3437,7 @@ body.light .bot-card {
         min-width: 0; /* 允许flex item缩小 */
         box-sizing: border-box;
     }
-    
+
     .config-form-tags-add {
         padding: 14px 20px;
         font-size: 14px;

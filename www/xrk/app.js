@@ -32,6 +32,10 @@ class APIControlCenter {
         this._ttsPlaying = false;
         this._lastAsrFinal = '';
         this._chatHistory = this._loadChatHistory();
+        this.deviceWsPaths = ['/device', '/ws/device', '/ws'];
+        this._deviceWsPathIndex = 0;
+        this._deviceWsConnectingPromise = null;
+        this._codeMirrorAvailable = true;
         this.init();
     }
 
@@ -195,7 +199,7 @@ class APIControlCenter {
         this.loadSystemStatus();
         this.renderSidebar();
         this.renderQuickActions();
-        this.ensureDeviceWs();
+        this.ensureDeviceWs().catch(() => {});
         this._initParticles();
         this._installRouter();
         
@@ -231,11 +235,11 @@ class APIControlCenter {
                     const lastStatusTime = this._lastStatusTime || 0;
                     const STATUS_CACHE_TIME = 30000; // 30秒缓存
                     if (Date.now() - lastStatusTime > STATUS_CACHE_TIME) {
-                        this.loadSystemStatus();
-                    }
+                    this.loadSystemStatus();
+                }
                 }
                 // 确保WebSocket连接，但不强制重连
-                this.ensureDeviceWs();
+                this.ensureDeviceWs().catch(() => {});
                 // 不强制应用路由，保持当前状态
             }
         });
@@ -813,7 +817,7 @@ class APIControlCenter {
         this._restoreChatHistory();
 
         // 确保WebSocket连接
-        this.ensureDeviceWs();
+        this.ensureDeviceWs().catch(() => {});
         this.updateEmotionDisplay('happy');
     }
 
@@ -1348,7 +1352,7 @@ class APIControlCenter {
         });
         micBtn.addEventListener('click', () => this.toggleMic());
 
-        this.ensureDeviceWs();
+        this.ensureDeviceWs().catch(() => {});
     }
 
     appendChat(role, text, persist = true) {
@@ -1428,7 +1432,11 @@ class APIControlCenter {
 
     async startAIStream(prompt) {
         // 确保WebSocket连接已建立
-        await this.ensureDeviceWs();
+        try {
+            await this.ensureDeviceWs();
+        } catch (err) {
+            console.warn('[WebClient] WebSocket暂不可用，尝试继续AI流式:', err);
+        }
         // 等待WebSocket就绪（最多等待2秒）
         let waitCount = 0;
         while ((!this._deviceWs || this._deviceWs.readyState !== 1) && waitCount < 20) {
@@ -1570,183 +1578,202 @@ class APIControlCenter {
 
     // ============== Streaming ASR via /device WebSocket ==============
     async ensureDeviceWs() {
-        // 如果已连接，直接返回
         if (this._deviceWs && this._deviceWs.readyState === WebSocket.OPEN) {
-            return Promise.resolve();
+            return this._deviceWs;
         }
-        
-        // 如果正在连接，等待连接完成
-        if (this._deviceWs && this._deviceWs.readyState === WebSocket.CONNECTING) {
-            return new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => {
-                    reject(new Error('WebSocket连接超时'));
-                }, 5000);
-                this._deviceWs.addEventListener('open', () => {
-                    clearTimeout(timeout);
-                    resolve();
-                }, { once: true });
-                this._deviceWs.addEventListener('error', () => {
-                    clearTimeout(timeout);
-                    reject(new Error('WebSocket连接失败'));
-                }, { once: true });
+        if (this._deviceWsConnectingPromise) {
+            return this._deviceWsConnectingPromise;
+        }
+        const candidates = (this.deviceWsPaths && this.deviceWsPaths.length > 0)
+            ? this.deviceWsPaths
+            : ['/device'];
+        let attempt = 0;
+        const tryConnect = async () => {
+            const path = candidates[this._deviceWsPathIndex % candidates.length] || '/device';
+            const wsUrl = this._buildDeviceWsUrl(path);
+            console.log('[WebClient] 尝试连接WebSocket:', wsUrl.replace(/api_key=[^&]+/, 'api_key=***'));
+            try {
+                const ws = await this._connectDeviceWs(wsUrl);
+                this._activeDeviceWsPath = path;
+                this._deviceWsPathIndex = 0;
+                return ws;
+            } catch (err) {
+                attempt += 1;
+                this._deviceWsPathIndex = (this._deviceWsPathIndex + 1) % candidates.length;
+                if (attempt >= candidates.length) {
+                    throw err;
+                }
+                await new Promise(r => setTimeout(r, 800));
+                return tryConnect();
+            }
+        };
+        this._deviceWsConnectingPromise = tryConnect()
+            .catch((err) => {
+                throw err;
+            })
+            .finally(() => {
+                this._deviceWsConnectingPromise = null;
             });
+        return this._deviceWsConnectingPromise;
+    }
+
+    _buildDeviceWsUrl(path = '/device') {
+        const origin = this.serverUrl.replace(/^http/, 'ws');
+        const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+        const url = new URL(normalizedPath, origin.endsWith('/') ? origin : `${origin}/`);
+        const apiKey = this._getSanitizedApiKey();
+        if (apiKey) {
+            url.searchParams.set('api_key', apiKey);
         }
-        
-        // 如果已关闭或出错，清理旧连接
-        if (this._deviceWs) {
-            this._deviceWs = null;
-        }
-        
-        // 如果正在重连，不要重复触发
-        if (this._wsReconnectTimer) {
-            return Promise.resolve();
-        }
-        
-        const apiKey = localStorage.getItem('apiKey') || '';
-        // WebSocket 路径是 /device（根据 device.js 中的 ws.device 定义）
-        const wsUrl = (this.serverUrl.replace(/^http/, 'ws') + `/device`) + (apiKey ? `?api_key=${encodeURIComponent(apiKey)}` : '');
-        
-        try {
-            console.log('[WebClient] 尝试连接WebSocket:', wsUrl);
-            this._deviceWs = new WebSocket(wsUrl);
-        } catch (error) {
-            console.error('[WebClient] WebSocket创建失败:', error);
-            this._deviceWs = null;
-            this._scheduleWsReconnect();
-            return Promise.reject(error);
-        }
-        
+        url.searchParams.set('client', 'web');
+        return url.toString();
+    }
+
+    _getSanitizedApiKey() {
+        const raw = (localStorage.getItem('apiKey') || '').trim();
+        if (!raw) return '';
+        const cleaned = raw.replace(/^api_key\s*=/i, '').split('&')[0].trim();
+        return cleaned;
+    }
+
+    _connectDeviceWs(wsUrl) {
         return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                reject(new Error('WebSocket连接超时'));
-            }, 5000);
-            
-            this._deviceWs.addEventListener('open', () => {
-                clearTimeout(timeout);
-                console.log('[WebClient] WebSocket connected to /device');
-                this._deviceWsConnected = true; // 标记已连接
-                this._wsReconnectAttempt = 0;
-                this._startHeartbeat();
-                // 注册为webclient设备
-                try {
-                    const registerMsg = {
-                        type: 'register',
-                        device_id: 'webclient',
-                        device_type: 'web',
-                        device_name: 'Web客户端',
-                        capabilities: ['display', 'microphone', 'emotion', 'tts'],
-                        metadata: {
-                            ua: navigator.userAgent,
-                            lang: navigator.language,
-                            tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'local'
-                        }
-                    };
-                    console.log('[WebClient] 发送注册消息:', registerMsg);
-                    this._deviceWs.send(JSON.stringify(registerMsg));
-                    
-                    // 主动上报一次心跳，帮助服务端尽快建立在线状态
-                    setTimeout(() => {
-                        if (this._deviceWs && this._deviceWs.readyState === 1) {
-                            this._deviceWs.send(JSON.stringify({
-                                type: 'heartbeat',
-                                device_id: 'webclient',
-                                status: { ui: 'ready' }
-                            }));
-                        }
-                    }, 500);
-                } catch (error) {
-                    console.error('[WebClient] 发送WebSocket消息失败:', error);
-                }
-                resolve();
-            });
-            
-            this._deviceWs.addEventListener('error', (error) => {
-                clearTimeout(timeout);
-                console.error('[WebClient] WebSocket错误:', error);
-                // 记录错误详情
-                if (this._deviceWs) {
-                    console.error('[WebClient] WebSocket状态:', this._deviceWs.readyState);
-                    console.error('[WebClient] WebSocket URL:', this._deviceWs.url);
-                }
-                reject(error);
-            });
+            try {
+                this._deviceWs = new WebSocket(wsUrl);
+            } catch (error) {
+                this._deviceWs = null;
+                return reject(error);
+            }
+            const ws = this._deviceWs;
+            const handleOpen = () => {
+                ws.removeEventListener('error', handleInitialError);
+                this._afterDeviceWsOpen(ws);
+                resolve(ws);
+            };
+            const handleInitialError = (event) => {
+                ws.removeEventListener('open', handleOpen);
+                this._deviceWs = null;
+                reject(event instanceof Error ? event : new Error('WebSocket连接失败'));
+            };
+            ws.addEventListener('open', handleOpen, { once: true });
+            ws.addEventListener('error', handleInitialError, { once: true });
+            this._attachDeviceWsHandlers(ws);
         });
-        
-        this._deviceWs.addEventListener('close', (event) => {
+    }
+
+    _afterDeviceWsOpen(ws) {
+        console.log('[WebClient] WebSocket connected:', ws.url);
+        this._deviceWsConnected = true;
+        this._wsReconnectAttempt = 0;
+        this._stopHeartbeat();
+        this._startHeartbeat();
+        try {
+            const registerMsg = {
+                type: 'register',
+                device_id: 'webclient',
+                device_type: 'web',
+                device_name: 'Web客户端',
+                capabilities: ['display', 'microphone', 'emotion', 'tts'],
+                metadata: {
+                    ua: navigator.userAgent,
+                    lang: navigator.language,
+                    tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'local'
+                }
+            };
+            this._deviceWs.send(JSON.stringify(registerMsg));
+            setTimeout(() => {
+                if (this._deviceWs && this._deviceWs.readyState === WebSocket.OPEN) {
+                    this._deviceWs.send(JSON.stringify({
+                        type: 'heartbeat',
+                        device_id: 'webclient',
+                        status: { ui: 'ready' }
+                    }));
+                }
+            }, 500);
+        } catch (error) {
+            console.error('[WebClient] 发送WebSocket消息失败:', error);
+        }
+    }
+
+    _attachDeviceWsHandlers(ws) {
+        ws.addEventListener('error', (error) => {
+            console.error('[WebClient] WebSocket错误:', error);
+            if (this._deviceWs) {
+                console.error('[WebClient] WebSocket状态:', this._deviceWs.readyState);
+                console.error('[WebClient] WebSocket URL:', this._deviceWs.url);
+            }
+        });
+        ws.addEventListener('close', (event) => {
             console.log('[WebClient] WebSocket关闭:', {
                 code: event.code,
                 reason: event.reason,
                 wasClean: event.wasClean
             });
             this._deviceWs = null;
-            this._deviceWsConnected = false; // 标记已断开
+            this._deviceWsConnected = false;
             this._stopHeartbeat();
-            
-            // 如果不是正常关闭（code 1000），则重连
             if (event.code !== 1000) {
                 this._scheduleWsReconnect();
             }
         });
-        this._deviceWs.addEventListener('message', (evt) => {
-            let data;
-            try {
-                data = JSON.parse(evt.data);
-            } catch (e) {
-                return; // 无效的JSON数据，忽略
+        ws.addEventListener('message', (evt) => this._handleDeviceWsMessage(evt));
+    }
+
+    _handleDeviceWsMessage(evt) {
+        let data;
+        try {
+            data = JSON.parse(evt.data);
+        } catch (e) {
+            return;
+        }
+        if (data.type === 'heartbeat_request') {
+            if (this._deviceWs && this._deviceWs.readyState === WebSocket.OPEN) {
+                this._deviceWs.send(JSON.stringify({
+                    type: 'heartbeat',
+                    device_id: 'webclient',
+                    status: { ts: Date.now() }
+                }));
             }
-            if (data.type === 'heartbeat_request') {
-                if (this._deviceWs && this._deviceWs.readyState === 1) {
-                    this._deviceWs.send(JSON.stringify({
-                        type: 'heartbeat',
-                        device_id: 'webclient',
-                        status: { ts: Date.now() }
-                    }));
-                }
-                return;
+            return;
+        }
+        if (data.type === 'heartbeat_response') {
+            if (Array.isArray(data.commands) && data.commands.length > 0) {
+                this._handleDeviceCommands(data.commands);
             }
-            if (data.type === 'heartbeat_response') {
-                if (Array.isArray(data.commands) && data.commands.length > 0) {
-                    this._handleDeviceCommands(data.commands);
-                }
-                return;
+            return;
+        }
+        if (data.type === 'command') {
+            const cmd = data.command ? [data.command] : [];
+            if (cmd.length) {
+                console.log('[WebClient] 收到命令:', cmd);
+                this._handleDeviceCommands(cmd);
             }
-            if (data.type === 'command') {
-                const cmd = data.command ? [data.command] : [];
-                if (cmd.length) {
-                    console.log('[WebClient] 收到命令:', cmd);
-                    this._handleDeviceCommands(cmd);
-                }
-                return;
+            return;
+        }
+        if (data.type === 'asr_interim' && data.text) {
+            this.renderASRStreaming(data.text, false);
+            return;
+        }
+        if (data.type === 'asr_final' && data.text) {
+            this.renderASRStreaming('', true);
+            const finalText = data.text || '';
+            if (finalText && finalText !== this._lastAsrFinal) {
+                this.appendChat('user', finalText, true);
+                this._lastAsrFinal = finalText;
             }
-            if (data.type === 'asr_interim' && data.text) {
-                // 只显示最新的识别结果
-                this.renderASRStreaming(data.text, false);
-                return;
-            }
-            if (data.type === 'asr_final' && data.text) {
-                // 结束识别：移除"识别中"，并把最终文本作为用户消息显示 + 持久化
-                this.renderASRStreaming('', true);
-                const finalText = data.text || '';
-                if (finalText && finalText !== this._lastAsrFinal) {
-                    this.appendChat('user', finalText, true);
-                    this._lastAsrFinal = finalText;
-                }
-                return;
-            }
-            if (data.type === 'register_response') {
-                if (data.success) {
-                    console.log('[WebClient] 设备注册成功:', data.device);
+            return;
+        }
+        if (data.type === 'register_response') {
+            if (data.success) {
+                console.log('[WebClient] 设备注册成功:', data.device);
                 this.showToast('已连接设备: webclient', 'success');
                 this.loadStats();
-                    // 标记WebSocket已就绪
-                    this._deviceWsReady = true;
-                } else {
-                    console.error('[WebClient] 设备注册失败:', data.message);
-                    this.showToast('设备注册失败: ' + (data.message || '未知错误'), 'error');
-                }
+                this._deviceWsReady = true;
+            } else {
+                console.error('[WebClient] 设备注册失败:', data.message);
+                this.showToast('设备注册失败: ' + (data.message || '未知错误'), 'error');
             }
-        });
-        // 移除重复的空监听器，避免冗余
+        }
     }
 
     _scheduleWsReconnect() {
@@ -1768,7 +1795,7 @@ class APIControlCenter {
         clearTimeout(this._wsReconnectTimer);
         this._wsReconnectTimer = setTimeout(() => {
             this._wsReconnectTimer = null;
-            this.ensureDeviceWs();
+            this.ensureDeviceWs().catch(() => {});
         }, backoff);
     }
 
@@ -2084,14 +2111,14 @@ class APIControlCenter {
             const sendWhenReady = () => {
                 if (this._deviceWs && this._deviceWs.readyState === WebSocket.OPEN) {
                     this._deviceWs.send(JSON.stringify({
-                        type: 'asr_session_start',
-                        device_id: 'webclient',
-                        session_id: sessionId,
-                        session_number: 1,
-                        sample_rate: 16000,
-                        bits: 16,
-                        channels: 1
-                    }));
+                type: 'asr_session_start',
+                device_id: 'webclient',
+                session_id: sessionId,
+                session_number: 1,
+                sample_rate: 16000,
+                bits: 16,
+                channels: 1
+            }));
                 } else if (this._deviceWs && this._deviceWs.readyState === WebSocket.CONNECTING) {
                     // 如果正在连接，等待连接完成
                     this._deviceWs.addEventListener('open', () => {
@@ -2119,7 +2146,7 @@ class APIControlCenter {
                                 channels: 1
                             }));
                         }
-                    });
+                    }).catch(() => {});
                 }
             };
             sendWhenReady();
@@ -2141,13 +2168,13 @@ class APIControlCenter {
                     .join('');
                 try {
                     this._deviceWs.send(JSON.stringify({
-                        type: 'asr_audio_chunk',
-                        device_id: 'webclient',
-                        session_id: sessionId,
-                        chunk_index: this._asrChunkIndex++,
-                        vad_state: 'active',
-                        data: hex
-                    }));
+                    type: 'asr_audio_chunk',
+                    device_id: 'webclient',
+                    session_id: sessionId,
+                    chunk_index: this._asrChunkIndex++,
+                    vad_state: 'active',
+                    data: hex
+                }));
                 } catch (err) {
                     console.warn('发送音频数据失败:', err);
                     // 如果发送失败，停止录音
@@ -2430,6 +2457,10 @@ class APIControlCenter {
         if (!textarea) return;
 
         const theme = document.body.classList.contains('light') ? 'default' : 'monokai';
+        if (this._codeMirrorAvailable === false) {
+            this._activatePlainTextarea(textarea);
+            return;
+        }
         if (typeof window.CodeMirror === 'undefined') {
             this._loadCodeMirror().then(() => this.initJSONEditor());
             return;
@@ -2486,15 +2517,23 @@ class APIControlCenter {
         ];
         
         this._codeMirrorLoading = (async () => {
-            // 加载CSS
-            for (const css of cssList) {
-                await this._loadCssWithFallback(cdnBases, css);
+            try {
+                // 加载CSS
+                for (const css of cssList) {
+                    await this._loadCssWithFallback(cdnBases, css);
+                }
+                // 加载JS
+                for (const js of jsList) {
+                    await this._loadScriptWithFallback(cdnBases, js);
+                }
+                this._codeMirrorAvailable = true;
+            } catch (err) {
+                console.warn('CodeMirror资源加载失败，已回退到简易编辑器模式。', err);
+                this._codeMirrorAvailable = false;
+                this._codeMirrorLoadError = err;
+                this.showToast?.('代码编辑器资源加载失败，已使用纯文本模式', 'warning');
             }
-            // 加载JS
-            for (const js of jsList) {
-                await this._loadScriptWithFallback(cdnBases, js);
-            }
-            return true;
+            return this._codeMirrorAvailable;
         })();
         return this._codeMirrorLoading;
     }
@@ -2543,6 +2582,19 @@ class APIControlCenter {
             l.onerror = () => reject(new Error('css load error'));
             document.head.appendChild(l);
         });
+    }
+
+    _activatePlainTextarea(textarea) {
+        if (!textarea) return;
+        textarea.classList.add('plain-json-editor');
+        textarea.removeAttribute('disabled');
+        textarea.style.minHeight = '200px';
+        const adjust = () => {
+            textarea.style.height = 'auto';
+            textarea.style.height = Math.min(textarea.scrollHeight + 16, 800) + 'px';
+        };
+        textarea.addEventListener('input', adjust);
+        adjust();
     }
 
     renderParamField(param) {
@@ -3667,20 +3719,28 @@ class APIControlCenter {
                 if (this.configEditor) {
                     this.configEditor.toTextArea();
                 }
-                if (typeof window.CodeMirror === 'undefined') {
-                    await this._loadCodeMirror();
-                }
                 const theme = document.body.classList.contains('light') ? 'default' : 'monokai';
-                this.configEditor = CodeMirror.fromTextArea(editorTextarea, {
-                    mode: 'application/json',
-                    theme: theme,
-                    lineNumbers: true,
-                    lineWrapping: true,
-                    matchBrackets: true,
-                    autoCloseBrackets: true,
-                    foldGutter: true,
-                    gutters: ['CodeMirror-linenumbers', 'CodeMirror-foldgutter']
-                });
+                if (this._codeMirrorAvailable === false) {
+                    this._activatePlainTextarea(editorTextarea);
+                } else {
+                    if (typeof window.CodeMirror === 'undefined') {
+                        const loaded = await this._loadCodeMirror();
+                        if (!loaded) {
+                            this._activatePlainTextarea(editorTextarea);
+                            return;
+                        }
+                    }
+                    this.configEditor = CodeMirror.fromTextArea(editorTextarea, {
+                        mode: 'application/json',
+                        theme: theme,
+                        lineNumbers: true,
+                        lineWrapping: true,
+                        matchBrackets: true,
+                        autoCloseBrackets: true,
+                        foldGutter: true,
+                        gutters: ['CodeMirror-linenumbers', 'CodeMirror-foldgutter']
+                    });
+                }
             }
         } catch (error) {
             editorTextarea.value = `错误: ${error.message}`;
@@ -3843,16 +3903,27 @@ class APIControlCenter {
                     this.configEditor.toTextArea();
                 }
                 const theme = document.body.classList.contains('light') ? 'default' : 'monokai';
-                this.configEditor = CodeMirror.fromTextArea(editorTextarea, {
-                    mode: 'application/json',
-                    theme: theme,
-                    lineNumbers: true,
-                    lineWrapping: true,
-                    matchBrackets: true,
-                    autoCloseBrackets: true,
-                    foldGutter: true,
-                    gutters: ['CodeMirror-linenumbers', 'CodeMirror-foldgutter']
-                });
+                if (this._codeMirrorAvailable === false) {
+                    this._activatePlainTextarea(editorTextarea);
+                } else {
+                    if (typeof window.CodeMirror === 'undefined') {
+                        const loaded = await this._loadCodeMirror();
+                        if (!loaded) {
+                            this._activatePlainTextarea(editorTextarea);
+                            return;
+                        }
+                    }
+                    this.configEditor = CodeMirror.fromTextArea(editorTextarea, {
+                        mode: 'application/json',
+                        theme: theme,
+                        lineNumbers: true,
+                        lineWrapping: true,
+                        matchBrackets: true,
+                        autoCloseBrackets: true,
+                        foldGutter: true,
+                        gutters: ['CodeMirror-linenumbers', 'CodeMirror-foldgutter']
+                    });
+                }
             }
 
             document.getElementById('saveConfigBtn').addEventListener('click', () => this.saveSubConfig());
@@ -4646,7 +4717,7 @@ class APIControlCenter {
                         if (rmBtn) {
                             rmBtn.dataset.index = String(index);
                             rmBtn.addEventListener('click', () => item.remove());
-                        }
+                    }
                         item.innerHTML = clone.innerHTML;
                     } else {
                         // 如果没有第一个item，创建一个空的结构
@@ -4921,7 +4992,7 @@ class APIControlCenter {
                 // 不要过滤掉空对象，因为用户可能正在填写
                 // 只有当对象完全没有字段时才跳过
                 if (Object.keys(itemObj).length > 0) {
-                    items.push(itemObj);
+                items.push(itemObj);
                 }
                 // 注意：不添加完全空的对象，但保留有字段但值为空的对象
             });
