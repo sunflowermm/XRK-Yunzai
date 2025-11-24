@@ -1570,19 +1570,36 @@ class APIControlCenter {
 
     // ============== Streaming ASR via /device WebSocket ==============
     async ensureDeviceWs() {
-        // 如果正在连接或已连接，直接返回
+        // 如果已连接，直接返回
+        if (this._deviceWs && this._deviceWs.readyState === WebSocket.OPEN) {
+            return Promise.resolve();
+        }
+        
+        // 如果正在连接，等待连接完成
+        if (this._deviceWs && this._deviceWs.readyState === WebSocket.CONNECTING) {
+            return new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    reject(new Error('WebSocket连接超时'));
+                }, 5000);
+                this._deviceWs.addEventListener('open', () => {
+                    clearTimeout(timeout);
+                    resolve();
+                }, { once: true });
+                this._deviceWs.addEventListener('error', () => {
+                    clearTimeout(timeout);
+                    reject(new Error('WebSocket连接失败'));
+                }, { once: true });
+            });
+        }
+        
+        // 如果已关闭或出错，清理旧连接
         if (this._deviceWs) {
-            const state = this._deviceWs.readyState;
-            if (state === WebSocket.CONNECTING || state === WebSocket.OPEN) {
-                return;
-            }
-            // 如果已关闭或出错，清理旧连接
             this._deviceWs = null;
         }
         
         // 如果正在重连，不要重复触发
         if (this._wsReconnectTimer) {
-            return;
+            return Promise.resolve();
         }
         
         const apiKey = localStorage.getItem('apiKey') || '';
@@ -1596,53 +1613,63 @@ class APIControlCenter {
             console.error('[WebClient] WebSocket创建失败:', error);
             this._deviceWs = null;
             this._scheduleWsReconnect();
-            return;
+            return Promise.reject(error);
         }
-        this._deviceWs.addEventListener('open', () => {
-            console.log('[WebClient] WebSocket connected to /device');
-            this._deviceWsConnected = true; // 标记已连接
-            this._wsReconnectAttempt = 0;
-            this._startHeartbeat();
-            // 注册为webclient设备
-            try {
-                const registerMsg = {
-                    type: 'register',
-                    device_id: 'webclient',
-                    device_type: 'web',
-                    device_name: 'Web客户端',
-                    capabilities: ['display', 'microphone', 'emotion', 'tts'],
-                    metadata: {
-                        ua: navigator.userAgent,
-                        lang: navigator.language,
-                        tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'local'
-                    }
-                };
-                console.log('[WebClient] 发送注册消息:', registerMsg);
-                this._deviceWs.send(JSON.stringify(registerMsg));
-                
-                // 主动上报一次心跳，帮助服务端尽快建立在线状态
-                setTimeout(() => {
-                    if (this._deviceWs && this._deviceWs.readyState === 1) {
-                this._deviceWs.send(JSON.stringify({
-                    type: 'heartbeat',
-                    device_id: 'webclient',
-                    status: { ui: 'ready' }
-                }));
-                    }
-                }, 500);
-            } catch (error) {
-                console.error('[WebClient] 发送WebSocket消息失败:', error);
-            }
-        });
         
-        this._deviceWs.addEventListener('error', (error) => {
-            console.error('[WebClient] WebSocket错误:', error);
-            // 记录错误详情
-            if (this._deviceWs) {
-                console.error('[WebClient] WebSocket状态:', this._deviceWs.readyState);
-                console.error('[WebClient] WebSocket URL:', this._deviceWs.url);
-            }
-            // 连接失败时不抛出错误，稍后会自动重试
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('WebSocket连接超时'));
+            }, 5000);
+            
+            this._deviceWs.addEventListener('open', () => {
+                clearTimeout(timeout);
+                console.log('[WebClient] WebSocket connected to /device');
+                this._deviceWsConnected = true; // 标记已连接
+                this._wsReconnectAttempt = 0;
+                this._startHeartbeat();
+                // 注册为webclient设备
+                try {
+                    const registerMsg = {
+                        type: 'register',
+                        device_id: 'webclient',
+                        device_type: 'web',
+                        device_name: 'Web客户端',
+                        capabilities: ['display', 'microphone', 'emotion', 'tts'],
+                        metadata: {
+                            ua: navigator.userAgent,
+                            lang: navigator.language,
+                            tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'local'
+                        }
+                    };
+                    console.log('[WebClient] 发送注册消息:', registerMsg);
+                    this._deviceWs.send(JSON.stringify(registerMsg));
+                    
+                    // 主动上报一次心跳，帮助服务端尽快建立在线状态
+                    setTimeout(() => {
+                        if (this._deviceWs && this._deviceWs.readyState === 1) {
+                            this._deviceWs.send(JSON.stringify({
+                                type: 'heartbeat',
+                                device_id: 'webclient',
+                                status: { ui: 'ready' }
+                            }));
+                        }
+                    }, 500);
+                } catch (error) {
+                    console.error('[WebClient] 发送WebSocket消息失败:', error);
+                }
+                resolve();
+            });
+            
+            this._deviceWs.addEventListener('error', (error) => {
+                clearTimeout(timeout);
+                console.error('[WebClient] WebSocket错误:', error);
+                // 记录错误详情
+                if (this._deviceWs) {
+                    console.error('[WebClient] WebSocket状态:', this._deviceWs.readyState);
+                    console.error('[WebClient] WebSocket URL:', this._deviceWs.url);
+                }
+                reject(error);
+            });
         });
         
         this._deviceWs.addEventListener('close', (event) => {
@@ -2053,19 +2080,56 @@ class APIControlCenter {
                 micBtn.innerHTML = '<span class="mic-icon"></span><span>停止语音</span>';
             }
 
-            // 开始会话
-            this._deviceWs?.send(JSON.stringify({
-                type: 'asr_session_start',
-                device_id: 'webclient',
-                session_id: sessionId,
-                session_number: 1,
-                sample_rate: 16000,
-                bits: 16,
-                channels: 1
-            }));
+            // 开始会话：确保WebSocket已连接
+            const sendWhenReady = () => {
+                if (this._deviceWs && this._deviceWs.readyState === WebSocket.OPEN) {
+                    this._deviceWs.send(JSON.stringify({
+                        type: 'asr_session_start',
+                        device_id: 'webclient',
+                        session_id: sessionId,
+                        session_number: 1,
+                        sample_rate: 16000,
+                        bits: 16,
+                        channels: 1
+                    }));
+                } else if (this._deviceWs && this._deviceWs.readyState === WebSocket.CONNECTING) {
+                    // 如果正在连接，等待连接完成
+                    this._deviceWs.addEventListener('open', () => {
+                        this._deviceWs.send(JSON.stringify({
+                            type: 'asr_session_start',
+                            device_id: 'webclient',
+                            session_id: sessionId,
+                            session_number: 1,
+                            sample_rate: 16000,
+                            bits: 16,
+                            channels: 1
+                        }));
+                    }, { once: true });
+                } else {
+                    // 如果未连接，尝试连接后发送
+                    this.ensureDeviceWs().then(() => {
+                        if (this._deviceWs && this._deviceWs.readyState === WebSocket.OPEN) {
+                            this._deviceWs.send(JSON.stringify({
+                                type: 'asr_session_start',
+                                device_id: 'webclient',
+                                session_id: sessionId,
+                                session_number: 1,
+                                sample_rate: 16000,
+                                bits: 16,
+                                channels: 1
+                            }));
+                        }
+                    });
+                }
+            };
+            sendWhenReady();
 
             processor.onaudioprocess = (e) => {
                 if (!this._micActive) return;
+                // 确保WebSocket已连接才发送数据
+                if (!this._deviceWs || this._deviceWs.readyState !== WebSocket.OPEN) {
+                    return;
+                }
                 const input = e.inputBuffer.getChannelData(0);
                 const pcm16 = new Int16Array(input.length);
                 for (let i = 0; i < input.length; i++) {
@@ -2075,14 +2139,20 @@ class APIControlCenter {
                 const hex = Array.from(new Uint8Array(pcm16.buffer))
                     .map(b => b.toString(16).padStart(2, '0'))
                     .join('');
-                this._deviceWs?.send(JSON.stringify({
-                    type: 'asr_audio_chunk',
-                    device_id: 'webclient',
-                    session_id: sessionId,
-                    chunk_index: this._asrChunkIndex++,
-                    vad_state: 'active',
-                    data: hex
-                }));
+                try {
+                    this._deviceWs.send(JSON.stringify({
+                        type: 'asr_audio_chunk',
+                        device_id: 'webclient',
+                        session_id: sessionId,
+                        chunk_index: this._asrChunkIndex++,
+                        vad_state: 'active',
+                        data: hex
+                    }));
+                } catch (err) {
+                    console.warn('发送音频数据失败:', err);
+                    // 如果发送失败，停止录音
+                    this.stopMic();
+                }
             };
         } catch (err) {
             this.showToast('启动麦克风失败: ' + err.message, 'error');
@@ -2522,7 +2592,16 @@ class APIControlCenter {
         const makeItem = (item = {}, index = 0) => {
             let inner = '';
             for (const [subName, subSchema] of Object.entries(subFields)) {
-                const subVal = (item && Object.prototype.hasOwnProperty.call(item, subName)) ? item[subName] : (subSchema.default !== undefined ? subSchema.default : null);
+                // 确保正确获取值，优先使用item中的值，然后是默认值，最后是空字符串（不是null）
+                let subVal;
+                if (item && Object.prototype.hasOwnProperty.call(item, subName)) {
+                    subVal = item[subName];
+                } else if (subSchema.default !== undefined) {
+                    subVal = subSchema.default;
+                } else {
+                    // 对于字符串类型，使用空字符串而不是null，避免配置丢失
+                    subVal = (subSchema.type === 'string' || subSchema.type === 'text') ? '' : null;
+                }
                 inner += `
                     <div class="config-form-subfield">
                         <label class="config-form-label">${subSchema.label || subName}</label>
@@ -4830,18 +4909,21 @@ class APIControlCenter {
                             cur[last] = null;
                         }
                     } else {
-                        // 文本输入：保留空字符串，但如果是必填字段且为空，设为null
+                        // 文本输入：保留实际值，空字符串也保留（避免配置丢失）
                         const value = f.value || '';
-                        cur[last] = value === '' ? null : value;
+                        // 对于域名等关键字段，即使为空也保留空字符串，不要设为null
+                        // 这样可以确保配置项不会因为空值而消失
+                        cur[last] = value;
                     }
                 });
                 
-                // 确保至少有一个空对象（即使没有字段被填写）
-                if (Object.keys(itemObj).length === 0) {
-                    itemObj.domain = null; // 为domains数组提供默认字段
+                // 确保所有有字段的对象都被收集，即使某些字段为空
+                // 不要过滤掉空对象，因为用户可能正在填写
+                // 只有当对象完全没有字段时才跳过
+                if (Object.keys(itemObj).length > 0) {
+                    items.push(itemObj);
                 }
-                
-                items.push(itemObj);
+                // 注意：不添加完全空的对象，但保留有字段但值为空的对象
             });
             // 即使数组为空，也保留键（空数组）
             data[fieldName] = items;
