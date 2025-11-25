@@ -3,117 +3,7 @@
  * 提供统一的配置文件读写接口
  */
 import BotUtil from '../../lib/common/util.js';
-
-// 辅助函数：清理配置数据（与验证逻辑保持一致的类型转换）
-function cleanConfigData(data, config) {
-  if (!data || typeof data !== 'object') {
-    return data;
-  }
-
-  const cleaned = Array.isArray(data) ? [...data] : { ...data };
-  const schema = config?.schema;
-
-  if (schema && schema.fields) {
-    for (const [field, fieldSchema] of Object.entries(schema.fields)) {
-      // 注意：不要为不存在的字段设置默认值，这会覆盖原有配置
-      // 只处理已存在的字段，进行类型转换
-      if (!(field in cleaned)) {
-        // 字段不存在，跳过（保持原有配置不变）
-        continue;
-      }
-      
-      let value = cleaned[field];
-      const expectedType = fieldSchema.type;
-      
-      // 类型转换：确保类型匹配schema定义
-      if (expectedType === 'array') {
-        // 数组类型：确保是数组
-        if (!Array.isArray(value)) {
-          // 如果不是数组，转换为空数组
-          if (value === null || value === undefined || value === '') {
-            cleaned[field] = [];
-          } else if (typeof value === 'string') {
-            // 字符串尝试解析为数组
-            try {
-              const parsed = JSON.parse(value);
-              cleaned[field] = Array.isArray(parsed) ? parsed : [];
-            } catch {
-              cleaned[field] = [];
-            }
-          } else {
-            // 其他类型转换为空数组
-            cleaned[field] = [];
-          }
-        } else {
-          // 已经是数组，递归处理数组中的对象
-          if (fieldSchema.itemType === 'object' && fieldSchema.itemSchema) {
-            // 对象数组：递归清理每个对象
-            cleaned[field] = value.map(item => {
-              if (item && typeof item === 'object' && !Array.isArray(item)) {
-                return cleanConfigData(item, { schema: { fields: fieldSchema.itemSchema.fields || {} } });
-              }
-              return item;
-            });
-          } else {
-            // 标量数组：直接保留
-            cleaned[field] = value;
-          }
-        }
-      } else if (expectedType === 'boolean') {
-        // 布尔类型：确保是布尔值
-        if (typeof value !== 'boolean') {
-          if (typeof value === 'string') {
-            if (value === 'true' || value === '1' || value === 'on') {
-              cleaned[field] = true;
-            } else if (value === 'false' || value === '0' || value === 'off' || value === '') {
-              cleaned[field] = false;
-            } else {
-              // 无法转换，使用默认值或false
-              cleaned[field] = fieldSchema.default !== undefined ? fieldSchema.default : false;
-            }
-          } else if (value === null || value === undefined) {
-            // null/undefined 使用默认值或false
-            cleaned[field] = fieldSchema.default !== undefined ? fieldSchema.default : false;
-          } else {
-            // 其他类型（如数字）转换为布尔
-            cleaned[field] = Boolean(value);
-          }
-        }
-      } else if (expectedType === 'number') {
-        // 数字类型：确保是数字或null
-        if (typeof value !== 'number') {
-          if (typeof value === 'string') {
-            const numValue = Number(value);
-            if (!isNaN(numValue) && value.trim() !== '') {
-              cleaned[field] = numValue;
-            } else if (value === '') {
-              cleaned[field] = null;
-            } else {
-              // 无法转换，使用默认值或null
-              cleaned[field] = fieldSchema.default !== undefined ? fieldSchema.default : null;
-            }
-          } else if (value === null || value === undefined || value === '') {
-            cleaned[field] = null;
-          } else {
-            // 其他类型尝试转换为数字
-            const numValue = Number(value);
-            cleaned[field] = !isNaN(numValue) ? numValue : (fieldSchema.default !== undefined ? fieldSchema.default : null);
-          }
-        }
-      } else if (expectedType === 'object') {
-        // 对象类型：递归处理嵌套对象
-        if (value && typeof value === 'object' && !Array.isArray(value)) {
-          cleaned[field] = cleanConfigData(value, { schema: { fields: fieldSchema.fields || {} } });
-        } else if (value === null || value === undefined || value === '') {
-          // 空值转换为空对象或null
-          cleaned[field] = fieldSchema.default !== undefined ? fieldSchema.default : {};
-        }
-      }
-    }
-  }
-
-  return cleaned;
-}
+import { deepMergeConfig, cleanConfigData } from './config-utils.js';
 
 export default {
   name: 'config-manager',
@@ -425,42 +315,8 @@ export default {
                 existingData = {};
               }
               
-              // 智能合并：保留原有值，除非新值明确存在
-              // 策略：如果新值是"空值"（空数组、空字符串、null）且原有值不是"空值"，保留原有值
-              // 这样可以避免前端没有正确收集到值时，错误地清空原有配置
-              const mergedData = { ...existingData };
-              for (const [key, newValue] of Object.entries(data)) {
-                const fieldSchema = subConfig.schema.fields?.[key];
-                const expectedType = fieldSchema?.type;
-                const existingValue = existingData[key];
-                
-                // 判断新值是否为"空值"
-                const isNewValueEmpty = 
-                  newValue === null || 
-                  newValue === undefined ||
-                  (Array.isArray(newValue) && newValue.length === 0) ||
-                  (typeof newValue === 'string' && newValue === '') ||
-                  (expectedType === 'number' && newValue === null);
-                
-                // 判断原有值是否为"空值"
-                const isExistingValueEmpty = 
-                  existingValue === null || 
-                  existingValue === undefined ||
-                  (Array.isArray(existingValue) && existingValue.length === 0) ||
-                  (typeof existingValue === 'string' && existingValue === '') ||
-                  (expectedType === 'number' && existingValue === null);
-                
-                // 如果新值是空值，且原有值不是空值，保留原有值
-                // 这样可以避免前端没有正确收集到值时，错误地清空原有配置
-                if (isNewValueEmpty && !isExistingValueEmpty) {
-                  // 保留原有值，跳过这个字段
-                  BotUtil.makeLog('debug', `保留字段原有值 [${key}]: ${JSON.stringify(existingValue)} (新值为空)`, 'ConfigAPI');
-                  continue;
-                }
-                
-                // 其他情况：使用新值（包括明确设置的值和非空值）
-                mergedData[key] = newValue;
-              }
+              // 使用深度合并：保留原有值，除非新值明确存在且不为空
+              const mergedData = deepMergeConfig(existingData, data, subConfig.schema);
               
               // 创建临时配置对象，使用子配置的schema
               const tempConfig = { schema: subConfig.schema };

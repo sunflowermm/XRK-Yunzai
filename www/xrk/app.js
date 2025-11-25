@@ -4465,6 +4465,10 @@ class APIControlCenter {
         
         const formContainer = document.createElement('div');
         formContainer.className = 'config-form-container';
+        // 存储schema信息，供数据收集时使用
+        if (schema) {
+            formContainer.dataset.schema = JSON.stringify(schema);
+        }
         formContainer.innerHTML = this.generateFormHTML(configData, schema.fields || {}, schema.required || []);
         
         // 替换编辑器内容
@@ -5178,6 +5182,12 @@ class APIControlCenter {
      * 从表单收集数据
      * 确保所有字段都被收集，即使值为 null 或空
      * 同时确保所有 schema 中定义的字段都在数据中（即使没有对应的表单元素）
+     * 
+     * 改进：
+     * 1. 确保数组字段总是被收集为数组（即使为空）
+     * 2. 确保布尔字段总是被收集为布尔值
+     * 3. 确保数字字段总是被收集为数字或null
+     * 4. 避免覆盖未修改的字段
      */
     collectFormData(formContainer) {
         const data = {};
@@ -5189,6 +5199,9 @@ class APIControlCenter {
         // 收集所有表单字段
         // 先收集所有字段，然后按路径分组，避免重复收集
         const fieldMap = new Map(); // 用于跟踪已收集的字段路径
+        
+        // 获取schema信息（如果存在），用于确定字段类型
+        const schemaInfo = this._getSchemaFromForm(formContainer);
         
         const fields = formContainer.querySelectorAll('[data-field]');
         
@@ -5559,7 +5572,46 @@ class APIControlCenter {
         }
         keysToRemove.forEach(key => delete data[key]);
         
+        // 确保所有schema中定义的字段都在数据中（即使没有对应的表单元素）
+        // 这样可以避免遗漏字段
+        if (schemaInfo && schemaInfo.fields) {
+            for (const [fieldName, fieldSchema] of Object.entries(schemaInfo.fields)) {
+                if (!(fieldName in data)) {
+                    // 字段不存在，根据类型设置默认值
+                    const expectedType = fieldSchema.type;
+                    if (expectedType === 'array') {
+                        data[fieldName] = [];
+                    } else if (expectedType === 'boolean') {
+                        data[fieldName] = fieldSchema.default !== undefined ? fieldSchema.default : false;
+                    } else if (expectedType === 'number') {
+                        data[fieldName] = fieldSchema.default !== undefined ? fieldSchema.default : null;
+                    } else if (expectedType === 'object') {
+                        data[fieldName] = fieldSchema.default !== undefined ? fieldSchema.default : {};
+                    } else {
+                        data[fieldName] = fieldSchema.default !== undefined ? fieldSchema.default : '';
+                    }
+                }
+            }
+        }
+        
         return data;
+    }
+    
+    /**
+     * 从表单容器中获取schema信息
+     * @private
+     */
+    _getSchemaFromForm(formContainer) {
+        // 尝试从data属性获取schema
+        const schemaAttr = formContainer.dataset.schema;
+        if (schemaAttr) {
+            try {
+                return JSON.parse(schemaAttr);
+            } catch (e) {
+                console.warn('[ConfigEditor] 无法解析schema:', e);
+            }
+        }
+        return null;
     }
 
     /**
