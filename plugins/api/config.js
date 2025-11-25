@@ -15,23 +15,10 @@ function cleanConfigData(data, config) {
 
   if (schema && schema.fields) {
     for (const [field, fieldSchema] of Object.entries(schema.fields)) {
-      // 如果字段不在数据中，根据类型设置默认值
+      // 注意：不要为不存在的字段设置默认值，这会覆盖原有配置
+      // 只处理已存在的字段，进行类型转换
       if (!(field in cleaned)) {
-        const expectedType = fieldSchema.type;
-        if (expectedType === 'array') {
-          cleaned[field] = fieldSchema.default !== undefined ? 
-            (Array.isArray(fieldSchema.default) ? [...fieldSchema.default] : []) : [];
-        } else if (expectedType === 'boolean') {
-          cleaned[field] = fieldSchema.default !== undefined ? fieldSchema.default : false;
-        } else if (expectedType === 'number') {
-          cleaned[field] = fieldSchema.default !== undefined ? fieldSchema.default : null;
-        } else if (expectedType === 'object') {
-          cleaned[field] = fieldSchema.default !== undefined ? 
-            (typeof fieldSchema.default === 'object' && !Array.isArray(fieldSchema.default) ? 
-              JSON.parse(JSON.stringify(fieldSchema.default)) : {}) : {};
-        } else {
-          cleaned[field] = fieldSchema.default !== undefined ? fieldSchema.default : null;
-        }
+        // 字段不存在，跳过（保持原有配置不变）
         continue;
       }
       
@@ -420,17 +407,67 @@ export default {
           }
 
           // 清理数据：对于SystemConfig的子配置，需要获取子配置的schema
+          // 重要：先读取现有配置，然后合并新数据，避免覆盖未修改的字段
           let cleanedData;
           if (keyPath && configName === 'system' && typeof config.getStructure === 'function') {
             // SystemConfig的子配置：获取子配置的schema
             const structure = config.getStructure();
             const subConfig = structure.configs?.[keyPath];
             if (subConfig && subConfig.schema) {
+              // 先读取现有配置
+              let existingData = {};
+              try {
+                if (typeof config.read === 'function') {
+                  existingData = await config.read(keyPath) || {};
+                }
+              } catch (readError) {
+                BotUtil.makeLog('warn', `读取现有配置失败 [${configName}/${keyPath}]: ${readError.message}`, 'ConfigAPI');
+                existingData = {};
+              }
+              
+              // 智能合并：保留原有值，除非新值明确存在
+              // 策略：如果新值是"空值"（空数组、空字符串、null）且原有值不是"空值"，保留原有值
+              // 这样可以避免前端没有正确收集到值时，错误地清空原有配置
+              const mergedData = { ...existingData };
+              for (const [key, newValue] of Object.entries(data)) {
+                const fieldSchema = subConfig.schema.fields?.[key];
+                const expectedType = fieldSchema?.type;
+                const existingValue = existingData[key];
+                
+                // 判断新值是否为"空值"
+                const isNewValueEmpty = 
+                  newValue === null || 
+                  newValue === undefined ||
+                  (Array.isArray(newValue) && newValue.length === 0) ||
+                  (typeof newValue === 'string' && newValue === '') ||
+                  (expectedType === 'number' && newValue === null);
+                
+                // 判断原有值是否为"空值"
+                const isExistingValueEmpty = 
+                  existingValue === null || 
+                  existingValue === undefined ||
+                  (Array.isArray(existingValue) && existingValue.length === 0) ||
+                  (typeof existingValue === 'string' && existingValue === '') ||
+                  (expectedType === 'number' && existingValue === null);
+                
+                // 如果新值是空值，且原有值不是空值，保留原有值
+                // 这样可以避免前端没有正确收集到值时，错误地清空原有配置
+                if (isNewValueEmpty && !isExistingValueEmpty) {
+                  // 保留原有值，跳过这个字段
+                  BotUtil.makeLog('debug', `保留字段原有值 [${key}]: ${JSON.stringify(existingValue)} (新值为空)`, 'ConfigAPI');
+                  continue;
+                }
+                
+                // 其他情况：使用新值（包括明确设置的值和非空值）
+                mergedData[key] = newValue;
+              }
+              
               // 创建临时配置对象，使用子配置的schema
               const tempConfig = { schema: subConfig.schema };
               BotUtil.makeLog('info', `清理子配置数据 [${configName}/${keyPath}]，使用子配置schema`, 'ConfigAPI');
               BotUtil.makeLog('debug', `原始数据: ${JSON.stringify(data).substring(0, 500)}`, 'ConfigAPI');
-              cleanedData = cleanConfigData(data, tempConfig);
+              BotUtil.makeLog('debug', `现有配置: ${JSON.stringify(existingData).substring(0, 500)}`, 'ConfigAPI');
+              cleanedData = cleanConfigData(mergedData, tempConfig);
               BotUtil.makeLog('debug', `清理后数据: ${JSON.stringify(cleanedData).substring(0, 500)}`, 'ConfigAPI');
             } else {
               // 如果没有找到子配置schema，使用默认清理
