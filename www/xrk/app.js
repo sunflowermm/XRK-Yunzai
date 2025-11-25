@@ -4758,6 +4758,10 @@ class APIControlCenter {
     bindFormEvents(formContainer, configName, subName) {
         // 数组操作（标量）
         formContainer.querySelectorAll('.config-form-array-add').forEach(btn => {
+            // 检查是否已经绑定过（避免重复绑定）
+            if (btn.dataset.bound === 'true') return;
+            btn.dataset.bound = 'true';
+            
             btn.addEventListener('click', () => {
                 const fieldName = btn.dataset.field;
                 const arrayContainer = btn.closest('.config-form-array');
@@ -4781,10 +4785,70 @@ class APIControlCenter {
             });
         });
 
+        // Tags组件操作（字符串数组）
+        formContainer.querySelectorAll('.config-form-tags').forEach(tagsContainer => {
+            const input = tagsContainer.querySelector('.config-form-tags-input');
+            const addBtn = tagsContainer.querySelector('.config-form-tags-add');
+            const tagsList = tagsContainer.querySelector('.config-form-tags-list');
+            
+            if (!input || !addBtn || !tagsList) return;
+            
+            // 检查是否已经绑定过（避免重复绑定）
+            if (tagsContainer.dataset.bound === 'true') return;
+            tagsContainer.dataset.bound = 'true';
+            
+            const addTag = () => {
+                const value = input.value.trim();
+                if (!value) return;
+                
+                const tagDiv = document.createElement('div');
+                tagDiv.className = 'config-form-tag-item';
+                const index = tagsList.children.length;
+                tagDiv.dataset.tagIndex = index;
+                tagDiv.innerHTML = `
+                    <span class="config-form-tag-text">${this.escapeHtml(value)}</span>
+                    <button type="button" class="config-form-tag-remove" data-index="${index}">×</button>
+                `;
+                tagsList.appendChild(tagDiv);
+                input.value = '';
+                
+                // 绑定新标签的删除按钮
+                tagDiv.querySelector('.config-form-tag-remove').addEventListener('click', function() {
+                    tagDiv.remove();
+                });
+            };
+            
+            // 绑定输入框回车事件
+            input.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addTag();
+                }
+            });
+            
+            // 绑定添加按钮点击事件
+            addBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                addTag();
+            });
+            
+            // 绑定已有标签的删除按钮
+            tagsList.querySelectorAll('.config-form-tag-remove').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    this.closest('.config-form-tag-item').remove();
+                });
+            });
+        });
+
         // ArrayForm（对象数组）操作
         formContainer.querySelectorAll('.config-form-arrayform').forEach(arrayForm => {
             const addBtn = arrayForm.querySelector('.config-form-arrayform-add');
             if (addBtn) {
+                // 检查是否已经绑定过（避免重复绑定）
+                if (addBtn.dataset.bound === 'true') return;
+                addBtn.dataset.bound = 'true';
+                
                 addBtn.addEventListener('click', () => {
                     const index = arrayForm.querySelectorAll('.config-form-arrayform-item').length;
                     const fieldName = arrayForm.dataset.field;
@@ -5045,55 +5109,6 @@ class APIControlCenter {
             arrayContainer.querySelectorAll('.config-form-array-remove').forEach(btn => {
                 btn.addEventListener('click', function() {
                     this.closest('.config-form-array-item').remove();
-                });
-            });
-        });
-
-        // 绑定Tags组件（只绑定新添加项内的）
-        itemElement.querySelectorAll('.config-form-tags').forEach(tagsContainer => {
-            const input = tagsContainer.querySelector('.config-form-tags-input');
-            const addBtn = tagsContainer.querySelector('.config-form-tags-add');
-            const tagsList = tagsContainer.querySelector('.config-form-tags-list');
-            
-            if (!input || !addBtn || !tagsList) return;
-            
-            // 检查是否已经绑定过
-            if (tagsContainer.dataset.bound === 'true') return;
-            tagsContainer.dataset.bound = 'true';
-            
-            const addTag = () => {
-                const value = input.value.trim();
-                if (!value) return;
-                
-                const tagDiv = document.createElement('div');
-                tagDiv.className = 'config-form-tag-item';
-                const index = tagsList.children.length;
-                tagDiv.dataset.tagIndex = index;
-                tagDiv.innerHTML = `
-                    <span class="config-form-tag-text">${this.escapeHtml(value)}</span>
-                    <button type="button" class="config-form-tag-remove" data-index="${index}">×</button>
-                `;
-                tagsList.appendChild(tagDiv);
-                input.value = '';
-                
-                tagDiv.querySelector('.config-form-tag-remove').addEventListener('click', function() {
-                    tagDiv.remove();
-                });
-            };
-            
-            input.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    addTag();
-                }
-            });
-            
-            addBtn.addEventListener('click', addTag);
-            
-            // 绑定已有标签的删除按钮
-            tagsList.querySelectorAll('.config-form-tag-remove').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    this.closest('.config-form-tag-item').remove();
                 });
             });
         });
