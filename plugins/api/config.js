@@ -15,93 +15,111 @@ function cleanConfigData(data, config) {
 
   if (schema && schema.fields) {
     for (const [field, fieldSchema] of Object.entries(schema.fields)) {
-      if (field in cleaned) {
-        let value = cleaned[field];
+      // 如果字段不在数据中，根据类型设置默认值
+      if (!(field in cleaned)) {
         const expectedType = fieldSchema.type;
-        
-        // 类型转换：确保类型匹配schema定义
         if (expectedType === 'array') {
-          // 数组类型：确保是数组
-          if (!Array.isArray(value)) {
-            // 如果不是数组，转换为空数组
-            if (value === null || value === undefined || value === '') {
-              cleaned[field] = [];
-            } else if (typeof value === 'string') {
-              // 字符串尝试解析为数组
-              try {
-                const parsed = JSON.parse(value);
-                cleaned[field] = Array.isArray(parsed) ? parsed : [];
-              } catch {
-                cleaned[field] = [];
-              }
-            } else {
-              // 其他类型转换为空数组
+          cleaned[field] = fieldSchema.default !== undefined ? 
+            (Array.isArray(fieldSchema.default) ? [...fieldSchema.default] : []) : [];
+        } else if (expectedType === 'boolean') {
+          cleaned[field] = fieldSchema.default !== undefined ? fieldSchema.default : false;
+        } else if (expectedType === 'number') {
+          cleaned[field] = fieldSchema.default !== undefined ? fieldSchema.default : null;
+        } else if (expectedType === 'object') {
+          cleaned[field] = fieldSchema.default !== undefined ? 
+            (typeof fieldSchema.default === 'object' && !Array.isArray(fieldSchema.default) ? 
+              JSON.parse(JSON.stringify(fieldSchema.default)) : {}) : {};
+        } else {
+          cleaned[field] = fieldSchema.default !== undefined ? fieldSchema.default : null;
+        }
+        continue;
+      }
+      
+      let value = cleaned[field];
+      const expectedType = fieldSchema.type;
+      
+      // 类型转换：确保类型匹配schema定义
+      if (expectedType === 'array') {
+        // 数组类型：确保是数组
+        if (!Array.isArray(value)) {
+          // 如果不是数组，转换为空数组
+          if (value === null || value === undefined || value === '') {
+            cleaned[field] = [];
+          } else if (typeof value === 'string') {
+            // 字符串尝试解析为数组
+            try {
+              const parsed = JSON.parse(value);
+              cleaned[field] = Array.isArray(parsed) ? parsed : [];
+            } catch {
               cleaned[field] = [];
             }
           } else {
-            // 已经是数组，递归处理数组中的对象
-            if (fieldSchema.itemType === 'object' && fieldSchema.itemSchema) {
-              // 对象数组：递归清理每个对象
-              cleaned[field] = value.map(item => {
-                if (item && typeof item === 'object' && !Array.isArray(item)) {
-                  return cleanConfigData(item, { schema: { fields: fieldSchema.itemSchema.fields || {} } });
-                }
-                return item;
-              });
-            } else {
-              // 标量数组：直接保留
-              cleaned[field] = value;
-            }
+            // 其他类型转换为空数组
+            cleaned[field] = [];
           }
-        } else if (expectedType === 'boolean') {
-          // 布尔类型：确保是布尔值
-          if (typeof value !== 'boolean') {
-            if (typeof value === 'string') {
-              if (value === 'true' || value === '1' || value === 'on') {
-                cleaned[field] = true;
-              } else if (value === 'false' || value === '0' || value === 'off' || value === '') {
-                cleaned[field] = false;
-              } else {
-                // 无法转换，使用默认值或false
-                cleaned[field] = fieldSchema.default !== undefined ? fieldSchema.default : false;
+        } else {
+          // 已经是数组，递归处理数组中的对象
+          if (fieldSchema.itemType === 'object' && fieldSchema.itemSchema) {
+            // 对象数组：递归清理每个对象
+            cleaned[field] = value.map(item => {
+              if (item && typeof item === 'object' && !Array.isArray(item)) {
+                return cleanConfigData(item, { schema: { fields: fieldSchema.itemSchema.fields || {} } });
               }
-            } else if (value === null || value === undefined) {
-              // null/undefined 使用默认值或false
+              return item;
+            });
+          } else {
+            // 标量数组：直接保留
+            cleaned[field] = value;
+          }
+        }
+      } else if (expectedType === 'boolean') {
+        // 布尔类型：确保是布尔值
+        if (typeof value !== 'boolean') {
+          if (typeof value === 'string') {
+            if (value === 'true' || value === '1' || value === 'on') {
+              cleaned[field] = true;
+            } else if (value === 'false' || value === '0' || value === 'off' || value === '') {
+              cleaned[field] = false;
+            } else {
+              // 无法转换，使用默认值或false
               cleaned[field] = fieldSchema.default !== undefined ? fieldSchema.default : false;
-            } else {
-              // 其他类型（如数字）转换为布尔
-              cleaned[field] = Boolean(value);
             }
+          } else if (value === null || value === undefined) {
+            // null/undefined 使用默认值或false
+            cleaned[field] = fieldSchema.default !== undefined ? fieldSchema.default : false;
+          } else {
+            // 其他类型（如数字）转换为布尔
+            cleaned[field] = Boolean(value);
           }
-        } else if (expectedType === 'number') {
-          // 数字类型：确保是数字或null
-          if (typeof value !== 'number') {
-            if (typeof value === 'string') {
-              const numValue = Number(value);
-              if (!isNaN(numValue) && value.trim() !== '') {
-                cleaned[field] = numValue;
-              } else if (value === '') {
-                cleaned[field] = null;
-              } else {
-                // 无法转换，使用默认值或null
-                cleaned[field] = fieldSchema.default !== undefined ? fieldSchema.default : null;
-              }
-            } else if (value === null || value === undefined || value === '') {
+        }
+      } else if (expectedType === 'number') {
+        // 数字类型：确保是数字或null
+        if (typeof value !== 'number') {
+          if (typeof value === 'string') {
+            const numValue = Number(value);
+            if (!isNaN(numValue) && value.trim() !== '') {
+              cleaned[field] = numValue;
+            } else if (value === '') {
               cleaned[field] = null;
             } else {
-              // 其他类型尝试转换为数字
-              const numValue = Number(value);
-              cleaned[field] = !isNaN(numValue) ? numValue : (fieldSchema.default !== undefined ? fieldSchema.default : null);
+              // 无法转换，使用默认值或null
+              cleaned[field] = fieldSchema.default !== undefined ? fieldSchema.default : null;
             }
-          }
-        } else if (expectedType === 'object') {
-          // 对象类型：递归处理嵌套对象
-          if (value && typeof value === 'object' && !Array.isArray(value)) {
-            cleaned[field] = cleanConfigData(value, { schema: { fields: fieldSchema.fields || {} } });
           } else if (value === null || value === undefined || value === '') {
-            // 空值转换为空对象或null
-            cleaned[field] = fieldSchema.default !== undefined ? fieldSchema.default : {};
+            cleaned[field] = null;
+          } else {
+            // 其他类型尝试转换为数字
+            const numValue = Number(value);
+            cleaned[field] = !isNaN(numValue) ? numValue : (fieldSchema.default !== undefined ? fieldSchema.default : null);
           }
+        }
+      } else if (expectedType === 'object') {
+        // 对象类型：递归处理嵌套对象
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+          cleaned[field] = cleanConfigData(value, { schema: { fields: fieldSchema.fields || {} } });
+        } else if (value === null || value === undefined || value === '') {
+          // 空值转换为空对象或null
+          cleaned[field] = fieldSchema.default !== undefined ? fieldSchema.default : {};
         }
       }
     }
@@ -401,8 +419,28 @@ export default {
             BotUtil.makeLog('warn', `配置数据为空 [${configName}]`, 'ConfigAPI');
           }
 
-          // 清理数据：将空字符串转换为 null（对于数字字段）
-          const cleanedData = cleanConfigData(data, config);
+          // 清理数据：对于SystemConfig的子配置，需要获取子配置的schema
+          let cleanedData;
+          if (keyPath && configName === 'system' && typeof config.getStructure === 'function') {
+            // SystemConfig的子配置：获取子配置的schema
+            const structure = config.getStructure();
+            const subConfig = structure.configs?.[keyPath];
+            if (subConfig && subConfig.schema) {
+              // 创建临时配置对象，使用子配置的schema
+              const tempConfig = { schema: subConfig.schema };
+              BotUtil.makeLog('info', `清理子配置数据 [${configName}/${keyPath}]，使用子配置schema`, 'ConfigAPI');
+              BotUtil.makeLog('debug', `原始数据: ${JSON.stringify(data).substring(0, 500)}`, 'ConfigAPI');
+              cleanedData = cleanConfigData(data, tempConfig);
+              BotUtil.makeLog('debug', `清理后数据: ${JSON.stringify(cleanedData).substring(0, 500)}`, 'ConfigAPI');
+            } else {
+              // 如果没有找到子配置schema，使用默认清理
+              BotUtil.makeLog('warn', `未找到子配置schema [${configName}/${keyPath}]，使用默认清理`, 'ConfigAPI');
+              cleanedData = cleanConfigData(data, config);
+            }
+          } else {
+            // 普通配置：使用配置对象本身的schema
+            cleanedData = cleanConfigData(data, config);
+          }
 
           let result;
           if (keyPath) {

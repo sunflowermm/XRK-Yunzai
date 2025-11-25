@@ -4118,6 +4118,9 @@ class APIControlCenter {
         
         // 数据清理和验证：确保数组字段是数组类型（修复headers.join错误）
         configData = this._normalizeConfigData(configData);
+        
+        // 调试：输出收集的数据
+        console.log('[ConfigEditor] 保存子配置数据:', { configName, subName, configData });
 
         // SystemConfig 的子配置保存：使用 path 参数指定子配置名称
         const response = await fetch(`${this.serverUrl}/api/config/${configName}/write`, {
