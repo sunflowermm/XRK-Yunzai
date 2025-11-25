@@ -2680,19 +2680,41 @@ class APIControlCenter {
      */
     renderArrayForm(fieldId, fieldName, fieldSchema, value) {
         const arr = Array.isArray(value) ? value : [];
+        // 获取子字段定义：优先使用fields，然后是itemSchema.fields
         const subFields = fieldSchema.fields || fieldSchema.itemSchema?.fields || {};
-        const makeItem = (item = {}, index = 0) => {
+        
+        // 创建单个数组项的HTML
+        const makeItem = (item = {}, index = 0, useDefaults = false) => {
             let inner = '';
             for (const [subName, subSchema] of Object.entries(subFields)) {
-                // 确保正确获取值，优先使用item中的值，然后是默认值，最后是空字符串（不是null）
+                // 确定值：如果useDefaults为true，优先使用默认值；否则优先使用item中的值
                 let subVal;
-                if (item && Object.prototype.hasOwnProperty.call(item, subName)) {
-                    subVal = item[subName];
-                } else if (subSchema.default !== undefined) {
-                    subVal = subSchema.default;
+                if (useDefaults) {
+                    // 添加新项时：优先使用默认值
+                    if (subSchema.default !== undefined) {
+                        subVal = subSchema.default;
+                    } else if (subSchema.type === 'array') {
+                        subVal = [];
+                    } else if (subSchema.type === 'object') {
+                        subVal = {};
+                    } else if (subSchema.type === 'string' || subSchema.type === 'text') {
+                        subVal = '';
+                    } else if (subSchema.type === 'number') {
+                        subVal = null;
+                    } else if (subSchema.type === 'boolean') {
+                        subVal = false;
+                    } else {
+                        subVal = null;
+                    }
                 } else {
-                    // 对于字符串类型，使用空字符串而不是null，避免配置丢失
-                    subVal = (subSchema.type === 'string' || subSchema.type === 'text') ? '' : null;
+                    // 渲染已有项时：优先使用item中的值
+                    if (item && Object.prototype.hasOwnProperty.call(item, subName)) {
+                        subVal = item[subName];
+                    } else if (subSchema.default !== undefined) {
+                        subVal = subSchema.default;
+                    } else {
+                        subVal = (subSchema.type === 'string' || subSchema.type === 'text') ? '' : null;
+                    }
                 }
                 inner += `
                     <div class="config-form-subfield">
@@ -2712,12 +2734,16 @@ class APIControlCenter {
         };
 
         // 将schema信息存储在data属性中，以便添加项时使用
-        const schemaJson = JSON.stringify(fieldSchema);
+        // 只存储必要的字段定义信息，避免数据过大
+        const schemaData = {
+            fields: subFields,
+            itemSchema: fieldSchema.itemSchema
+        };
+        const schemaJson = JSON.stringify(schemaData);
         let html = `<div class="config-form-arrayform" id="${fieldId}" data-field="${fieldName}" data-schema="${this.escapeHtml(schemaJson)}">`;
-        // 如果数组为空，不创建空项，只显示添加按钮
-        // 这样可以避免保存时出现空白项
+        // 渲染已有的数组项
         if (arr.length > 0) {
-            arr.forEach((item, i) => { html += makeItem(item || {}, i); });
+            arr.forEach((item, i) => { html += makeItem(item || {}, i, false); });
         }
         html += `<button type="button" class="btn btn-sm btn-primary config-form-arrayform-add" data-field="${fieldName}">添加项</button>`;
         html += `</div>`;
@@ -4769,13 +4795,71 @@ class APIControlCenter {
                     item.className = 'config-form-arrayform-item';
                     item.dataset.index = String(index);
                     
-                    if (first) {
-                        // 克隆第一个item的结构，但清空值
+                    // 优先从schema创建新项（使用默认值），如果没有schema再尝试克隆已有项
+                    let itemCreated = false;
+                    
+                    // 方法1：从schema创建新项（推荐，使用默认值）
+                    try {
+                        const schemaJson = arrayForm.dataset.schema;
+                        if (schemaJson) {
+                            const schemaData = JSON.parse(schemaJson);
+                            const subFields = schemaData.fields || schemaData.itemSchema?.fields || {};
+                            
+                            if (Object.keys(subFields).length > 0) {
+                                let inner = '';
+                                for (const [subName, subSchema] of Object.entries(subFields)) {
+                                    // 使用默认值创建新项
+                                    let subVal;
+                                    if (subSchema.default !== undefined) {
+                                        // 深拷贝默认值（如果是对象或数组）
+                                        if (Array.isArray(subSchema.default)) {
+                                            subVal = [...subSchema.default];
+                                        } else if (subSchema.default && typeof subSchema.default === 'object') {
+                                            subVal = JSON.parse(JSON.stringify(subSchema.default));
+                                        } else {
+                                            subVal = subSchema.default;
+                                        }
+                                    } else if (subSchema.type === 'array') {
+                                        subVal = [];
+                                    } else if (subSchema.type === 'object') {
+                                        subVal = {};
+                                    } else if (subSchema.type === 'string' || subSchema.type === 'text') {
+                                        subVal = '';
+                                    } else if (subSchema.type === 'number') {
+                                        subVal = null;
+                                    } else if (subSchema.type === 'boolean') {
+                                        subVal = false;
+                                    } else {
+                                        subVal = null;
+                                    }
+                                    
+                                    const subFieldId = `${arrayForm.id}-${index}-${subName}`;
+                                    inner += `
+                                        <div class="config-form-subfield">
+                                            <label class="config-form-label">${subSchema.label || subName}</label>
+                                            ${this.renderFormField(subFieldId, subName, subSchema, subVal, subSchema.component || this.inferComponentType(subSchema.type, subSchema))}
+                                        </div>
+                                    `;
+                                }
+                                item.innerHTML = `
+                                    ${inner}
+                                    <div class="config-form-arrayform-actions">
+                                        <button type="button" class="btn btn-sm btn-danger config-form-arrayform-remove" data-index="${index}">删除</button>
+                                    </div>
+                                `;
+                                itemCreated = true;
+                            }
+                        }
+                    } catch (e) {
+                        console.warn(`[ConfigEditor] 从schema创建新项失败:`, e);
+                    }
+                    
+                    // 方法2：如果schema创建失败，尝试克隆第一个item（作为后备方案）
+                    if (!itemCreated && first) {
                         const clone = first.cloneNode(true);
                         // 更新所有data-field属性，确保它们保持正确的字段名
                         clone.querySelectorAll('[data-field]').forEach(el => {
-                            // 保持原有的data-field值（如 "domain", "ssl.enabled" 等）
-                            // 只清空输入值
+                            // 保持原有的data-field值，只清空输入值
                             if (el.type === 'checkbox') {
                                 el.checked = false;
                             } else if (el.type === 'number') {
@@ -4803,41 +4887,13 @@ class APIControlCenter {
                             rmBtn.dataset.index = String(index);
                         }
                         item.innerHTML = clone.innerHTML;
-                    } else {
-                        // 如果没有第一个item，从schema创建结构
-                        try {
-                            const schemaJson = arrayForm.dataset.schema;
-                            if (schemaJson) {
-                                const fieldSchema = JSON.parse(schemaJson);
-                                const subFields = fieldSchema.fields || fieldSchema.itemSchema?.fields || {};
-                                let inner = '';
-                                for (const [subName, subSchema] of Object.entries(subFields)) {
-                                    // 使用默认值或空值
-                                    let subVal = subSchema.default !== undefined ? subSchema.default : 
-                                                ((subSchema.type === 'string' || subSchema.type === 'text') ? '' : null);
-                                    const subFieldId = `${arrayForm.id}-${index}-${subName}`;
-                                    inner += `
-                                        <div class="config-form-subfield">
-                                            <label class="config-form-label">${subSchema.label || subName}</label>
-                                            ${this.renderFormField(subFieldId, subName, subSchema, subVal, subSchema.component || this.inferComponentType(subSchema.type, subSchema))}
-                                        </div>
-                                    `;
-                                }
-                                item.innerHTML = `
-                                    ${inner}
-                                    <div class="config-form-arrayform-actions">
-                                        <button type="button" class="btn btn-sm btn-danger config-form-arrayform-remove" data-index="${index}">删除</button>
-                                    </div>
-                                `;
-                            } else {
-                                // 如果无法获取schema，创建一个最小结构
-                                item.innerHTML = `<div class="config-form-arrayform-actions"><button type="button" class="btn btn-sm btn-danger config-form-arrayform-remove" data-index="${index}">删除</button></div>`;
-                                console.warn(`[ConfigEditor] 无法为字段 ${fieldName} 创建新项结构：缺少schema信息`);
-                            }
-                        } catch (e) {
-                            console.error(`[ConfigEditor] 解析schema失败:`, e);
-                            item.innerHTML = `<div class="config-form-arrayform-actions"><button type="button" class="btn btn-sm btn-danger config-form-arrayform-remove" data-index="${index}">删除</button></div>`;
-                        }
+                        itemCreated = true;
+                    }
+                    
+                    // 方法3：如果都失败了，至少创建一个带删除按钮的结构
+                    if (!itemCreated) {
+                        console.error(`[ConfigEditor] 无法为字段 ${fieldName} 创建新项：缺少schema和模板项`);
+                        item.innerHTML = `<div class="config-form-arrayform-actions"><button type="button" class="btn btn-sm btn-danger config-form-arrayform-remove" data-index="${index}">删除</button></div>`;
                     }
                     
                     arrayForm.insertBefore(item, addBtn);
@@ -4848,7 +4904,7 @@ class APIControlCenter {
                         rm.addEventListener('click', () => item.remove());
                     }
                     
-                    // 重新绑定新添加项内的所有表单事件（如Switch、Select等）
+                    // 重新绑定新添加项内的所有表单事件（如Switch、Select、Tags、Array等）
                     this._bindItemFormEvents(item, formContainer);
                 });
             }
@@ -4893,11 +4949,12 @@ class APIControlCenter {
                 });
                 
                 // 点击外部关闭下拉框
-                document.addEventListener('click', (e) => {
+                const clickHandler = (e) => {
                     if (!multiSelect.contains(e.target)) {
                         dropdown.style.display = 'none';
                     }
-                });
+                };
+                document.addEventListener('click', clickHandler);
                 
                 // 绑定复选框变化
                 checkboxes.forEach(cb => {
@@ -4911,12 +4968,18 @@ class APIControlCenter {
                 });
             }
         });
-
-        // Tags 组件操作
-        formContainer.querySelectorAll('.config-form-tags').forEach(tagsContainer => {
+        
+        // 绑定Tags组件（只绑定新添加项内的）
+        itemElement.querySelectorAll('.config-form-tags').forEach(tagsContainer => {
             const input = tagsContainer.querySelector('.config-form-tags-input');
             const addBtn = tagsContainer.querySelector('.config-form-tags-add');
             const tagsList = tagsContainer.querySelector('.config-form-tags-list');
+            
+            if (!input || !addBtn || !tagsList) return;
+            
+            // 检查是否已经绑定过
+            if (tagsContainer.dataset.bound === 'true') return;
+            tagsContainer.dataset.bound = 'true';
             
             const addTag = () => {
                 const value = input.value.trim();
@@ -4938,23 +5001,130 @@ class APIControlCenter {
                 });
             };
             
-            if (input) {
-                input.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        addTag();
-                    }
-                });
-            }
+            input.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addTag();
+                }
+            });
             
-            if (addBtn) {
-                addBtn.addEventListener('click', addTag);
-            }
+            addBtn.addEventListener('click', addTag);
             
             // 绑定已有标签的删除按钮
             tagsList.querySelectorAll('.config-form-tag-remove').forEach(btn => {
                 btn.addEventListener('click', function() {
                     this.closest('.config-form-tag-item').remove();
+                });
+            });
+        });
+        
+        // 绑定Array组件（只绑定新添加项内的）
+        itemElement.querySelectorAll('.config-form-array').forEach(arrayContainer => {
+            const addBtn = arrayContainer.querySelector('.config-form-array-add');
+            if (!addBtn) return;
+            
+            // 检查是否已经绑定过
+            if (arrayContainer.dataset.bound === 'true') return;
+            arrayContainer.dataset.bound = 'true';
+            
+            addBtn.addEventListener('click', () => {
+                const fieldName = addBtn.dataset.field;
+                const index = arrayContainer.querySelectorAll('.config-form-array-item').length;
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'config-form-array-item';
+                itemDiv.innerHTML = `
+                    <input type="text" class="config-form-input" data-array-index="${index}" value="" />
+                    <button type="button" class="btn btn-sm btn-danger config-form-array-remove" data-index="${index}">删除</button>
+                `;
+                arrayContainer.insertBefore(itemDiv, addBtn);
+                itemDiv.querySelector('.config-form-array-remove').addEventListener('click', function() {
+                    itemDiv.remove();
+                });
+            });
+            
+            arrayContainer.querySelectorAll('.config-form-array-remove').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    this.closest('.config-form-array-item').remove();
+                });
+            });
+        });
+
+        // 绑定Tags组件（只绑定新添加项内的）
+        itemElement.querySelectorAll('.config-form-tags').forEach(tagsContainer => {
+            const input = tagsContainer.querySelector('.config-form-tags-input');
+            const addBtn = tagsContainer.querySelector('.config-form-tags-add');
+            const tagsList = tagsContainer.querySelector('.config-form-tags-list');
+            
+            if (!input || !addBtn || !tagsList) return;
+            
+            // 检查是否已经绑定过
+            if (tagsContainer.dataset.bound === 'true') return;
+            tagsContainer.dataset.bound = 'true';
+            
+            const addTag = () => {
+                const value = input.value.trim();
+                if (!value) return;
+                
+                const tagDiv = document.createElement('div');
+                tagDiv.className = 'config-form-tag-item';
+                const index = tagsList.children.length;
+                tagDiv.dataset.tagIndex = index;
+                tagDiv.innerHTML = `
+                    <span class="config-form-tag-text">${this.escapeHtml(value)}</span>
+                    <button type="button" class="config-form-tag-remove" data-index="${index}">×</button>
+                `;
+                tagsList.appendChild(tagDiv);
+                input.value = '';
+                
+                tagDiv.querySelector('.config-form-tag-remove').addEventListener('click', function() {
+                    tagDiv.remove();
+                });
+            };
+            
+            input.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addTag();
+                }
+            });
+            
+            addBtn.addEventListener('click', addTag);
+            
+            // 绑定已有标签的删除按钮
+            tagsList.querySelectorAll('.config-form-tag-remove').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    this.closest('.config-form-tag-item').remove();
+                });
+            });
+        });
+        
+        // 绑定Array组件（只绑定新添加项内的）
+        itemElement.querySelectorAll('.config-form-array').forEach(arrayContainer => {
+            const addBtn = arrayContainer.querySelector('.config-form-array-add');
+            if (!addBtn) return;
+            
+            // 检查是否已经绑定过
+            if (arrayContainer.dataset.bound === 'true') return;
+            arrayContainer.dataset.bound = 'true';
+            
+            addBtn.addEventListener('click', () => {
+                const fieldName = addBtn.dataset.field;
+                const index = arrayContainer.querySelectorAll('.config-form-array-item').length;
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'config-form-array-item';
+                itemDiv.innerHTML = `
+                    <input type="text" class="config-form-input" data-array-index="${index}" value="" />
+                    <button type="button" class="btn btn-sm btn-danger config-form-array-remove" data-index="${index}">删除</button>
+                `;
+                arrayContainer.insertBefore(itemDiv, addBtn);
+                itemDiv.querySelector('.config-form-array-remove').addEventListener('click', function() {
+                    itemDiv.remove();
+                });
+            });
+            
+            arrayContainer.querySelectorAll('.config-form-array-remove').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    this.closest('.config-form-array-item').remove();
                 });
             });
         });
