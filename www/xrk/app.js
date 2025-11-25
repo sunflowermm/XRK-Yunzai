@@ -5229,7 +5229,14 @@ class APIControlCenter {
             
             if (fieldPath.length === 1) {
                 // 简单字段
-                if (field.type === 'checkbox') {
+                // 检查是否是Switch组件（checkbox在label内）
+                const switchContainer = field.closest('.config-form-switch');
+                const checkbox = switchContainer ? switchContainer.querySelector('input[type="checkbox"]') : null;
+                if (checkbox && checkbox.dataset.field === fieldName) {
+                    // Switch组件：收集checkbox的checked状态
+                    data[fieldName] = checkbox.checked;
+                } else if (field.type === 'checkbox') {
+                    // 普通checkbox
                     data[fieldName] = field.checked;
                 } else if (field.type === 'number') {
                     // 数字字段：空字符串或无效值保持为 null（允许 null）
@@ -5272,7 +5279,14 @@ class APIControlCenter {
                     current = current[pathKey];
                 }
                 const lastKey = fieldPath[fieldPath.length - 1];
-                if (field.type === 'checkbox') {
+                // 检查是否是Switch组件（checkbox在label内）
+                const switchContainer = field.closest('.config-form-switch');
+                const checkbox = switchContainer ? switchContainer.querySelector('input[type="checkbox"]') : null;
+                if (checkbox && checkbox.dataset.field === fieldName) {
+                    // Switch组件：收集checkbox的checked状态
+                    current[lastKey] = checkbox.checked;
+                } else if (field.type === 'checkbox') {
+                    // 普通checkbox
                     current[lastKey] = field.checked;
                 } else if (field.type === 'number') {
                     const numVal = field.value !== '' && field.value !== null && field.value !== undefined ? Number(field.value) : null;
@@ -5327,10 +5341,13 @@ class APIControlCenter {
                 })
                 .filter(item => item !== null);
             
+            // 确保总是数组类型，即使为空
+            const result = Array.isArray(items) ? items : [];
+            
             // 处理嵌套路径
             const fieldPath = fieldName.split('.');
             if (fieldPath.length === 1) {
-                data[fieldName] = items;
+                data[fieldName] = result;
             } else {
                 // 嵌套字段
                 let current = data;
@@ -5340,7 +5357,7 @@ class APIControlCenter {
                     }
                     current = current[fieldPath[i]];
                 }
-                current[fieldPath[fieldPath.length - 1]] = items;
+                current[fieldPath[fieldPath.length - 1]] = result;
             }
         });
         
@@ -5390,7 +5407,14 @@ class APIControlCenter {
                     const last = path[path.length - 1];
                     
                     // 处理不同类型的输入
-                    if (f.type === 'checkbox') {
+                    // 检查是否是Switch组件（checkbox在label内）
+                    const switchContainer = f.closest('.config-form-switch');
+                    const checkbox = switchContainer ? switchContainer.querySelector('input[type="checkbox"]') : null;
+                    if (checkbox && checkbox.dataset.field === name) {
+                        // Switch组件：收集checkbox的checked状态
+                        cur[last] = checkbox.checked;
+                    } else if (f.type === 'checkbox') {
+                        // 普通checkbox
                         cur[last] = f.checked;
                     } else if (f.type === 'number') {
                         const numVal = f.value !== '' && f.value !== null && f.value !== undefined ? Number(f.value) : null;
@@ -5434,10 +5458,13 @@ class APIControlCenter {
                 // 注意：不添加完全空的对象，但保留有字段但值为空的对象
             });
             
+            // 确保总是数组类型，即使为空
+            const result = Array.isArray(items) ? items : [];
+            
             // 处理嵌套路径
             const fieldPath = fieldName.split('.');
             if (fieldPath.length === 1) {
-                data[fieldName] = items;
+                data[fieldName] = result;
             } else {
                 // 嵌套字段
                 let current = data;
@@ -5447,7 +5474,7 @@ class APIControlCenter {
                     }
                     current = current[fieldPath[i]];
                 }
-                current[fieldPath[fieldPath.length - 1]] = items;
+                current[fieldPath[fieldPath.length - 1]] = result;
             }
         });
         
@@ -5465,10 +5492,13 @@ class APIControlCenter {
                 .map(span => span.textContent.trim())
                 .filter(item => item !== '');
             
+            // 确保总是数组类型，即使为空
+            const result = Array.isArray(items) ? items : [];
+            
             // 处理嵌套路径
             const fieldPath = fieldName.split('.');
             if (fieldPath.length === 1) {
-                data[fieldName] = items;
+                data[fieldName] = result;
             } else {
                 // 嵌套字段
                 let current = data;
@@ -5478,7 +5508,7 @@ class APIControlCenter {
                     }
                     current = current[fieldPath[i]];
                 }
-                current[fieldPath[fieldPath.length - 1]] = items;
+                current[fieldPath[fieldPath.length - 1]] = result;
             }
         });
         
