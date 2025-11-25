@@ -3,7 +3,7 @@
  * 提供统一的配置文件读写接口
  */
 import BotUtil from '../../lib/common/util.js';
-import { deepMergeConfig, cleanConfigData } from './config-utils.js';
+import { deepMergeConfig, cleanConfigData } from '../../lib/commonconfig/config-utils.js';
 
 export default {
   name: 'config-manager',
