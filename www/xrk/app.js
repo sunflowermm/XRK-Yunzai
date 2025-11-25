@@ -1573,8 +1573,8 @@ class APIControlCenter {
         }
         // 开始新的连接
         const path = '/device'; // 固定使用/device路径
-        const wsUrl = this._buildDeviceWsUrl(path);
-        console.log('[WebClient] 尝试连接WebSocket:', wsUrl.replace(/api_key=[^&]+/, 'api_key=***'));
+            const wsUrl = this._buildDeviceWsUrl(path);
+            console.log('[WebClient] 尝试连接WebSocket:', wsUrl.replace(/api_key=[^&]+/, 'api_key=***'));
         
         this._deviceWsConnectingPromise = this._connectDeviceWs(wsUrl)
             .then((ws) => {
@@ -2680,7 +2680,7 @@ class APIControlCenter {
      */
     renderArrayForm(fieldId, fieldName, fieldSchema, value) {
         const arr = Array.isArray(value) ? value : [];
-        const subFields = fieldSchema.fields || {};
+        const subFields = fieldSchema.fields || fieldSchema.itemSchema?.fields || {};
         const makeItem = (item = {}, index = 0) => {
             let inner = '';
             for (const [subName, subSchema] of Object.entries(subFields)) {
@@ -2711,10 +2711,12 @@ class APIControlCenter {
             `;
         };
 
-        let html = `<div class="config-form-arrayform" id="${fieldId}" data-field="${fieldName}">`;
-        if (arr.length === 0) {
-            html += makeItem({}, 0);
-        } else {
+        // 将schema信息存储在data属性中，以便添加项时使用
+        const schemaJson = JSON.stringify(fieldSchema);
+        let html = `<div class="config-form-arrayform" id="${fieldId}" data-field="${fieldName}" data-schema="${this.escapeHtml(schemaJson)}">`;
+        // 如果数组为空，不创建空项，只显示添加按钮
+        // 这样可以避免保存时出现空白项
+        if (arr.length > 0) {
             arr.forEach((item, i) => { html += makeItem(item || {}, i); });
         }
         html += `<button type="button" class="btn btn-sm btn-primary config-form-arrayform-add" data-field="${fieldName}">添加项</button>`;
@@ -3735,7 +3737,23 @@ class APIControlCenter {
                 configData = {};
             }
             
+            // 如果有schema，合并默认值（但不覆盖已存在的字段）
             if (hasSchema) {
+                try {
+                    const defaultsRes = await fetch(`${this.serverUrl}/api/config/${configName}/defaults`, {
+                        headers: this.getHeaders()
+                    });
+                    if (defaultsRes.ok) {
+                        const defaultsData = await defaultsRes.json();
+                        if (defaultsData.success && defaultsData.defaults) {
+                            // 深度合并：默认值作为基础，实际值覆盖默认值
+                            configData = this._mergeConfigWithDefaults(configData, defaultsData.defaults);
+                        }
+                    }
+                } catch (e) {
+                    console.warn('获取默认配置失败:', e);
+                }
+                
                 // 使用可视化表单编辑器
                 this.renderConfigForm(configName, configData, configStructure.schema, editorPanel, editorTextarea);
             } else {
@@ -3917,6 +3935,22 @@ class APIControlCenter {
             const hasSchema = subConfigStructure && subConfigStructure.fields;
             
             if (hasSchema) {
+                // 如果有schema，合并默认值（但不覆盖已存在的字段）
+                try {
+                    const defaultsRes = await fetch(`${this.serverUrl}/api/config/${parentName}/defaults?path=${subName}`, {
+                        headers: this.getHeaders()
+                    });
+                    if (defaultsRes.ok) {
+                        const defaultsData = await defaultsRes.json();
+                        if (defaultsData.success && defaultsData.defaults) {
+                            // 深度合并：默认值作为基础，实际值覆盖默认值
+                            subConfigData = this._mergeConfigWithDefaults(subConfigData, defaultsData.defaults);
+                        }
+                    }
+                } catch (e) {
+                    console.warn('获取子配置默认值失败:', e);
+                }
+                
                 // 使用可视化表单编辑器
                 this.renderConfigForm(parentName, subConfigData, subConfigStructure, editorPanel, editorTextarea, subName);
             } else {
@@ -4770,11 +4804,40 @@ class APIControlCenter {
                         }
                         item.innerHTML = clone.innerHTML;
                     } else {
-                        // 如果没有第一个item，尝试从schema创建结构
-                        // 这需要访问schema信息，但当前没有直接访问方式
-                        // 所以创建一个最小结构，至少包含删除按钮
-                        item.innerHTML = `<div class="config-form-arrayform-actions"><button type="button" class="btn btn-sm btn-danger config-form-arrayform-remove" data-index="${index}">删除</button></div>`;
-                        console.warn(`[ConfigEditor] 无法为字段 ${fieldName} 创建新项结构：缺少模板项`);
+                        // 如果没有第一个item，从schema创建结构
+                        try {
+                            const schemaJson = arrayForm.dataset.schema;
+                            if (schemaJson) {
+                                const fieldSchema = JSON.parse(schemaJson);
+                                const subFields = fieldSchema.fields || fieldSchema.itemSchema?.fields || {};
+                                let inner = '';
+                                for (const [subName, subSchema] of Object.entries(subFields)) {
+                                    // 使用默认值或空值
+                                    let subVal = subSchema.default !== undefined ? subSchema.default : 
+                                                ((subSchema.type === 'string' || subSchema.type === 'text') ? '' : null);
+                                    const subFieldId = `${arrayForm.id}-${index}-${subName}`;
+                                    inner += `
+                                        <div class="config-form-subfield">
+                                            <label class="config-form-label">${subSchema.label || subName}</label>
+                                            ${this.renderFormField(subFieldId, subName, subSchema, subVal, subSchema.component || this.inferComponentType(subSchema.type, subSchema))}
+                                        </div>
+                                    `;
+                                }
+                                item.innerHTML = `
+                                    ${inner}
+                                    <div class="config-form-arrayform-actions">
+                                        <button type="button" class="btn btn-sm btn-danger config-form-arrayform-remove" data-index="${index}">删除</button>
+                                    </div>
+                                `;
+                            } else {
+                                // 如果无法获取schema，创建一个最小结构
+                                item.innerHTML = `<div class="config-form-arrayform-actions"><button type="button" class="btn btn-sm btn-danger config-form-arrayform-remove" data-index="${index}">删除</button></div>`;
+                                console.warn(`[ConfigEditor] 无法为字段 ${fieldName} 创建新项结构：缺少schema信息`);
+                            }
+                        } catch (e) {
+                            console.error(`[ConfigEditor] 解析schema失败:`, e);
+                            item.innerHTML = `<div class="config-form-arrayform-actions"><button type="button" class="btn btn-sm btn-danger config-form-arrayform-remove" data-index="${index}">删除</button></div>`;
+                        }
                     }
                     
                     arrayForm.insertBefore(item, addBtn);
@@ -4936,12 +4999,45 @@ class APIControlCenter {
         formContainer.querySelectorAll('.config-form-arrayform [data-field]').forEach(el => skipFields.add(el));
         
         // 收集所有表单字段
+        // 先收集所有字段，然后按路径分组，避免重复收集
+        const fieldMap = new Map(); // 用于跟踪已收集的字段路径
+        
         const fields = formContainer.querySelectorAll('[data-field]');
         
         fields.forEach(field => {
             if (skipFields.has(field)) return;
             const fieldName = field.dataset.field;
             if (!fieldName) return;
+            
+            // 跳过SubForm容器本身的data-field（只收集子字段）
+            if (field.classList.contains('config-form-subform')) return;
+            
+            // 跳过ArrayForm容器本身的data-field（已在下面单独处理）
+            if (field.classList.contains('config-form-arrayform')) return;
+            
+            // 跳过Tags容器本身的data-field（已在下面单独处理）
+            if (field.classList.contains('config-form-tags')) return;
+            
+            // 跳过Array容器本身的data-field（已在下面单独处理）
+            if (field.classList.contains('config-form-array')) return;
+            
+            // 如果字段在SubForm内，确保路径正确
+            const subForm = field.closest('.config-form-subform');
+            if (subForm && !fieldName.includes('.')) {
+                // 字段在SubForm内但没有点号，说明是子字段，需要加上父字段名
+                const parentField = subForm.dataset.field;
+                if (parentField) {
+                    // 已经在renderSubForm时设置了正确的data-field（fieldName.subFieldName）
+                    // 这里不需要修改
+                }
+            }
+            
+            // 检查是否已经收集过这个路径（避免重复）
+            if (fieldMap.has(fieldName)) {
+                // 如果已经收集过，跳过（优先保留第一次收集的值）
+                return;
+            }
+            fieldMap.set(fieldName, true);
             
             collectedFields.add(fieldName);
             const fieldPath = fieldName.split('.');
@@ -4981,13 +5077,14 @@ class APIControlCenter {
                     data[fieldName] = field.value || '';
                 }
             } else {
-                // 嵌套字段
+                // 嵌套字段：确保正确创建嵌套结构
                 let current = data;
                 for (let i = 0; i < fieldPath.length - 1; i++) {
-                    if (!current[fieldPath[i]]) {
-                        current[fieldPath[i]] = {};
+                    const pathKey = fieldPath[i];
+                    if (!current[pathKey] || typeof current[pathKey] !== 'object' || Array.isArray(current[pathKey])) {
+                        current[pathKey] = {};
                     }
-                    current = current[fieldPath[i]];
+                    current = current[pathKey];
                 }
                 const lastKey = fieldPath[fieldPath.length - 1];
                 if (field.type === 'checkbox') {
@@ -5028,6 +5125,10 @@ class APIControlCenter {
             const fieldName = arrayContainer.dataset.field;
             if (!fieldName) return;
             
+            // 检查是否已经收集过（避免重复）
+            if (fieldMap.has(fieldName)) return;
+            fieldMap.set(fieldName, true);
+            
             collectedFields.add(fieldName);
             const items = Array.from(arrayContainer.querySelectorAll('.config-form-array-item input'))
                 .map(input => {
@@ -5041,14 +5142,32 @@ class APIControlCenter {
                 })
                 .filter(item => item !== null);
             
-            // 即使数组为空，也保留键（空数组）
-            data[fieldName] = items;
+            // 处理嵌套路径
+            const fieldPath = fieldName.split('.');
+            if (fieldPath.length === 1) {
+                data[fieldName] = items;
+            } else {
+                // 嵌套字段
+                let current = data;
+                for (let i = 0; i < fieldPath.length - 1; i++) {
+                    if (!current[fieldPath[i]] || typeof current[fieldPath[i]] !== 'object' || Array.isArray(current[fieldPath[i]])) {
+                        current[fieldPath[i]] = {};
+                    }
+                    current = current[fieldPath[i]];
+                }
+                current[fieldPath[fieldPath.length - 1]] = items;
+            }
         });
         
         // 处理 ArrayForm（对象数组）字段
         formContainer.querySelectorAll('.config-form-arrayform').forEach(arrayForm => {
             const fieldName = arrayForm.dataset.field;
             if (!fieldName) return;
+            
+            // 检查是否已经收集过（避免重复）
+            if (fieldMap.has(fieldName)) return;
+            fieldMap.set(fieldName, true);
+            
             collectedFields.add(fieldName);
             const items = [];
             arrayForm.querySelectorAll('.config-form-arrayform-item').forEach(itemEl => {
@@ -5069,6 +5188,12 @@ class APIControlCenter {
                     // 跳过删除按钮等非输入元素
                     if (f.classList.contains('config-form-arrayform-remove') || 
                         f.classList.contains('config-form-arrayform-add')) return;
+                    
+                    // 跳过SubForm、ArrayForm、Tags、Array容器本身的data-field
+                    if (f.classList.contains('config-form-subform') ||
+                        f.classList.contains('config-form-arrayform') ||
+                        f.classList.contains('config-form-tags') ||
+                        f.classList.contains('config-form-array')) return;
                     
                     const path = name.split('.');
                     let cur = itemObj;
@@ -5123,8 +5248,22 @@ class APIControlCenter {
                 }
                 // 注意：不添加完全空的对象，但保留有字段但值为空的对象
             });
-            // 即使数组为空，也保留键（空数组）
-            data[fieldName] = items;
+            
+            // 处理嵌套路径
+            const fieldPath = fieldName.split('.');
+            if (fieldPath.length === 1) {
+                data[fieldName] = items;
+            } else {
+                // 嵌套字段
+                let current = data;
+                for (let i = 0; i < fieldPath.length - 1; i++) {
+                    if (!current[fieldPath[i]] || typeof current[fieldPath[i]] !== 'object' || Array.isArray(current[fieldPath[i]])) {
+                        current[fieldPath[i]] = {};
+                    }
+                    current = current[fieldPath[i]];
+                }
+                current[fieldPath[fieldPath.length - 1]] = items;
+            }
         });
         
         // 处理 Tags 字段（字符串数组）
@@ -5132,27 +5271,122 @@ class APIControlCenter {
             const fieldName = tagsContainer.dataset.field;
             if (!fieldName) return;
             
+            // 检查是否已经收集过（避免重复）
+            if (fieldMap.has(fieldName)) return;
+            fieldMap.set(fieldName, true);
+            
             collectedFields.add(fieldName);
             const items = Array.from(tagsContainer.querySelectorAll('.config-form-tag-text'))
                 .map(span => span.textContent.trim())
                 .filter(item => item !== '');
             
-            // 即使数组为空，也保留键（空数组）
-            data[fieldName] = items;
+            // 处理嵌套路径
+            const fieldPath = fieldName.split('.');
+            if (fieldPath.length === 1) {
+                data[fieldName] = items;
+            } else {
+                // 嵌套字段
+                let current = data;
+                for (let i = 0; i < fieldPath.length - 1; i++) {
+                    if (!current[fieldPath[i]] || typeof current[fieldPath[i]] !== 'object' || Array.isArray(current[fieldPath[i]])) {
+                        current[fieldPath[i]] = {};
+                    }
+                    current = current[fieldPath[i]];
+                }
+                current[fieldPath[fieldPath.length - 1]] = items;
+            }
         });
         
-        // 处理嵌套对象中的字段：确保所有子字段都被收集
+        // 处理SubForm（嵌套对象）：确保所有子字段都被正确收集
+        // 注意：SubForm内的字段已经在上面通过嵌套路径（fieldName.subFieldName）收集了
+        // 这里只需要确保嵌套对象存在，避免遗漏
         formContainer.querySelectorAll('.config-form-subform').forEach(subForm => {
             const fieldName = subForm.dataset.field;
             if (!fieldName) return;
             
-            // 确保嵌套对象存在
-            if (!data[fieldName] || typeof data[fieldName] !== 'object') {
+            // 如果该字段还没有被收集（可能所有子字段都是空的），确保对象存在
+            if (!data[fieldName] || typeof data[fieldName] !== 'object' || Array.isArray(data[fieldName])) {
                 data[fieldName] = {};
             }
         });
         
+        // 清理重复的字段：删除所有以点号分隔的顶层字段（这些应该是嵌套字段）
+        // 这些字段应该已经在嵌套结构中收集了
+        const keysToRemove = [];
+        for (const key of Object.keys(data)) {
+            if (key.includes('.')) {
+                // 这是一个嵌套字段路径，应该已经在嵌套结构中收集了
+                // 检查是否真的在嵌套结构中
+                const path = key.split('.');
+                let exists = true;
+                let current = data;
+                for (let i = 0; i < path.length; i++) {
+                    if (!current[path[i]]) {
+                        exists = false;
+                        break;
+                    }
+                    if (i < path.length - 1) {
+                        current = current[path[i]];
+                        if (typeof current !== 'object' || Array.isArray(current)) {
+                            exists = false;
+                            break;
+                        }
+                    }
+                }
+                // 如果嵌套结构中已经存在，删除顶层字段
+                if (exists) {
+                    keysToRemove.push(key);
+                }
+            }
+        }
+        keysToRemove.forEach(key => delete data[key]);
+        
         return data;
+    }
+
+    /**
+     * 合并配置数据与默认值
+     * 默认值作为基础，实际值覆盖默认值，但不会覆盖已存在的非空值
+     * @private
+     */
+    _mergeConfigWithDefaults(actualData, defaults) {
+        if (!defaults || typeof defaults !== 'object') {
+            return actualData || {};
+        }
+        
+        if (!actualData || typeof actualData !== 'object' || Array.isArray(actualData)) {
+            // 如果实际数据不是对象，直接使用默认值
+            return JSON.parse(JSON.stringify(defaults));
+        }
+        
+        const merged = { ...defaults };
+        
+        // 深度合并：实际值覆盖默认值
+        for (const [key, value] of Object.entries(actualData)) {
+            if (value === null || value === undefined) {
+                // 如果实际值是null或undefined，保留默认值（如果存在）
+                if (defaults[key] !== undefined) {
+                    merged[key] = defaults[key];
+                }
+            } else if (Array.isArray(value)) {
+                // 数组：如果实际值存在且非空，使用实际值；否则使用默认值
+                if (value.length > 0) {
+                    merged[key] = [...value];
+                } else if (defaults[key] && Array.isArray(defaults[key])) {
+                    merged[key] = [...defaults[key]];
+                } else {
+                    merged[key] = [];
+                }
+            } else if (value && typeof value === 'object' && defaults[key] && typeof defaults[key] === 'object' && !Array.isArray(defaults[key])) {
+                // 嵌套对象：递归合并
+                merged[key] = this._mergeConfigWithDefaults(value, defaults[key]);
+            } else {
+                // 其他情况：使用实际值
+                merged[key] = value;
+            }
+        }
+        
+        return merged;
     }
 
     /**

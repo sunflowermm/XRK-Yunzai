@@ -55,12 +55,12 @@ function cleanConfigData(data, config) {
         if (expectedType === 'array' && Array.isArray(value)) {
           if (fieldSchema.itemType === 'object' && fieldSchema.itemSchema) {
             // 对象数组：递归清理每个对象
-            cleaned[field] = value.map(item => {
+          cleaned[field] = value.map(item => {
               if (item && typeof item === 'object' && !Array.isArray(item)) {
                 return cleanConfigData(item, { schema: { fields: fieldSchema.itemSchema.fields || {} } });
-              }
-              return item;
-            });
+            }
+            return item;
+          });
           } else {
             // 标量数组：直接保留
             cleaned[field] = value;
@@ -134,6 +134,96 @@ export default {
           res.status(500).json({
             success: false,
             message: '获取配置结构失败',
+            error: error.message
+          });
+        }
+      }
+    },
+
+    {
+      method: 'GET',
+      path: '/api/config/:name/defaults',
+      handler: async (req, res, Bot) => {
+        if (!Bot.checkApiAuthorization(req)) {
+          return res.status(403).json({ success: false, message: 'Unauthorized' });
+        }
+
+        try {
+          const { name } = req.params;
+          const { path: keyPath } = req.query || {};
+          const config = global.ConfigManager.get(name);
+
+          if (!config) {
+            return res.status(404).json({
+              success: false,
+              message: `配置 ${name} 不存在`
+            });
+          }
+
+          let defaults = {};
+          
+          // 辅助函数：从对象中通过路径获取值
+          const getValueByPath = (obj, keyPath) => {
+            if (!keyPath) return obj;
+            const keys = keyPath.split('.');
+            let current = obj;
+            for (const key of keys) {
+              const arrayMatch = key.match(/^(.+?)\[(\d+)\]$/);
+              if (arrayMatch) {
+                const [, arrayKey, index] = arrayMatch;
+                current = current?.[arrayKey]?.[parseInt(index)];
+              } else {
+                current = current?.[key];
+              }
+              if (current === undefined) return undefined;
+            }
+            return current;
+          };
+          
+          if (keyPath) {
+            // 获取子配置的默认值
+            if (name === 'system') {
+              const structure = config.getStructure();
+              const subConfig = structure.configs?.[keyPath];
+              if (subConfig && subConfig.schema) {
+                // 创建临时配置实例来获取默认值
+                const ConfigBase = (await import('../../lib/commonconfig/commonconfig.js')).default;
+                const tempConfig = Object.create(ConfigBase.prototype);
+                tempConfig.schema = subConfig.schema;
+                defaults = tempConfig.getDefaults ? tempConfig.getDefaults() : {};
+              }
+            } else if (typeof config.getDefaults === 'function') {
+              // 普通配置：从指定路径获取默认值
+              const allDefaults = config.getDefaults();
+              defaults = getValueByPath(allDefaults, keyPath) || {};
+            }
+          } else {
+            // 获取完整配置的默认值
+            if (name === 'system') {
+              // SystemConfig：返回所有子配置的默认值
+              const structure = config.getStructure();
+              defaults = {};
+              const ConfigBase = (await import('../../lib/commonconfig/commonconfig.js')).default;
+              for (const [subName, subConfig] of Object.entries(structure.configs || {})) {
+                if (subConfig.schema) {
+                  const tempConfig = Object.create(ConfigBase.prototype);
+                  tempConfig.schema = subConfig.schema;
+                  defaults[subName] = tempConfig.getDefaults ? tempConfig.getDefaults() : {};
+                }
+              }
+            } else if (typeof config.getDefaults === 'function') {
+              defaults = config.getDefaults();
+            }
+          }
+
+          res.json({
+            success: true,
+            defaults
+          });
+        } catch (error) {
+          res.status(500).json({
+            success: false,
+            message: '获取默认配置失败',
             error: error.message
           });
         }
