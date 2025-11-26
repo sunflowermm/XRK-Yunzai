@@ -3,7 +3,7 @@
  * 提供统一的配置文件读写接口
  */
 import BotUtil from '../../lib/common/util.js';
-import { deepMergeConfig, cleanConfigData } from '../../lib/commonconfig/config-utils.js';
+import { cleanConfigData } from '../../lib/commonconfig/config-utils.js';
 
 export default {
   name: 'config-manager',
@@ -66,96 +66,6 @@ export default {
           res.status(500).json({
             success: false,
             message: '获取配置结构失败',
-            error: error.message
-          });
-        }
-      }
-    },
-
-    {
-      method: 'GET',
-      path: '/api/config/:name/defaults',
-      handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
-
-        try {
-          const { name } = req.params;
-          const { path: keyPath } = req.query || {};
-          const config = global.ConfigManager.get(name);
-
-          if (!config) {
-            return res.status(404).json({
-              success: false,
-              message: `配置 ${name} 不存在`
-            });
-          }
-
-          let defaults = {};
-          
-          // 辅助函数：从对象中通过路径获取值
-          const getValueByPath = (obj, keyPath) => {
-            if (!keyPath) return obj;
-            const keys = keyPath.split('.');
-            let current = obj;
-            for (const key of keys) {
-              const arrayMatch = key.match(/^(.+?)\[(\d+)\]$/);
-              if (arrayMatch) {
-                const [, arrayKey, index] = arrayMatch;
-                current = current?.[arrayKey]?.[parseInt(index)];
-              } else {
-                current = current?.[key];
-              }
-              if (current === undefined) return undefined;
-            }
-            return current;
-          };
-          
-          if (keyPath) {
-            // 获取子配置的默认值
-            if (name === 'system') {
-              const structure = config.getStructure();
-              const subConfig = structure.configs?.[keyPath];
-              if (subConfig && subConfig.schema) {
-                // 创建临时配置实例来获取默认值
-                const ConfigBase = (await import('../../lib/commonconfig/commonconfig.js')).default;
-                const tempConfig = Object.create(ConfigBase.prototype);
-                tempConfig.schema = subConfig.schema;
-                defaults = tempConfig.getDefaults ? tempConfig.getDefaults() : {};
-              }
-            } else if (typeof config.getDefaults === 'function') {
-              // 普通配置：从指定路径获取默认值
-              const allDefaults = config.getDefaults();
-              defaults = getValueByPath(allDefaults, keyPath) || {};
-            }
-          } else {
-            // 获取完整配置的默认值
-            if (name === 'system') {
-              // SystemConfig：返回所有子配置的默认值
-              const structure = config.getStructure();
-              defaults = {};
-              const ConfigBase = (await import('../../lib/commonconfig/commonconfig.js')).default;
-              for (const [subName, subConfig] of Object.entries(structure.configs || {})) {
-                if (subConfig.schema) {
-                  const tempConfig = Object.create(ConfigBase.prototype);
-                  tempConfig.schema = subConfig.schema;
-                  defaults[subName] = tempConfig.getDefaults ? tempConfig.getDefaults() : {};
-                }
-              }
-            } else if (typeof config.getDefaults === 'function') {
-              defaults = config.getDefaults();
-            }
-          }
-
-          res.json({
-            success: true,
-            defaults
-          });
-        } catch (error) {
-          res.status(500).json({
-            success: false,
-            message: '获取默认配置失败',
             error: error.message
           });
         }
@@ -296,44 +206,8 @@ export default {
             BotUtil.makeLog('warn', `配置数据为空 [${configName}]`, 'ConfigAPI');
           }
 
-          // 清理数据：对于SystemConfig的子配置，需要获取子配置的schema
-          // 重要：先读取现有配置，然后合并新数据，避免覆盖未修改的字段
-          let cleanedData;
-          if (keyPath && configName === 'system' && typeof config.getStructure === 'function') {
-            // SystemConfig的子配置：获取子配置的schema
-            const structure = config.getStructure();
-            const subConfig = structure.configs?.[keyPath];
-            if (subConfig && subConfig.schema) {
-              // 先读取现有配置
-              let existingData = {};
-              try {
-                if (typeof config.read === 'function') {
-                  existingData = await config.read(keyPath) || {};
-                }
-              } catch (readError) {
-                BotUtil.makeLog('warn', `读取现有配置失败 [${configName}/${keyPath}]: ${readError.message}`, 'ConfigAPI');
-                existingData = {};
-              }
-              
-              // 使用深度合并：保留原有值，除非新值明确存在且不为空
-              const mergedData = deepMergeConfig(existingData, data, subConfig.schema);
-              
-              // 创建临时配置对象，使用子配置的schema
-              const tempConfig = { schema: subConfig.schema };
-              BotUtil.makeLog('info', `清理子配置数据 [${configName}/${keyPath}]，使用子配置schema`, 'ConfigAPI');
-              BotUtil.makeLog('debug', `原始数据: ${JSON.stringify(data).substring(0, 500)}`, 'ConfigAPI');
-              BotUtil.makeLog('debug', `现有配置: ${JSON.stringify(existingData).substring(0, 500)}`, 'ConfigAPI');
-              cleanedData = cleanConfigData(mergedData, tempConfig);
-              BotUtil.makeLog('debug', `清理后数据: ${JSON.stringify(cleanedData).substring(0, 500)}`, 'ConfigAPI');
-            } else {
-              // 如果没有找到子配置schema，使用默认清理
-              BotUtil.makeLog('warn', `未找到子配置schema [${configName}/${keyPath}]，使用默认清理`, 'ConfigAPI');
-              cleanedData = cleanConfigData(data, config);
-            }
-          } else {
-            // 普通配置：使用配置对象本身的schema
-            cleanedData = cleanConfigData(data, config);
-          }
+          // 清理数据：将空字符串转换为 null（对于数字字段）
+          const cleanedData = cleanConfigData(data, config);
 
           let result;
           if (keyPath) {

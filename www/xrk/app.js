@@ -32,16 +32,47 @@ class APIControlCenter {
         this._ttsPlaying = false;
         this._lastAsrFinal = '';
         this._chatHistory = this._loadChatHistory();
-        // WebSocket路径：后端注册为'device'，匹配路径为'/device'
+        this.deviceWsPaths = ['/device', '/ws/device', '/ws'];
+        this._deviceWsPathIndex = 0;
         this._deviceWsConnectingPromise = null;
         this._codeMirrorAvailable = true;
+        this.configSchemaCache = new Map();
+        this._legacyArrayFields = new Set(['headers', 'methods', 'origins']);
+        this._booleanTrueSet = new Set(['true', '1', 'yes', 'on']);
+        this._booleanFalseSet = new Set(['false', '0', 'no', 'off', '']);
+        this.formComponentRenderers = {
+            Select: this.renderSelect.bind(this),
+            MultiSelect: this.renderMultiSelect.bind(this),
+            Input: this.renderInput.bind(this),
+            InputPassword: this.renderInputPassword.bind(this),
+            InputNumber: this.renderInputNumber.bind(this),
+            Switch: this.renderSwitch.bind(this),
+            SubForm: this.renderSubForm.bind(this),
+            ArrayForm: this.renderArrayForm.bind(this),
+            Array: this.renderArray.bind(this),
+            Tags: this.renderTags.bind(this)
+        };
         this.init();
     }
 
     updateEmotionDisplay(emotion) {
         console.log('[WebClient] updateEmotionDisplay 被调用，表情:', emotion);
         
-        // 内置表情配置
+        // 动态导入表情配置（如果可用）
+        let getEmotionIcon, getEmotionAnimation, smartMatchEmotion;
+        try {
+            // 尝试使用外部表情配置
+            if (typeof getEmotionIcon === 'function') {
+                const icon = getEmotionIcon(emotion);
+                const anim = getEmotionAnimation(emotion);
+                this._applyEmotionWithAnimation(icon, anim);
+                return;
+            }
+        } catch (e) {
+            // 如果导入失败，使用内置配置
+        }
+        
+        // 内置表情配置（完整版）
         const EMOTION_ICONS = {
             happy: '😀', excited: '🤩', sad: '😢', angry: '😠', surprise: '😮',
             love: '❤️', cool: '😎', sleep: '😴', think: '🤔', wink: '😉', laugh: '😂',
@@ -1563,68 +1594,54 @@ class APIControlCenter {
 
     // ============== Streaming ASR via /device WebSocket ==============
     async ensureDeviceWs() {
-        // 如果已经连接，直接返回
         if (this._deviceWs && this._deviceWs.readyState === WebSocket.OPEN) {
             return this._deviceWs;
         }
-        // 如果正在连接，返回连接中的Promise
         if (this._deviceWsConnectingPromise) {
             return this._deviceWsConnectingPromise;
         }
-        // 开始新的连接
-        const path = '/device'; // 固定使用/device路径
+        const candidates = (this.deviceWsPaths && this.deviceWsPaths.length > 0)
+            ? this.deviceWsPaths
+            : ['/device'];
+        let attempt = 0;
+        const tryConnect = async () => {
+            const path = candidates[this._deviceWsPathIndex % candidates.length] || '/device';
             const wsUrl = this._buildDeviceWsUrl(path);
             console.log('[WebClient] 尝试连接WebSocket:', wsUrl.replace(/api_key=[^&]+/, 'api_key=***'));
-        
-        this._deviceWsConnectingPromise = this._connectDeviceWs(wsUrl)
-            .then((ws) => {
+            try {
+                const ws = await this._connectDeviceWs(wsUrl);
                 this._activeDeviceWsPath = path;
+                this._deviceWsPathIndex = 0;
                 return ws;
-            })
-            .catch((err) => {
-                console.error('[WebClient] WebSocket连接失败:', err);
-                // 如果是302错误，可能是路径或认证问题
-                if (err.message && err.message.includes('302')) {
-                    console.error('[WebClient] WebSocket返回302重定向，请检查：');
-                    console.error('  1. WebSocket路径是否正确（应为 /device）');
-                    console.error('  2. API密钥是否正确');
-                    console.error('  3. 服务器是否配置了反向代理重定向');
+            } catch (err) {
+                attempt += 1;
+                this._deviceWsPathIndex = (this._deviceWsPathIndex + 1) % candidates.length;
+                if (attempt >= candidates.length) {
+                    throw err;
                 }
+                await new Promise(r => setTimeout(r, 800));
+                return tryConnect();
+            }
+        };
+        this._deviceWsConnectingPromise = tryConnect()
+            .catch((err) => {
                 throw err;
             })
             .finally(() => {
                 this._deviceWsConnectingPromise = null;
             });
-        
         return this._deviceWsConnectingPromise;
     }
 
     _buildDeviceWsUrl(path = '/device') {
-        // 确保正确转换协议：http -> ws, https -> wss
-        let origin = this.serverUrl;
-        if (origin.startsWith('https://')) {
-            origin = origin.replace('https://', 'wss://');
-        } else if (origin.startsWith('http://')) {
-            origin = origin.replace('http://', 'ws://');
-        } else {
-            // 如果没有协议，默认使用wss（生产环境通常使用HTTPS）
-            origin = `wss://${origin}`;
-        }
-        
-        // 规范化路径
+        const origin = this.serverUrl.replace(/^http/, 'ws');
         const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-        
-        // 构建完整URL
-        const baseUrl = origin.endsWith('/') ? origin.slice(0, -1) : origin;
-        const url = new URL(normalizedPath, baseUrl);
-        
-        // 添加查询参数
+        const url = new URL(normalizedPath, origin.endsWith('/') ? origin : `${origin}/`);
         const apiKey = this._getSanitizedApiKey();
         if (apiKey) {
             url.searchParams.set('api_key', apiKey);
         }
         url.searchParams.set('client', 'web');
-        
         return url.toString();
     }
 
@@ -1637,67 +1654,25 @@ class APIControlCenter {
 
     _connectDeviceWs(wsUrl) {
         return new Promise((resolve, reject) => {
-            let ws;
             try {
-                ws = new WebSocket(wsUrl);
-                this._deviceWs = ws;
+                this._deviceWs = new WebSocket(wsUrl);
             } catch (error) {
                 this._deviceWs = null;
                 return reject(error);
             }
-            
-            // 设置超时，避免长时间等待
-            const timeout = setTimeout(() => {
-                if (ws.readyState !== WebSocket.OPEN) {
-                    ws.close();
-                    this._deviceWs = null;
-                    reject(new Error('WebSocket连接超时'));
-                }
-            }, 10000); // 10秒超时
-            
+            const ws = this._deviceWs;
             const handleOpen = () => {
-                clearTimeout(timeout);
                 ws.removeEventListener('error', handleInitialError);
-                ws.removeEventListener('close', handleInitialClose);
                 this._afterDeviceWsOpen(ws);
                 resolve(ws);
             };
-            
             const handleInitialError = (event) => {
-                clearTimeout(timeout);
                 ws.removeEventListener('open', handleOpen);
-                ws.removeEventListener('close', handleInitialClose);
                 this._deviceWs = null;
-                
-                // 尝试从错误事件中获取更多信息
-                let errorMessage = 'WebSocket连接失败';
-                if (event instanceof Error) {
-                    errorMessage = event.message;
-                } else if (event.target && event.target.readyState === WebSocket.CLOSED) {
-                    // 检查是否是302重定向
-                    const url = event.target.url || wsUrl;
-                    errorMessage = `WebSocket连接失败 (状态: ${event.target.readyState})`;
-                }
-                reject(new Error(errorMessage));
+                reject(event instanceof Error ? event : new Error('WebSocket连接失败'));
             };
-            
-            const handleInitialClose = (event) => {
-                clearTimeout(timeout);
-                ws.removeEventListener('open', handleOpen);
-                ws.removeEventListener('error', handleInitialError);
-                this._deviceWs = null;
-                
-                // 如果关闭代码是1006（异常关闭），可能是302重定向
-                if (event.code === 1006) {
-                    reject(new Error('WebSocket连接异常关闭，可能是302重定向或路径不匹配'));
-                } else {
-                    reject(new Error(`WebSocket连接关闭 (code: ${event.code}, reason: ${event.reason || '未知'})`));
-                }
-            };
-            
             ws.addEventListener('open', handleOpen, { once: true });
             ws.addEventListener('error', handleInitialError, { once: true });
-            ws.addEventListener('close', handleInitialClose, { once: true });
             this._attachDeviceWsHandlers(ws);
         });
     }
@@ -2533,13 +2508,14 @@ class APIControlCenter {
 
     _loadCodeMirror() {
         if (this._codeMirrorLoading) return this._codeMirrorLoading;
-        // 使用国内稳定CDN源，优先使用国内CDN
+        // 使用多个CDN备用方案，提高加载成功率（添加更多可用源）
         const cdnBases = [
-            'https://cdn.bootcdn.net/ajax/libs/codemirror/5.65.2',
-            'https://cdn.staticfile.org/codemirror/5.65.2',
+            'https://cdn.jsdelivr.net/npm/codemirror@5.65.2',
+            'https://fastly.jsdelivr.net/npm/codemirror@5.65.2',
             'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2',
+            'https://cdn.bootcdn.net/ajax/libs/codemirror/5.65.2',
             'https://unpkg.com/codemirror@5.65.2',
-            'https://cdn.jsdelivr.net/npm/codemirror@5.65.2'
+            'https://cdn.staticfile.org/codemirror/5.65.2'
         ];
         const cssList = [
             'codemirror.min.css',
@@ -2680,41 +2656,19 @@ class APIControlCenter {
      */
     renderArrayForm(fieldId, fieldName, fieldSchema, value) {
         const arr = Array.isArray(value) ? value : [];
-        // 获取子字段定义：优先使用fields，然后是itemSchema.fields
-        const subFields = fieldSchema.fields || fieldSchema.itemSchema?.fields || {};
-        
-        // 创建单个数组项的HTML
-        const makeItem = (item = {}, index = 0, useDefaults = false) => {
+        const subFields = fieldSchema.fields || {};
+        const makeItem = (item = {}, index = 0) => {
             let inner = '';
             for (const [subName, subSchema] of Object.entries(subFields)) {
-                // 确定值：如果useDefaults为true，优先使用默认值；否则优先使用item中的值
+                // 确保正确获取值，优先使用item中的值，然后是默认值，最后是空字符串（不是null）
                 let subVal;
-                if (useDefaults) {
-                    // 添加新项时：优先使用默认值
-                    if (subSchema.default !== undefined) {
-                        subVal = subSchema.default;
-                    } else if (subSchema.type === 'array') {
-                        subVal = [];
-                    } else if (subSchema.type === 'object') {
-                        subVal = {};
-                    } else if (subSchema.type === 'string' || subSchema.type === 'text') {
-                        subVal = '';
-                    } else if (subSchema.type === 'number') {
-                        subVal = null;
-                    } else if (subSchema.type === 'boolean') {
-                        subVal = false;
-                    } else {
-                        subVal = null;
-                    }
+                if (item && Object.prototype.hasOwnProperty.call(item, subName)) {
+                    subVal = item[subName];
+                } else if (subSchema.default !== undefined) {
+                    subVal = subSchema.default;
                 } else {
-                    // 渲染已有项时：优先使用item中的值
-                    if (item && Object.prototype.hasOwnProperty.call(item, subName)) {
-                        subVal = item[subName];
-                    } else if (subSchema.default !== undefined) {
-                        subVal = subSchema.default;
-                    } else {
-                        subVal = (subSchema.type === 'string' || subSchema.type === 'text') ? '' : null;
-                    }
+                    // 对于字符串类型，使用空字符串而不是null，避免配置丢失
+                    subVal = (subSchema.type === 'string' || subSchema.type === 'text') ? '' : null;
                 }
                 inner += `
                     <div class="config-form-subfield">
@@ -2733,17 +2687,11 @@ class APIControlCenter {
             `;
         };
 
-        // 将schema信息存储在data属性中，以便添加项时使用
-        // 只存储必要的字段定义信息，避免数据过大
-        const schemaData = {
-            fields: subFields,
-            itemSchema: fieldSchema.itemSchema
-        };
-        const schemaJson = JSON.stringify(schemaData);
-        let html = `<div class="config-form-arrayform" id="${fieldId}" data-field="${fieldName}" data-schema="${this.escapeHtml(schemaJson)}">`;
-        // 渲染已有的数组项
-        if (arr.length > 0) {
-            arr.forEach((item, i) => { html += makeItem(item || {}, i, false); });
+        let html = `<div class="config-form-arrayform" id="${fieldId}" data-field="${fieldName}">`;
+        if (arr.length === 0) {
+            html += makeItem({}, 0);
+        } else {
+            arr.forEach((item, i) => { html += makeItem(item || {}, i); });
         }
         html += `<button type="button" class="btn btn-sm btn-primary config-form-arrayform-add" data-field="${fieldName}">添加项</button>`;
         html += `</div>`;
@@ -3678,6 +3626,7 @@ class APIControlCenter {
 
             // 先获取配置结构，了解配置类型
             let configStructure = null;
+            const schemaKey = this._buildSchemaKey(configName);
             try {
                 const structureRes = await fetch(`${this.serverUrl}/api/config/${configName}/structure`, {
                     headers: this.getHeaders()
@@ -3686,6 +3635,9 @@ class APIControlCenter {
                     const structureData = await structureRes.json();
                     if (structureData.success) {
                         configStructure = structureData.structure;
+                        if (configStructure?.schema) {
+                            this._cacheConfigSchema(schemaKey, configStructure.schema);
+                        }
                     }
                 }
             } catch (e) {
@@ -3763,23 +3715,7 @@ class APIControlCenter {
                 configData = {};
             }
             
-            // 如果有schema，合并默认值（但不覆盖已存在的字段）
             if (hasSchema) {
-                try {
-                    const defaultsRes = await fetch(`${this.serverUrl}/api/config/${configName}/defaults`, {
-                        headers: this.getHeaders()
-                    });
-                    if (defaultsRes.ok) {
-                        const defaultsData = await defaultsRes.json();
-                        if (defaultsData.success && defaultsData.defaults) {
-                            // 深度合并：默认值作为基础，实际值覆盖默认值
-                            configData = this._mergeConfigWithDefaults(configData, defaultsData.defaults);
-                        }
-                    }
-                } catch (e) {
-                    console.warn('获取默认配置失败:', e);
-                }
-                
                 // 使用可视化表单编辑器
                 this.renderConfigForm(configName, configData, configStructure.schema, editorPanel, editorTextarea);
             } else {
@@ -3798,6 +3734,7 @@ class APIControlCenter {
                 editorTextarea.value = jsonString;
                 editorTextarea.disabled = false;
                 editorTextarea.dataset.configName = configName;
+                delete editorTextarea.dataset.schemaKey;
 
                 // 初始化代码编辑器
                 if (this.configEditor) {
@@ -3934,6 +3871,7 @@ class APIControlCenter {
             
             // 获取子配置的结构信息
             let subConfigStructure = null;
+            const schemaKey = this._buildSchemaKey(parentName, subName);
             try {
                 const structureRes = await fetch(`${this.serverUrl}/api/config/${parentName}/structure`, {
                     headers: this.getHeaders()
@@ -3944,6 +3882,9 @@ class APIControlCenter {
                         const subConfigMeta = structureData.structure.configs[subName];
                         if (subConfigMeta && subConfigMeta.schema) {
                             subConfigStructure = subConfigMeta.schema;
+                            this._cacheConfigSchema(schemaKey, subConfigStructure);
+                        } else {
+                            this.configSchemaCache.delete(schemaKey);
                         }
                     }
                 }
@@ -3961,22 +3902,6 @@ class APIControlCenter {
             const hasSchema = subConfigStructure && subConfigStructure.fields;
             
             if (hasSchema) {
-                // 如果有schema，合并默认值（但不覆盖已存在的字段）
-                try {
-                    const defaultsRes = await fetch(`${this.serverUrl}/api/config/${parentName}/defaults?path=${subName}`, {
-                        headers: this.getHeaders()
-                    });
-                    if (defaultsRes.ok) {
-                        const defaultsData = await defaultsRes.json();
-                        if (defaultsData.success && defaultsData.defaults) {
-                            // 深度合并：默认值作为基础，实际值覆盖默认值
-                            subConfigData = this._mergeConfigWithDefaults(subConfigData, defaultsData.defaults);
-                        }
-                    }
-                } catch (e) {
-                    console.warn('获取子配置默认值失败:', e);
-                }
-                
                 // 使用可视化表单编辑器
                 this.renderConfigForm(parentName, subConfigData, subConfigStructure, editorPanel, editorTextarea, subName);
             } else {
@@ -3997,6 +3922,7 @@ class APIControlCenter {
                 editorTextarea.disabled = false;
                 editorTextarea.dataset.configName = parentName;
                 editorTextarea.dataset.subName = subName;
+                delete editorTextarea.dataset.schemaKey;
 
                 // 初始化编辑器
                 if (this.configEditor) {
@@ -4060,25 +3986,9 @@ class APIControlCenter {
     }
 
     async saveSubConfig() {
-        // 尝试多种方式获取 editorTextarea
-        let editorTextarea = document.getElementById('configEditorTextarea');
-        
-        // 如果找不到，尝试从整个文档中查找
+        const editorTextarea = this._getEditorTextarea();
         if (!editorTextarea) {
-            editorTextarea = document.querySelector('textarea#configEditorTextarea');
-        }
-        
-        // 如果还是没有，尝试通过 data 属性查找
-        if (!editorTextarea) {
-            editorTextarea = document.querySelector('textarea[data-config-name][data-sub-name]');
-        }
-        
-        if (!editorTextarea) {
-            console.error('无法找到子配置编辑器，当前 DOM 状态:', {
-                hasConfigEditorTextarea: !!document.getElementById('configEditorTextarea'),
-                hasFormContainer: !!document.querySelector('.config-form-container'),
-                hasEditorPanel: !!document.getElementById('configEditorPanel')
-            });
+            this._logMissingEditor();
             this.showToast('无法找到配置编辑器，请刷新页面重试', 'error');
             return;
         }
@@ -4116,11 +4026,9 @@ class APIControlCenter {
             configData = {};
         }
         
-        // 数据清理和验证：确保数组字段是数组类型（修复headers.join错误）
-        configData = this._normalizeConfigData(configData);
-        
-        // 调试：输出收集的数据
-        console.log('[ConfigEditor] 保存子配置数据:', { configName, subName, configData });
+        const schemaKey = editorTextarea.dataset.schemaKey || this._buildSchemaKey(configName, subName);
+        const schema = this._getCachedSchema(schemaKey);
+        configData = this._normalizeConfigData(configData, schema);
 
         // SystemConfig 的子配置保存：使用 path 参数指定子配置名称
         const response = await fetch(`${this.serverUrl}/api/config/${configName}/write`, {
@@ -4153,8 +4061,11 @@ class APIControlCenter {
     }
 
     async validateSubConfig() {
-        const editorTextarea = document.getElementById('configEditorTextarea');
-        if (!editorTextarea || !editorTextarea.dataset.configName || !editorTextarea.dataset.subName) return;
+        const editorTextarea = this._getEditorTextarea();
+        if (!editorTextarea || !editorTextarea.dataset.configName || !editorTextarea.dataset.subName) {
+            this._logMissingEditor();
+            return;
+        }
 
         const configName = editorTextarea.dataset.configName;
         const subName = editorTextarea.dataset.subName;
@@ -4197,25 +4108,9 @@ class APIControlCenter {
     }
 
     async saveConfig() {
-        // 尝试多种方式获取 editorTextarea
-        let editorTextarea = document.getElementById('configEditorTextarea');
-        
-        // 如果找不到，尝试从整个文档中查找
+        const editorTextarea = this._getEditorTextarea();
         if (!editorTextarea) {
-            editorTextarea = document.querySelector('textarea#configEditorTextarea');
-        }
-        
-        // 如果还是没有，尝试通过 data 属性查找
-        if (!editorTextarea) {
-            editorTextarea = document.querySelector('textarea[data-config-name]');
-        }
-        
-        if (!editorTextarea) {
-            console.error('无法找到配置编辑器，当前 DOM 状态:', {
-                hasConfigEditorTextarea: !!document.getElementById('configEditorTextarea'),
-                hasFormContainer: !!document.querySelector('.config-form-container'),
-                hasEditorPanel: !!document.getElementById('configEditorPanel')
-            });
+            this._logMissingEditor();
             this.showToast('无法找到配置编辑器，请刷新页面重试', 'error');
             return;
         }
@@ -4257,8 +4152,9 @@ class APIControlCenter {
             configData = {};
         }
         
-        // 数据清理和验证：确保数组字段是数组类型（修复headers.join错误）
-        configData = this._normalizeConfigData(configData);
+        const schemaKey = editorTextarea.dataset.schemaKey || this._buildSchemaKey(configName, null);
+        const schema = this._getCachedSchema(schemaKey);
+        configData = this._normalizeConfigData(configData, schema);
 
         try {
             console.log('保存配置:', { configName, configData });
@@ -4293,8 +4189,11 @@ class APIControlCenter {
     }
 
     async validateConfig() {
-        const editorTextarea = document.getElementById('configEditorTextarea');
-        if (!editorTextarea || !editorTextarea.dataset.configName) return;
+        const editorTextarea = this._getEditorTextarea();
+        if (!editorTextarea || !editorTextarea.dataset.configName) {
+            this._logMissingEditor();
+            return;
+        }
 
         const configName = editorTextarea.dataset.configName;
         let configData;
@@ -4463,12 +4362,13 @@ class APIControlCenter {
             }
         }
         
+        const schemaKey = this._buildSchemaKey(configName, subName);
+        if (schema) {
+            this._cacheConfigSchema(schemaKey, schema);
+        }
+
         const formContainer = document.createElement('div');
         formContainer.className = 'config-form-container';
-        // 存储schema信息，供数据收集时使用
-        if (schema) {
-            formContainer.dataset.schema = JSON.stringify(schema);
-        }
         formContainer.innerHTML = this.generateFormHTML(configData, schema.fields || {}, schema.required || []);
         
         // 替换编辑器内容
@@ -4495,6 +4395,9 @@ class APIControlCenter {
             delete textareaElement.dataset.subName;
         }
         textareaElement.dataset.hasForm = 'true';
+        if (schemaKey) {
+            textareaElement.dataset.schemaKey = schemaKey;
+        }
         
         // 绑定表单事件
         this.bindFormEvents(formContainer, configName, subName);
@@ -4577,30 +4480,8 @@ class APIControlCenter {
      * 渲染表单字段
      */
     renderFormField(fieldId, fieldName, fieldSchema, value, component) {
-        switch (component) {
-            case 'Select':
-                return this.renderSelect(fieldId, fieldName, fieldSchema, value);
-            case 'MultiSelect':
-                return this.renderMultiSelect(fieldId, fieldName, fieldSchema, value);
-            case 'Input':
-                return this.renderInput(fieldId, fieldName, fieldSchema, value);
-            case 'InputPassword':
-                return this.renderInputPassword(fieldId, fieldName, fieldSchema, value);
-            case 'InputNumber':
-                return this.renderInputNumber(fieldId, fieldName, fieldSchema, value);
-            case 'Switch':
-                return this.renderSwitch(fieldId, fieldName, fieldSchema, value);
-            case 'SubForm':
-                return this.renderSubForm(fieldId, fieldName, fieldSchema, value);
-            case 'ArrayForm':
-                return this.renderArrayForm(fieldId, fieldName, fieldSchema, value);
-            case 'Array':
-                return this.renderArray(fieldId, fieldName, fieldSchema, value);
-            case 'Tags':
-                return this.renderTags(fieldId, fieldName, fieldSchema, value);
-            default:
-                return this.renderInput(fieldId, fieldName, fieldSchema, value);
-        }
+        const renderer = this.formComponentRenderers[component] || this.formComponentRenderers.Input;
+        return renderer(fieldId, fieldName, fieldSchema, value);
     }
 
     /**
@@ -4765,10 +4646,6 @@ class APIControlCenter {
     bindFormEvents(formContainer, configName, subName) {
         // 数组操作（标量）
         formContainer.querySelectorAll('.config-form-array-add').forEach(btn => {
-            // 检查是否已经绑定过（避免重复绑定）
-            if (btn.dataset.bound === 'true') return;
-            btn.dataset.bound = 'true';
-            
             btn.addEventListener('click', () => {
                 const fieldName = btn.dataset.field;
                 const arrayContainer = btn.closest('.config-form-array');
@@ -4792,70 +4669,10 @@ class APIControlCenter {
             });
         });
 
-        // Tags组件操作（字符串数组）
-        formContainer.querySelectorAll('.config-form-tags').forEach(tagsContainer => {
-            const input = tagsContainer.querySelector('.config-form-tags-input');
-            const addBtn = tagsContainer.querySelector('.config-form-tags-add');
-            const tagsList = tagsContainer.querySelector('.config-form-tags-list');
-            
-            if (!input || !addBtn || !tagsList) return;
-            
-            // 检查是否已经绑定过（避免重复绑定）
-            if (tagsContainer.dataset.bound === 'true') return;
-            tagsContainer.dataset.bound = 'true';
-            
-            const addTag = () => {
-                const value = input.value.trim();
-                if (!value) return;
-                
-                const tagDiv = document.createElement('div');
-                tagDiv.className = 'config-form-tag-item';
-                const index = tagsList.children.length;
-                tagDiv.dataset.tagIndex = index;
-                tagDiv.innerHTML = `
-                    <span class="config-form-tag-text">${this.escapeHtml(value)}</span>
-                    <button type="button" class="config-form-tag-remove" data-index="${index}">×</button>
-                `;
-                tagsList.appendChild(tagDiv);
-                input.value = '';
-                
-                // 绑定新标签的删除按钮
-                tagDiv.querySelector('.config-form-tag-remove').addEventListener('click', function() {
-                    tagDiv.remove();
-                });
-            };
-            
-            // 绑定输入框回车事件
-            input.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    addTag();
-                }
-            });
-            
-            // 绑定添加按钮点击事件
-            addBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                addTag();
-            });
-            
-            // 绑定已有标签的删除按钮
-            tagsList.querySelectorAll('.config-form-tag-remove').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    this.closest('.config-form-tag-item').remove();
-                });
-            });
-        });
-
         // ArrayForm（对象数组）操作
         formContainer.querySelectorAll('.config-form-arrayform').forEach(arrayForm => {
             const addBtn = arrayForm.querySelector('.config-form-arrayform-add');
             if (addBtn) {
-                // 检查是否已经绑定过（避免重复绑定）
-                if (addBtn.dataset.bound === 'true') return;
-                addBtn.dataset.bound = 'true';
-                
                 addBtn.addEventListener('click', () => {
                     const index = arrayForm.querySelectorAll('.config-form-arrayform-item').length;
                     const fieldName = arrayForm.dataset.field;
@@ -4866,71 +4683,13 @@ class APIControlCenter {
                     item.className = 'config-form-arrayform-item';
                     item.dataset.index = String(index);
                     
-                    // 优先从schema创建新项（使用默认值），如果没有schema再尝试克隆已有项
-                    let itemCreated = false;
-                    
-                    // 方法1：从schema创建新项（推荐，使用默认值）
-                    try {
-                        const schemaJson = arrayForm.dataset.schema;
-                        if (schemaJson) {
-                            const schemaData = JSON.parse(schemaJson);
-                            const subFields = schemaData.fields || schemaData.itemSchema?.fields || {};
-                            
-                            if (Object.keys(subFields).length > 0) {
-                                let inner = '';
-                                for (const [subName, subSchema] of Object.entries(subFields)) {
-                                    // 使用默认值创建新项
-                                    let subVal;
-                                    if (subSchema.default !== undefined) {
-                                        // 深拷贝默认值（如果是对象或数组）
-                                        if (Array.isArray(subSchema.default)) {
-                                            subVal = [...subSchema.default];
-                                        } else if (subSchema.default && typeof subSchema.default === 'object') {
-                                            subVal = JSON.parse(JSON.stringify(subSchema.default));
-                                        } else {
-                                            subVal = subSchema.default;
-                                        }
-                                    } else if (subSchema.type === 'array') {
-                                        subVal = [];
-                                    } else if (subSchema.type === 'object') {
-                                        subVal = {};
-                                    } else if (subSchema.type === 'string' || subSchema.type === 'text') {
-                                        subVal = '';
-                                    } else if (subSchema.type === 'number') {
-                                        subVal = null;
-                                    } else if (subSchema.type === 'boolean') {
-                                        subVal = false;
-                                    } else {
-                                        subVal = null;
-                                    }
-                                    
-                                    const subFieldId = `${arrayForm.id}-${index}-${subName}`;
-                                    inner += `
-                                        <div class="config-form-subfield">
-                                            <label class="config-form-label">${subSchema.label || subName}</label>
-                                            ${this.renderFormField(subFieldId, subName, subSchema, subVal, subSchema.component || this.inferComponentType(subSchema.type, subSchema))}
-                                        </div>
-                                    `;
-                                }
-                                item.innerHTML = `
-                                    ${inner}
-                                    <div class="config-form-arrayform-actions">
-                                        <button type="button" class="btn btn-sm btn-danger config-form-arrayform-remove" data-index="${index}">删除</button>
-                                    </div>
-                                `;
-                                itemCreated = true;
-                            }
-                        }
-                    } catch (e) {
-                        console.warn(`[ConfigEditor] 从schema创建新项失败:`, e);
-                    }
-                    
-                    // 方法2：如果schema创建失败，尝试克隆第一个item（作为后备方案）
-                    if (!itemCreated && first) {
+                    if (first) {
+                        // 克隆第一个item的结构，但清空值
                         const clone = first.cloneNode(true);
                         // 更新所有data-field属性，确保它们保持正确的字段名
                         clone.querySelectorAll('[data-field]').forEach(el => {
-                            // 保持原有的data-field值，只清空输入值
+                            // 保持原有的data-field值（如 "domain", "ssl.enabled" 等）
+                            // 只清空输入值
                             if (el.type === 'checkbox') {
                                 el.checked = false;
                             } else if (el.type === 'number') {
@@ -4940,117 +4699,36 @@ class APIControlCenter {
                             } else {
                                 el.value = '';
                             }
-                            // 更新ID，确保唯一性
-                            if (el.id) {
-                                const oldId = el.id;
-                                const newId = oldId.replace(/\d+$/, index) || `${oldId}-${index}`;
-                                el.id = newId;
-                                // 更新label的for属性
-                                const label = formContainer.querySelector(`label[for="${oldId}"]`);
-                                if (label) {
-                                    label.setAttribute('for', newId);
-                                }
-                            }
                         });
                         // 更新删除按钮的索引
                         const rmBtn = clone.querySelector('.config-form-arrayform-remove');
                         if (rmBtn) {
                             rmBtn.dataset.index = String(index);
-                        }
-                        item.innerHTML = clone.innerHTML;
-                        itemCreated = true;
+                            rmBtn.addEventListener('click', () => item.remove());
                     }
-                    
-                    // 方法3：如果都失败了，至少创建一个带删除按钮的结构
-                    if (!itemCreated) {
-                        console.error(`[ConfigEditor] 无法为字段 ${fieldName} 创建新项：缺少schema和模板项`);
+                        item.innerHTML = clone.innerHTML;
+                    } else {
+                        // 如果没有第一个item，创建一个空的结构
                         item.innerHTML = `<div class="config-form-arrayform-actions"><button type="button" class="btn btn-sm btn-danger config-form-arrayform-remove" data-index="${index}">删除</button></div>`;
                     }
                     
                     arrayForm.insertBefore(item, addBtn);
-                    
-                    // 重新绑定删除按钮事件
                     const rm = item.querySelector('.config-form-arrayform-remove');
-                    if (rm) {
-                        rm.addEventListener('click', () => item.remove());
-                    }
-                    
-                    // 重新绑定新添加项内的所有表单事件（如Switch、Select、Tags、Array等）
-                    this._bindItemFormEvents(item, formContainer);
+                    if (rm) rm.addEventListener('click', () => item.remove());
                 });
             }
-            
-            // 绑定已有项的删除按钮
             arrayForm.querySelectorAll('.config-form-arrayform-remove').forEach(btn => {
                 btn.addEventListener('click', function() {
                     this.closest('.config-form-arrayform-item')?.remove();
                 });
             });
         });
-    }
 
-    /**
-     * 绑定单个ArrayForm项内的表单事件
-     * @private
-     */
-    _bindItemFormEvents(itemElement, formContainer) {
-        // 绑定Switch组件
-        itemElement.querySelectorAll('.config-form-switch').forEach(switchEl => {
-            const checkbox = switchEl.querySelector('input[type="checkbox"]');
-            if (checkbox && !checkbox.dataset.bound) {
-                checkbox.dataset.bound = 'true';
-                checkbox.addEventListener('change', () => {
-                    switchEl.classList.toggle('checked', checkbox.checked);
-                });
-            }
-        });
-        
-        // 绑定MultiSelect组件
-        itemElement.querySelectorAll('.config-form-multiselect').forEach(multiSelect => {
-            const toggle = multiSelect.querySelector('.config-form-multiselect-toggle');
-            const dropdown = multiSelect.querySelector('.config-form-multiselect-dropdown');
-            const checkboxes = multiSelect.querySelectorAll('input[type="checkbox"]');
-            
-            if (toggle && dropdown && !toggle.dataset.bound) {
-                toggle.dataset.bound = 'true';
-                toggle.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const isOpen = dropdown.style.display !== 'none';
-                    dropdown.style.display = isOpen ? 'none' : 'block';
-                });
-                
-                // 点击外部关闭下拉框
-                const clickHandler = (e) => {
-                    if (!multiSelect.contains(e.target)) {
-                        dropdown.style.display = 'none';
-                    }
-                };
-                document.addEventListener('click', clickHandler);
-                
-                // 绑定复选框变化
-                checkboxes.forEach(cb => {
-                    if (!cb.dataset.bound) {
-                        cb.dataset.bound = 'true';
-                        cb.addEventListener('change', () => {
-                            const selected = Array.from(checkboxes).filter(c => c.checked).map(c => c.value);
-                            this.updateMultiSelectTags(multiSelect, selected);
-                        });
-                    }
-                });
-            }
-        });
-        
-        // 绑定Tags组件（只绑定新添加项内的）
-        itemElement.querySelectorAll('.config-form-tags').forEach(tagsContainer => {
+        // Tags 组件操作
+        formContainer.querySelectorAll('.config-form-tags').forEach(tagsContainer => {
             const input = tagsContainer.querySelector('.config-form-tags-input');
             const addBtn = tagsContainer.querySelector('.config-form-tags-add');
             const tagsList = tagsContainer.querySelector('.config-form-tags-list');
-            
-            if (!input || !addBtn || !tagsList) return;
-            
-            // 检查是否已经绑定过
-            if (tagsContainer.dataset.bound === 'true') return;
-            tagsContainer.dataset.bound = 'true';
             
             const addTag = () => {
                 const value = input.value.trim();
@@ -5072,81 +4750,23 @@ class APIControlCenter {
                 });
             };
             
-            input.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    addTag();
-                }
-            });
+            if (input) {
+                input.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addTag();
+                    }
+                });
+            }
             
-            addBtn.addEventListener('click', addTag);
+            if (addBtn) {
+                addBtn.addEventListener('click', addTag);
+            }
             
             // 绑定已有标签的删除按钮
             tagsList.querySelectorAll('.config-form-tag-remove').forEach(btn => {
                 btn.addEventListener('click', function() {
                     this.closest('.config-form-tag-item').remove();
-                });
-            });
-        });
-        
-        // 绑定Array组件（只绑定新添加项内的）
-        itemElement.querySelectorAll('.config-form-array').forEach(arrayContainer => {
-            const addBtn = arrayContainer.querySelector('.config-form-array-add');
-            if (!addBtn) return;
-            
-            // 检查是否已经绑定过
-            if (arrayContainer.dataset.bound === 'true') return;
-            arrayContainer.dataset.bound = 'true';
-            
-            addBtn.addEventListener('click', () => {
-                const fieldName = addBtn.dataset.field;
-                const index = arrayContainer.querySelectorAll('.config-form-array-item').length;
-                const itemDiv = document.createElement('div');
-                itemDiv.className = 'config-form-array-item';
-                itemDiv.innerHTML = `
-                    <input type="text" class="config-form-input" data-array-index="${index}" value="" />
-                    <button type="button" class="btn btn-sm btn-danger config-form-array-remove" data-index="${index}">删除</button>
-                `;
-                arrayContainer.insertBefore(itemDiv, addBtn);
-                itemDiv.querySelector('.config-form-array-remove').addEventListener('click', function() {
-                    itemDiv.remove();
-                });
-            });
-            
-            arrayContainer.querySelectorAll('.config-form-array-remove').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    this.closest('.config-form-array-item').remove();
-                });
-            });
-        });
-        
-        // 绑定Array组件（只绑定新添加项内的）
-        itemElement.querySelectorAll('.config-form-array').forEach(arrayContainer => {
-            const addBtn = arrayContainer.querySelector('.config-form-array-add');
-            if (!addBtn) return;
-            
-            // 检查是否已经绑定过
-            if (arrayContainer.dataset.bound === 'true') return;
-            arrayContainer.dataset.bound = 'true';
-            
-            addBtn.addEventListener('click', () => {
-                const fieldName = addBtn.dataset.field;
-                const index = arrayContainer.querySelectorAll('.config-form-array-item').length;
-                const itemDiv = document.createElement('div');
-                itemDiv.className = 'config-form-array-item';
-                itemDiv.innerHTML = `
-                    <input type="text" class="config-form-input" data-array-index="${index}" value="" />
-                    <button type="button" class="btn btn-sm btn-danger config-form-array-remove" data-index="${index}">删除</button>
-                `;
-                arrayContainer.insertBefore(itemDiv, addBtn);
-                itemDiv.querySelector('.config-form-array-remove').addEventListener('click', function() {
-                    itemDiv.remove();
-                });
-            });
-            
-            arrayContainer.querySelectorAll('.config-form-array-remove').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    this.closest('.config-form-array-item').remove();
                 });
             });
         });
@@ -5182,12 +4802,6 @@ class APIControlCenter {
      * 从表单收集数据
      * 确保所有字段都被收集，即使值为 null 或空
      * 同时确保所有 schema 中定义的字段都在数据中（即使没有对应的表单元素）
-     * 
-     * 改进：
-     * 1. 确保数组字段总是被收集为数组（即使为空）
-     * 2. 确保布尔字段总是被收集为布尔值
-     * 3. 确保数字字段总是被收集为数字或null
-     * 4. 避免覆盖未修改的字段
      */
     collectFormData(formContainer) {
         const data = {};
@@ -5197,12 +4811,6 @@ class APIControlCenter {
         formContainer.querySelectorAll('.config-form-arrayform [data-field]').forEach(el => skipFields.add(el));
         
         // 收集所有表单字段
-        // 先收集所有字段，然后按路径分组，避免重复收集
-        const fieldMap = new Map(); // 用于跟踪已收集的字段路径
-        
-        // 获取schema信息（如果存在），用于确定字段类型
-        const schemaInfo = this._getSchemaFromForm(formContainer);
-        
         const fields = formContainer.querySelectorAll('[data-field]');
         
         fields.forEach(field => {
@@ -5210,49 +4818,12 @@ class APIControlCenter {
             const fieldName = field.dataset.field;
             if (!fieldName) return;
             
-            // 跳过SubForm容器本身的data-field（只收集子字段）
-            if (field.classList.contains('config-form-subform')) return;
-            
-            // 跳过ArrayForm容器本身的data-field（已在下面单独处理）
-            if (field.classList.contains('config-form-arrayform')) return;
-            
-            // 跳过Tags容器本身的data-field（已在下面单独处理）
-            if (field.classList.contains('config-form-tags')) return;
-            
-            // 跳过Array容器本身的data-field（已在下面单独处理）
-            if (field.classList.contains('config-form-array')) return;
-            
-            // 如果字段在SubForm内，确保路径正确
-            const subForm = field.closest('.config-form-subform');
-            if (subForm && !fieldName.includes('.')) {
-                // 字段在SubForm内但没有点号，说明是子字段，需要加上父字段名
-                const parentField = subForm.dataset.field;
-                if (parentField) {
-                    // 已经在renderSubForm时设置了正确的data-field（fieldName.subFieldName）
-                    // 这里不需要修改
-                }
-            }
-            
-            // 检查是否已经收集过这个路径（避免重复）
-            if (fieldMap.has(fieldName)) {
-                // 如果已经收集过，跳过（优先保留第一次收集的值）
-                return;
-            }
-            fieldMap.set(fieldName, true);
-            
             collectedFields.add(fieldName);
             const fieldPath = fieldName.split('.');
             
             if (fieldPath.length === 1) {
                 // 简单字段
-                // 检查是否是Switch组件（checkbox在label内）
-                const switchContainer = field.closest('.config-form-switch');
-                const checkbox = switchContainer ? switchContainer.querySelector('input[type="checkbox"]') : null;
-                if (checkbox && checkbox.dataset.field === fieldName) {
-                    // Switch组件：收集checkbox的checked状态
-                    data[fieldName] = checkbox.checked;
-                } else if (field.type === 'checkbox') {
-                    // 普通checkbox
+                if (field.type === 'checkbox') {
                     data[fieldName] = field.checked;
                 } else if (field.type === 'number') {
                     // 数字字段：空字符串或无效值保持为 null（允许 null）
@@ -5285,24 +4856,16 @@ class APIControlCenter {
                     data[fieldName] = field.value || '';
                 }
             } else {
-                // 嵌套字段：确保正确创建嵌套结构
+                // 嵌套字段
                 let current = data;
                 for (let i = 0; i < fieldPath.length - 1; i++) {
-                    const pathKey = fieldPath[i];
-                    if (!current[pathKey] || typeof current[pathKey] !== 'object' || Array.isArray(current[pathKey])) {
-                        current[pathKey] = {};
+                    if (!current[fieldPath[i]]) {
+                        current[fieldPath[i]] = {};
                     }
-                    current = current[pathKey];
+                    current = current[fieldPath[i]];
                 }
                 const lastKey = fieldPath[fieldPath.length - 1];
-                // 检查是否是Switch组件（checkbox在label内）
-                const switchContainer = field.closest('.config-form-switch');
-                const checkbox = switchContainer ? switchContainer.querySelector('input[type="checkbox"]') : null;
-                if (checkbox && checkbox.dataset.field === fieldName) {
-                    // Switch组件：收集checkbox的checked状态
-                    current[lastKey] = checkbox.checked;
-                } else if (field.type === 'checkbox') {
-                    // 普通checkbox
+                if (field.type === 'checkbox') {
                     current[lastKey] = field.checked;
                 } else if (field.type === 'number') {
                     const numVal = field.value !== '' && field.value !== null && field.value !== undefined ? Number(field.value) : null;
@@ -5340,10 +4903,6 @@ class APIControlCenter {
             const fieldName = arrayContainer.dataset.field;
             if (!fieldName) return;
             
-            // 检查是否已经收集过（避免重复）
-            if (fieldMap.has(fieldName)) return;
-            fieldMap.set(fieldName, true);
-            
             collectedFields.add(fieldName);
             const items = Array.from(arrayContainer.querySelectorAll('.config-form-array-item input'))
                 .map(input => {
@@ -5357,61 +4916,26 @@ class APIControlCenter {
                 })
                 .filter(item => item !== null);
             
-            // 确保总是数组类型，即使为空
-            const result = Array.isArray(items) ? items : [];
-            
-            // 处理嵌套路径
-            const fieldPath = fieldName.split('.');
-            if (fieldPath.length === 1) {
-                data[fieldName] = result;
-            } else {
-                // 嵌套字段
-                let current = data;
-                for (let i = 0; i < fieldPath.length - 1; i++) {
-                    if (!current[fieldPath[i]] || typeof current[fieldPath[i]] !== 'object' || Array.isArray(current[fieldPath[i]])) {
-                        current[fieldPath[i]] = {};
-                    }
-                    current = current[fieldPath[i]];
-                }
-                current[fieldPath[fieldPath.length - 1]] = result;
-            }
+            // 即使数组为空，也保留键（空数组）
+            data[fieldName] = items;
         });
         
         // 处理 ArrayForm（对象数组）字段
         formContainer.querySelectorAll('.config-form-arrayform').forEach(arrayForm => {
             const fieldName = arrayForm.dataset.field;
             if (!fieldName) return;
-            
-            // 检查是否已经收集过（避免重复）
-            if (fieldMap.has(fieldName)) return;
-            fieldMap.set(fieldName, true);
-            
             collectedFields.add(fieldName);
             const items = [];
             arrayForm.querySelectorAll('.config-form-arrayform-item').forEach(itemEl => {
                 const itemObj = {};
                 // 查找所有有data-field属性的元素，包括嵌套的
-                // 只查找直接子元素和子元素内的字段，避免查找到ArrayForm容器本身
                 const itemFields = itemEl.querySelectorAll('[data-field]');
                 itemFields.forEach(f => {
                     const name = f.dataset.field;
                     if (!name) return;
                     
                     // 跳过ArrayForm容器本身的data-field
-                    if (f.closest('.config-form-arrayform') === arrayForm && f !== arrayForm) {
-                        // 确保字段在item内，而不是在ArrayForm容器上
-                        if (f.closest('.config-form-arrayform-item') !== itemEl) return;
-                    }
-                    
-                    // 跳过删除按钮等非输入元素
-                    if (f.classList.contains('config-form-arrayform-remove') || 
-                        f.classList.contains('config-form-arrayform-add')) return;
-                    
-                    // 跳过SubForm、ArrayForm、Tags、Array容器本身的data-field
-                    if (f.classList.contains('config-form-subform') ||
-                        f.classList.contains('config-form-arrayform') ||
-                        f.classList.contains('config-form-tags') ||
-                        f.classList.contains('config-form-array')) return;
+                    if (f.classList.contains('config-form-arrayform')) return;
                     
                     const path = name.split('.');
                     let cur = itemObj;
@@ -5423,14 +4947,7 @@ class APIControlCenter {
                     const last = path[path.length - 1];
                     
                     // 处理不同类型的输入
-                    // 检查是否是Switch组件（checkbox在label内）
-                    const switchContainer = f.closest('.config-form-switch');
-                    const checkbox = switchContainer ? switchContainer.querySelector('input[type="checkbox"]') : null;
-                    if (checkbox && checkbox.dataset.field === name) {
-                        // Switch组件：收集checkbox的checked状态
-                        cur[last] = checkbox.checked;
-                    } else if (f.type === 'checkbox') {
-                        // 普通checkbox
+                    if (f.type === 'checkbox') {
                         cur[last] = f.checked;
                     } else if (f.type === 'number') {
                         const numVal = f.value !== '' && f.value !== null && f.value !== undefined ? Number(f.value) : null;
@@ -5450,12 +4967,6 @@ class APIControlCenter {
                         } else {
                             cur[last] = null;
                         }
-                    } else if (f.closest('.config-form-multiselect')) {
-                        // MultiSelect：收集所有选中的值
-                        const multiSelect = f.closest('.config-form-multiselect');
-                        const checkboxes = multiSelect.querySelectorAll('input[type="checkbox"]');
-                        const selected = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
-                        cur[last] = selected.length > 0 ? selected : [];
                     } else {
                         // 文本输入：保留实际值，空字符串也保留（避免配置丢失）
                         const value = f.value || '';
@@ -5469,29 +4980,12 @@ class APIControlCenter {
                 // 不要过滤掉空对象，因为用户可能正在填写
                 // 只有当对象完全没有字段时才跳过
                 if (Object.keys(itemObj).length > 0) {
-                    items.push(itemObj);
+                items.push(itemObj);
                 }
                 // 注意：不添加完全空的对象，但保留有字段但值为空的对象
             });
-            
-            // 确保总是数组类型，即使为空
-            const result = Array.isArray(items) ? items : [];
-            
-            // 处理嵌套路径
-            const fieldPath = fieldName.split('.');
-            if (fieldPath.length === 1) {
-                data[fieldName] = result;
-            } else {
-                // 嵌套字段
-                let current = data;
-                for (let i = 0; i < fieldPath.length - 1; i++) {
-                    if (!current[fieldPath[i]] || typeof current[fieldPath[i]] !== 'object' || Array.isArray(current[fieldPath[i]])) {
-                        current[fieldPath[i]] = {};
-                    }
-                    current = current[fieldPath[i]];
-                }
-                current[fieldPath[fieldPath.length - 1]] = result;
-            }
+            // 即使数组为空，也保留键（空数组）
+            data[fieldName] = items;
         });
         
         // 处理 Tags 字段（字符串数组）
@@ -5499,199 +4993,237 @@ class APIControlCenter {
             const fieldName = tagsContainer.dataset.field;
             if (!fieldName) return;
             
-            // 检查是否已经收集过（避免重复）
-            if (fieldMap.has(fieldName)) return;
-            fieldMap.set(fieldName, true);
-            
             collectedFields.add(fieldName);
             const items = Array.from(tagsContainer.querySelectorAll('.config-form-tag-text'))
                 .map(span => span.textContent.trim())
                 .filter(item => item !== '');
             
-            // 确保总是数组类型，即使为空
-            const result = Array.isArray(items) ? items : [];
-            
-            // 处理嵌套路径
-            const fieldPath = fieldName.split('.');
-            if (fieldPath.length === 1) {
-                data[fieldName] = result;
-            } else {
-                // 嵌套字段
-                let current = data;
-                for (let i = 0; i < fieldPath.length - 1; i++) {
-                    if (!current[fieldPath[i]] || typeof current[fieldPath[i]] !== 'object' || Array.isArray(current[fieldPath[i]])) {
-                        current[fieldPath[i]] = {};
-                    }
-                    current = current[fieldPath[i]];
-                }
-                current[fieldPath[fieldPath.length - 1]] = result;
-            }
+            // 即使数组为空，也保留键（空数组）
+            data[fieldName] = items;
         });
         
-        // 处理SubForm（嵌套对象）：确保所有子字段都被正确收集
-        // 注意：SubForm内的字段已经在上面通过嵌套路径（fieldName.subFieldName）收集了
-        // 这里只需要确保嵌套对象存在，避免遗漏
+        // 处理嵌套对象中的字段：确保所有子字段都被收集
         formContainer.querySelectorAll('.config-form-subform').forEach(subForm => {
             const fieldName = subForm.dataset.field;
             if (!fieldName) return;
             
-            // 如果该字段还没有被收集（可能所有子字段都是空的），确保对象存在
-            if (!data[fieldName] || typeof data[fieldName] !== 'object' || Array.isArray(data[fieldName])) {
+            // 确保嵌套对象存在
+            if (!data[fieldName] || typeof data[fieldName] !== 'object') {
                 data[fieldName] = {};
             }
         });
         
-        // 清理重复的字段：删除所有以点号分隔的顶层字段（这些应该是嵌套字段）
-        // 这些字段应该已经在嵌套结构中收集了
-        const keysToRemove = [];
-        for (const key of Object.keys(data)) {
-            if (key.includes('.')) {
-                // 这是一个嵌套字段路径，应该已经在嵌套结构中收集了
-                // 检查是否真的在嵌套结构中
-                const path = key.split('.');
-                let exists = true;
-                let current = data;
-                for (let i = 0; i < path.length; i++) {
-                    if (!current[path[i]]) {
-                        exists = false;
-                        break;
-                    }
-                    if (i < path.length - 1) {
-                        current = current[path[i]];
-                        if (typeof current !== 'object' || Array.isArray(current)) {
-                            exists = false;
-                            break;
-                        }
-                    }
-                }
-                // 如果嵌套结构中已经存在，删除顶层字段
-                if (exists) {
-                    keysToRemove.push(key);
-                }
-            }
-        }
-        keysToRemove.forEach(key => delete data[key]);
-        
-        // 确保所有schema中定义的字段都在数据中（即使没有对应的表单元素）
-        // 这样可以避免遗漏字段
-        if (schemaInfo && schemaInfo.fields) {
-            for (const [fieldName, fieldSchema] of Object.entries(schemaInfo.fields)) {
-                if (!(fieldName in data)) {
-                    // 字段不存在，根据类型设置默认值
-                    const expectedType = fieldSchema.type;
-                    if (expectedType === 'array') {
-                        data[fieldName] = [];
-                    } else if (expectedType === 'boolean') {
-                        data[fieldName] = fieldSchema.default !== undefined ? fieldSchema.default : false;
-                    } else if (expectedType === 'number') {
-                        data[fieldName] = fieldSchema.default !== undefined ? fieldSchema.default : null;
-                    } else if (expectedType === 'object') {
-                        data[fieldName] = fieldSchema.default !== undefined ? fieldSchema.default : {};
-                    } else {
-                        data[fieldName] = fieldSchema.default !== undefined ? fieldSchema.default : '';
-                    }
-                }
-            }
-        }
-        
         return data;
     }
-    
-    /**
-     * 从表单容器中获取schema信息
-     * @private
-     */
-    _getSchemaFromForm(formContainer) {
-        // 尝试从data属性获取schema
-        const schemaAttr = formContainer.dataset.schema;
-        if (schemaAttr) {
-            try {
-                return JSON.parse(schemaAttr);
-            } catch (e) {
-                console.warn('[ConfigEditor] 无法解析schema:', e);
-            }
-        }
-        return null;
+
+    _getEditorTextarea() {
+        return document.getElementById('configEditorTextarea') ||
+            document.querySelector('textarea#configEditorTextarea') ||
+            document.querySelector('textarea[data-config-name]');
     }
 
-    /**
-     * 合并配置数据与默认值
-     * 默认值作为基础，实际值覆盖默认值，但不会覆盖已存在的非空值
-     * @private
-     */
-    _mergeConfigWithDefaults(actualData, defaults) {
-        if (!defaults || typeof defaults !== 'object') {
-            return actualData || {};
+    _logMissingEditor() {
+        console.error('无法找到配置编辑器，当前 DOM 状态:', {
+            hasConfigEditorTextarea: !!document.getElementById('configEditorTextarea'),
+            hasFormContainer: !!document.querySelector('.config-form-container'),
+            hasEditorPanel: !!document.getElementById('configEditorPanel')
+        });
+    }
+
+    _buildSchemaKey(configName, subName) {
+        if (!configName) return null;
+        return subName ? `${configName}.${subName}` : configName;
+    }
+
+    _cacheConfigSchema(schemaKey, schema) {
+        if (!schemaKey || !schema) {
+            return;
         }
-        
-        if (!actualData || typeof actualData !== 'object' || Array.isArray(actualData)) {
-            // 如果实际数据不是对象，直接使用默认值
-            return JSON.parse(JSON.stringify(defaults));
-        }
-        
-        const merged = { ...defaults };
-        
-        // 深度合并：实际值覆盖默认值
-        for (const [key, value] of Object.entries(actualData)) {
-            if (value === null || value === undefined) {
-                // 如果实际值是null或undefined，保留默认值（如果存在）
-                if (defaults[key] !== undefined) {
-                    merged[key] = defaults[key];
-                }
-            } else if (Array.isArray(value)) {
-                // 数组：如果实际值存在且非空，使用实际值；否则使用默认值
-                if (value.length > 0) {
-                    merged[key] = [...value];
-                } else if (defaults[key] && Array.isArray(defaults[key])) {
-                    merged[key] = [...defaults[key]];
-                } else {
-                    merged[key] = [];
-                }
-            } else if (value && typeof value === 'object' && defaults[key] && typeof defaults[key] === 'object' && !Array.isArray(defaults[key])) {
-                // 嵌套对象：递归合并
-                merged[key] = this._mergeConfigWithDefaults(value, defaults[key]);
-            } else {
-                // 其他情况：使用实际值
-                merged[key] = value;
-            }
-        }
-        
-        return merged;
+        this.configSchemaCache.set(schemaKey, schema);
+    }
+
+    _getCachedSchema(schemaKey) {
+        if (!schemaKey) return null;
+        return this.configSchemaCache.get(schemaKey) || null;
     }
 
     /**
      * 规范化配置数据，确保类型正确
      * 修复headers等数组字段可能不是数组的问题
      */
-    _normalizeConfigData(data) {
+    _normalizeConfigData(data, schema = null) {
         if (!data || typeof data !== 'object') {
             return data;
         }
-        
+
+        if (schema?.fields) {
+            return this._normalizeBySchema(data, schema.fields);
+        }
+
+        return this._normalizeLegacyArrayFields(data);
+    }
+
+    _normalizeLegacyArrayFields(data) {
         const normalized = Array.isArray(data) ? [...data] : { ...data };
-        
-        // 递归处理嵌套对象
-        for (const [key, value] of Object.entries(normalized)) {
+
+        Object.entries(normalized).forEach(([key, value]) => {
             if (value && typeof value === 'object' && !Array.isArray(value)) {
-                normalized[key] = this._normalizeConfigData(value);
-            } else if (key === 'headers' || key === 'methods' || key === 'origins') {
-                // 确保这些字段是数组
-                if (!Array.isArray(value)) {
-                    if (typeof value === 'string') {
-                        // 如果是字符串，尝试分割
-                        normalized[key] = value.split(',').map(s => s.trim()).filter(s => s);
-                    } else if (value === null || value === undefined) {
-                        // 如果是null或undefined，设为空数组
-                        normalized[key] = [];
-                    } else {
-                        // 其他情况，尝试转换为数组
-                        normalized[key] = [value];
-                    }
+                normalized[key] = this._normalizeLegacyArrayFields(value);
+                return;
+            }
+
+            if (this._legacyArrayFields.has(key) && !Array.isArray(value)) {
+                if (typeof value === 'string') {
+                    normalized[key] = value.split(',').map(s => s.trim()).filter(Boolean);
+                } else if (value === null || value === undefined) {
+                    normalized[key] = [];
+                } else {
+                    normalized[key] = [value];
                 }
             }
-        }
-        
+        });
+
         return normalized;
+    }
+
+    _normalizeBySchema(data, fields) {
+        if (Array.isArray(data)) {
+            return data.map(item => this._normalizeBySchema(item, fields));
+        }
+
+        const normalized = { ...data };
+
+        Object.entries(fields).forEach(([field, fieldSchema]) => {
+            if (!(field in normalized)) {
+                return;
+            }
+
+            normalized[field] = this._convertValueByType(normalized[field], fieldSchema);
+        });
+
+        return normalized;
+    }
+
+    _convertValueByType(value, fieldSchema = {}) {
+        const type = fieldSchema.type;
+        switch (type) {
+            case 'array':
+                return this._convertArrayValue(value, fieldSchema);
+            case 'boolean':
+                return this._convertBooleanValue(value, fieldSchema);
+            case 'number':
+                return this._convertNumberValue(value, fieldSchema);
+            case 'object':
+                return this._convertObjectValue(value, fieldSchema);
+            case 'string':
+                return this._convertStringValue(value);
+            default:
+                return value;
+        }
+    }
+
+    _convertArrayValue(value, fieldSchema = {}) {
+        let arrayValue;
+        if (Array.isArray(value)) {
+            arrayValue = [...value];
+        } else if (typeof value === 'string') {
+            try {
+                const parsed = JSON.parse(value);
+                arrayValue = Array.isArray(parsed) ? parsed : [];
+            } catch {
+                arrayValue = value.split(/[\r\n,]/).map(item => item.trim()).filter(Boolean);
+            }
+        } else if (value === null || value === undefined || value === '') {
+            arrayValue = [];
+        } else {
+            arrayValue = [value];
+        }
+
+        if (fieldSchema.itemType === 'object' && fieldSchema.itemSchema?.fields) {
+            return arrayValue.map(item => (item && typeof item === 'object')
+                ? this._normalizeBySchema(item, fieldSchema.itemSchema.fields)
+                : {});
+        }
+
+        if (fieldSchema.itemType && fieldSchema.itemType !== 'object') {
+            return arrayValue.map(item => this._convertValueByType(item, { type: fieldSchema.itemType, ...(fieldSchema.itemSchema || {}) }));
+        }
+
+        return arrayValue;
+    }
+
+    _convertBooleanValue(value, fieldSchema = {}) {
+        if (typeof value === 'boolean') {
+            return value;
+        }
+
+        if (typeof value === 'number') {
+            return value !== 0;
+        }
+
+        if (typeof value === 'string') {
+            const normalized = value.trim().toLowerCase();
+            if (this._booleanTrueSet.has(normalized)) {
+                return true;
+            }
+            if (this._booleanFalseSet.has(normalized)) {
+                return false;
+            }
+        }
+
+        if (value === null || value === undefined) {
+            return fieldSchema.default ?? false;
+        }
+
+        return Boolean(value);
+    }
+
+    _convertNumberValue(value, fieldSchema = {}) {
+        if (typeof value === 'number' && !Number.isNaN(value)) {
+            return value;
+        }
+
+        if (typeof value === 'string') {
+            const trimmed = value.trim();
+            if (trimmed === '') {
+                return fieldSchema.default ?? null;
+            }
+            const numValue = Number(trimmed);
+            return Number.isNaN(numValue) ? fieldSchema.default ?? null : numValue;
+        }
+
+        if (value === null || value === undefined || value === '') {
+            return fieldSchema.default ?? null;
+        }
+
+        if (typeof value === 'boolean') {
+            return value ? 1 : 0;
+        }
+
+        const numValue = Number(value);
+        return Number.isNaN(numValue) ? fieldSchema.default ?? null : numValue;
+    }
+
+    _convertObjectValue(value, fieldSchema = {}) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            if (value === null || value === undefined || value === '') {
+                return fieldSchema.default ?? {};
+            }
+            return {};
+        }
+
+        if (!fieldSchema.fields) {
+            return { ...value };
+        }
+
+        return this._normalizeBySchema(value, fieldSchema.fields);
+    }
+
+    _convertStringValue(value) {
+        if (value === null || value === undefined) {
+            return '';
+        }
+        return typeof value === 'string' ? value : String(value);
     }
 
     /**
@@ -5735,3 +5267,6 @@ window.addEventListener('beforeunload', (e) => {
         e.returnValue = '';
     }
 });
+
+
+
