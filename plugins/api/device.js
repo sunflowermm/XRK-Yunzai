@@ -1695,6 +1695,62 @@ export default {
                 }
             }
         },
+
+        {
+            method: 'GET',
+            path: '/api/system/info',
+            handler: async (req, res, Bot) => {
+                if (!Bot.checkApiAuthorization(req)) {
+                    return res.status(403).json({ success: false, message: 'Unauthorized' });
+                }
+
+                try {
+                    const os = await import('os');
+                    const platform = os.default.platform();
+                    const arch = os.default.arch();
+                    const hostname = os.default.hostname();
+                    const cpus = os.default.cpus();
+                    const totalMem = os.default.totalmem();
+                    const freeMem = os.default.freemem();
+                    const uptime = os.default.uptime();
+                    
+                    let platformName = '未知系统';
+                    if (platform === 'win32') {
+                        platformName = 'Windows';
+                    } else if (platform === 'darwin') {
+                        platformName = 'macOS';
+                    } else if (platform === 'linux') {
+                        platformName = 'Linux';
+                    }
+
+                    res.json({
+                        success: true,
+                        system: {
+                            platform: platformName,
+                            platformRaw: platform,
+                            arch,
+                            hostname,
+                            cpuCount: cpus.length,
+                            cpuModel: cpus[0]?.model || '未知',
+                            totalMemory: totalMem,
+                            freeMemory: freeMem,
+                            usedMemory: totalMem - freeMem,
+                            memoryUsage: ((totalMem - freeMem) / totalMem * 100).toFixed(2),
+                            uptime: uptime,
+                            uptimeHours: Math.floor(uptime / 3600),
+                            nodeVersion: process.version,
+                            cwd: process.cwd()
+                        }
+                    });
+                } catch (error) {
+                    res.status(500).json({
+                        success: false,
+                        message: '获取系统信息失败',
+                        error: error.message
+                    });
+                }
+            }
+        },
     ],
 
     ws: {

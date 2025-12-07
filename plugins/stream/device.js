@@ -58,6 +58,11 @@ export default class DeviceStream extends AIStream {
       temperature: cfg.kuizai?.ai?.reasoning?.temperature || 0.8
     };
 
+    // 确保functions已初始化
+    if (!this.functions) {
+      this.functions = new Map();
+    }
+
     // 注册工作助手功能
     this.registerAllFunctions();
   }
@@ -237,6 +242,9 @@ Linux示例：[打开软件:gedit] 或 [打开软件:/usr/bin/firefox]`,
     const persona = context?.persona || '你是一个简洁友好的设备语音助手，以地道中文回答。';
     const supportedEmotions = Object.keys(EMOTION_KEYWORDS).join(' ');
     
+    // 获取系统信息
+    const systemInfo = this.getSystemInfo();
+    
     // 获取记忆摘要
     const memorySystem = this.getMemorySystem();
     const memorySummary = context?.memorySummary || '';
@@ -250,6 +258,8 @@ Linux示例：[打开软件:gedit] 或 [打开软件:/usr/bin/firefox]`,
     return `【人设】
 ${persona}
 ${memoryHint}
+【系统信息】
+${systemInfo}
 【规则】
 1. 尽量简洁，优先中文
 2. 如需展示表情或动画，请在文本前加一个表情标记（可选）：
@@ -258,6 +268,35 @@ ${memoryHint}
 4. 不要输出多余解释
 5. 参考记忆提示中的信息，但不要直接重复
 ${functionsPrompt}`;
+  }
+
+  /**
+   * 获取系统信息
+   */
+  getSystemInfo() {
+    const platform = os.platform();
+    const arch = os.arch();
+    const hostname = os.hostname();
+    const cpus = os.cpus();
+    const totalMem = (os.totalmem() / 1024 / 1024 / 1024).toFixed(2);
+    const freeMem = (os.freemem() / 1024 / 1024 / 1024).toFixed(2);
+    const uptime = Math.floor(os.uptime() / 3600);
+    
+    let platformName = '未知系统';
+    if (platform === 'win32') {
+      platformName = 'Windows';
+    } else if (platform === 'darwin') {
+      platformName = 'macOS';
+    } else if (platform === 'linux') {
+      platformName = 'Linux';
+    }
+    
+    return `操作系统: ${platformName} (${arch})
+主机名: ${hostname}
+CPU核心数: ${cpus.length}
+总内存: ${totalMem}GB
+可用内存: ${freeMem}GB
+系统运行时间: ${uptime}小时`;
   }
 
   /**
@@ -634,6 +673,45 @@ ${messages.map(m => `${m.role}: ${m.content}`).join('\n')}
       return `整理完成！已移动${movedCount}个文件到分类文件夹`;
     } catch (error) {
       throw new Error(`整理失败: ${error.message}`);
+    }
+  }
+
+  /**
+   * 获取系统状态信息（类MCP钩子）
+   */
+  async getSystemStatus() {
+    try {
+      const cpus = os.cpus();
+      const totalMem = os.totalmem();
+      const freeMem = os.freemem();
+      const usedMem = totalMem - freeMem;
+      const memUsage = (usedMem / totalMem * 100).toFixed(1);
+      const uptime = os.uptime();
+      const uptimeHours = Math.floor(uptime / 3600);
+      const uptimeMinutes = Math.floor((uptime % 3600) / 60);
+      
+      // 计算CPU使用率（简化版）
+      const cpuUsage = cpus.length > 0 ? '正常' : '未知';
+      
+      const platform = os.platform();
+      let platformName = '未知系统';
+      if (platform === 'win32') {
+        platformName = 'Windows';
+      } else if (platform === 'darwin') {
+        platformName = 'macOS';
+      } else if (platform === 'linux') {
+        platformName = 'Linux';
+      }
+      
+      return `系统状态：
+操作系统: ${platformName} (${os.arch()})
+主机名: ${os.hostname()}
+CPU核心数: ${cpus.length}
+内存使用: ${memUsage}% (已用 ${(usedMem / 1024 / 1024 / 1024).toFixed(2)}GB / 总计 ${(totalMem / 1024 / 1024 / 1024).toFixed(2)}GB)
+系统运行时间: ${uptimeHours}小时${uptimeMinutes}分钟
+Node.js版本: ${process.version}`;
+    } catch (error) {
+      throw new Error(`获取系统状态失败: ${error.message}`);
     }
   }
 
