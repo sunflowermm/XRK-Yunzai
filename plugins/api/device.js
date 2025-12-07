@@ -685,10 +685,13 @@ class DeviceManager {
 
         this.createDeviceBot(device_id, device, ws);
 
-        BotUtil.makeLog('info',
-            `🟢 [设备上线] ${device.device_name} (${device_id}) - IP: ${ip_address}`,
-            device.device_name
-        );
+        // 只在非 Web 客户端或 IP 不为 undefined 时记录日志，减少噪音
+        if (device_type !== 'webclient' || ip_address !== 'undefined') {
+          BotUtil.makeLog('debug',
+              `🟢 [设备上线] ${device.device_name} (${device_id})${ip_address && ip_address !== 'undefined' ? ` - IP: ${ip_address}` : ''}`,
+              device.device_name
+          );
+        }
 
         Bot.em('device.online', {
             post_type: 'device',
@@ -777,7 +780,7 @@ class DeviceManager {
         if (device) {
             device.online = false;
 
-            BotUtil.makeLog('info',
+            BotUtil.makeLog('debug',
                 `🔴 [设备离线] ${device.device_name} (${deviceId})`,
                 device.device_name
             );
@@ -1246,7 +1249,7 @@ class DeviceManager {
                 } else {
                     device.online = false;
 
-                    BotUtil.makeLog('info',
+                    BotUtil.makeLog('debug',
                         `🔴 [设备离线] ${device.device_name} (${id})`,
                         device.device_name
                     );
@@ -1373,6 +1376,16 @@ export default {
                     }
 
                     const persona = (req.query.persona || '').toString();
+                    const workflow = (req.query.workflow || 'device').toString();
+                    let context = [];
+                    try {
+                        const contextParam = req.query.context;
+                        if (contextParam) {
+                            context = JSON.parse(contextParam);
+                        }
+                    } catch (e) {
+                        BotUtil.makeLog('warn', `解析context参数失败: ${e.message}`, 'AIStream');
+                    }
 
                     if (!StreamLoader.loaded && !StreamLoader._loadingPromise) {
                         await StreamLoader.load();
@@ -1380,9 +1393,9 @@ export default {
                         await StreamLoader._loadingPromise;
                     }
 
-                    const stream = StreamLoader.getStream('device');
+                    const stream = StreamLoader.getStream(workflow);
                     if (!stream) {
-                        res.write(`data: ${JSON.stringify({ error: '设备工作流未加载' })}\n\n`);
+                        res.write(`data: ${JSON.stringify({ error: `工作流 ${workflow} 未加载` })}\n\n`);
                         res.end();
                         return;
                     }
@@ -1394,11 +1407,24 @@ export default {
                         self_id: 'webclient'
                     };
 
-                    const messages = await stream.buildChatContext(e, { 
-                        text: prompt, 
-                        persona,
-                        deviceId: 'webclient'
-                    });
+                    // 如果前端传递了context，使用它构建消息；否则使用工作流的buildChatContext
+                    let messages;
+                    if (Array.isArray(context) && context.length > 0) {
+                        // 使用前端传递的上下文，转换为工作流需要的格式
+                        messages = await stream.buildChatContext(e, { 
+                            text: prompt, 
+                            persona,
+                            deviceId: 'webclient',
+                            history: context // 传递历史上下文
+                        });
+                    } else {
+                        // 没有上下文，使用默认方式构建
+                        messages = await stream.buildChatContext(e, { 
+                            text: prompt, 
+                            persona,
+                            deviceId: 'webclient'
+                        });
+                    }
                     
                     let acc = '';
                     

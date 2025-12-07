@@ -80,10 +80,11 @@ ${memoryHint}
   }
 
   /**
-   * 构建消息（增强版：集成记忆系统）
+   * 构建消息（增强版：集成记忆系统，支持历史上下文）
    */
   async buildChatContext(e, question) {
     const text = typeof question === 'string' ? question : (question?.text || question?.content || '');
+    const history = question?.history || [];
     
     // 获取记忆摘要
     const memorySummary = await this.buildMemorySummary(e || { device_id: question?.deviceId });
@@ -95,9 +96,26 @@ ${memoryHint}
           persona: question?.persona,
           memorySummary
         }) 
-      },
-      { role: 'user', content: text || '你好' }
+      }
     ];
+    
+    // 如果有历史上下文，添加到消息中
+    if (Array.isArray(history) && history.length > 0) {
+      // 转换历史消息格式：确保role为'user'或'assistant'
+      history.forEach(msg => {
+        if (msg.role && msg.text) {
+          const role = msg.role === 'user' ? 'user' : (msg.role === 'assistant' ? 'assistant' : 'user');
+          messages.push({
+            role,
+            content: msg.text
+          });
+        }
+      });
+    }
+    
+    // 添加当前用户消息
+    messages.push({ role: 'user', content: text || '你好' });
+    
     return messages;
   }
 

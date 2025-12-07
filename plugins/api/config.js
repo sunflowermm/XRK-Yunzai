@@ -215,16 +215,13 @@ export default {
             if (configName === 'system' && typeof config.write === 'function') {
               // SystemConfig 的特殊处理：keyPath 是子配置名称
               try {
-                BotUtil.makeLog('info', `写入 SystemConfig 子配置 [${configName}/${keyPath}]`, 'ConfigAPI');
-                result = await config.write(keyPath, cleanedData, { backup, validate });
-                BotUtil.makeLog('info', `SystemConfig 子配置写入成功 [${configName}/${keyPath}]`, 'ConfigAPI');
+                result = await config.write(keyPath, cleanedData, { backup, validate, silent: true });
               } catch (subError) {
                 BotUtil.makeLog('error', `写入子配置失败 [${configName}/${keyPath}]: ${subError.message}`, 'ConfigAPI', subError);
                 throw subError;
               }
             } else if (typeof config.set === 'function') {
-              BotUtil.makeLog('info', `使用 set 方法写入配置路径 [${configName}/${keyPath}]`, 'ConfigAPI');
-              result = await config.set(keyPath, cleanedData, { backup, validate });
+              result = await config.set(keyPath, cleanedData, { backup, validate, silent: true });
             } else {
               throw new Error('配置对象不支持 set 方法');
             }
@@ -233,9 +230,7 @@ export default {
             if (configName === 'system') {
               throw new Error('SystemConfig 需要指定子配置名称（使用 path 参数）');
             } else if (typeof config.write === 'function') {
-              BotUtil.makeLog('info', `写入完整配置 [${configName}]`, 'ConfigAPI');
-              result = await config.write(cleanedData, { backup, validate });
-              BotUtil.makeLog('info', `配置写入成功 [${configName}]`, 'ConfigAPI');
+              result = await config.write(cleanedData, { backup, validate, silent: true });
             } else {
               throw new Error('配置对象不支持 write 方法');
             }
@@ -776,7 +771,7 @@ export default {
               });
             }
           } else {
-            result = await config.write(finalData, { backup, validate });
+            result = await config.write(finalData, { backup, validate, silent: true });
           }
 
           res.json({

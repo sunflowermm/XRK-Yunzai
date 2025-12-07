@@ -12,13 +12,48 @@ class App {
     this.selectedFiles = [];
     this.jsonEditor = null;
     this._charts = {};
-    this._metricsHistory = { 
-      netRx: Array(30).fill(0), 
-      netTx: Array(30).fill(0),
-      _initialized: false,
-      _lastTimestamp: null,
-      _lastUpdate: null
-    };
+    // 从 localStorage 恢复历史数据，避免刷新后丢失
+    const savedHistory = localStorage.getItem('metricsHistory');
+    if (savedHistory) {
+      try {
+        const parsed = JSON.parse(savedHistory);
+        // 检查数据是否过期（超过5分钟的数据视为过期）
+        const now = Date.now();
+        if (parsed._lastUpdate && (now - parsed._lastUpdate) < 5 * 60 * 1000) {
+          this._metricsHistory = {
+            netRx: parsed.netRx || Array(60).fill(0),
+            netTx: parsed.netTx || Array(60).fill(0),
+            _initialized: parsed._initialized || false,
+            _lastTimestamp: parsed._lastTimestamp,
+            _lastUpdate: parsed._lastUpdate
+          };
+        } else {
+          this._metricsHistory = { 
+            netRx: Array(60).fill(0), 
+            netTx: Array(60).fill(0),
+            _initialized: false,
+            _lastTimestamp: null,
+            _lastUpdate: null
+          };
+        }
+      } catch (e) {
+        this._metricsHistory = { 
+          netRx: Array(60).fill(0), 
+          netTx: Array(60).fill(0),
+          _initialized: false,
+          _lastTimestamp: null,
+          _lastUpdate: null
+        };
+      }
+    } else {
+      this._metricsHistory = { 
+        netRx: Array(60).fill(0), 
+        netTx: Array(60).fill(0),
+        _initialized: false,
+        _lastTimestamp: null,
+        _lastUpdate: null
+      };
+    }
     this._chatHistory = this._loadChatHistory();
     this._deviceWs = null;
     this._micActive = false;
@@ -989,11 +1024,13 @@ class App {
             scales: {
               x: { 
                 display: false,
-                grid: { display: false }
+                grid: { display: false },
+                min: 0,
+                max: 59 // 固定显示60个数据点
               },
               y: { 
                 beginAtZero: true,
-                suggestedMax: 10, // 默认最大10 KB/s，会根据实际数据动态调整
+                suggestedMax: Math.max(10, Math.ceil(Math.max(...this._metricsHistory.netRx, ...this._metricsHistory.netTx) * 1.2) || 10),
                 grid: { 
                   color: border,
                   drawBorder: false,
@@ -1075,7 +1112,7 @@ class App {
         </div>
         <div class="chat-messages" id="chatMessages"></div>
         <div class="chat-input-area">
-          <button class="mic-btn" id="micBtn">
+          <button class="mic-btn" id="micBtn" title="语音输入（仅限本地访问）">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
               <path d="M19 10v2a7 7 0 01-14 0v-2"/>
@@ -1311,23 +1348,24 @@ class App {
       this.appendChat('user', text);
     }
     
-    // 默认使用 device 工作流
-    const workflow = 'device';
+    // 从配置中获取工作流，默认使用 device
+    const workflow = this._chatSettings.workflow || 'device';
     const persona = this.getCurrentPersona();
     const profile = this.getCurrentProfile();
+    
+    // 获取最近8条消息作为上下文（不包含当前消息）
     const recentHistory = this._chatHistory.slice(-8).map(m => ({ role: m.role, text: m.text }));
-    const ctxSummary = recentHistory.map(m => `${m.role === 'user' ? 'U' : 'A'}:${m.text}`).join('|').slice(-800);
-    const finalPrompt = ctxSummary ? `【上下文】${ctxSummary}\n【提问】${text}` : text;
     
     const params = new URLSearchParams({
-      prompt: finalPrompt,
+      prompt: text, // 直接传递原始文本，上下文由后端处理
       workflow,
       persona
     });
     if (profile) {
       params.set('profile', profile);
     }
-    if (recentHistory.length) {
+    // 传递历史上下文给后端，后端会正确构建消息
+    if (recentHistory.length > 0) {
       params.set('context', JSON.stringify(recentHistory));
     }
     
@@ -3718,6 +3756,15 @@ class App {
   }
 
   async startMic() {
+    // 检查是否为本地访问（127.0.0.1 或 localhost），非本地访问禁用语音功能
+    const hostname = window.location.hostname;
+    const isLocalhost = hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '[::1]';
+    
+    if (!isLocalhost) {
+      this.showToast('语音功能仅限本地访问使用，当前访问地址不支持语音', 'warning');
+      return;
+    }
+    
     try {
       await this.ensureDeviceWs();
       

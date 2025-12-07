@@ -235,7 +235,11 @@ export default {
               };
             });
 
+          // 默认返回最近60个数据点的网络历史（约3-5分钟的数据）
+          const netHist24h = __getNetHistory24h();
+          const netRecent = netHist24h.slice(-60); // 取最后60个点，约3-5分钟数据
           const includeHist = (req.query?.hist === '24h') || (req.query?.withHistory === '1') || (req.query?.withHistory === 'true');
+          
           res.json({
             success: true,
             timestamp: Date.now(),
@@ -273,7 +277,8 @@ export default {
               disks,
               net: { rxBytes, txBytes },
               netRates: { rxSec, txSec },
-              netHistory24h: includeHist ? __getNetHistory24h() : [],
+              netRecent, // 最近60个数据点（约3-5分钟），默认返回
+              netHistory24h: includeHist ? netHist24h : [], // 完整的24小时历史（可选）
               network: networkStats
             },
             bot: {
@@ -494,17 +499,23 @@ export default {
           let panels = { workflows: null };
           try {
             const StreamLoader = (await import('../../lib/aistream/loader.js')).default;
+            // 使用 StreamLoader 的 getSummary 方法获取准确的工作流统计
+            const summary = StreamLoader.getSummary ? StreamLoader.getSummary() : null;
             const allStreams = StreamLoader.getAllStreams() || [];
             const enabledStreams = allStreams.filter(s => s.config?.enabled !== false);
-            const embeddingReadyStreams = allStreams.filter(s => s.embeddingReady === true);
+            
+            // 从 summary 获取准确的 embedding 就绪数量
+            const embeddingReadyCount = summary?.embedding?.ready ?? allStreams.filter(s => s.embeddingReady === true).length;
             
             // 获取 embedding provider（从第一个启用的工作流中获取）
-            let provider = '默认';
-            const firstEnabled = enabledStreams[0];
-            if (firstEnabled?.embeddingConfig?.provider) {
-              provider = firstEnabled.embeddingConfig.provider;
-            } else if (StreamLoader.embeddingConfig?.provider) {
-              provider = StreamLoader.embeddingConfig.provider;
+            let provider = summary?.embedding?.provider || '默认';
+            if (provider === 'none' || provider === '默认') {
+              const firstEnabled = enabledStreams[0];
+              if (firstEnabled?.embeddingConfig?.provider) {
+                provider = firstEnabled.embeddingConfig.provider;
+              } else if (StreamLoader.embeddingConfig?.provider) {
+                provider = StreamLoader.embeddingConfig.provider;
+              }
             }
             
             const items = allStreams.map(s => ({
@@ -518,7 +529,7 @@ export default {
               stats: {
                 total: allStreams.length,
                 enabled: enabledStreams.length,
-                embeddingReady: embeddingReadyStreams.length,
+                embeddingReady: embeddingReadyCount,
                 provider
               },
               items,
