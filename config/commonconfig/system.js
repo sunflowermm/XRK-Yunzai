@@ -14,7 +14,7 @@ export default class SystemConfig extends ConfigBase {
     super({
       name: 'system',
       displayName: '系统配置',
-      description: 'XRK-AGT 系统配置管理',
+      description: 'XRK-Yunzai 系统配置管理',
       filePath: '', // 系统配置管理多个文件，此处留空
       fileType: 'yaml'
     });

@@ -5,10 +5,10 @@
 headless: "new"
 
 # Chromium 路径（可选）
-chromiumPath:
+chromiumPath: ""
 
 # 连接到远程浏览器（可选）
-wsEndpoint:
+wsEndpoint: ""
 
 # 浏览器启动参数
 args:

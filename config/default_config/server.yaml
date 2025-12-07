@@ -31,30 +31,30 @@ proxy:
   
   # 域名配置列表
   # 每个域名可以有不同的配置和处理方式
-  domains:
-    # 主域名配置示例
-    - domain: "xrkk.cc"
-      # 静态文件根目录（可选）
-      # 如果不配置，使用默认的www目录
-      staticRoot: "./www"
-      
-      # 是否启用SSL（需要配置证书）
-      ssl:
-        enabled: true
-        certificate:
-          # 域名专用证书路径
-          key: "/path/to/xrkk.cc.key"
-          cert: "/path/to/xrkk.cc.cert"
-          ca: ""  # CA证书链（可选）
-      
-    # 目标服务器（如果需要代理到其他服务）
-    # 不配置则直接提供静态文件服务
-    # target: "http://localhost:3000"
-      
-    # 路径重写规则（可选）
-    # rewritePath:
-    #   from: "/"
-    #   to: "/"
+  domains: []
+    # 主域名配置示例（已注释，需要时取消注释并添加到domains数组中）
+    # - domain: "xrkk.cc"
+    #   # 静态文件根目录（可选）
+    #   # 如果不配置，使用默认的www目录
+    #   staticRoot: "./www"
+    #   
+    #   # 是否启用SSL（需要配置证书）
+    #   ssl:
+    #     enabled: true
+    #     certificate:
+    #       # 域名专用证书路径
+    #       key: "/path/to/xrkk.cc.key"
+    #       cert: "/path/to/xrkk.cc.cert"
+    #       ca: ""  # CA证书链（可选）
+    #   
+    #   # 目标服务器（如果需要代理到其他服务）
+    #   # 不配置则直接提供静态文件服务
+    #   # target: "http://localhost:3000"
+    #     
+    #   # 路径重写规则（可选）
+    #   # rewritePath:
+    #   #   from: "/"
+    #   #   to: "/"
     
     # 子域名配置示例（已注释）
     # - domain: "xrk.xrkk.cc"
@@ -151,14 +151,13 @@ https:
   
   # 默认SSL证书配置（当域名没有配置专用证书时使用）
   certificate:
-    # 私钥文件路径（必需）
-    key: "/path/to/default/privkey.pem"
+    # 私钥文件路径（可选）
+    key: ""
     
-    # 证书文件路径（必需）
-    cert: "/path/to/default/fullchain.pem"
+    # 证书文件路径（可选）
+    cert: ""
     
     # CA证书链文件路径（可选）
-    # 某些证书可能需要提供完整的证书链
     ca: ""
   
   # TLS配置

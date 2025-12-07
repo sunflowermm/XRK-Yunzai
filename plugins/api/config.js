@@ -3,7 +3,7 @@
  * 提供统一的配置文件读写接口
  */
 import BotUtil from '../../lib/common/util.js';
-import { cleanConfigData } from '../../lib/commonconfig/config-utils.js';
+import { cleanConfigData, flattenStructure, flattenData, unflattenData } from '../../lib/commonconfig/config-utils.js';
 
 export default {
   name: 'config-manager',
@@ -564,6 +564,129 @@ export default {
           res.status(500).json({
             success: false,
             message: '清除缓存失败',
+            error: error.message
+          });
+        }
+      }
+    },
+
+    {
+      method: 'GET',
+      path: '/api/config/:name/flat-structure',
+      handler: async (req, res, Bot) => {
+        if (!Bot.checkApiAuthorization(req)) {
+          return res.status(403).json({ success: false, message: 'Unauthorized' });
+        }
+
+        try {
+          const { name } = req.params;
+          const config = global.ConfigManager.get(name);
+
+          if (!config) {
+            return res.status(404).json({
+              success: false,
+              message: `配置 ${name} 不存在`
+            });
+          }
+
+          const structure = config.getStructure();
+          const flat = flattenStructure(structure.schema);
+
+          res.json({
+            success: true,
+            flat
+          });
+        } catch (error) {
+          res.status(500).json({
+            success: false,
+            message: '获取扁平化结构失败',
+            error: error.message
+          });
+        }
+      }
+    },
+
+    {
+      method: 'GET',
+      path: '/api/config/:name/flat',
+      handler: async (req, res, Bot) => {
+        if (!Bot.checkApiAuthorization(req)) {
+          return res.status(403).json({ success: false, message: 'Unauthorized' });
+        }
+
+        try {
+          const { name } = req.params;
+          const config = global.ConfigManager.get(name);
+
+          if (!config) {
+            return res.status(404).json({
+              success: false,
+              message: `配置 ${name} 不存在`
+            });
+          }
+
+          const data = await config.read();
+          const flat = flattenData(data);
+
+          res.json({
+            success: true,
+            flat
+          });
+        } catch (error) {
+          res.status(500).json({
+            success: false,
+            message: '获取扁平化数据失败',
+            error: error.message
+          });
+        }
+      }
+    },
+
+    {
+      method: 'POST',
+      path: '/api/config/:name/batch-set',
+      handler: async (req, res, Bot) => {
+        if (!Bot.checkApiAuthorization(req)) {
+          return res.status(403).json({ success: false, message: 'Unauthorized' });
+        }
+
+        try {
+          const { name } = req.params;
+          const { flat, backup = true, validate = true } = req.body;
+
+          if (!flat || typeof flat !== 'object') {
+            return res.status(400).json({
+              success: false,
+              message: '缺少flat参数或格式错误'
+            });
+          }
+
+          const config = global.ConfigManager.get(name);
+
+          if (!config) {
+            return res.status(404).json({
+              success: false,
+              message: `配置 ${name} 不存在`
+            });
+          }
+
+          // 将扁平化数据还原为嵌套对象
+          const data = unflattenData(flat);
+          
+          // 清理数据
+          const cleanedData = cleanConfigData(data, config);
+
+          // 写入配置
+          const result = await config.write(cleanedData, { backup, validate });
+
+          res.json({
+            success: result,
+            message: '配置已批量更新'
+          });
+        } catch (error) {
+          res.status(500).json({
+            success: false,
+            message: '批量设置失败',
             error: error.message
           });
         }

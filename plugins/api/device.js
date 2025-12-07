@@ -1568,6 +1568,53 @@ export default {
                 }
             }
         },
+
+        {
+            method: 'GET',
+            path: '/api/ai/models',
+            handler: async (req, res, Bot) => {
+                if (!Bot.checkApiAuthorization(req)) {
+                    return res.status(403).json({ success: false, message: 'Unauthorized' });
+                }
+
+                try {
+                    const aiConfig = deviceManager.getAIConfig();
+                    const StreamLoader = (await import('../../lib/aistream/loader.js')).default;
+                    const allStreams = StreamLoader.getAllStreams();
+                    
+                    // 获取工作流列表
+                    const workflows = allStreams.map(s => ({
+                        name: s.name,
+                        description: s.description || '',
+                        enabled: s.config?.enabled || false
+                    }));
+
+                    // 构建模型配置（简化版，实际可以从配置中读取）
+                    const profiles = [{
+                        name: 'default',
+                        displayName: '默认配置',
+                        model: aiConfig.chatModel || 'deepseek-r1-0528',
+                        baseUrl: aiConfig.baseUrl || '',
+                        temperature: aiConfig.temperature || 0.8,
+                        maxTokens: aiConfig.max_tokens || 2000
+                    }];
+
+                    res.json({
+                        success: true,
+                        enabled: aiConfig.enabled || false,
+                        defaultProfile: 'default',
+                        profiles,
+                        workflows
+                    });
+                } catch (error) {
+                    res.status(500).json({
+                        success: false,
+                        message: '获取AI模型列表失败',
+                        error: error.message
+                    });
+                }
+            }
+        },
     ],
 
     ws: {

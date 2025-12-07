@@ -90,6 +90,61 @@ export default {
 
         res.json({ success: true, tasks });
       }
+    },
+
+    {
+      method: 'GET',
+      path: '/api/plugins/summary',
+      handler: async (req, res, Bot) => {
+        if (!Bot.checkApiAuthorization(req)) {
+          return res.status(403).json({ success: false, message: 'Unauthorized' });
+        }
+
+        try {
+          const priorityPlugins = PluginsLoader.priority || [];
+          const extendedPlugins = PluginsLoader.extended || [];
+          const allPlugins = [...priorityPlugins, ...extendedPlugins];
+          
+          let totalPlugins = 0;
+          let withRules = 0;
+          let withTasks = 0;
+          let totalLoadTime = 0;
+
+          for (const p of allPlugins) {
+            try {
+              const plugin = new p.class();
+              totalPlugins++;
+              if (plugin.rule?.length) withRules++;
+              if (plugin.task) withTasks++;
+              // 加载时间可以从插件加载统计中获取
+            } catch (error) {
+              // 忽略初始化失败的插件
+            }
+          }
+
+          res.json({
+            success: true,
+            summary: {
+              totalPlugins,
+              withRules,
+              withTasks,
+              taskCount: withTasks,
+              totalLoadTime: totalLoadTime || 0
+            },
+            plugins: allPlugins.map(p => ({
+              key: p.key,
+              name: p.name || p.key,
+              priority: p.priority
+            }))
+          });
+        } catch (error) {
+          res.status(500).json({
+            success: false,
+            message: '获取插件摘要失败',
+            error: error.message
+          });
+        }
+      }
     }
   ]
 };

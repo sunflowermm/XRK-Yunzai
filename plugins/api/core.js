@@ -377,6 +377,168 @@ export default {
           }
         });
       }
+    },
+
+    {
+      method: 'GET',
+      path: '/api/system/overview',
+      handler: async (req, res, Bot) => {
+        if (!Bot.checkApiAuthorization(req)) {
+          return res.status(403).json({ success: false, message: 'Unauthorized' });
+        }
+
+        try {
+          // 复用 /api/system/status 的逻辑
+          if (!__cpuCache.ts || (Date.now() - __cpuCache.ts > 5_000)) {
+            __sampleCpuOnce();
+          }
+          const cpuPct = __cpuCache.percent || 0;
+
+          const cpus = os.cpus();
+          const totalMem = os.totalmem();
+          const freeMem = os.freemem();
+          const usedMem = totalMem - freeMem;
+          const memUsage = process.memoryUsage();
+
+          const siMem = await si.mem().catch(() => ({}));
+
+          const lastNet = __lastNetSample || { ts: Date.now(), rx: 0, tx: 0 };
+          const rxBytes = Number(lastNet.rx || 0);
+          const txBytes = Number(lastNet.tx || 0);
+          const lastHist = __netHist.length ? __netHist[__netHist.length - 1] : { rxSec: 0, txSec: 0 };
+          const rxSec = Number(lastHist.rxSec || 0);
+          const txSec = Number(lastHist.txSec || 0);
+
+          const disks = Array.isArray(__fsCache.disks) ? __fsCache.disks : [];
+          if (!__fsTimer || (Date.now() - (__fsCache.ts || 0) > 60_000)) __refreshFsCache();
+
+          const processesTop5 = Array.isArray(__procCache.top5) ? __procCache.top5 : [];
+          if (!__procTimer || (Date.now() - (__procCache.ts || 0) > 20_000)) __refreshProcCache();
+          
+          const networkInterfaces = os.networkInterfaces();
+          const networkStats = {};
+          for (const [name, interfaces] of Object.entries(networkInterfaces)) {
+            if (interfaces) {
+              for (const iface of interfaces) {
+                if (iface.family === 'IPv4' && !iface.internal) {
+                  networkStats[name] = {
+                    address: iface.address,
+                    netmask: iface.netmask,
+                    mac: iface.mac
+                  };
+                }
+              }
+            }
+          }
+
+          const bots = Object.entries(Bot.bots)
+            .filter(([uin, bot]) => {
+              if (typeof bot !== 'object' || !bot) return false;
+              const excludeKeys = ['port', 'apiKey', 'stdin', 'logger', '_eventsCount', 'url'];
+              if (excludeKeys.includes(uin)) return false;
+              return bot.adapter || bot.nickname || bot.fl || bot.gl;
+            })
+            .map(([uin, bot]) => ({
+              uin,
+              online: bot.stat?.online || false,
+              nickname: bot.nickname || uin,
+              adapter: bot.adapter?.name || 'unknown',
+              device: bot.device || false,
+              stats: {
+                friends: bot.fl?.size || 0,
+                groups: bot.gl?.size || 0
+              }
+            }));
+
+          // 获取工作流信息
+          let workflows = { stats: {}, items: [], total: 0 };
+          let panels = { workflows: null };
+          try {
+            const StreamLoader = (await import('../../lib/aistream/loader.js')).default;
+            const allStreams = StreamLoader.getAllStreams();
+            const enabledStreams = allStreams.filter(s => s.config?.enabled);
+            const items = allStreams.map(s => ({
+              name: s.name,
+              description: s.description || '',
+              enabled: s.config?.enabled || false,
+              embeddingReady: s.embeddingReady || false
+            }));
+            
+            workflows = {
+              stats: {
+                total: allStreams.length,
+                enabled: enabledStreams.length,
+                embeddingReady: allStreams.filter(s => s.embeddingReady).length,
+                provider: 'lightweight'
+              },
+              items,
+              total: allStreams.length
+            };
+            panels = { workflows };
+          } catch (e) {
+            // 工作流加载失败时使用默认值
+          }
+
+          const includeHist = (req.query?.hist === '24h') || (req.query?.withHistory === '1') || (req.query?.withHistory === 'true');
+          res.json({
+            success: true,
+            timestamp: Date.now(),
+            system: {
+              platform: os.platform(),
+              arch: os.arch(),
+              hostname: os.hostname(),
+              nodeVersion: process.version,
+              uptime: process.uptime(),
+              cpu: {
+                model: cpus[0]?.model || 'Unknown',
+                cores: cpus.length,
+                usage: process.cpuUsage(),
+                percent: cpuPct,
+                loadavg: os.loadavg ? os.loadavg() : [0,0,0]
+              },
+              memory: {
+                total: totalMem,
+                free: freeMem,
+                used: usedMem,
+                usagePercent: ((usedMem / totalMem) * 100).toFixed(2),
+                process: {
+                  rss: memUsage.rss,
+                  heapTotal: memUsage.heapTotal,
+                  heapUsed: memUsage.heapUsed,
+                  external: memUsage.external,
+                  arrayBuffers: memUsage.arrayBuffers
+                }
+              },
+              swap: {
+                total: Number(siMem?.swaptotal || 0),
+                used: Number(siMem?.swapused || 0),
+                usagePercent: siMem?.swaptotal ? +(((siMem.swapused || 0) / siMem.swaptotal) * 100).toFixed(2) : 0
+              },
+              disks,
+              net: { rxBytes, txBytes },
+              netRates: { rxSec, txSec },
+              netHistory24h: includeHist ? __getNetHistory24h() : [],
+              network: networkStats
+            },
+            bot: {
+              url: Bot.url,
+              port: Bot.port,
+              startTime: Bot.stat?.start_time || Date.now() / 1000,
+              uptime: Bot.stat?.start_time ? (Date.now() / 1000) - Bot.stat.start_time : process.uptime()
+            },
+            bots,
+            workflows,
+            panels,
+            processesTop5,
+            adapters: Bot.adapter
+          });
+        } catch (error) {
+          res.status(500).json({
+            success: false,
+            error: error.message
+          });
+        }
+      }
     }
   ]
 };
