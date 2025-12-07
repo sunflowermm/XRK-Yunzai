@@ -580,6 +580,7 @@ export default {
 
         try {
           const { name } = req.params;
+          const { path: childPath } = req.query || {};
           const config = global.ConfigManager.get(name);
 
           if (!config) {
@@ -589,8 +590,27 @@ export default {
             });
           }
 
-          const structure = config.getStructure();
-          const flat = flattenStructure(structure.schema);
+          let schema = null;
+          
+          // 处理 system 配置的子配置
+          if (name === 'system' && childPath) {
+            const structure = config.getStructure();
+            const childConfig = structure.configs?.[childPath];
+            if (childConfig) {
+              schema = childConfig.schema || { fields: childConfig.fields || {} };
+            } else {
+              return res.status(404).json({
+                success: false,
+                message: `子配置 ${childPath} 不存在`
+              });
+            }
+          } else {
+            // 普通配置直接使用 schema
+            const structure = config.getStructure();
+            schema = structure.schema || { fields: structure.fields || {} };
+          }
+
+          const flat = flattenStructure(schema);
 
           res.json({
             success: true,
@@ -616,6 +636,7 @@ export default {
 
         try {
           const { name } = req.params;
+          const { path: childPath } = req.query || {};
           const config = global.ConfigManager.get(name);
 
           if (!config) {
@@ -625,7 +646,21 @@ export default {
             });
           }
 
-          const data = await config.read();
+          // 处理 system 配置的子配置
+          let data;
+          if (name === 'system' && childPath) {
+            if (typeof config.read === 'function') {
+              data = await config.read(childPath);
+            } else {
+              return res.status(400).json({
+                success: false,
+                message: 'SystemConfig 需要指定子配置路径'
+              });
+            }
+          } else {
+            data = await config.read();
+          }
+
           const flat = flattenData(data);
 
           res.json({
@@ -652,7 +687,7 @@ export default {
 
         try {
           const { name } = req.params;
-          const { flat, backup = true, validate = true } = req.body;
+          const { flat, path: childPath, backup = true, validate = true } = req.body;
 
           if (!flat || typeof flat !== 'object') {
             return res.status(400).json({
@@ -673,11 +708,34 @@ export default {
           // 将扁平化数据还原为嵌套对象
           const data = unflattenData(flat);
           
+          // 获取 schema 用于数据清理
+          let schema = null;
+          if (name === 'system' && childPath) {
+            const structure = config.getStructure();
+            const childConfig = structure.configs?.[childPath];
+            schema = childConfig?.schema || { fields: childConfig?.fields || {} };
+          } else {
+            const structure = config.getStructure();
+            schema = structure.schema || { fields: structure.fields || {} };
+          }
+          
           // 清理数据
-          const cleanedData = cleanConfigData(data, config);
+          const cleanedData = cleanConfigData(data, { schema });
 
           // 写入配置
-          const result = await config.write(cleanedData, { backup, validate });
+          let result;
+          if (name === 'system' && childPath) {
+            if (typeof config.write === 'function') {
+              result = await config.write(childPath, cleanedData, { backup, validate });
+            } else {
+              return res.status(400).json({
+                success: false,
+                message: 'SystemConfig 需要指定子配置路径'
+              });
+            }
+          } else {
+            result = await config.write(cleanedData, { backup, validate });
+          }
 
           res.json({
             success: result,
