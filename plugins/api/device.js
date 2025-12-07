@@ -461,26 +461,23 @@ class DeviceManager {
             if (aiResult.emotion) {
                 await new Promise(r => setTimeout(r, 200));
                 
-                // 通过WebSocket发送表情更新给前端（仅webclient设备）
-                if (deviceId === 'webclient') {
-                    const ws = deviceWebSockets.get(deviceId);
-                    if (ws && ws.readyState === WebSocket.OPEN) {
-                        try {
-                            ws.send(JSON.stringify({
-                                type: 'emotion_update',
-                                device_id: deviceId,
-                                emotion: aiResult.emotion
-                            }));
-                        } catch (e) {
-                            BotUtil.makeLog('warn', `[AI] 发送表情更新失败: ${e.message}`, deviceId);
-                        }
+                // 通过WebSocket发送表情更新给前端（通用接口，适用于所有设备）
+                const ws = deviceWebSockets.get(deviceId);
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    try {
+                        ws.send(JSON.stringify({
+                            type: 'emotion_update',
+                            device_id: deviceId,
+                            emotion: aiResult.emotion
+                        }));
+                    } catch (e) {
+                        BotUtil.makeLog('warn', `[AI] 发送表情更新失败: ${e.message}`, deviceId);
                     }
                 }
             }
 
-            // 播放TTS（非webclient设备始终播放，webclient设备在流式接口中处理）
-            // 注意：webclient的TTS在流式接口中根据IP判断是否播放，这里不处理
-            if (deviceId !== 'webclient' && aiResult.text && this.getTTSConfig().enabled) {
+            // 播放TTS（通用接口，适用于所有设备）
+            if (aiResult.text && this.getTTSConfig().enabled) {
                 try {
                     const ttsClient = this._getTTSClient(deviceId);
                     const success = await ttsClient.synthesize(aiResult.text);
@@ -919,19 +916,17 @@ class DeviceManager {
                     throw new Error(`未知表情: ${emotionName}`);
                 }
                 
-                // 如果是webclient设备，通过WebSocket发送表情更新
-                if (deviceId === 'webclient') {
-                    const ws = deviceWebSockets.get(deviceId);
-                    if (ws && ws.readyState === WebSocket.OPEN) {
-                        try {
-                            ws.send(JSON.stringify({
-                                type: 'emotion_update',
-                                device_id: deviceId,
-                                emotion: normalized
-                            }));
-                        } catch (e) {
-                            BotUtil.makeLog('warn', `[设备] 发送表情更新失败: ${e.message}`, deviceId);
-                        }
+                // 通过WebSocket发送表情更新（通用接口，适用于所有设备）
+                const ws = deviceWebSockets.get(deviceId);
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    try {
+                        ws.send(JSON.stringify({
+                            type: 'emotion_update',
+                            device_id: deviceId,
+                            emotion: normalized
+                        }));
+                    } catch (e) {
+                        BotUtil.makeLog('warn', `[设备] 发送表情更新失败: ${e.message}`, deviceId);
                     }
                 }
                 
@@ -1434,11 +1429,14 @@ export default {
                         return;
                     }
 
-                    const deviceBot = Bot['webclient'];
+                    // 从请求中获取设备ID，默认为webclient（兼容旧版本）
+                    const deviceId = req.query.deviceId || req.headers['x-device-id'] || 'webclient';
+                    const deviceBot = Bot[deviceId];
+                    const device = devices.get(deviceId);
                     const e = {
-                        device_id: 'webclient',
-                        user_id: 'webclient_user',
-                        self_id: 'webclient'
+                        device_id: deviceId,
+                        user_id: device?.user_id || `${deviceId}_user`,
+                        self_id: deviceId
                     };
 
                     // 如果前端传递了context，使用它构建消息；否则使用工作流的buildChatContext
@@ -1448,7 +1446,7 @@ export default {
                         messages = await stream.buildChatContext(e, { 
                             text: prompt, 
                             persona,
-                            deviceId: 'webclient',
+                            deviceId: deviceId,
                             history: context // 传递历史上下文
                         });
                     } else {
@@ -1456,7 +1454,7 @@ export default {
                         messages = await stream.buildChatContext(e, { 
                             text: prompt, 
                             persona,
-                            deviceId: 'webclient'
+                            deviceId: deviceId
                         });
                     }
                     
@@ -1468,13 +1466,17 @@ export default {
                     });
 
                     const finalText = acc.trim();
-                    let polishedText = finalText;
-                    if (stream.responsePolishConfig?.enabled && finalText) {
-                        polishedText = await stream.polishResponse(finalText, persona).catch(() => finalText);
+                    
+                    // 先解析表情并移除表情标记（和chat.js一样）
+                    const { emotion, cleanText: rawCleanText } = stream.parseEmotion(finalText);
+                    
+                    // 使用cleanText（已移除表情标记），如果没有cleanText则使用原始文本
+                    let displayText = (rawCleanText && rawCleanText.trim()) || finalText.trim();
+                    
+                    // 润色（可选，对已移除表情标记的文本进行润色）
+                    if (stream.responsePolishConfig?.enabled && displayText) {
+                        displayText = await stream.polishResponse(displayText, persona).catch(() => displayText);
                     }
-
-                    const { emotion, cleanText } = stream.parseEmotion(polishedText);
-                    const displayText = (cleanText && cleanText.trim()) || polishedText;
 
                     res.write(`data: ${JSON.stringify({ done: true, text: displayText })}\n\n`);
 
@@ -1483,16 +1485,17 @@ export default {
                     const isLocalhost = clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === '::ffff:127.0.0.1' || 
                                        req.headers.host?.includes('localhost') || req.headers.host?.includes('127.0.0.1');
 
+                    // 处理表情：适用于所有设备
                     if (emotion && deviceBot?.emotion) {
                         try {
                             await deviceBot.emotion(emotion);
                             
-                            // 通过WebSocket发送表情更新给前端
-                            const ws = deviceWebSockets.get('webclient');
+                            // 通过WebSocket发送表情更新给前端（通用接口，适用于所有设备）
+                            const ws = deviceWebSockets.get(deviceId);
                             if (ws && ws.readyState === WebSocket.OPEN) {
                                 ws.send(JSON.stringify({
                                     type: 'emotion_update',
-                                    device_id: 'webclient',
+                                    device_id: deviceId,
                                     emotion: emotion
                                 }));
                             }
@@ -1501,11 +1504,11 @@ export default {
                         }
                     }
 
-                    // 只有本地访问时才调用TTS
+                    // TTS处理：只有本地访问时才调用（适用于所有设备）
                     const ttsConfig = deviceManager.getTTSConfig();
                     if (isLocalhost && ttsConfig.enabled && displayText && deviceBot) {
                         try {
-                            const ttsClient = getTTSClientForDevice('webclient');
+                            const ttsClient = getTTSClientForDevice(deviceId);
                             if (ttsClient) {
                                 await ttsClient.synthesize(displayText);
                             }
@@ -1514,16 +1517,17 @@ export default {
                         }
                     }
 
-                    if (polishedText && stream.getMemorySystem()?.isEnabled() && prompt.length > 10) {
+                    // 记忆系统（通用接口）
+                    if (displayText && stream.getMemorySystem()?.isEnabled() && prompt.length > 10) {
                         const memorySystem = stream.getMemorySystem();
                         const { ownerId, scene } = memorySystem.extractScene(e);
                         memorySystem.remember({
                             ownerId,
                             scene,
                             layer: 'short',
-                            content: `用户: ${prompt.substring(0, 100)} | 助手: ${polishedText.substring(0, 100)}`,
-                            metadata: { deviceId: 'webclient', type: 'conversation' },
-                            authorId: 'webclient'
+                            content: `用户: ${prompt.substring(0, 100)} | 助手: ${displayText.substring(0, 100)}`,
+                            metadata: { deviceId: deviceId, type: 'conversation' },
+                            authorId: deviceId
                         }).catch(() => {});
                     }
                     

@@ -221,11 +221,13 @@ ${messages.map(m => `${m.role}: ${m.content}`).join('\n')}
         }
       }
 
-      // 解析表情
+      // 先解析表情并移除表情标记（和chat.js一样）
       const { emotion, cleanText: rawText } = this.parseEmotion(response);
       
-      // 润色（可选）
-      let finalText = rawText || response;
+      // 使用cleanText（已移除表情标记），如果没有cleanText则使用原始response
+      let finalText = (rawText && rawText.trim()) || response.trim();
+      
+      // 润色（可选，对已移除表情标记的文本进行润色）
       if (this.responsePolishConfig?.enabled && finalText) {
         finalText = await this.polishResponse(finalText, persona);
       }

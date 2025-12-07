@@ -1444,7 +1444,13 @@ class App {
   }
 
   updateEmotionDisplay(emotion) {
-    const map = { happy: '😊', sad: '😢', angry: '😠', surprise: '😮', love: '❤️', cool: '😎', sleep: '😴', think: '🤔' };
+    // 完整表情映射，支持所有后端定义的表情
+    const map = {
+      happy: '😊', excited: '🤩', sad: '😢', angry: '😠', surprise: '😮', 
+      love: '❤️', cool: '😎', sleep: '😴', think: '🤔', wink: '😉', 
+      laugh: '😂', shy: '😊', confused: '😕', proud: '😤', bored: '😑', 
+      worried: '😟', calm: '😌', playful: '😜', gentle: '🥰', serious: '😐'
+    };
     const icon = map[emotion?.toLowerCase()] || map.happy;
     const el = document.getElementById('emotionIcon');
     if (el) el.textContent = icon;
