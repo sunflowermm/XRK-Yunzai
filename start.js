@@ -713,6 +713,13 @@ class MenuManager {
         name: `${chalk.green('▶')} 启动服务器 (端口: ${chalk.yellow(port)})`,
         value: { action: 'start_server', port }
       })),
+      ...(availablePorts.length > 0 ? [
+        new inquirer.Separator(),
+        ...availablePorts.map(port => ({
+          name: `${chalk.red('🗑')} 删除端口配置 (端口: ${chalk.yellow(port)})`,
+          value: { action: 'delete_port', port }
+        }))
+      ] : []),
       new inquirer.Separator(),
       { name: `${chalk.blue('+')} 添加新端口`, value: { action: 'add_port' } },
       { name: `${chalk.magenta('⚙')} PM2 进程管理`, value: { action: 'pm2_menu' } },
@@ -749,6 +756,10 @@ class MenuManager {
         
       case 'add_port':
         await this.handleAddPort();
+        break;
+        
+      case 'delete_port':
+        await this.handleDeletePort(selected.port);
         break;
         
       case 'pm2_menu':
@@ -805,6 +816,49 @@ class MenuManager {
       name: 'continue',
       message: '按 Enter 键返回主菜单...'
     }]);
+  }
+
+  /**
+   * 处理删除端口配置
+   * @private
+   * @param {number} port - 端口号
+   * @returns {Promise<void>}
+   */
+  async handleDeletePort(port) {
+    const { confirm } = await inquirer.prompt([{
+      type: 'confirm',
+      name: 'confirm',
+      message: chalk.red(`⚠ 确定要删除端口 ${port} 的所有配置文件吗？此操作不可恢复！`),
+      default: false
+    }]);
+    
+    if (!confirm) {
+      console.log(chalk.yellow('已取消删除操作'));
+      return;
+    }
+    
+    try {
+      const portDir = path.join(PATHS.SERVER_BOTS, port.toString());
+      
+      // 检查目录是否存在
+      try {
+        await fs.access(portDir);
+      } catch {
+        console.log(chalk.yellow(`端口 ${port} 的配置目录不存在`));
+        return;
+      }
+      
+      // 删除目录
+      await fs.rm(portDir, { recursive: true, force: true });
+      console.log(chalk.green(`✓ 端口 ${port} 的配置文件已删除`));
+      console.log(chalk.gray(`  已删除目录: ${portDir}`));
+      console.log(chalk.yellow(`\n提示: 下次选择此端口启动时，将自动重新生成配置文件`));
+      
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    } catch (error) {
+      console.error(chalk.red(`删除失败: ${error.message}`));
+      await this.serverManager.logger.error(`删除端口配置失败 [${port}]: ${error.message}`);
+    }
   }
 
   /**

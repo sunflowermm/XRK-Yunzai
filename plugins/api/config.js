@@ -722,11 +722,34 @@ export default {
           // 清理数据
           const cleanedData = cleanConfigData(data, { schema });
 
+          // 对于批量更新，先读取现有数据，然后合并，确保必需字段不会丢失
+          let finalData = cleanedData;
+          if (validate) {
+            try {
+              // 读取现有配置
+              let existingData = {};
+              if (name === 'system' && childPath) {
+                if (typeof config.read === 'function') {
+                  existingData = await config.read(childPath) || {};
+                }
+              } else {
+                existingData = await config.read() || {};
+              }
+              
+              // 深度合并：新数据覆盖现有数据，但保留现有数据的其他字段
+              const { deepMergeConfig } = await import('../../lib/commonconfig/config-utils.js');
+              finalData = deepMergeConfig(existingData, cleanedData, schema);
+            } catch (e) {
+              // 如果读取失败，使用新数据（可能是首次创建）
+              finalData = cleanedData;
+            }
+          }
+
           // 写入配置
           let result;
           if (name === 'system' && childPath) {
             if (typeof config.write === 'function') {
-              result = await config.write(childPath, cleanedData, { backup, validate });
+              result = await config.write(childPath, finalData, { backup, validate });
             } else {
               return res.status(400).json({
                 success: false,
@@ -734,7 +757,7 @@ export default {
               });
             }
           } else {
-            result = await config.write(cleanedData, { backup, validate });
+            result = await config.write(finalData, { backup, validate });
           }
 
           res.json({

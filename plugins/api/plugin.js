@@ -105,10 +105,13 @@ export default {
           const extendedPlugins = PluginsLoader.extended || [];
           const allPlugins = [...priorityPlugins, ...extendedPlugins];
           
+          // 从插件加载统计中获取加载时间
+          const loadStats = PluginsLoader.pluginLoadStats || {};
+          const totalLoadTime = loadStats.totalLoadTime || 0;
+          
           let totalPlugins = 0;
           let withRules = 0;
           let withTasks = 0;
-          let totalLoadTime = 0;
 
           for (const p of allPlugins) {
             try {
@@ -116,7 +119,6 @@ export default {
               totalPlugins++;
               if (plugin.rule?.length) withRules++;
               if (plugin.task) withTasks++;
-              // 加载时间可以从插件加载统计中获取
             } catch (error) {
               // 忽略初始化失败的插件
             }
@@ -129,7 +131,7 @@ export default {
               withRules,
               withTasks,
               taskCount: withTasks,
-              totalLoadTime: totalLoadTime || 0
+              totalLoadTime: totalLoadTime
             },
             plugins: allPlugins.map(p => ({
               key: p.key,

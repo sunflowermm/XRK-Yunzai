@@ -210,17 +210,30 @@ export default {
               if (excludeKeys.includes(uin)) return false;
               return bot.adapter || bot.nickname || bot.fl || bot.gl;
             })
-            .map(([uin, bot]) => ({
-              uin,
-              online: bot.stat?.online || false,
-              nickname: bot.nickname || uin,
-              adapter: bot.adapter?.name || 'unknown',
-              device: bot.device || false,
-              stats: {
-                friends: bot.fl?.size || 0,
-                groups: bot.gl?.size || 0
+            .map(([uin, bot]) => {
+              // 获取头像URL
+              let avatar = null;
+              if (bot.picUrl) {
+                avatar = bot.picUrl;
+              } else if (bot.user_id && bot.adapter?.name === 'OneBotv11') {
+                avatar = `https://q1.qlogo.cn/g?b=qq&nk=${bot.user_id}&s=640`;
+              } else if (bot.uin && !bot.device) {
+                avatar = `https://q1.qlogo.cn/g?b=qq&nk=${bot.uin}&s=640`;
               }
-            }));
+              
+              return {
+                uin,
+                online: bot.stat?.online || false,
+                nickname: bot.nickname || uin,
+                adapter: bot.adapter?.name || 'unknown',
+                device: bot.device || false,
+                avatar,
+                stats: {
+                  friends: bot.fl?.size || 0,
+                  groups: bot.gl?.size || 0
+                }
+              };
+            });
 
           const includeHist = (req.query?.hist === '24h') || (req.query?.withHistory === '1') || (req.query?.withHistory === 'true');
           res.json({
@@ -293,17 +306,30 @@ export default {
             if (excludeKeys.includes(uin)) return false;
             return bot.adapter || bot.nickname || bot.fl || bot.gl;
           })
-          .map(([uin, bot]) => ({
-            uin,
-            online: bot.stat?.online || false,
-            nickname: bot.nickname || uin,
-            adapter: bot.adapter?.name || 'unknown',
-            device: bot.device || false,
-            stats: {
-              friends: bot.fl?.size || 0,
-              groups: bot.gl?.size || 0
+          .map(([uin, bot]) => {
+            // 获取头像URL
+            let avatar = null;
+            if (bot.picUrl) {
+              avatar = bot.picUrl;
+            } else if (bot.user_id && bot.adapter?.name === 'OneBotv11') {
+              avatar = `https://q1.qlogo.cn/g?b=qq&nk=${bot.user_id}&s=640`;
+            } else if (bot.uin && !bot.device) {
+              avatar = `https://q1.qlogo.cn/g?b=qq&nk=${bot.uin}&s=640`;
             }
-          }));
+            
+            return {
+              uin,
+              online: bot.stat?.online || false,
+              nickname: bot.nickname || uin,
+              adapter: bot.adapter?.name || 'unknown',
+              device: bot.device || false,
+              avatar,
+              stats: {
+                friends: bot.fl?.size || 0,
+                groups: bot.gl?.size || 0
+              }
+            };
+          });
 
         res.json({
           success: true,
@@ -438,38 +464,62 @@ export default {
               if (excludeKeys.includes(uin)) return false;
               return bot.adapter || bot.nickname || bot.fl || bot.gl;
             })
-            .map(([uin, bot]) => ({
-              uin,
-              online: bot.stat?.online || false,
-              nickname: bot.nickname || uin,
-              adapter: bot.adapter?.name || 'unknown',
-              device: bot.device || false,
-              stats: {
-                friends: bot.fl?.size || 0,
-                groups: bot.gl?.size || 0
+            .map(([uin, bot]) => {
+              // 获取头像URL
+              let avatar = null;
+              if (bot.picUrl) {
+                avatar = bot.picUrl;
+              } else if (bot.user_id && bot.adapter?.name === 'OneBotv11') {
+                avatar = `https://q1.qlogo.cn/g?b=qq&nk=${bot.user_id}&s=640`;
+              } else if (bot.uin && !bot.device) {
+                avatar = `https://q1.qlogo.cn/g?b=qq&nk=${bot.uin}&s=640`;
               }
-            }));
+              
+              return {
+                uin,
+                online: bot.stat?.online || false,
+                nickname: bot.nickname || uin,
+                adapter: bot.adapter?.name || 'unknown',
+                device: bot.device || false,
+                avatar,
+                stats: {
+                  friends: bot.fl?.size || 0,
+                  groups: bot.gl?.size || 0
+                }
+              };
+            });
 
           // 获取工作流信息
           let workflows = { stats: {}, items: [], total: 0 };
           let panels = { workflows: null };
           try {
             const StreamLoader = (await import('../../lib/aistream/loader.js')).default;
-            const allStreams = StreamLoader.getAllStreams();
-            const enabledStreams = allStreams.filter(s => s.config?.enabled);
+            const allStreams = StreamLoader.getAllStreams() || [];
+            const enabledStreams = allStreams.filter(s => s.config?.enabled !== false);
+            const embeddingReadyStreams = allStreams.filter(s => s.embeddingReady === true);
+            
+            // 获取 embedding provider（从第一个启用的工作流中获取）
+            let provider = '默认';
+            const firstEnabled = enabledStreams[0];
+            if (firstEnabled?.embeddingConfig?.provider) {
+              provider = firstEnabled.embeddingConfig.provider;
+            } else if (StreamLoader.embeddingConfig?.provider) {
+              provider = StreamLoader.embeddingConfig.provider;
+            }
+            
             const items = allStreams.map(s => ({
-              name: s.name,
+              name: s.name || 'unknown',
               description: s.description || '',
-              enabled: s.config?.enabled || false,
-              embeddingReady: s.embeddingReady || false
+              enabled: s.config?.enabled !== false,
+              embeddingReady: s.embeddingReady === true
             }));
             
             workflows = {
               stats: {
                 total: allStreams.length,
                 enabled: enabledStreams.length,
-                embeddingReady: allStreams.filter(s => s.embeddingReady).length,
-                provider: 'lightweight'
+                embeddingReady: embeddingReadyStreams.length,
+                provider
               },
               items,
               total: allStreams.length
@@ -477,6 +527,7 @@ export default {
             panels = { workflows };
           } catch (e) {
             // 工作流加载失败时使用默认值
+            console.error('获取工作流信息失败:', e);
           }
 
           const includeHist = (req.query?.hist === '24h') || (req.query?.withHistory === '1') || (req.query?.withHistory === 'true');
