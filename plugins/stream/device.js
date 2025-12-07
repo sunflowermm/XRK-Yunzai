@@ -3,6 +3,7 @@ import BotUtil from '../../lib/common/util.js';
 import { parseEmotionFromText, normalizeEmotion } from '../../components/util/emotionUtil.js';
 import { EMOTION_KEYWORDS } from '../../components/config/deviceConfig.js';
 import cfg from '../../lib/config/config.js';
+import { WorkflowManager } from '../../lib/aistream/workflow-manager.js';
 import fs from 'fs';
 import path from 'path';
 import { exec, spawn } from 'child_process';
@@ -62,6 +63,9 @@ export default class DeviceStream extends AIStream {
     if (!this.functions) {
       this.functions = new Map();
     }
+
+    // 创建工作流管理器（用于记忆系统等扩展功能）
+    this.workflowManager = new DeviceWorkflowManager(this);
 
     // 注册工作助手功能
     this.registerAllFunctions();
@@ -229,6 +233,54 @@ Linux示例：[打开软件:gedit] 或 [打开软件:/usr/bin/firefox]`,
           BotUtil.makeLog('error', `函数调用失败: ${error.message}`, 'DeviceStream');
           return { type: 'text', content: `调用失败: ${error.message}` };
         }
+      },
+      enabled: true
+    });
+
+    // 6. 扩展工作流（记忆系统等）
+    this.registerFunction('workflow', {
+      description: '调用扩展工作流（记忆系统等）',
+      prompt: `[工作流:类型:可选参数] - 触发扩展动作
+记忆相关：
+- [工作流:memory:长期|用户喜欢原神] - 记住信息（支持长期/短期，默认长期）
+- [工作流:memory-recall] - 回忆记忆
+- [工作流:memory-forget:要删除的内容] - 删除记忆（支持id:xxx或内容关键词）`,
+      parser: (text, context) => {
+        const functions = [];
+        let cleanText = text;
+        const regex = /\[工作流:([^\]:]+)(?::([^\]]+))?\]/g;
+        let match;
+
+        while ((match = regex.exec(text))) {
+          functions.push({
+            type: 'workflow',
+            params: {
+              workflow: match[1]?.trim(),
+              argument: match[2]?.trim()
+            },
+            raw: match[0]
+          });
+        }
+
+        if (functions.length > 0) {
+          cleanText = text.replace(regex, '').trim();
+        }
+
+        return { functions, cleanText };
+      },
+      handler: async (params, context) => {
+        if (!this.workflowManager) {
+          return { type: 'text', content: '' };
+        }
+        
+        const enrichedContext = {
+          ...context,
+          persona: context.question?.persona || context.persona,
+          config: context.config || context.question?.config
+        };
+        
+        const result = await this.workflowManager.run(params.workflow, params, enrichedContext);
+        return result;
       },
       enabled: true
     });
@@ -769,6 +821,180 @@ Node.js版本: ${process.version}`;
       return String(result);
     } catch (error) {
       throw new Error(`函数调用失败: ${error.message}`);
+    }
+  }
+}
+
+/**
+ * 设备工作流管理器（扩展WorkflowManager）
+ * 处理设备场景特定的工作流，如记忆系统
+ */
+class DeviceWorkflowManager extends WorkflowManager {
+  constructor(stream) {
+    super();
+    this.stream = stream;
+    
+    // 注册设备特定的工作流
+    this.registerDeviceWorkflows();
+  }
+
+  registerDeviceWorkflows() {
+    // 记忆相关
+    this.registerWorkflow('memory', this.runMemory.bind(this), {
+      description: '记住信息',
+      enabled: true,
+      priority: 30
+    });
+    this.registerWorkflow('remember', this.runMemory.bind(this));
+    
+    this.registerWorkflow('memory-recall', this.runMemoryRecall.bind(this), {
+      description: '回忆记忆',
+      enabled: true,
+      priority: 30
+    });
+    this.registerWorkflow('recall-memory', this.runMemoryRecall.bind(this));
+    
+    // 删除记忆
+    this.registerWorkflow('memory-forget', this.runMemoryForget.bind(this), {
+      description: '删除记忆',
+      enabled: true,
+      priority: 30
+    });
+    this.registerWorkflow('forget-memory', this.runMemoryForget.bind(this));
+    this.registerWorkflow('删除记忆', this.runMemoryForget.bind(this));
+  }
+
+  /**
+   * 解析记忆参数（设备场景特定）
+   */
+  parseMemoryArguments(rawArg = '', e) {
+    const tokens = rawArg.split('|').map(t => t.trim()).filter(Boolean);
+    let layer = null;
+    const contentTokens = [];
+
+    const layerMap = new Map([
+      ['long', 'long'],
+      ['长期', 'long'],
+      ['长期记忆', 'long'],
+      ['short', 'short'],
+      ['短期', 'short'],
+      ['临时', 'short']
+    ]);
+
+    for (const token of tokens) {
+      const key = token.toLowerCase();
+      if (!layer && layerMap.has(key)) {
+        layer = layerMap.get(key);
+        continue;
+      }
+      contentTokens.push(token);
+    }
+
+    const content = contentTokens.join(' ').trim();
+    
+    // 使用记忆系统的场景提取
+    const memorySystem = this.stream.getMemorySystem();
+    const { ownerId, scene } = memorySystem.extractScene(e);
+
+    return {
+      ownerId,
+      scene,
+      layer,
+      content
+    };
+  }
+
+  /**
+   * 记住信息（使用基类记忆系统）
+   */
+  async runMemory(params = {}, context = {}) {
+    const memorySystem = this.stream.getMemorySystem();
+    if (!memorySystem?.isEnabled()) {
+      return { type: 'text', content: '记忆系统暂时不可用～' };
+    }
+
+    const rawArg = params.argument?.trim();
+    if (!rawArg) {
+      return { type: 'text', content: '想记住什么呀？内容空空的。' };
+    }
+
+    const parsed = this.parseMemoryArguments(rawArg, context.e);
+    if (!parsed.content) {
+      return { type: 'text', content: '记忆内容还没说清楚，换种说法再来一次？' };
+    }
+
+    const saved = await memorySystem.remember({
+      ownerId: parsed.ownerId,
+      scene: parsed.scene,
+      layer: parsed.layer,
+      content: parsed.content,
+      metadata: {
+        deviceId: context.e?.device_id || 'unknown',
+        type: 'device_conversation'
+      },
+      authorId: context.e?.self_id || context.e?.device_id
+    });
+
+    if (!saved) {
+      return { type: 'text', content: '这条记忆没记住，再试试？' };
+    }
+
+    return { type: 'text', content: '记住啦～想看的时候可以叫我回忆。' };
+  }
+
+  /**
+   * 回忆记忆（使用基类记忆系统）
+   */
+  async runMemoryRecall(params = {}, context = {}) {
+    const memorySystem = this.stream.getMemorySystem();
+    if (!memorySystem?.isEnabled()) {
+      return { type: 'text', content: '记忆系统暂时不可用～' };
+    }
+
+    const summary = await memorySystem.buildSummary(context.e, { preferUser: true });
+    if (!summary) {
+      return { type: 'text', content: '现在脑子里还没有新的记忆。' };
+    }
+
+    return { type: 'text', content: summary };
+  }
+
+  /**
+   * 删除记忆（AI可以删除自己的记忆）
+   */
+  async runMemoryForget(params = {}, context = {}) {
+    const memorySystem = this.stream.getMemorySystem();
+    if (!memorySystem?.isEnabled()) {
+      return { type: 'text', content: '记忆系统暂时不可用～' };
+    }
+
+    const rawArg = params.argument?.trim();
+    if (!rawArg) {
+      return { type: 'text', content: '想删除什么记忆呀？说清楚内容或ID。' };
+    }
+
+    const { ownerId, scene } = memorySystem.extractScene(context.e);
+    
+    // 解析参数：支持 memoryId 或 content 关键词
+    let memoryId = null;
+    let content = null;
+    
+    // 尝试解析为ID（格式：id:xxx）
+    if (rawArg.startsWith('id:')) {
+      memoryId = rawArg.substring(3).trim();
+    } else if (rawArg.startsWith('ID:')) {
+      memoryId = rawArg.substring(3).trim();
+    } else {
+      // 否则作为内容关键词
+      content = rawArg;
+    }
+
+    const success = await memorySystem.forget(ownerId, scene, memoryId, content);
+    
+    if (success) {
+      return { type: 'text', content: '记忆已删除～' };
+    } else {
+      return { type: 'text', content: '没找到要删除的记忆，可能已经删除了？' };
     }
   }
 }

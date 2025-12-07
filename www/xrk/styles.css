@@ -1166,6 +1166,56 @@ select.form-input {
   66% { content: '...'; }
 }
 
+/* Markdown 样式 */
+.chat-message code {
+  background: var(--bg-input);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 0.9em;
+  color: var(--primary-dark);
+}
+
+.chat-message pre {
+  background: var(--bg-input);
+  padding: 12px;
+  border-radius: var(--radius);
+  overflow-x: auto;
+  margin: 8px 0;
+  border: 1px solid var(--border);
+}
+
+.chat-message pre code {
+  background: transparent;
+  padding: 0;
+  color: var(--text-primary);
+}
+
+.chat-message strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.chat-message em {
+  font-style: italic;
+  color: var(--text-secondary);
+}
+
+.chat-message a {
+  color: var(--primary);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--transition);
+}
+
+.chat-message a:hover {
+  border-bottom-color: var(--primary);
+}
+
+.chat-message br {
+  line-height: 1.6;
+}
+
 .chat-input-area {
   padding: 16px 20px;
   border-top: 1px solid var(--border);

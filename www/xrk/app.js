@@ -1176,10 +1176,51 @@ class App {
     if (box) {
       const div = document.createElement('div');
       div.className = `chat-message ${role}`;
-      div.textContent = text;
+      // 处理Markdown：简单转换，避免XSS
+      const processedText = this.processMarkdown(text);
+      div.innerHTML = processedText;
       box.appendChild(div);
       box.scrollTop = box.scrollHeight;
     }
+  }
+
+  /**
+   * 处理Markdown文本（简单转换，避免XSS）
+   */
+  processMarkdown(text) {
+    if (!text || typeof text !== 'string') return '';
+    
+    // 转义HTML特殊字符
+    let html = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+    
+    // 处理代码块
+    html = html.replace(/```([\s\S]*?)```/g, (match, code) => {
+      return `<pre><code>${code.trim()}</code></pre>`;
+    });
+    
+    // 处理行内代码
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    
+    // 处理粗体
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+    
+    // 处理斜体
+    html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    html = html.replace(/_([^_]+)_/g, '<em>$1</em>');
+    
+    // 处理链接
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    
+    // 处理换行
+    html = html.replace(/\n/g, '<br>');
+    
+    return html;
   }
 
   clearChat() {
@@ -1425,7 +1466,9 @@ class App {
     
     if (!msg) return;
     
-    msg.textContent = text;
+    // 处理Markdown（流式输出时也支持）
+    const processedText = this.processMarkdown(text);
+    msg.innerHTML = processedText;
     
     if (done) {
       msg.classList.remove('streaming');
