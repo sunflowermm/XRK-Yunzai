@@ -1161,10 +1161,17 @@ class App {
     this._chatHistory.forEach(m => {
       const div = document.createElement('div');
       div.className = `chat-message ${m.role}`;
-      div.textContent = m.text;
+      // 使用processMarkdown处理文本，确保Markdown样式正确显示
+      // processMarkdown内部会移除表情标记，所以历史记录也不会显示[开心]等
+      const processedText = this.processMarkdown(m.text);
+      div.innerHTML = processedText;
       box.appendChild(div);
     });
     box.scrollTop = box.scrollHeight;
+    
+    // 恢复表情显示（如果有最后一条助手消息，尝试从WebSocket获取最新表情）
+    // 或者保持默认表情
+    this.updateEmotionDisplay('happy'); // 默认表情
   }
 
   appendChat(role, text, persist = true) {
@@ -1185,13 +1192,36 @@ class App {
   }
 
   /**
+   * 解析表情标记（前端辅助函数，用于实时移除表情标记）
+   */
+  parseEmotionFromText(text) {
+    if (!text || typeof text !== 'string') return { emotion: null, cleanText: text };
+    
+    // 匹配 [表情] 或 [表情} 格式
+    const emotionRegex = /\[([^\]]+)[\]}]/;
+    const match = text.match(emotionRegex);
+    
+    if (!match) {
+      return { emotion: null, cleanText: text };
+    }
+    
+    // 移除表情标记
+    const cleanText = text.replace(match[0], '').trim();
+    return { emotion: match[1], cleanText };
+  }
+
+  /**
    * 处理Markdown文本（简单转换，避免XSS）
    */
   processMarkdown(text) {
     if (!text || typeof text !== 'string') return '';
     
+    // 先移除表情标记（确保不显示[开心]等）
+    const { cleanText } = this.parseEmotionFromText(text);
+    const textToProcess = cleanText || text;
+    
     // 转义HTML特殊字符
-    let html = text
+    let html = textToProcess
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
@@ -1425,13 +1455,22 @@ class App {
         const data = JSON.parse(e.data || '{}');
         if (data.delta) {
           acc += data.delta;
-          this.renderStreamingMessage(acc);
-          this.updateChatStatus(`AI 输出中 (${acc.length} 字)`);
+          // 流式输出时实时移除表情标记（避免显示[开心]等标记）
+          const { cleanText } = this.parseEmotionFromText(acc);
+          const displayText = cleanText || acc;
+          this.renderStreamingMessage(displayText);
+          this.updateChatStatus(`AI 输出中 (${displayText.length} 字)`);
         }
         if (data.done) {
           es.close();
           if (this._activeEventSource === es) this._activeEventSource = null;
-          this.renderStreamingMessage(acc, true);
+          // 使用后端返回的text（已移除表情标记），如果没有则使用acc并移除表情标记
+          let finalText = data.text;
+          if (!finalText) {
+            const { cleanText } = this.parseEmotionFromText(acc);
+            finalText = cleanText || acc;
+          }
+          this.renderStreamingMessage(finalText, true);
           this.stopActiveStream();
         }
         if (data.error) {

@@ -1459,9 +1459,16 @@ export default {
                     }
                     
                     let acc = '';
+                    let lastEmotion = null;
                     
                     await stream.callAIStream(messages, stream.config, (delta) => {
                         acc += delta;
+                        // 实时解析表情，但不在流式输出中移除（避免影响流式体验）
+                        // 只在最终结果中移除表情标记
+                        const { emotion } = stream.parseEmotion(acc);
+                        if (emotion) {
+                            lastEmotion = emotion;
+                        }
                         res.write(`data: ${JSON.stringify({ delta })}\n\n`);
                     });
 
@@ -1469,6 +1476,7 @@ export default {
                     
                     // 先解析表情并移除表情标记（和chat.js一样）
                     const { emotion, cleanText: rawCleanText } = stream.parseEmotion(finalText);
+                    const finalEmotion = emotion || lastEmotion;
                     
                     // 使用cleanText（已移除表情标记），如果没有cleanText则使用原始文本
                     let displayText = (rawCleanText && rawCleanText.trim()) || finalText.trim();
@@ -1478,6 +1486,7 @@ export default {
                         displayText = await stream.polishResponse(displayText, persona).catch(() => displayText);
                     }
 
+                    // 最终返回的文本必须移除所有表情标记
                     res.write(`data: ${JSON.stringify({ done: true, text: displayText })}\n\n`);
 
                     // 检查是否为本地访问（127.0.0.1 或 localhost）
@@ -1485,10 +1494,10 @@ export default {
                     const isLocalhost = clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === '::ffff:127.0.0.1' || 
                                        req.headers.host?.includes('localhost') || req.headers.host?.includes('127.0.0.1');
 
-                    // 处理表情：适用于所有设备
-                    if (emotion && deviceBot?.emotion) {
+                    // 处理表情：适用于所有设备（使用最终解析的表情）
+                    if (finalEmotion && deviceBot?.emotion) {
                         try {
-                            await deviceBot.emotion(emotion);
+                            await deviceBot.emotion(finalEmotion);
                             
                             // 通过WebSocket发送表情更新给前端（通用接口，适用于所有设备）
                             const ws = deviceWebSockets.get(deviceId);
@@ -1496,7 +1505,7 @@ export default {
                                 ws.send(JSON.stringify({
                                     type: 'emotion_update',
                                     device_id: deviceId,
-                                    emotion: emotion
+                                    emotion: finalEmotion
                                 }));
                             }
                         } catch (e) {
