@@ -33,95 +33,13 @@ const __dirname = dirname(__filename);
 const execAsync = promisify(exec);
 
 /**
- * 简化的日志类
- * 用于引导阶段的日志记录
- * 
- * @class BootstrapLogger
- */
-class BootstrapLogger {
-  constructor() {
-    /** @type {string} 日志文件路径 */
-    this.logFile = path.join('./logs', 'bootstrap.log');
-    /** @type {boolean} 控制台输出开关 */
-    this.consoleEnabled = true;
-  }
-
-  /**
-   * 确保日志目录存在
-   * @returns {Promise<void>}
-   */
-  async ensureLogDir() {
-    await fs.mkdir('./logs', { recursive: true });
-  }
-
-  /**
-   * 写入日志
-   * @param {string} message - 日志消息
-   * @param {string} [level='INFO'] - 日志级别
-   * @returns {Promise<void>}
-   */
-  async log(message, level = 'INFO') {
-    const timestamp = new Date().toISOString();
-    const logMessage = `[${timestamp}] [${level}] ${message}\n`;
-    
-    try {
-      await fs.appendFile(this.logFile, logMessage);
-      
-      if (this.consoleEnabled) {
-        const colorMap = {
-          INFO: '\x1b[36m',    // 青色
-          SUCCESS: '\x1b[32m', // 绿色
-          WARNING: '\x1b[33m', // 黄色
-          ERROR: '\x1b[31m'    // 红色
-        };
-        
-        console.log(`${colorMap[level] || ''}${message}\x1b[0m`);
-      }
-    } catch (error) {
-      console.error('日志写入失败:', error.message);
-    }
-  }
-
-  /**
-   * 记录成功消息
-   * @param {string} message - 成功消息
-   * @returns {Promise<void>}
-   */
-  async success(message) {
-    await this.log(message, 'SUCCESS');
-  }
-
-  /**
-   * 记录警告消息
-   * @param {string} message - 警告消息
-   * @returns {Promise<void>}
-   */
-  async warning(message) {
-    await this.log(message, 'WARNING');
-  }
-
-  /**
-   * 记录错误消息
-   * @param {string} message - 错误消息
-   * @returns {Promise<void>}
-   */
-  async error(message) {
-    await this.log(message, 'ERROR');
-  }
-}
-
-/**
  * 依赖管理器
  * 负责检查和安装项目依赖
  * 
  * @class DependencyManager
  */
 class DependencyManager {
-  /**
-   * @param {BootstrapLogger} logger - 日志实例
-   */
-  constructor(logger) {
-    this.logger = logger;
+  constructor() {
     /** @type {string} 包管理器类型 */
     this.packageManager = 'pnpm';
   }
@@ -206,25 +124,14 @@ class DependencyManager {
    * @returns {Promise<void>}
    */
   async installDependencies(missingDeps) {
-    await this.logger.warning(`发现 ${missingDeps.length} 个缺失的依赖`);
-    await this.logger.log(`缺失的依赖: ${missingDeps.join(', ')}`);
-    
     const manager = await this.detectPackageManager();
     this.packageManager = manager;
     
-    await this.logger.log(`使用 ${manager} 安装依赖...`);
-    
     try {
-      const { stdout, stderr } = await execAsync(`${manager} install`, {
-        maxBuffer: 1024 * 1024 * 10, // 10MB缓冲区
-        timeout: 300000 // 5分钟超时
+      await execAsync(`${manager} install`, {
+        maxBuffer: 1024 * 1024 * 10,
+        timeout: 300000
       });
-      
-      if (stderr && !stderr.includes('warning')) {
-        await this.logger.warning(`安装警告: ${stderr}`);
-      }
-      
-      await this.logger.success('依赖安装完成');
     } catch (error) {
       throw new Error(`依赖安装失败: ${error.message}`);
     }
@@ -240,29 +147,19 @@ class DependencyManager {
   async checkAndInstall(config) {
     const { packageJsonPath, nodeModulesPath } = config;
     
-    try {
-      /** 解析package.json */
-      const packageJson = await this.parsePackageJson(packageJsonPath);
-      
-      /** 合并所有依赖 */
-      const allDependencies = {
-        ...packageJson.dependencies || {},
-        ...packageJson.devDependencies || {}
-      };
-      
-      /** 检查缺失的依赖 */
-      const missingDeps = await this.getMissingDependencies(
-        allDependencies, 
-        nodeModulesPath
-      );
-      
-      /** 安装缺失的依赖 */
-      if (missingDeps.length > 0) {
-        await this.installDependencies(missingDeps);
-      } else { }
-    } catch (error) {
-      await this.logger.error(`依赖检查失败: ${error.message}`);
-      throw error;
+    const packageJson = await this.parsePackageJson(packageJsonPath);
+    const allDependencies = {
+      ...packageJson.dependencies || {},
+      ...packageJson.devDependencies || {}
+    };
+    
+    const missingDeps = await this.getMissingDependencies(
+      allDependencies, 
+      nodeModulesPath
+    );
+    
+    if (missingDeps.length > 0) {
+      await this.installDependencies(missingDeps);
     }
   }
 
@@ -300,7 +197,6 @@ class DependencyManager {
       try {
         pkg = JSON.parse(await fs.readFile(pkgPath, 'utf8'));
       } catch (e) {
-        await this.logger.warning(`插件 package.json 无法解析: ${pkgPath} (${e.message})`);
         continue;
       }
 
@@ -320,19 +216,14 @@ class DependencyManager {
       }
 
       if (missing.length > 0) {
-        await this.logger.warning(`插件依赖缺失 [${d}]: ${missing.join(', ')}`);
         try {
-          await this.logger.log(`为插件安装依赖 (${manager}): ${d}`);
-          // 子目录安装并设定合理超时与缓冲
           await execAsync(`${manager} install`, {
             cwd: d,
             maxBuffer: 1024 * 1024 * 16,
             timeout: 10 * 60 * 1000
           });
-          await this.logger.success(`插件依赖安装完成: ${d}`);
         } catch (err) {
-          await this.logger.error(`插件依赖安装失败: ${d} (${err.message})`);
-          throw err;
+          throw new Error(`插件依赖安装失败: ${d} (${err.message})`);
         }
       }
     }
@@ -347,13 +238,6 @@ class DependencyManager {
  */
 class EnvironmentValidator {
   /**
-   * @param {BootstrapLogger} logger - 日志实例
-   */
-  constructor(logger) {
-    this.logger = logger;
-  }
-
-  /**
    * 检查Node.js版本
    * @returns {Promise<void>}
    */
@@ -364,8 +248,6 @@ class EnvironmentValidator {
     if (majorVersion < 18) {
       throw new Error(`Node.js版本过低: ${nodeVersion}, 需要 v18.0.0 或更高版本`);
     }
-    
-    await this.logger.log(`Node.js 版本检查通过: ${nodeVersion}`);
   }
 
   /**
@@ -390,7 +272,6 @@ class EnvironmentValidator {
    * @returns {Promise<void>}
    */
   async validate() {
-    
     await this.checkNodeVersion();
     await this.checkRequiredDirectories();
   }
@@ -404,9 +285,8 @@ class EnvironmentValidator {
  */
 class Bootstrap {
   constructor() {
-    this.logger = new BootstrapLogger();
-    this.dependencyManager = new DependencyManager(this.logger);
-    this.environmentValidator = new EnvironmentValidator(this.logger);
+    this.dependencyManager = new DependencyManager();
+    this.environmentValidator = new EnvironmentValidator();
   }
 
   /**
@@ -420,7 +300,6 @@ class Bootstrap {
     try {
       await fs.access(importsDir);
     } catch {
-      await this.logger.log('importsJson目录不存在，跳过动态imports加载');
       return;
     }
 
@@ -455,18 +334,13 @@ class Bootstrap {
    * @returns {Promise<void>}
    */
   async initialize() {
-    await this.logger.ensureLogDir();
-    await this.logger.log('='.repeat(50));
-    await this.logger.log('XRK-Yunzai 启动引导');
-    await this.logger.log('='.repeat(50));
+    // 确保日志目录存在
+    await fs.mkdir('./logs', { recursive: true });
     
     /** 验证环境 */
-    await this.logger.log('步骤 1/4: 验证运行环境...');
     await this.environmentValidator.validate();
-    await this.logger.success('环境验证通过');
     
     /** 检查并安装依赖 */
-    await this.logger.log('步骤 2/4: 检查项目依赖...');
     const packageJsonPath = path.join(process.cwd(), 'package.json');
     const nodeModulesPath = path.join(process.cwd(), 'node_modules');
     
@@ -474,21 +348,12 @@ class Bootstrap {
       packageJsonPath,
       nodeModulesPath
     });
-    await this.logger.success('项目依赖检查完成');
 
-    // 插件依赖检查与安装，防止加载期卡死
-    await this.logger.log('步骤 3/4: 检查插件依赖...');
+    // 插件依赖检查与安装
     await this.dependencyManager.ensurePluginDependencies(process.cwd());
-    await this.logger.success('插件依赖检查完成');
 
     /** 加载动态imports */
-    await this.logger.log('步骤 4/4: 加载动态配置...');
     await this.loadDynamicImports(packageJsonPath);
-    await this.logger.success('动态配置加载完成');
-    
-    await this.logger.log('='.repeat(50));
-    await this.logger.success('引导流程完成，正在启动主程序...');
-    await this.logger.log('='.repeat(50));
   }
 
   /**
@@ -496,13 +361,10 @@ class Bootstrap {
    * @returns {Promise<void>}
    */
   async startMainApplication() {
-    
     try {
-      /** 动态导入主程序 */
       await import('./start.js');
     } catch (error) {
-      await this.logger.error(`主程序启动失败: ${error.message}`);
-      throw error;
+      throw new Error(`主程序启动失败: ${error.message}`);
     }
   }
 
@@ -515,25 +377,10 @@ class Bootstrap {
       await this.initialize();
       await this.startMainApplication();
     } catch (error) {
-      await this.logger.error(`引导失败: ${error.message}`);
-      
+      console.error(`引导失败: ${error.message}`);
       if (error.stack) {
-        await this.logger.error(`堆栈追踪:\n${error.stack}`);
+        console.error(`堆栈追踪:\n${error.stack}`);
       }
-      
-      /** 提供故障排除建议 */
-      console.log('\n' + '='.repeat(50));
-      console.log('故障排除建议:');
-      console.log('='.repeat(50));
-      console.log('1. 确保 Node.js 版本 >= 18.0.0 (当前: ' + process.version + ')');
-      console.log('2. 手动运行: pnpm install (或 npm install / yarn install)');
-      console.log('3. 检查网络连接和代理设置');
-      console.log('4. 查看详细日志: ./logs/bootstrap.log');
-      console.log('5. 如果问题持续，尝试:');
-      console.log('   - 删除 node_modules 和 pnpm-lock.yaml');
-      console.log('   - 重新运行: pnpm install');
-      console.log('='.repeat(50));
-      
       process.exit(1);
     }
   }
@@ -541,33 +388,25 @@ class Bootstrap {
 
 /**
  * 全局错误处理
- * 确保所有错误都被捕获并记录
  */
-process.on('uncaughtException', async (error) => {
-  const logger = new BootstrapLogger();
-  await logger.error(`未捕获的异常: ${error.message}\n${error.stack}`);
+process.on('uncaughtException', (error) => {
+  console.error(`未捕获的异常: ${error.message}\n${error.stack}`);
   process.exit(1);
 });
 
-process.on('unhandledRejection', async (reason, promise) => {
-  const logger = new BootstrapLogger();
+process.on('unhandledRejection', (reason, promise) => {
   const errorMessage = reason instanceof Error 
     ? `${reason.message}\n${reason.stack}` 
     : String(reason);
   
-  // 对于 API 不支持的错误，只记录警告，不退出进程
+  // 对于 API 不支持的错误，忽略
   if (errorMessage.includes('不支持的Api') || 
       errorMessage.includes('API_NOT_SUPPORTED') ||
       (reason instanceof Error && reason.message && reason.message.includes('不支持的Api'))) {
-    await logger.warning(`API不支持（已忽略）: ${errorMessage}`);
-    return; // 不退出进程
+    return;
   }
   
-  // 对于其他严重错误，记录并退出
-  await logger.error(`未处理的Promise拒绝: ${errorMessage}`);
-  // 注意：这里不直接退出，让应用继续运行，但记录错误
-  // 如果确实需要退出，可以取消下面的注释
-  // process.exit(1);
+  console.error(`未处理的Promise拒绝: ${errorMessage}`);
 });
 
 /**

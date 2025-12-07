@@ -509,6 +509,9 @@ export default class PlaywrightRenderer extends Renderer {
       await redis.del(this.browserMacKey).catch(() => {});
     }
 
-    BotUtil.makeLog("info", "Playwright resources cleaned up", "PlaywrightRenderer");
+    if (!global._rendererCleanupLogged) {
+      BotUtil.makeLog("info", "Renderer resources cleaned up", "Renderer");
+      global._rendererCleanupLogged = true;
+    }
   }
 }

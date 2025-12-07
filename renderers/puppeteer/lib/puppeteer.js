@@ -460,6 +460,9 @@ export default class PuppeteerRenderer extends Renderer {
       await redis.del(this.browserMacKey).catch(() => {});
     }
 
-    BotUtil.makeLog("info", "Puppeteer resources cleaned up", "PuppeteerRenderer");
+    if (!global._rendererCleanupLogged) {
+      BotUtil.makeLog("info", "Renderer resources cleaned up", "Renderer");
+      global._rendererCleanupLogged = true;
+    }
   }
 }
