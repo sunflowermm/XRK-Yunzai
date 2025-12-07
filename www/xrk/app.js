@@ -3694,6 +3694,12 @@ class App {
         }
         break;
       }
+      case 'emotion_update':
+        // 接收表情更新消息
+        if (data.emotion) {
+          this.updateEmotionDisplay(data.emotion);
+        }
+        break;
       case 'command':
         if (data.command === 'display' && data.parameters?.text) {
           this.appendChat('assistant', data.parameters.text);

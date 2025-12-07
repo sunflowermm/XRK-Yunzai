@@ -460,10 +460,27 @@ class DeviceManager {
             // 表情已由工作流处理
             if (aiResult.emotion) {
                 await new Promise(r => setTimeout(r, 200));
+                
+                // 通过WebSocket发送表情更新给前端（仅webclient设备）
+                if (deviceId === 'webclient') {
+                    const ws = deviceWebSockets.get(deviceId);
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        try {
+                            ws.send(JSON.stringify({
+                                type: 'emotion_update',
+                                device_id: deviceId,
+                                emotion: aiResult.emotion
+                            }));
+                        } catch (e) {
+                            BotUtil.makeLog('warn', `[AI] 发送表情更新失败: ${e.message}`, deviceId);
+                        }
+                    }
+                }
             }
 
-            // 播放TTS
-            if (aiResult.text && this.getTTSConfig().enabled) {
+            // 播放TTS（非webclient设备始终播放，webclient设备在流式接口中处理）
+            // 注意：webclient的TTS在流式接口中根据IP判断是否播放，这里不处理
+            if (deviceId !== 'webclient' && aiResult.text && this.getTTSConfig().enabled) {
                 try {
                     const ttsClient = this._getTTSClient(deviceId);
                     const success = await ttsClient.synthesize(aiResult.text);
@@ -901,6 +918,23 @@ class DeviceManager {
                 if (!normalized) {
                     throw new Error(`未知表情: ${emotionName}`);
                 }
+                
+                // 如果是webclient设备，通过WebSocket发送表情更新
+                if (deviceId === 'webclient') {
+                    const ws = deviceWebSockets.get(deviceId);
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        try {
+                            ws.send(JSON.stringify({
+                                type: 'emotion_update',
+                                device_id: deviceId,
+                                emotion: normalized
+                            }));
+                        } catch (e) {
+                            BotUtil.makeLog('warn', `[设备] 发送表情更新失败: ${e.message}`, deviceId);
+                        }
+                    }
+                }
+                
                 return await deviceManager.sendCommand(
                     deviceId,
                     'display_emotion',
@@ -1444,16 +1478,32 @@ export default {
 
                     res.write(`data: ${JSON.stringify({ done: true, text: displayText })}\n\n`);
 
+                    // 检查是否为本地访问（127.0.0.1 或 localhost）
+                    const clientIp = req.ip || req.socket?.remoteAddress || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || '';
+                    const isLocalhost = clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === '::ffff:127.0.0.1' || 
+                                       req.headers.host?.includes('localhost') || req.headers.host?.includes('127.0.0.1');
+
                     if (emotion && deviceBot?.emotion) {
                         try {
                             await deviceBot.emotion(emotion);
+                            
+                            // 通过WebSocket发送表情更新给前端
+                            const ws = deviceWebSockets.get('webclient');
+                            if (ws && ws.readyState === WebSocket.OPEN) {
+                                ws.send(JSON.stringify({
+                                    type: 'emotion_update',
+                                    device_id: 'webclient',
+                                    emotion: emotion
+                                }));
+                            }
                         } catch (e) {
                             BotUtil.makeLog('error', `[AI流式] 表情切换失败: ${e.message}`, 'AIStream');
                         }
                     }
 
+                    // 只有本地访问时才调用TTS
                     const ttsConfig = deviceManager.getTTSConfig();
-                    if (ttsConfig.enabled && displayText && deviceBot) {
+                    if (isLocalhost && ttsConfig.enabled && displayText && deviceBot) {
                         try {
                             const ttsClient = getTTSClientForDevice('webclient');
                             if (ttsClient) {
