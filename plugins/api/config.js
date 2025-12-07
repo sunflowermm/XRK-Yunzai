@@ -597,7 +597,17 @@ export default {
             const structure = config.getStructure();
             const childConfig = structure.configs?.[childPath];
             if (childConfig) {
-              schema = childConfig.schema || { fields: childConfig.fields || {} };
+              // 优先使用 schema，如果没有则从 fields 构建
+              if (childConfig.schema && childConfig.schema.fields) {
+                schema = childConfig.schema;
+              } else if (childConfig.fields) {
+                schema = { fields: childConfig.fields };
+              } else {
+                return res.status(404).json({
+                  success: false,
+                  message: `子配置 ${childPath} 的 schema 不存在`
+                });
+              }
             } else {
               return res.status(404).json({
                 success: false,
@@ -607,7 +617,16 @@ export default {
           } else {
             // 普通配置直接使用 schema
             const structure = config.getStructure();
-            schema = structure.schema || { fields: structure.fields || {} };
+            if (structure.schema && structure.schema.fields) {
+              schema = structure.schema;
+            } else if (structure.fields) {
+              schema = { fields: structure.fields };
+            } else {
+              return res.status(404).json({
+                success: false,
+                message: `配置 ${name} 的 schema 不存在`
+              });
+            }
           }
 
           const flat = flattenStructure(schema);

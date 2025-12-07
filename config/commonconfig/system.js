@@ -2192,9 +2192,11 @@ export default class SystemConfig extends ConfigBase {
     };
 
     for (const [name, meta] of Object.entries(this.configFiles)) {
+      // 确保 schema 完整传递，包含所有字段定义和元数据
       structure.configs[name] = {
         ...meta,
-        fields: meta.schema?.fields || {}
+        schema: meta.schema || { fields: meta.fields || {} },
+        fields: meta.schema?.fields || meta.fields || {}
       };
     }
 

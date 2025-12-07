@@ -2075,6 +2075,11 @@ class App {
       return { label: opt, value: opt };
     });
 
+    // 获取选项：优先从 meta 读取，其次从 field 顶层读取
+    const getOptions = () => {
+      return meta.enum || meta.options || field.enum || field.options || [];
+    };
+
     const lowerComponent = (component || '').toLowerCase();
     const isArrayObject = field.type === 'array<object>' || (lowerComponent === 'arrayform' && meta.itemType === 'object');
     if (isArrayObject) {
@@ -2090,8 +2095,14 @@ class App {
           </label>
         `;
       case 'select': {
-        const opts = normalizeOptions(meta.enum || meta.options || []);
+        const opts = normalizeOptions(getOptions());
         const current = value ?? '';
+        if (opts.length === 0) {
+          return `
+            <input type="text" class="form-input" id="${inputId}" ${dataset} value="${this.escapeHtml(String(current))}" ${disabled} placeholder="${placeholder}">
+            <p class="config-field-hint">该字段缺少选项定义，请使用 JSON 模式编辑</p>
+          `;
+        }
         return `
           <select class="form-input" id="${inputId}" ${dataset} ${disabled}>
             ${opts.map(opt => `<option value="${this.escapeHtml(opt.value)}" ${String(opt.value) === String(current) ? 'selected' : ''}>${this.escapeHtml(opt.label)}</option>`).join('')}
@@ -2099,8 +2110,14 @@ class App {
         `;
       }
       case 'multiselect': {
-        const opts = normalizeOptions(meta.enum || meta.options || []);
+        const opts = normalizeOptions(getOptions());
         const current = Array.isArray(value) ? value.map(v => String(v)) : [];
+        if (opts.length === 0) {
+          return `
+            <input type="text" class="form-input" id="${inputId}" ${dataset} value="${this.escapeHtml(Array.isArray(current) ? current.join(',') : String(current))}" ${disabled} placeholder="${placeholder}">
+            <p class="config-field-hint">该字段缺少选项定义，请使用 JSON 模式编辑</p>
+          `;
+        }
         return `
           <select class="form-input" id="${inputId}" multiple ${dataset} data-control="multiselect" ${disabled}>
             ${opts.map(opt => `<option value="${this.escapeHtml(opt.value)}" ${current.includes(String(opt.value)) ? 'selected' : ''}>${this.escapeHtml(opt.label)}</option>`).join('')}
