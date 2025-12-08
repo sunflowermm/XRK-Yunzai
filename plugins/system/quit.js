@@ -16,8 +16,8 @@ export class quit extends plugin {
     /** 请求阶段直接拒绝拉群邀请，避免遗漏入群事件 */
     if (this.e.post_type === 'request') {
       if (this.e.sub_type !== 'invite') return
-      const inviter = Number(this.e.user_id)
-      if (cfg.masterQQ.some(qq => Number(qq) === inviter)) {
+      const inviter = Number(this.e.user_id || this.e.inviter_id || this.e.invitor_id || 0)
+      if (cfg.masterQQ.some(qq => qq * 1 === inviter)) {
         logger.mark(`[主人邀请] ${this.e.group_id}`)
         return
       }
@@ -26,18 +26,26 @@ export class quit extends plugin {
       return
     }
 
-    /** 仅处理机器人自身入群的通知 */
-    if (this.e.user_id != this.e.bot.uin) return
+    /** 仅处理机器人自身入群的通知（Napcat 可能把目标放在 target_id） */
+    const targetId = Number(this.e.user_id ?? this.e.target_id ?? this.e.self_id ?? 0)
+    if (targetId !== Number(this.e.bot.uin)) return
 
     /** 邀请人（operator_id）优先判定，少数群可能没有单独的邀请事件 */
-    const inviter = Number(this.e.operator_id || this.e.inviter_id || 0)
-    if (inviter && cfg.masterQQ.some(qq => Number(qq) === inviter)) {
+    const inviter = Number(
+      this.e.operator_id ||
+      this.e.inviter_id ||
+      this.e.invitor_id ||
+      // 部分上报会把邀请人塞在 user_id
+      (this.e.user_id !== targetId ? this.e.user_id : 0) ||
+      0
+    )
+    if (inviter && cfg.masterQQ.some(qq => qq * 1 === inviter)) {
       logger.mark(`[主人邀请] ${this.e.group_id}`)
       return
     }
 
     /** 拉取最新群信息与成员列表，防止人数判断失真 */
-    const group = this.e.group || this.e.bot?.pickGroup?.(this.e, this.e.group_id)
+    const group = this.e.group || this.e.bot?.pickGroup?.(this.e.group_id)
     if (!group) return
 
     const info = await group.getInfo().catch(() => ({}))
