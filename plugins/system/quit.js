@@ -37,8 +37,11 @@ export class quit extends plugin {
     }
 
     /** 拉取最新群信息与成员列表，防止人数判断失真 */
-    const info = await this.e.group.getInfo().catch(() => ({}))
-    const gl = await this.e.group.getMemberMap().catch(() => null)
+    const group = this.e.group || this.e.bot?.pickGroup?.(this.e, this.e.group_id)
+    if (!group) return
+
+    const info = await group.getInfo().catch(() => ({}))
+    const gl = await group.getMemberMap().catch(() => null)
 
     /** 判断主人已在群中，主人在则不退群 */
     if (gl) {
@@ -52,11 +55,11 @@ export class quit extends plugin {
 
     /** 自动退群：优先用 member_count，其次成员表大小，最后兜底为 0 */
     const memberCount = Number(info?.member_count) || gl?.size || 0
-    if (memberCount <= other.autoQuit && !this.e.group.is_owner) {
+    if (memberCount <= other.autoQuit && !group.is_owner) {
       await this.e.reply('禁止拉群，已自动退出')
       logger.mark(`[自动退群] ${this.e.group_id} (inviter: ${inviter || 'unknown'})`)
       setTimeout(() => {
-        this.e.group.quit()
+        group.quit()
       }, 2000)
     }
   }
