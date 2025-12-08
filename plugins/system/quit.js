@@ -5,18 +5,33 @@ export class quit extends plugin {
     super({
       name: 'notice',
       dsc: '自动退群',
-      event: 'notice.group.increase'
+      event: ['notice.group.increase', 'request.group.invite']
     })
   }
 
   async accept () {
-    if (this.e.user_id != this.e.bot.uin) return
-
-    let other = cfg.other
+    const other = cfg.other
     if (other.autoQuit <= 0) return
 
+    /** 请求阶段直接拒绝拉群邀请，避免遗漏入群事件 */
+    if (this.e.post_type === 'request') {
+      if (this.e.sub_type !== 'invite') return
+      const inviter = Number(this.e.user_id)
+      if (cfg.masterQQ.some(qq => Number(qq) === inviter)) {
+        logger.mark(`[主人邀请] ${this.e.group_id}`)
+        return
+      }
+      await this.e.bot.setGroupAddRequest(this.e.flag, false, '禁止拉群')
+      logger.mark(`[自动拒绝拉群邀请] ${this.e.group_id}`)
+      return
+    }
+
+    /** 仅处理机器人自身入群的通知 */
+    if (this.e.user_id != this.e.bot.uin) return
+
     /** 判断主人，主人邀请不退群 */
-    let gl = await this.e.group.getMemberMap()
+    const gl = await this.e.group.getMemberMap().catch(() => null)
+    if (!gl) return
     for (let qq of cfg.masterQQ) {
       if (gl.has(Number(qq))) {
         logger.mark(`[主人拉群] ${this.e.group_id}`)
@@ -25,7 +40,7 @@ export class quit extends plugin {
     }
 
     /** 自动退群 */
-    if (Array.from(gl).length <= other.autoQuit && !this.e.group.is_owner) {
+    if (gl.size <= other.autoQuit && !this.e.group.is_owner) {
       await this.e.reply('禁止拉群，已自动退出')
       logger.mark(`[自动退群] ${this.e.group_id}`)
       setTimeout(() => {

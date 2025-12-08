@@ -1705,6 +1705,18 @@ Bot.adapter.push(
      * 处理通知事件
      */
     async makeNotice(data) {
+      // Napcat 兼容：将 Napcat 文档里的事件名规范化为 OneBot v11
+      this.normalizeNapcatNotice(data)
+      // 补全 Napcat 可能缺失的身份字段，确保后续逻辑可用
+      if (data.notice_type === "group_increase") {
+        data.user_id ||= data.target_id || data.self_id
+        data.operator_id ||= data.invitor_id || data.operator_uid || data.self_id
+      } else if (data.notice_type === "group_decrease") {
+        data.user_id ||= data.target_id
+        data.operator_id ||= data.operator_uid || data.self_id
+      } else if (data.notice_type === "group_admin") {
+        data.user_id ||= data.target_id
+      }
       switch (data.notice_type) {
         case "friend_recall":
           Bot.makeLog(
@@ -1730,9 +1742,14 @@ Bot.adapter.push(
             true,
           )
           const group = data.bot.pickGroup(data.group_id)
-          group.getInfo()
-          // 新成员加入时更新成员列表
-          group.pickMember(data.user_id).getInfo()
+          // 刷新群信息与成员身份，确保事件对象挂载的数据最新
+          await group.getInfo().catch(() => {})
+          if (data.user_id) await group.pickMember(data.user_id).getInfo().catch(() => {})
+          // 机器人被拉入新群时，强制刷新群列表与成员列表，避免事件丢失
+          if (data.user_id === data.self_id) {
+            await data.bot.getGroupMap(data).catch(() => {})
+            await group.getMemberMap().catch(() => {})
+          }
           break
         }
         case "group_decrease": {
@@ -1759,7 +1776,11 @@ Bot.adapter.push(
             true,
           )
           data.set = data.sub_type === "set"
-          data.bot.pickMember(data.group_id, data.user_id).getInfo()
+          await data.bot.pickMember(data.group_id, data.user_id).getInfo().catch(() => {})
+          // 如果是机器人自身身份变更，刷新群成员缓存
+          if (data.user_id === data.self_id) {
+            await data.bot.getGroupMemberMap({ ...data, group_id: data.group_id }).catch(() => {})
+          }
           break
         case "group_upload":
           Bot.makeLog(
@@ -1979,6 +2000,45 @@ Bot.adapter.push(
       }
 
       Bot.em(`${data.post_type}.${data.notice_type}.${data.sub_type}`, data)
+    }
+
+    /**
+     * Napcat 事件名与 OneBot v11 对齐
+     */
+    normalizeNapcatNotice(data) {
+      const map = {
+        group_member_increase: "group_increase",
+        group_self_increase: "group_increase",
+        group_join: "group_increase",
+        group_member_decrease: "group_decrease",
+        group_self_decrease: "group_decrease",
+        group_exit: "group_decrease",
+        group_admin_set: "group_admin",
+        group_admin_unset: "group_admin",
+        group_member_admin: "group_admin",
+        group_member_ban: "group_ban",
+        group_member_mute: "group_ban",
+        group_mute: "group_ban",
+        group_member_card: "group_card",
+        group_member_title: "group_title",
+        guild_channel_updated: "channel_updated",
+        guild_channel_created: "channel_created",
+        guild_channel_destroyed: "channel_destroyed",
+      }
+      const subMap = {
+        group_admin_set: "set",
+        group_admin_unset: "unset",
+        group_member_admin: data.sub_type, // 保留原始子类型
+        group_member_ban: data.sub_type,
+        group_member_mute: data.sub_type,
+        group_mute: data.sub_type,
+      }
+
+      const mapped = map[data.notice_type]
+      if (mapped) {
+        data.sub_type = subMap[data.notice_type] || data.sub_type
+        data.notice_type = mapped
+      }
     }
 
     /**
