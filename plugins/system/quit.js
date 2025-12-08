@@ -29,51 +29,35 @@ export class quit extends plugin {
     /** 仅处理机器人自身入群的通知 */
     if (this.e.user_id != this.e.bot.uin) return
 
-    /** 记录邀请人，方便后续判断与日志 */
-    const inviter = Number(this.e.operator_id || this.e.invitor_id || 0)
-    logger.mark(
-      `[自动退群检查] group=${this.e.group_id}, inviter=${inviter || '未知'}, bot=${this.e.bot.uin}`
-    )
-
-    /** 拉取最新群信息与成员列表，防止人数判断失真 */
-    const info = await this.e.group.getInfo().catch(err => {
-      logger.warn(`[自动退群] 获取群信息失败 ${this.e.group_id}: ${err?.message || err}`)
-      return {}
-    })
-    const gl = await this.e.group.getMemberMap().catch(err => {
-      logger.warn(`[自动退群] 获取成员列表失败 ${this.e.group_id}: ${err?.message || err}`)
-      return null
-    })
-
-    /** 判断主人，主人邀请不退群 */
+    /** 邀请人（operator_id）优先判定，少数群可能没有单独的邀请事件 */
+    const inviter = Number(this.e.operator_id || this.e.inviter_id || 0)
     if (inviter && cfg.masterQQ.some(qq => Number(qq) === inviter)) {
-      logger.mark(`[主人邀请] ${this.e.group_id} by ${inviter}`)
+      logger.mark(`[主人邀请] ${this.e.group_id}`)
       return
     }
-    for (let qq of cfg.masterQQ) {
-      if (gl?.has(Number(qq))) {
-        logger.mark(`[主人已在群中] ${this.e.group_id}`)
-        return
+
+    /** 拉取最新群信息与成员列表，防止人数判断失真 */
+    const info = await this.e.group.getInfo().catch(() => ({}))
+    const gl = await this.e.group.getMemberMap().catch(() => null)
+
+    /** 判断主人已在群中，主人在则不退群 */
+    if (gl) {
+      for (let qq of cfg.masterQQ) {
+        if (gl.has(Number(qq))) {
+          logger.mark(`[主人拉群] ${this.e.group_id}`)
+          return
+        }
       }
     }
 
-    /** 自动退群：优先用 member_count，其次成员表大小 */
-    const memberCount = Number(info?.member_count) || gl?.size || Number(this.e.group?.member_count) || 0
-    if (!memberCount) {
-      logger.warn(`[自动退群] 无法确定群人数 ${this.e.group_id}，跳过`)
-      return
-    }
-
+    /** 自动退群：优先用 member_count，其次成员表大小，最后兜底为 0 */
+    const memberCount = Number(info?.member_count) || gl?.size || 0
     if (memberCount <= other.autoQuit && !this.e.group.is_owner) {
       await this.e.reply('禁止拉群，已自动退出')
-      logger.mark(`[自动退群] ${this.e.group_id} 成员数=${memberCount}`)
+      logger.mark(`[自动退群] ${this.e.group_id} (inviter: ${inviter || 'unknown'})`)
       setTimeout(() => {
         this.e.group.quit()
       }, 2000)
-    } else {
-      logger.mark(
-        `[自动退群跳过] ${this.e.group_id} 成员数=${memberCount} 阈值=${other.autoQuit} 群主=${this.e.group.is_owner}`
-      )
     }
   }
 }
