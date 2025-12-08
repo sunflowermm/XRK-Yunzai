@@ -29,9 +29,12 @@ export class quit extends plugin {
     /** 仅处理机器人自身入群的通知 */
     if (this.e.user_id != this.e.bot.uin) return
 
-    /** 判断主人，主人邀请不退群 */
+    /** 拉取最新群信息与成员列表，防止人数判断失真 */
+    const info = await this.e.group.getInfo().catch(() => ({}))
     const gl = await this.e.group.getMemberMap().catch(() => null)
     if (!gl) return
+
+    /** 判断主人，主人邀请不退群 */
     for (let qq of cfg.masterQQ) {
       if (gl.has(Number(qq))) {
         logger.mark(`[主人拉群] ${this.e.group_id}`)
@@ -39,8 +42,9 @@ export class quit extends plugin {
       }
     }
 
-    /** 自动退群 */
-    if (gl.size <= other.autoQuit && !this.e.group.is_owner) {
+    /** 自动退群：优先用 member_count，其次成员表大小 */
+    const memberCount = Number(info?.member_count) || gl.size
+    if (memberCount <= other.autoQuit && !this.e.group.is_owner) {
       await this.e.reply('禁止拉群，已自动退出')
       logger.mark(`[自动退群] ${this.e.group_id}`)
       setTimeout(() => {
