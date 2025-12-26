@@ -706,7 +706,8 @@ export default class ChatStream extends AIStream {
     // 3. 戳一戳
     this.registerFunction('poke', {
       description: '戳一戳',
-      prompt: `[CQ:poke,qq=QQ号] - 戳一戳某人`,
+      prompt: `[CQ:poke,qq=QQ号] - 戳一戳某人
+示例：[CQ:poke,qq=123456789] 戳一戳QQ号为123456789的用户`,
       parser: (text, context) => {
         const functions = [];
         let cleanText = text;
@@ -733,7 +734,7 @@ export default class ChatStream extends AIStream {
             await context.e.group.pokeMember(params.qq);
             await BotUtil.sleep(300);
           } catch (error) {
-            // 静默失败
+            BotUtil.makeLog('debug', `戳一戳失败: ${error.message}`, 'ChatStream');
           }
         }
       },
@@ -743,30 +744,41 @@ export default class ChatStream extends AIStream {
     // 4. 回复
     this.registerFunction('reply', {
       description: '回复消息',
-      prompt: `[CQ:reply,id=消息ID] - 回复某条消息`,
+      prompt: `[CQ:reply,id=消息ID] - 回复某条消息
+重要：消息ID可以从聊天记录中看到，格式为 [ID:消息ID]
+示例：[CQ:reply,id=1234567890] 回复消息ID为1234567890的消息`,
       parser: (text, context) => {
         return { functions: [], cleanText: text };
       },
       enabled: true
     });
 
-    // 5. 表情回应（适配新API，默认false用于调试）
+    // 5. 表情回应（优化版：支持多种格式的消息ID）
     this.registerFunction('emojiReaction', {
       description: '表情回应',
       prompt: `[回应:消息ID:表情类型] - 给消息添加表情回应
-表情类型: 开心/惊讶/伤心/大笑/害怕/喜欢/爱心/生气`,
+重要说明：
+1. 消息ID可以从聊天记录中看到，格式为 [ID:消息ID]，使用时直接使用数字部分
+2. 表情类型支持: 开心/惊讶/伤心/大笑/害怕/喜欢/爱心/生气
+3. 示例：[回应:1234567890:开心] 给消息ID为1234567890的消息添加开心的表情回应
+4. 可以同时回应多条消息，每条消息单独使用一个[回应:消息ID:表情类型]`,
       parser: (text, context) => {
         const functions = [];
         let cleanText = text;
-        const regex = /\[回应:([^:]+):([^\]]+)\]/g;
+        // 支持多种格式：ID:123456 或 123456
+        const regex = /\[回应:(?:ID:)?([^:]+):([^\]]+)\]/g;
         let match;
         
         while ((match = regex.exec(text))) {
-          functions.push({ 
-            type: 'emojiReaction', 
-            params: { msgId: match[1], emojiType: match[2] },
-            raw: match[0]
-          });
+          const msgId = match[1].trim();
+          const emojiType = match[2].trim();
+          if (msgId && emojiType && EMOJI_REACTIONS[emojiType]) {
+            functions.push({ 
+              type: 'emojiReaction', 
+              params: { msgId, emojiType },
+              raw: match[0]
+            });
+          }
         }
         
         if (functions.length > 0) {
@@ -780,22 +792,28 @@ export default class ChatStream extends AIStream {
           return;
         }
         
+        // 清理消息ID（支持 ID:123456 或 123456 格式）
+        const msgId = params.msgId?.startsWith('ID:') 
+          ? params.msgId.substring(3).trim() 
+          : params.msgId?.trim();
+        
+        if (!msgId) {
+          BotUtil.makeLog('warn', '表情回应：消息ID为空', 'ChatStream');
+          return;
+        }
+        
         const emojiIds = EMOJI_REACTIONS[params.emojiType];
         const emojiId = emojiIds[Math.floor(Math.random() * emojiIds.length)];
         
         try {
           // 优先使用新的Napcat API
-          if (context.e.bot && typeof context.e.bot.setMessageReaction === 'function') {
-            const result = await context.e.bot.setMessageReaction(params.msgId, emojiId);
-            if (result && result.success === false) {
-              // API不支持，尝试旧方法
-              if (context.e.group && typeof context.e.group.setEmojiLike === 'function') {
-                await context.e.group.setEmojiLike(params.msgId, emojiId);
-              }
+          if (context.e.bot?.setMessageReaction) {
+            const result = await context.e.bot.setMessageReaction(msgId, emojiId);
+            if (result?.success === false && context.e.group?.setEmojiLike) {
+              await context.e.group.setEmojiLike(msgId, emojiId);
             }
-          } else if (context.e.group && typeof context.e.group.setEmojiLike === 'function') {
-            // 回退到旧方法
-            await context.e.group.setEmojiLike(params.msgId, emojiId);
+          } else if (context.e.group?.setEmojiLike) {
+            await context.e.group.setEmojiLike(msgId, emojiId);
           }
           await BotUtil.sleep(200);
         } catch (error) {
@@ -1373,17 +1391,20 @@ export default class ChatStream extends AIStream {
     // 19. 设置精华消息
     this.registerFunction('setEssence', {
       description: '设置精华消息',
-      prompt: `[设精华:消息ID] - 将某条消息设为精华`,
+      prompt: `[设精华:消息ID] - 将某条消息设为精华
+重要：消息ID可以从聊天记录中看到，格式为 [ID:消息ID]，使用时直接使用数字部分
+示例：[设精华:1234567890] 将消息ID为1234567890的消息设为精华`,
       parser: (text, context) => {
         const functions = [];
         let cleanText = text;
-        const regex = /\[设精华:([^\]]+)\]/g;
+        // 支持 ID:123456 或 123456 格式
+        const regex = /\[设精华:(?:ID:)?([^\]]+)\]/g;
         let match;
         
         while ((match = regex.exec(text))) {
           functions.push({ 
             type: 'setEssence', 
-            params: { msgId: String(match[1]) },
+            params: { msgId: String(match[1].trim()) },
             raw: match[0]
           });
         }
@@ -1397,10 +1418,15 @@ export default class ChatStream extends AIStream {
       handler: async (params, context) => {
         if (context.e?.isGroup && context.e.bot) {
           try {
-            await context.e.bot.sendApi('set_essence_msg', {
-              message_id: String(params.msgId)
-            });
-            await BotUtil.sleep(300);
+            // 清理消息ID（支持 ID:123456 或 123456 格式）
+            let msgId = String(params.msgId).trim();
+            if (msgId.startsWith('ID:')) {
+              msgId = msgId.substring(3).trim();
+            }
+            if (msgId) {
+              await context.e.bot.setEssenceMessage(msgId);
+              await BotUtil.sleep(300);
+            }
           } catch (error) {
             BotUtil.makeLog('warn', `设置精华失败: ${error.message}`, 'ChatStream');
           }
@@ -1413,17 +1439,20 @@ export default class ChatStream extends AIStream {
     // 20. 取消精华消息
     this.registerFunction('removeEssence', {
       description: '取消精华消息',
-      prompt: `[取消精华:消息ID] - 取消某条精华消息`,
+      prompt: `[取消精华:消息ID] - 取消某条精华消息
+重要：消息ID可以从聊天记录中看到，格式为 [ID:消息ID]，使用时直接使用数字部分
+示例：[取消精华:1234567890] 取消消息ID为1234567890的精华消息`,
       parser: (text, context) => {
         const functions = [];
         let cleanText = text;
-        const regex = /\[取消精华:([^\]]+)\]/g;
+        // 支持 ID:123456 或 123456 格式
+        const regex = /\[取消精华:(?:ID:)?([^\]]+)\]/g;
         let match;
         
         while ((match = regex.exec(text))) {
           functions.push({ 
             type: 'removeEssence', 
-            params: { msgId: String(match[1]) },
+            params: { msgId: String(match[1].trim()) },
             raw: match[0]
           });
         }
@@ -1437,10 +1466,15 @@ export default class ChatStream extends AIStream {
       handler: async (params, context) => {
         if (context.e?.isGroup && context.e.bot) {
           try {
-            await context.e.bot.sendApi('delete_essence_msg', {
-              message_id: String(params.msgId)
-            });
-            await BotUtil.sleep(300);
+            // 清理消息ID（支持 ID:123456 或 123456 格式）
+            let msgId = String(params.msgId).trim();
+            if (msgId.startsWith('ID:')) {
+              msgId = msgId.substring(3).trim();
+            }
+            if (msgId) {
+              await context.e.bot.removeEssenceMessage(msgId);
+              await BotUtil.sleep(300);
+            }
           } catch (error) {
             BotUtil.makeLog('warn', `取消精华失败: ${error.message}`, 'ChatStream');
           }
@@ -1826,20 +1860,22 @@ export default class ChatStream extends AIStream {
     this.registerFunction('recall', {
       description: '撤回消息',
       prompt: `[撤回:消息ID] - 撤回指定消息
-注意：
-- 撤回别人的消息需要管理员权限
-- 撤回自己的消息需要在3分钟内
-示例：[撤回:1234567890]`,
+重要说明：
+1. 消息ID可以从聊天记录中看到，格式为 [ID:消息ID]，使用时直接使用数字部分
+2. 撤回别人的消息需要管理员权限
+3. 撤回自己的消息需要在3分钟内
+示例：[撤回:1234567890] 或 [撤回:ID:1234567890]`,
       parser: (text, context) => {
         const functions = [];
         let cleanText = text;
-        const regex = /\[撤回:([^\]]+)\]/g;
+        // 支持 ID:123456 或 123456 格式
+        const regex = /\[撤回:(?:ID:)?([^\]]+)\]/g;
         let match;
         
         while ((match = regex.exec(text))) {
           functions.push({ 
             type: 'recall', 
-            params: { msgId: String(match[1]) },
+            params: { msgId: String(match[1].trim()) },
             raw: match[0]
           });
         }
@@ -1854,14 +1890,22 @@ export default class ChatStream extends AIStream {
         if (!context.e) return;
         
         try {
+          // 清理消息ID（支持 ID:123456 或 123456 格式）
+          let msgId = String(params.msgId ?? '').trim();
+          if (msgId.startsWith('ID:')) {
+            msgId = msgId.substring(3).trim();
+          }
+          if (!msgId) {
+            BotUtil.makeLog('warn', '撤回消息：消息ID为空', 'ChatStream');
+            return;
+          }
+          
           let canRecall = false;
           let messageInfo = null;
           
           try {
-            if (context.e.bot && context.e.bot.sendApi) {
-              messageInfo = await context.e.bot.sendApi('get_msg', {
-                message_id: params.msgId
-              });
+            if (context.e.bot?.sendApi) {
+              messageInfo = await context.e.bot.sendApi('get_msg', { message_id: msgId });
             }
           } catch (error) {
             // 忽略获取消息信息失败
@@ -1872,10 +1916,10 @@ export default class ChatStream extends AIStream {
             const botRole = await this.getBotRole(context.e);
             const isAdmin = botRole === '管理员' || botRole === '群主';
             
-            if (messageInfo && messageInfo.data) {
+            if (messageInfo?.data) {
               const msgData = messageInfo.data;
               const isSelfMsg = String(msgData.sender?.user_id) === String(context.e.self_id);
-              const msgTime = msgData.time || 0;
+              const msgTime = msgData.time ?? 0;
               const currentTime = Math.floor(Date.now() / 1000);
               const timeDiff = currentTime - msgTime;
               
@@ -1895,10 +1939,10 @@ export default class ChatStream extends AIStream {
             }
           } else {
             // 私聊消息撤回逻辑
-            if (messageInfo && messageInfo.data) {
+            if (messageInfo?.data) {
               const msgData = messageInfo.data;
               const isSelfMsg = String(msgData.sender?.user_id) === String(context.e.self_id);
-              const msgTime = msgData.time || 0;
+              const msgTime = msgData.time ?? 0;
               const currentTime = Math.floor(Date.now() / 1000);
               const timeDiff = currentTime - msgTime;
               
@@ -1918,11 +1962,9 @@ export default class ChatStream extends AIStream {
           
           if (canRecall) {
             if (context.e.isGroup && context.e.group) {
-              await context.e.group.recallMsg(params.msgId);
-            } else if (context.e.bot) {
-              await context.e.bot.sendApi('delete_msg', {
-                message_id: params.msgId
-              });
+              await context.e.group.recallMsg(msgId);
+            } else if (context.e.bot?.sendApi) {
+              await context.e.bot.sendApi('delete_msg', { message_id: msgId });
             }
             await BotUtil.sleep(300);
           }
@@ -2433,232 +2475,6 @@ ${contentsText}
     }
   }
 
-  /**
-   * 执行网页搜索（使用DuckDuckGo）- 已废弃，使用performFastSearch替代
-   * @deprecated 使用 performFastSearch 替代
-   */
-  async performWebSearch(keyword) {
-    try {
-      // 使用DuckDuckGo HTML搜索（无需API key）
-      const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(keyword)}`;
-      
-      // 使用AbortController实现超时
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-      
-      const response = await fetch(searchUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        },
-        signal: controller.signal
-      }).finally(() => clearTimeout(timeoutId));
-      
-      if (!response.ok) {
-        throw new Error(`搜索请求失败: ${response.status}`);
-      }
-      
-      const html = await response.text();
-      
-      if (!html || html.length < 100) {
-        throw new Error('搜索返回内容为空或过短');
-      }
-      
-      const cheerio = await getCheerio();
-      const $ = cheerio.load(html);
-      
-      const results = [];
-      
-      // 解析DuckDuckGo搜索结果（尝试多种选择器）
-      const selectors = [
-        { container: '.result', title: '.result__title a', snippet: '.result__snippet' },
-        { container: '.web-result', title: 'a.result__a', snippet: '.result__snippet' },
-        { container: 'div[class*="result"]', title: 'a[class*="title"]', snippet: 'div[class*="snippet"]' }
-      ];
-      
-      for (const selector of selectors) {
-        $(selector.container).each((index, element) => {
-          if (results.length >= 10) return false; // 最多10个结果
-          
-          const $el = $(element);
-          const title = $el.find(selector.title).first().text().trim();
-          const link = $el.find(selector.title).first().attr('href') || '';
-          const snippet = $el.find(selector.snippet).first().text().trim();
-          
-          if (title && link && !results.some(r => r.url === link)) {
-            // 清理链接（DuckDuckGo可能返回重定向链接）
-            let cleanUrl = link;
-            if (link.startsWith('/l/?kh=') || link.includes('uddg=')) {
-              try {
-                const urlMatch = link.match(/uddg=([^&]+)/);
-                if (urlMatch) {
-                  cleanUrl = decodeURIComponent(urlMatch[1]);
-                }
-              } catch (e) {
-                // 忽略URL解析错误
-              }
-            }
-            
-            results.push({
-              title,
-              url: cleanUrl,
-              snippet: snippet || '暂无摘要',
-              index: results.length + 1
-            });
-          }
-        });
-        
-        if (results.length > 0) break; // 找到结果就停止尝试其他选择器
-      }
-      
-      // 如果DuckDuckGo解析失败，尝试备用方案
-      if (results.length === 0) {
-        BotUtil.makeLog('debug', 'DuckDuckGo解析无结果，尝试备用方案', 'ChatStream');
-        return await this.performFastSearch(keyword, 'bing');
-      }
-      
-      return results;
-    } catch (error) {
-      BotUtil.makeLog('warn', `DuckDuckGo搜索失败，尝试备用方案: ${error.message}`, 'ChatStream');
-      // 尝试备用搜索方案
-      return await this.performFastSearch(keyword, 'bing');
-    }
-  }
-
-  /**
-   * 备用搜索方案：使用Google搜索（通过HTML解析）- 已废弃
-   * @deprecated 使用 performFastSearch 替代
-   */
-  async performGoogleSearch(keyword) {
-    try {
-      // 使用Google搜索（需要处理反爬虫）
-      const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(keyword)}&num=10`;
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-      
-      const response = await fetch(searchUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
-        },
-        signal: controller.signal
-      }).finally(() => clearTimeout(timeoutId));
-      
-      if (!response.ok) {
-        throw new Error(`Google搜索请求失败: ${response.status}`);
-      }
-      
-      const html = await response.text();
-      
-      if (!html || html.length < 100) {
-        throw new Error('Google搜索返回内容为空或过短');
-      }
-      
-      const cheerio = await getCheerio();
-      const $ = cheerio.load(html);
-      
-      const results = [];
-      
-      // 解析Google搜索结果
-      $('.g, div[data-ved]').each((index, element) => {
-        if (results.length >= 10) return false;
-        
-        const $el = $(element);
-        const titleEl = $el.find('h3').first();
-        const title = titleEl.text().trim();
-        const linkEl = $el.find('a').first();
-        const link = linkEl.attr('href') || '';
-        const snippet = $el.find('.VwiC3b, .s').first().text().trim();
-        
-        if (title && link && !results.some(r => r.url === link)) {
-          results.push({
-            title,
-            url: link.startsWith('/url?q=') ? decodeURIComponent(link.split('&')[0].replace('/url?q=', '')) : link,
-            snippet: snippet || '暂无摘要',
-            index: results.length + 1
-          });
-        }
-      });
-      
-      return results;
-    } catch (error) {
-      BotUtil.makeLog('debug', `Google搜索失败: ${error.message}`, 'ChatStream');
-      return [];
-    }
-  }
-
-  /**
-   * 备用搜索方案：使用Bing搜索（通过HTML解析）- 已废弃，使用performFastSearch替代
-   * @deprecated 使用 performFastSearch 替代
-   */
-  async performBingSearch(keyword) {
-    try {
-      const searchUrl = `https://www.bing.com/search?q=${encodeURIComponent(keyword)}`;
-      
-      // 使用AbortController实现超时
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-      
-      const response = await fetch(searchUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        },
-        signal: controller.signal
-      }).finally(() => clearTimeout(timeoutId));
-      
-      if (!response.ok) {
-        throw new Error(`Bing搜索请求失败: ${response.status}`);
-      }
-      
-      const html = await response.text();
-      
-      if (!html || html.length < 100) {
-        throw new Error('Bing搜索返回内容为空或过短');
-      }
-      
-      const cheerio = await getCheerio();
-      const $ = cheerio.load(html);
-      
-      const results = [];
-      
-      // 解析Bing搜索结果（尝试多种选择器）
-      const selectors = [
-        { container: '.b_algo', title: 'h2 a', snippet: '.b_caption p, .b_caption' },
-        { container: 'li[class*="b_algo"]', title: 'h2 a, a[class*="title"]', snippet: 'p, div[class*="caption"]' },
-        { container: 'div[data-bm]', title: 'h2 a, a', snippet: 'p' }
-      ];
-      
-      for (const selector of selectors) {
-        $(selector.container).each((index, element) => {
-          if (results.length >= 10) return false;
-          
-          const $el = $(element);
-          const titleEl = $el.find(selector.title).first();
-          const title = titleEl.text().trim();
-          const link = titleEl.attr('href') || '';
-          const snippet = $el.find(selector.snippet).first().text().trim();
-          
-          if (title && link && !results.some(r => r.url === link)) {
-            results.push({
-              title,
-              url: link,
-              snippet: snippet || '暂无摘要',
-              index: results.length + 1
-            });
-          }
-        });
-        
-        if (results.length > 0) break; // 找到结果就停止尝试其他选择器
-      }
-      
-      return results;
-    } catch (error) {
-      BotUtil.makeLog('warn', `Bing搜索失败: ${error.message}`, 'ChatStream');
-      // 如果Bing也失败，返回空数组，让上层尝试其他方法
-      return [];
-    }
-  }
 
   /**
    * 分析搜索结果（统一方法，支持多轮分析）
@@ -2720,55 +2536,6 @@ ${resultsText}
     return result || this.formatSearchResults(searchResults);
   }
 
-  /**
-   * 润色搜索结果回复
-   */
-  async polishSearchResponse(analysis, keyword, context) {
-    if (!this.callAI) {
-      return `根据搜索"${keyword}"的结果：\n\n${analysis}`;
-    }
-    
-    const persona = context?.question?.persona || context?.persona || '我是AI助手';
-    
-    const messages = [
-      {
-        role: 'system',
-        content: `${persona}
-
-你是QQ聊天助手，需要将搜索结果整理成自然、友好的回复。
-
-【重要要求】
-1. 必须使用纯文本，绝对不要使用Markdown格式
-2. 禁止使用星号(*)、下划线(_)、反引号(backtick)、井号(#)、方括号([])用于标题
-3. 语气要自然轻松，像QQ聊天一样
-4. 开头要说明"我搜索了一下"或类似表达，体现使用了搜索工具
-5. 将搜索结果整合成流畅的对话
-6. 保持简洁，控制在3-5句话内
-7. 可以适当引用具体数据或事实`
-      },
-      {
-        role: 'user',
-        content: `请将以下搜索结果整理成友好的聊天回复：
-
-${analysis}
-
-要求：
-1. 开头说明使用了搜索工具
-2. 自然整合信息
-3. 纯文本格式
-4. 语气轻松友好`
-      }
-    ];
-    
-    const apiConfig = context?.config || context?.question?.config || {};
-    const result = await this.callAI(messages, {
-      ...apiConfig,
-      maxTokens: 800,
-      temperature: 0.8
-    });
-    
-    return result || `我搜索了一下"${keyword}"，找到以下信息：\n\n${analysis}`;
-  }
 
   /**
    * 格式化搜索结果（优化版）
@@ -2829,7 +2596,7 @@ ${analysis}
   }
 
   /**
-   * 格式化聊天记录供AI阅读（优化版：使用现代方法）
+   * 格式化聊天记录供AI阅读（优化版：突出显示消息ID）
    */
   formatHistoryForAI(messages, isGlobalTrigger = false) {
     if (!messages?.length) return '';
@@ -2854,12 +2621,13 @@ ${analysis}
       const timestamp = msg.timestamp ?? Math.floor(msg.time / 1000);
       const displayName = msg.nickname ?? '未知';
       const msgContent = `${msg.message ?? '(空消息)'}${formatToolInfo(msg)}`;
+      const msgId = msg.message_id ? `[ID:${msg.message_id}]` : '';
       const tags = [
         msg.isBot ? '[机器人]' : '[成员]',
         msg.isTool ? `[工具:${msg.toolType ?? 'unknown'}]` : '',
         msg.hasImage ? '[含图片]' : '',
-        msg.message_id ? ` 消息ID:${msg.message_id}` : ''
-      ].filter(Boolean).join('');
+        msgId
+      ].filter(Boolean).join(' ');
       
       return `${tags} ${displayName}(${msg.user_id}) [${formatTime(timestamp)}]: ${msgContent}`;
     })];
@@ -2882,14 +2650,14 @@ ${analysis}
     }
 
     const polishConfig = this.responsePolishConfig;
-    const persona = context?.question?.persona || '保持原角色语气';
+    const persona = context?.question?.persona ?? '保持原角色语气';
 
     const messages = [
       {
         role: 'system',
         content: `${persona}
 
-${polishConfig.instructions || RESPONSE_POLISH_DEFAULT.instructions}`
+${polishConfig.instructions ?? RESPONSE_POLISH_DEFAULT.instructions}`
       },
       {
         role: 'user',
@@ -2899,13 +2667,17 @@ ${polishConfig.instructions || RESPONSE_POLISH_DEFAULT.instructions}`
 
     const apiConfig = {
       ...context?.config,
-      maxTokens: polishConfig.maxTokens || RESPONSE_POLISH_DEFAULT.maxTokens,
+      maxTokens: polishConfig.maxTokens ?? RESPONSE_POLISH_DEFAULT.maxTokens,
       temperature: polishConfig.temperature ?? RESPONSE_POLISH_DEFAULT.temperature
     };
 
-    const refined = await this.callAI(messages, apiConfig);
-    if (!refined) return text;
-    return refined.trim();
+    try {
+      const refined = await this.callAI(messages, apiConfig);
+      return refined?.trim() ?? text;
+    } catch (error) {
+      BotUtil.makeLog('warn', `润色响应失败: ${error.message}`, 'ChatStream');
+      return text;
+    }
   }
 
   async postProcessResponse(text, context) {
@@ -2986,23 +2758,31 @@ ${polishConfig.instructions || RESPONSE_POLISH_DEFAULT.instructions}`
       ? `\n【记忆提示】\n${question.memorySummary}\n`
       : '';
 
-    // 添加搜索功能提示
-    const searchHint = `
-【联网搜索功能】
-当用户询问实时信息、最新资讯、新闻、数据等需要联网查询的内容时，优先使用 [搜索:关键词] 功能。
-搜索功能会自动：
-1. 联网搜索最新信息
-2. 智能分析搜索结果（3轮分析）
-3. 润色成自然回复
-4. 将搜索过程记录到聊天记录中，体现AI使用了搜索工具
+    // 消息ID使用指南（添加到系统提示中）
+    const messageIdGuide = `
+【消息ID使用指南 - 非常重要】
+每条消息都有唯一的消息ID，在聊天记录中显示为 [ID:消息ID] 格式。
+重要：使用消息ID时，直接使用数字部分，不需要包含"ID:"前缀。
 
-使用场景：
-- 询问最新新闻、事件
-- 查询实时数据、价格
-- 了解最新技术、趋势
-- 需要联网验证的信息
+可用操作：
+1. 回复消息：[CQ:reply,id=消息ID]
+   示例：看到消息 [ID:1234567890]，使用 [CQ:reply,id=1234567890] 来回复这条消息
 
-示例：[搜索:2024年最新AI技术] [搜索:今天北京天气]
+2. 表情回应：[回应:消息ID:表情类型]
+   表情类型：开心/惊讶/伤心/大笑/害怕/喜欢/爱心/生气
+   示例：看到消息 [ID:1234567890]，使用 [回应:1234567890:开心] 来给这条消息添加开心的表情回应
+
+3. 设置精华：[设精华:消息ID]（需要管理员权限）
+   示例：[设精华:1234567890] 将消息ID为1234567890的消息设为精华
+
+4. 撤回消息：[撤回:消息ID]（需要权限）
+   示例：[撤回:1234567890] 撤回消息ID为1234567890的消息
+
+重要提示：
+- 消息ID必须从聊天记录中获取，格式为 [ID:数字]
+- 使用时只取数字部分，如看到 [ID:1234567890]，使用 1234567890
+- 不要编造或猜测消息ID，必须使用聊天记录中显示的真实ID
+- 如果找不到消息ID，不要使用这些功能
 `;
 
     const masterNote = e.isMaster ? `
@@ -3057,21 +2837,17 @@ ${masterNote}
 
 ${expressionRules}
 ${memoryGuidance}
+${messageIdGuide}
 
 【联网搜索功能】
 当用户询问实时信息、最新资讯、新闻、数据等需要联网查询的内容时，优先使用 [搜索:关键词] 功能。
 搜索功能会自动：
 1. 联网搜索最新信息
-2. 智能分析搜索结果（3轮分析）
+2. 智能分析搜索结果
 3. 润色成自然回复
-4. 将搜索过程记录到聊天记录中，体现AI使用了搜索工具
+4. 将搜索过程记录到聊天记录中
 
-使用场景：
-- 询问最新新闻、事件
-- 查询实时数据、价格
-- 了解最新技术、趋势
-- 需要联网验证的信息
-
+使用场景：询问最新新闻、事件、查询实时数据、了解最新技术等
 示例：[搜索:2024年最新AI技术] [搜索:今天北京天气]
 
 ${functionsPrompt}
@@ -3084,6 +2860,7 @@ ${functionsPrompt}
 5. 管理操作要有正当理由
 6. 绝对禁止Markdown格式：不要用###、**、__、反引号、#等符号，用纯文本和普通标点
 7. 工作流调用时，确保输出符合人设且为纯文本格式
+8. 使用消息ID时，必须从聊天记录中获取准确的ID，不要编造ID
 
 【注意事项】
 ${isGlobalTrigger ? 
@@ -3133,17 +2910,18 @@ ${e.isMaster ? '5. 对主人保持亲密、顺从' : ''}`;
       }
       
       if (!question?.isGlobalTrigger) {
-        const userInfo = e.sender?.card || e.sender?.nickname || '未知';
+        const userInfo = e.sender?.card ?? e.sender?.nickname ?? '未知';
         let actualQuestion = typeof question === 'string' ? question : 
-                            (question?.content || question?.text || '');
+                            (question?.content ?? question?.text ?? '');
         
         if (question?.imageDescriptions?.length > 0) {
           actualQuestion += ' ' + question.imageDescriptions.join(' ');
         }
         
+        const msgId = e.message_id ? `[ID:${e.message_id}]` : '';
         messages.push({
           role: 'user',
-          content: `[当前消息]\n${userInfo}(${e.user_id}): ${actualQuestion}`
+          content: `[当前消息] ${msgId}\n${userInfo}(${e.user_id}): ${actualQuestion}`
         });
       }
     } else {
@@ -3188,7 +2966,7 @@ ${e.isMaster ? '5. 对主人保持亲密、顺从' : ''}`;
           switch (type) {
             case 'at':
               if (e.isGroup && paramObj.qq) {
-                const history = ChatStream.messageHistory.get(String(e.group_id)) || [];
+                const history = ChatStream.messageHistory.get(String(e.group_id)) ?? [];
                 const userExists = history.some(msg => 
                   String(msg.user_id) === String(paramObj.qq)
                 );
@@ -3200,7 +2978,14 @@ ${e.isMaster ? '5. 对主人保持亲密、顺从' : ''}`;
               break;
             case 'reply':
               if (paramObj.id) {
-                segments.push(segment.reply(paramObj.id));
+                // 支持 ID:123456 或 123456 格式，清理消息ID
+                let msgId = paramObj.id.trim();
+                if (msgId.startsWith('ID:')) {
+                  msgId = msgId.substring(3).trim();
+                }
+                if (msgId) {
+                  segments.push(segment.reply(msgId));
+                }
               }
               break;
             case 'image':
