@@ -737,7 +737,7 @@ export default class ChatStream extends AIStream {
           }
         }
       },
-      enabled: false
+      enabled: true
     });
 
     // 4. 回复
@@ -802,7 +802,7 @@ export default class ChatStream extends AIStream {
           BotUtil.makeLog('debug', `表情回应失败: ${error.message}`, 'ChatStream');
         }
       },
-      enabled: false // 默认false，用于调试
+      enabled: true
     });
 
     // 6. 联网搜索功能
