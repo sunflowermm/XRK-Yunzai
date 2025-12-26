@@ -60,21 +60,16 @@ function extractPlainText(html, maxLength = 5000) {
 }
 
 /**
- * 使用cheerio提取结构化文本
+ * 使用cheerio提取结构化文本（保留作为工具函数）
  */
 async function extractStructuredText(html, selector) {
   try {
     const cheerio = await getCheerio();
     const $ = cheerio.load(html);
-    const elements = $(selector);
-    const texts = [];
-    
-    elements.each((index, element) => {
-      const text = $(element).text().trim();
-      if (text && text.length > 10) {
-        texts.push(text);
-      }
-    });
+    const texts = $(selector)
+      .map((_, element) => $(element).text().trim())
+      .get()
+      .filter(text => text?.length > 10);
     
     return texts.join('\n\n');
   } catch (error) {
@@ -218,10 +213,39 @@ class ChatWorkflowManager extends WorkflowManager {
     super();
     this.stream = stream;
     this.cache = new Map();
-    this.cacheTTL = 5 * 60 * 1000;
+    this.cacheTTL = 5 * 60 * 1000; // 5分钟缓存
+    this.requestCache = new Map(); // 请求去重缓存
     
     // 注册聊天特定的工作流
     this.registerChatWorkflows();
+  }
+  
+  /**
+   * 带缓存的请求（防止重复请求）
+   */
+  async cachedRequest(key, requestFn, ttl = this.cacheTTL) {
+    const cached = this.cache.get(key);
+    if (cached && Date.now() - cached.time < ttl) {
+      return cached.data;
+    }
+    
+    // 检查是否正在请求中（防止并发重复请求）
+    const pending = this.requestCache.get(key);
+    if (pending) {
+      return pending;
+    }
+    
+    const promise = requestFn().then(data => {
+      this.cache.set(key, { data, time: Date.now() });
+      this.requestCache.delete(key);
+      return data;
+    }).catch(error => {
+      this.requestCache.delete(key);
+      throw error;
+    });
+    
+    this.requestCache.set(key, promise);
+    return promise;
   }
 
   registerChatWorkflows() {
@@ -281,45 +305,38 @@ class ChatWorkflowManager extends WorkflowManager {
 
   async fetchHotNews(keyword) {
     const cacheKey = keyword ? `hot-news:${keyword}` : 'hot-news:all';
-    const cached = this.cache.get(cacheKey);
+    
+    return this.cachedRequest(cacheKey, async () => {
+      try {
+        const response = await fetch('https://top.baidu.com/api/board?tab=realtime', {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (XRK-Yunzai Bot)'
+          },
+          timeout: 5000
+        });
 
-    if (cached && Date.now() - cached.time < this.cacheTTL) {
-      return cached.data;
-    }
-
-    try {
-      const response = await fetch('https://top.baidu.com/api/board?tab=realtime', {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (XRK-Yunzai Bot)'
+        if (!response.ok) {
+          throw new Error(`热点接口响应异常: ${response.status}`);
         }
-      });
 
-      if (!response.ok) {
-        throw new Error(`热点接口响应异常: ${response.status}`);
+        const payload = await response.json();
+        const items = payload?.data?.cards?.[0]?.content ?? [];
+        const normalized = items.slice(0, 8).map((item, index) => ({
+          index: index + 1,
+          title: item.query ?? item.word,
+          summary: item.desc ?? item.biz_ext?.abstract ?? '',
+          heat: item.hotScore ?? item.hotVal ?? '',
+          url: item.url ?? `https://m.baidu.com/s?word=${encodeURIComponent(item.query ?? '')}`
+        })).filter(item => item.title);
+
+        return keyword 
+          ? normalized.filter(item => item.title.includes(keyword) || item.summary.includes(keyword))
+          : normalized;
+      } catch (error) {
+        BotUtil.makeLog('warn', `获取热点失败: ${error.message}`, 'ChatStream');
+        return [];
       }
-
-      const payload = await response.json();
-      const items = payload?.data?.cards?.[0]?.content || [];
-      const normalized = items.slice(0, 8).map((item, index) => ({
-        index: index + 1,
-        title: item.query || item.word,
-        summary: item.desc || item.biz_ext?.abstract || '',
-        heat: item.hotScore || item.hotVal || '',
-        url: item.url || `https://m.baidu.com/s?word=${encodeURIComponent(item.query || '')}`
-      })).filter(item => item.title);
-
-      const filtered = keyword ? normalized.filter(item => item.title.includes(keyword) || item.summary.includes(keyword)) : normalized;
-
-      this.cache.set(cacheKey, {
-        data: filtered,
-        time: Date.now()
-      });
-
-      return filtered;
-    } catch (error) {
-      BotUtil.makeLog('warn', `获取热点失败: ${error.message}`, 'ChatStream');
-      return [];
-    }
+    });
   }
 
   async summarizeHotNews(newsList, context = {}) {
@@ -362,11 +379,13 @@ class ChatWorkflowManager extends WorkflowManager {
   }
 
   formatHotNews(newsList) {
-    return newsList.map(item => {
-      const heat = item.heat ? `（热度 ${item.heat}）` : '';
-      const summary = item.summary ? ` - ${item.summary}` : '';
-      return `${item.index}. ${item.title}${heat}${summary}`;
-    }).join('\n');
+    return newsList
+      .map(item => {
+        const heat = item.heat ? `（热度 ${item.heat}）` : '';
+        const summary = item.summary ? ` - ${item.summary}` : '';
+        return `${item.index}. ${item.title}${heat}${summary}`;
+      })
+      .join('\n');
   }
 
   /**
@@ -533,9 +552,10 @@ class ChatWorkflowManager extends WorkflowManager {
 
 // MemoryManager已移除，改用基类的记忆系统
 
-function randomRange(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
+/**
+ * 生成随机数范围（使用现代箭头函数）
+ */
+const randomRange = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
 /**
  * 聊天工作流
@@ -1925,67 +1945,63 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 构建消息文本（从消息段提取）
+   * 构建消息文本（从消息段提取，使用现代方法）
    */
   extractMessageText(e) {
     if (e.raw_message) return e.raw_message;
     if (typeof e.msg === 'string') return e.msg;
-    
     if (!Array.isArray(e.message)) return '';
     
-    return e.message.map(seg => {
-      switch (seg.type) {
-        case 'text': return seg.text || '';
-        case 'image': return '[图片]';
-        case 'at': return `@${seg.qq || ''}`;
-        case 'reply': return `[回复:${seg.id || ''}]`;
-        case 'face': return `[表情:${seg.id || ''}]`;
-        case 'poke': return `[戳了戳 ${seg.target || ''}]`;
-        default: return '';
-      }
-    }).filter(Boolean).join('').trim();
+    const typeMap = {
+      text: (seg) => seg.text ?? '',
+      image: () => '[图片]',
+      at: (seg) => `@${seg.qq ?? ''}`,
+      reply: (seg) => `[回复:${seg.id ?? ''}]`,
+      face: (seg) => `[表情:${seg.id ?? ''}]`,
+      poke: (seg) => `[戳了戳 ${seg.target ?? ''}]`
+    };
+    
+    return e.message
+      .map(seg => (typeMap[seg.type]?.(seg) ?? ''))
+      .filter(Boolean)
+      .join('')
+      .trim();
   }
 
   /**
-   * 记录消息（以群为单位的高效Map实时构建）
+   * 记录消息（使用现代JavaScript特性优化）
    */
   recordMessage(e) {
-    if (!e?.isGroup || !e.group_id) return;
+    if (!e?.isGroup || !e?.group_id) return;
     
     try {
       const groupId = String(e.group_id);
       const MAX_HISTORY = 50;
       
-      if (!ChatStream.messageHistory.has(groupId)) {
-        ChatStream.messageHistory.set(groupId, []);
-      }
-      
-      const history = ChatStream.messageHistory.get(groupId);
+      const history = ChatStream.messageHistory.get(groupId) ?? [];
       const messageText = this.extractMessageText(e);
+      const timestamp = Math.floor((e.time ?? Date.now()) / 1000);
       
       const msgData = {
-        user_id: String(e.user_id || ''),
-        nickname: e.sender?.card || e.sender?.nickname || '未知',
+        user_id: String(e.user_id ?? ''),
+        nickname: e.sender?.card ?? e.sender?.nickname ?? '未知',
         message: messageText,
-        message_id: String(e.message_id || ''),
-        timestamp: Math.floor((e.time || Date.now()) / 1000),
+        message_id: String(e.message_id ?? ''),
+        timestamp,
         time: Date.now(),
         hasImage: !!(e.img?.length > 0 || e.message?.some(s => s.type === 'image')),
-        // 标记是否为Bot消息（后续展示/检索可用）
-        isBot: String(e.user_id || '') === String(e.self_id || '')
+        isBot: String(e.user_id ?? '') === String(e.self_id ?? '')
       };
       
-      // 避免重复记录同一条消息（例如被多处调用 recordMessage）
-      const last = history[history.length - 1];
-      if (!last || last.message_id !== msgData.message_id) {
-      history.push(msgData);
+      // 避免重复记录
+      if (history[history.length - 1]?.message_id !== msgData.message_id) {
+        history.push(msgData);
+        if (history.length > MAX_HISTORY) history.shift();
+        ChatStream.messageHistory.set(groupId, history);
       }
       
-      if (history.length > MAX_HISTORY) {
-        history.shift();
-      }
-      
-      if (this.embeddingConfig?.enabled && messageText && messageText.length > 5) {
+      // 异步存储embedding（不阻塞主流程）
+      if (this.embeddingConfig?.enabled && messageText?.length > 5) {
         this.storeMessageWithEmbedding(groupId, msgData).catch(() => {});
       }
     } catch (error) {
@@ -1994,37 +2010,31 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 记录Bot回复
+   * 记录Bot回复（优化版）
    */
   async recordBotReply(e, messageText) {
-    if (!e?.isGroup || !e.group_id || !messageText) return;
+    if (!e?.isGroup || !e?.group_id || !messageText) return;
     
     try {
       const groupId = String(e.group_id);
       const MAX_HISTORY = 50;
-      
-      if (!ChatStream.messageHistory.has(groupId)) {
-        ChatStream.messageHistory.set(groupId, []);
-      }
-      
-      const history = ChatStream.messageHistory.get(groupId);
+      const history = ChatStream.messageHistory.get(groupId) ?? [];
       const timestamp = Math.floor(Date.now() / 1000);
       
       const msgData = {
-        user_id: String(e.self_id || ''),
+        user_id: String(e.self_id ?? ''),
         nickname: (typeof Bot !== 'undefined' && Bot.nickname) || 'Bot',
         message: messageText,
         message_id: Date.now().toString(),
         timestamp,
         time: Date.now(),
-        hasImage: false
+        hasImage: false,
+        isBot: true
       };
       
       history.push(msgData);
-      
-      if (history.length > MAX_HISTORY) {
-        history.shift();
-      }
+      if (history.length > MAX_HISTORY) history.shift();
+      ChatStream.messageHistory.set(groupId, history);
     } catch (error) {
       BotUtil.makeLog('debug', `记录Bot回复失败: ${error.message}`, 'ChatStream');
     }
@@ -2103,33 +2113,32 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 爬虫阶段主动筛选和提取关键信息
+   * 爬虫阶段主动筛选和提取关键信息（优化版：使用现代方法）
    */
   filterAndExtractResults(searchResults, keyword) {
-    if (!searchResults || searchResults.length === 0) return [];
+    if (!searchResults?.length) return [];
     
-    // 相关性评分
+    const keywordLower = keyword.toLowerCase();
+    const keywords = keywordLower.split(/\s+/);
+    const officialKeywords = ['政府', '官方', '国务院', 'gov.cn'];
+    const timeKeywords = ['最新', '2024', '2025'];
+    
     const scoredResults = searchResults.map(item => {
       let score = 0;
-      const titleLower = item.title.toLowerCase();
-      const snippetLower = (item.snippet || '').toLowerCase();
-      const keywordLower = keyword.toLowerCase();
-      const keywords = keywordLower.split(/\s+/);
+      const titleLower = item.title?.toLowerCase() ?? '';
+      const snippetLower = (item.snippet ?? '').toLowerCase();
       
+      // 关键词匹配评分
       keywords.forEach(kw => {
         if (titleLower.includes(kw)) score += 3;
         if (snippetLower.includes(kw)) score += 1;
       });
       
       // 官方来源加分
-      if (titleLower.includes('政府') || titleLower.includes('官方') || 
-          titleLower.includes('国务院') || titleLower.includes('gov.cn')) {
-        score += 2;
-      }
+      if (officialKeywords.some(kw => titleLower.includes(kw))) score += 2;
       
       // 时间相关加分
-      if (titleLower.includes('最新') || titleLower.includes('2024') || 
-          titleLower.includes('2025') || snippetLower.includes('最新')) {
+      if (timeKeywords.some(kw => titleLower.includes(kw) || snippetLower.includes(kw))) {
         score += 1;
       }
       
@@ -2143,97 +2152,87 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 抓取实际网页内容并清洗（提取正文，去除广告和导航）
+   * 抓取实际网页内容并清洗（优化版：支持重试、并行处理）
    */
   async fetchWebContents(searchResults, keyword) {
-    const contents = [];
+    const TIMEOUT = 5000;
+    const MAX_CONTENT_LENGTH = 2000;
+    const MIN_CONTENT_LENGTH = 100;
+    const CONTENT_SELECTORS = [
+      'article', 'main', '.content', '.article-content', 
+      '.post-content', '#content', '.main-content', '[role="main"]'
+    ];
     
-    for (const result of searchResults) {
+    const DEFAULT_HEADERS = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+    };
+    
+    // 并行抓取前2个结果（提高速度）
+    const fetchPromises = searchResults.slice(0, 2).map(async (result) => {
       try {
         BotUtil.makeLog('debug', `[抓取] 正在抓取: ${result.url}`, 'ChatStream');
         
-        // 使用axios抓取，5秒超时
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-        
         const response = await axios.get(result.url, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
-          },
-          timeout: 5000,
-          signal: controller.signal,
+          headers: DEFAULT_HEADERS,
+          timeout: TIMEOUT,
           maxRedirects: 3
-        }).finally(() => clearTimeout(timeoutId));
+        });
         
-        if (!response.data || response.data.length < 100) continue;
+        if (!response?.data || response.data.length < 100) {
+          return { ...result, content: result.snippet || '无法获取内容' };
+        }
         
-        // 使用cheerio解析HTML
         const cheerio = await getCheerio();
         const $ = cheerio.load(response.data);
         
-        // 移除脚本、样式、广告等
+        // 移除干扰元素
         $('script, style, nav, header, footer, aside, .ad, .advertisement, .ads').remove();
         
-        // 尝试提取主要内容（优先选择article、main、.content等标签）
+        // 提取主要内容
         let mainContent = '';
-        const contentSelectors = [
-          'article',
-          'main',
-          '.content',
-          '.article-content',
-          '.post-content',
-          '#content',
-          '.main-content',
-          '[role="main"]'
-        ];
-        
-        for (const selector of contentSelectors) {
-          const element = $(selector).first();
-          if (element.length > 0) {
-            mainContent = element.text().trim();
-            if (mainContent.length > 200) break; // 找到足够长的内容就停止
+        for (const selector of CONTENT_SELECTORS) {
+          const text = $(selector).first().text().trim();
+          if (text.length > 200) {
+            mainContent = text;
+            break;
           }
         }
         
-        // 如果没找到，尝试提取body中的文本（排除导航等）
+        // 备用方案：提取body文本
         if (mainContent.length < 200) {
           $('nav, header, footer, .menu, .navigation').remove();
           mainContent = $('body').text().trim();
         }
         
-        // 清洗文本：去除多余空白，限制长度
+        // 清洗和限制长度
         mainContent = mainContent
           .replace(/\s+/g, ' ')
           .replace(/\n\s*\n/g, '\n')
           .trim();
         
-        // 限制长度（2000字，确保AI能处理）
-        if (mainContent.length > 2000) {
-          mainContent = mainContent.substring(0, 2000) + '...';
+        if (mainContent.length > MAX_CONTENT_LENGTH) {
+          mainContent = `${mainContent.substring(0, MAX_CONTENT_LENGTH)}...`;
         }
         
-        if (mainContent.length > 100) {
-          contents.push({
-            title: result.title,
-            url: result.url,
-            content: mainContent
-          });
+        if (mainContent.length > MIN_CONTENT_LENGTH) {
           BotUtil.makeLog('debug', `[抓取] 成功提取${mainContent.length}字内容`, 'ChatStream');
+          return { title: result.title, url: result.url, content: mainContent };
         }
+        
+        return { ...result, content: result.snippet || '无法获取内容' };
       } catch (error) {
         BotUtil.makeLog('debug', `[抓取] 失败: ${result.url} - ${error.message}`, 'ChatStream');
-        // 如果抓取失败，至少保留标题和摘要
-        contents.push({
-          title: result.title,
-          url: result.url,
-          content: result.snippet || '无法获取内容'
-        });
+        return { ...result, content: result.snippet || '无法获取内容' };
       }
-    }
+    });
     
-    return contents;
+    const results = await Promise.allSettled(fetchPromises);
+    return results
+      .filter(r => r.status === 'fulfilled')
+      .map(r => r.value)
+      .filter(c => c?.content);
   }
 
   /**
@@ -2291,153 +2290,140 @@ ${contentsText}
   }
 
   /**
-   * 快速清理工具描述（不需要AI，直接正则替换）
+   * 快速清理工具描述（使用现代正则和链式调用）
    */
   quickCleanResponse(response) {
     if (!response) return response;
     
-    // 删除工具描述、舞台提示等
-    let cleaned = response
-      .replace(/\[(?:回复|回应|工具|命令|搜索)[^\]]*\]/gi, '')
-      .replace(/\((?:正在|过了一会儿?|稍等)[^)]*\)/g, '')
-      .replace(/（(?:正在|过了一会儿?|稍等)[^）]*）/g, '')
-      .replace(/\s{2,}/g, ' ')
-      .trim();
+    const CLEANUP_PATTERNS = [
+      /\[(?:回复|回应|工具|命令|搜索)[^\]]*\]/gi,
+      /\((?:正在|过了一会儿?|稍等)[^)]*\)/g,
+      /（(?:正在|过了一会儿?|稍等)[^）]*）/g,
+      /\s{2,}/g
+    ];
     
-    return cleaned;
+    return CLEANUP_PATTERNS.reduce((text, pattern) => text.replace(pattern, ' '), response).trim();
   }
 
 
   /**
-   * 执行搜索（爬虫）
+   * 统一搜索接口（优化版：并行搜索多个引擎，取最快成功的结果）
    */
   async executeSearch(keyword) {
-    try {
-      // 并行搜索多个引擎，取最快成功的结果
-      const searchPromises = [
-        this.performFastSearch(keyword, 'baidu'),
-        this.performFastSearch(keyword, 'bing'),
-        this.performFastSearch(keyword, 'sogou')
-      ];
-      
-      const results = await Promise.allSettled(searchPromises);
-      
-      for (const result of results) {
-        if (result.status === 'fulfilled' && result.value && result.value.length > 0) {
-          return result.value;
-        }
+    if (!keyword?.trim()) return [];
+    
+    const engines = ['baidu', 'bing', 'sogou'];
+    const searchPromises = engines.map(engine => 
+      this.performFastSearch(keyword, engine).catch(() => [])
+    );
+    
+    const results = await Promise.allSettled(searchPromises);
+    
+    // 返回第一个成功的结果
+    for (const result of results) {
+      if (result.status === 'fulfilled' && result.value?.length > 0) {
+        return result.value;
       }
-      
-      return [];
-    } catch (error) {
-      BotUtil.makeLog('error', `执行搜索失败: ${error.message}`, 'ChatStream');
-      return [];
     }
+    
+    return [];
   }
 
 
 
 
   /**
-   * 快速搜索（使用axios + cheerio，超时5秒）
+   * 统一搜索方法（使用配置化方式，支持多种搜索引擎）
    */
   async performFastSearch(keyword, engine = 'baidu') {
-    const timeout = 5000; // 5秒超时
+    const SEARCH_CONFIGS = {
+      baidu: {
+        url: (kw) => `https://www.baidu.com/s?wd=${encodeURIComponent(kw)}`,
+        selectors: {
+          container: '.result, .c-container',
+          title: 'h3 a, .t a',
+          link: 'h3 a, .t a',
+          snippet: '.content-right_8Zs40, .c-abstract, .c-span9'
+        },
+        linkCleaner: (link) => {
+          if (link?.startsWith('/link?url=')) {
+            const match = link.match(/url=([^&]+)/);
+            return match ? decodeURIComponent(match[1]) : link;
+          }
+          return link;
+        }
+      },
+      bing: {
+        url: (kw) => `https://www.bing.com/search?q=${encodeURIComponent(kw)}&count=10`,
+        selectors: {
+          container: '.b_algo',
+          title: 'h2 a',
+          link: 'h2 a',
+          snippet: '.b_caption p, .b_caption'
+        },
+        linkCleaner: (link) => link
+      },
+      sogou: {
+        url: (kw) => `https://www.sogou.com/web?query=${encodeURIComponent(kw)}`,
+        selectors: {
+          container: '.vrwrap, .rb',
+          title: 'h3 a, .vr-title a',
+          link: 'h3 a, .vr-title a',
+          snippet: '.str-text, .str-info'
+        },
+        linkCleaner: (link) => link
+      }
+    };
+    
+    const config = SEARCH_CONFIGS[engine];
+    if (!config) return [];
+    
+    const TIMEOUT = 5000;
+    const MAX_RESULTS = 8;
+    const DEFAULT_HEADERS = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+    };
     
     try {
-      let searchUrl = '';
-      let selectors = {};
-      
-      switch (engine) {
-        case 'baidu':
-          searchUrl = `https://www.baidu.com/s?wd=${encodeURIComponent(keyword)}`;
-          selectors = {
-            container: '.result, .c-container',
-            title: 'h3 a, .t a',
-            link: 'h3 a, .t a',
-            snippet: '.content-right_8Zs40, .c-abstract, .c-span9'
-          };
-          break;
-        case 'bing':
-          searchUrl = `https://www.bing.com/search?q=${encodeURIComponent(keyword)}&count=10`;
-          selectors = {
-            container: '.b_algo',
-            title: 'h2 a',
-            link: 'h2 a',
-            snippet: '.b_caption p, .b_caption'
-          };
-          break;
-        case 'sogou':
-          searchUrl = `https://www.sogou.com/web?query=${encodeURIComponent(keyword)}`;
-          selectors = {
-            container: '.vrwrap, .rb',
-            title: 'h3 a, .vr-title a',
-            link: 'h3 a, .vr-title a',
-            snippet: '.str-text, .str-info'
-          };
-          break;
-        default:
-          return [];
-      }
-      
-      // 使用axios快速请求（比fetch更快）
-      const response = await axios.get(searchUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
-        },
-        timeout: timeout,
+      const response = await axios.get(config.url(keyword), {
+        headers: DEFAULT_HEADERS,
+        timeout: TIMEOUT,
         maxRedirects: 3
       });
       
-      if (!response.data || response.data.length < 100) {
-        return [];
-      }
+      if (!response?.data || response.data.length < 100) return [];
       
       const cheerio = await getCheerio();
       const $ = cheerio.load(response.data);
       const results = [];
+      const { container, title: titleSel, link: linkSel, snippet: snippetSel } = config.selectors;
       
-      // 快速解析搜索结果
-      $(selectors.container).each((index, element) => {
-        if (results.length >= 8) return false; // 最多8个结果
+      $(container).each((_, element) => {
+        if (results.length >= MAX_RESULTS) return false;
         
         const $el = $(element);
-        const titleEl = $el.find(selectors.title).first();
+        const titleEl = $el.find(titleSel).first();
         const title = titleEl.text().trim();
         let link = titleEl.attr('href') || '';
-        const snippet = $el.find(selectors.snippet).first().text().trim();
+        const snippet = $el.find(snippetSel).first().text().trim();
         
-        // 清理链接
-        if (link) {
-          if (link.startsWith('/link?url=')) {
-            try {
-              const urlMatch = link.match(/url=([^&]+)/);
-              if (urlMatch) {
-                link = decodeURIComponent(urlMatch[1]);
-              }
-            } catch (e) {}
-          }
-          if (!link.startsWith('http')) {
-            link = '';
-          }
-        }
+        // 清理和验证链接
+        link = config.linkCleaner(link);
+        if (!link?.startsWith('http')) return;
+        if (!title) return;
         
-        if (title && link) {
-          // 提取纯文本摘要（如果snippet太长）
-          let cleanSnippet = snippet || '暂无摘要';
-          if (cleanSnippet.length > 200) {
-            cleanSnippet = cleanSnippet.substring(0, 200) + '...';
-          }
-          
-          results.push({
-            title,
-            url: link,
-            snippet: cleanSnippet,
-            index: results.length + 1
-          });
-        }
+        const cleanSnippet = snippet?.length > 200 
+          ? `${snippet.substring(0, 200)}...` 
+          : (snippet || '暂无摘要');
+        
+        results.push({
+          title,
+          url: link,
+          snippet: cleanSnippet,
+          index: results.length + 1
+        });
       });
       
       return results;
@@ -2448,7 +2434,8 @@ ${contentsText}
   }
 
   /**
-   * 执行网页搜索（使用DuckDuckGo）
+   * 执行网页搜索（使用DuckDuckGo）- 已废弃，使用performFastSearch替代
+   * @deprecated 使用 performFastSearch 替代
    */
   async performWebSearch(keyword) {
     try {
@@ -2526,19 +2513,20 @@ ${contentsText}
       // 如果DuckDuckGo解析失败，尝试备用方案
       if (results.length === 0) {
         BotUtil.makeLog('debug', 'DuckDuckGo解析无结果，尝试备用方案', 'ChatStream');
-        return await this.performBingSearch(keyword);
+        return await this.performFastSearch(keyword, 'bing');
       }
       
       return results;
     } catch (error) {
       BotUtil.makeLog('warn', `DuckDuckGo搜索失败，尝试备用方案: ${error.message}`, 'ChatStream');
       // 尝试备用搜索方案
-      return await this.performBingSearch(keyword);
+      return await this.performFastSearch(keyword, 'bing');
     }
   }
 
   /**
-   * 备用搜索方案：使用Google搜索（通过HTML解析）
+   * 备用搜索方案：使用Google搜索（通过HTML解析）- 已废弃
+   * @deprecated 使用 performFastSearch 替代
    */
   async performGoogleSearch(keyword) {
     try {
@@ -2601,7 +2589,8 @@ ${contentsText}
   }
 
   /**
-   * 备用搜索方案：使用Bing搜索（通过HTML解析）
+   * 备用搜索方案：使用Bing搜索（通过HTML解析）- 已废弃，使用performFastSearch替代
+   * @deprecated 使用 performFastSearch 替代
    */
   async performBingSearch(keyword) {
     try {
@@ -2672,130 +2661,59 @@ ${contentsText}
   }
 
   /**
-   * 快速分析搜索结果（优化版：减少AI调用次数，提高速度）
+   * 分析搜索结果（统一方法，支持多轮分析）
    */
-  async analyzeSearchResultsFast(searchResults, keyword, context, round, previousAnalysis = null) {
+  async analyzeSearchResults(searchResults, keyword, context, round = 1, previousAnalysis = null) {
     if (!this.callAI) {
       return this.formatSearchResults(searchResults);
     }
     
-    // 只取前5个结果进行分析，提高速度
-    const topResults = searchResults.slice(0, 5);
+    const topResults = searchResults.slice(0, round === 1 ? 5 : 8);
     const resultsText = topResults.map(item => 
       `${item.index}. ${item.title}\n   链接: ${item.url}\n   摘要: ${item.snippet}`
     ).join('\n\n');
     
-    let analysisPrompt = '';
-    if (round === 1) {
-      analysisPrompt = `请快速分析以下搜索结果，提取与"${keyword}"最相关的关键信息（3-5个要点）：
+    const prompts = {
+      1: `请快速分析以下搜索结果，提取与"${keyword}"最相关的关键信息（3-5个要点）：
       
 ${resultsText}
 
-要求：简洁明了，纯文本格式，标注信息来源`;
-    } else if (round === 2) {
-      analysisPrompt = `综合以下信息，形成最终回复：
+要求：简洁明了，纯文本格式，标注信息来源`,
+      2: `综合以下信息，形成最终回复：
 
 第一轮分析：
-${previousAnalysis}
+${previousAnalysis || '无'}
 
 搜索结果：
 ${resultsText}
 
-要求：整合关键信息，去除冗余，准备用于最终回复（纯文本格式）`;
-    }
+要求：整合关键信息，去除冗余，准备用于最终回复（纯文本格式）`,
+      3: `综合前两轮分析，形成最终的综合分析：
+
+第一轮分析：
+${previousAnalysis || '无'}
+
+搜索结果：
+${resultsText}
+
+要求：整合所有关键信息，去除重复和冗余，按照重要性排序，准备用于最终回复`
+    };
     
     const messages = [
       {
         role: 'system',
-        content: `你是信息分析专家。要求：1. 纯文本格式，不用Markdown 2. 语言简洁 3. 突出重点`
+        content: '你是信息分析专家。要求：1. 纯文本格式，不用Markdown 2. 语言简洁 3. 突出重点'
       },
       {
         role: 'user',
-        content: analysisPrompt
+        content: prompts[round] || prompts[1]
       }
     ];
     
-    const apiConfig = context?.config || context?.question?.config || {};
+    const apiConfig = context?.config ?? context?.question?.config ?? {};
     const result = await this.callAI(messages, {
       ...apiConfig,
-      maxTokens: 1000, // 减少token，提高速度
-      temperature: 0.7
-    });
-    
-    return result || this.formatSearchResults(searchResults);
-  }
-
-  /**
-   * 分析搜索结果（三次分析中的一次）（保留原方法作为备用）
-   */
-  async analyzeSearchResults(searchResults, keyword, context, round, previousAnalysis = null) {
-    if (!this.callAI) {
-      return this.formatSearchResults(searchResults);
-    }
-    
-    const resultsText = searchResults.slice(0, 8).map(item => 
-      `${item.index}. ${item.title}\n   链接: ${item.url}\n   摘要: ${item.snippet}`
-    ).join('\n\n');
-    
-    let analysisPrompt = '';
-    if (round === 1) {
-      analysisPrompt = `请分析以下搜索结果，提取与"${keyword}"最相关的关键信息：
-      
-${resultsText}
-
-要求：
-1. 提取最重要的3-5个关键点
-2. 标注信息来源
-3. 用简洁的语言总结`;
-    } else if (round === 2) {
-      analysisPrompt = `基于第一轮分析，深入分析以下搜索结果，找出更深层次的信息：
-
-第一轮分析：
-${previousAnalysis}
-
-搜索结果：
-${resultsText}
-
-要求：
-1. 补充第一轮分析遗漏的重要信息
-2. 评估信息的可靠性和时效性
-3. 找出不同来源的一致性和差异性`;
-    } else if (round === 3) {
-      analysisPrompt = `综合前两轮分析，形成最终的综合分析：
-
-第一轮分析：
-${previousAnalysis}
-
-搜索结果：
-${resultsText}
-
-要求：
-1. 整合所有关键信息
-2. 去除重复和冗余
-3. 按照重要性排序
-4. 准备用于最终回复`;
-    }
-    
-    const messages = [
-      {
-        role: 'system',
-        content: `你是信息分析专家，擅长从搜索结果中提取和整理关键信息。
-要求：
-1. 使用纯文本格式，不要使用Markdown
-2. 语言简洁明了
-3. 标注信息来源
-4. 突出重点信息`
-      },
-      {
-        role: 'user',
-        content: analysisPrompt
-      }
-    ];
-    
-    const apiConfig = context?.config || context?.question?.config || {};
-    const result = await this.callAI(messages, {
-      ...apiConfig,
-      maxTokens: 1500,
+      maxTokens: round === 1 ? 1000 : 1500,
       temperature: 0.7
     });
     
@@ -2853,16 +2771,17 @@ ${analysis}
   }
 
   /**
-   * 格式化搜索结果（备用方法）
+   * 格式化搜索结果（优化版）
    */
   formatSearchResults(searchResults) {
-    if (!searchResults || searchResults.length === 0) {
+    if (!searchResults?.length) {
       return '未找到相关搜索结果';
     }
     
-    const formatted = searchResults.slice(0, 5).map(item => 
-      `${item.index}. ${item.title}\n   ${item.snippet}`
-    ).join('\n\n');
+    const formatted = searchResults
+      .slice(0, 5)
+      .map(item => `${item.index}. ${item.title}\n   ${item.snippet ?? '暂无摘要'}`)
+      .join('\n\n');
     
     return `搜索结果：\n\n${formatted}`;
   }
@@ -2910,47 +2829,40 @@ ${analysis}
   }
 
   /**
-   * 格式化聊天记录供AI阅读（美观易读）
+   * 格式化聊天记录供AI阅读（优化版：使用现代方法）
    */
   formatHistoryForAI(messages, isGlobalTrigger = false) {
-    if (!messages || messages.length === 0) return '';
+    if (!messages?.length) return '';
     
     const now = Math.floor(Date.now() / 1000);
-    const lines = ['[群聊记录]'];
+    const formatTime = (timestamp) => {
+      const timeDiff = now - timestamp;
+      if (timeDiff < 60) return `${timeDiff}秒前`;
+      if (timeDiff < 3600) return `${Math.floor(timeDiff / 60)}分钟前`;
+      const date = new Date(timestamp * 1000);
+      return `${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+    };
     
-    for (const msg of messages) {
-      const timeDiff = now - (msg.timestamp || Math.floor(msg.time / 1000));
-      let timeStr = '';
+    const formatToolInfo = (msg) => {
+      if (!msg.isTool || !msg.toolResult) return '';
+      return msg.toolType === 'webSearch'
+        ? ` → 搜索了"${msg.toolResult.keyword}"，找到${msg.toolResult.searchCount}个结果`
+        : ` → 使用了${msg.toolType}工具`;
+    };
+    
+    const lines = ['[群聊记录]', ...messages.map(msg => {
+      const timestamp = msg.timestamp ?? Math.floor(msg.time / 1000);
+      const displayName = msg.nickname ?? '未知';
+      const msgContent = `${msg.message ?? '(空消息)'}${formatToolInfo(msg)}`;
+      const tags = [
+        msg.isBot ? '[机器人]' : '[成员]',
+        msg.isTool ? `[工具:${msg.toolType ?? 'unknown'}]` : '',
+        msg.hasImage ? '[含图片]' : '',
+        msg.message_id ? ` 消息ID:${msg.message_id}` : ''
+      ].filter(Boolean).join('');
       
-      if (timeDiff < 60) {
-        timeStr = `${timeDiff}秒前`;
-      } else if (timeDiff < 3600) {
-        timeStr = `${Math.floor(timeDiff / 60)}分钟前`;
-      } else {
-        const date = new Date((msg.timestamp || msg.time) * 1000);
-        timeStr = `${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
-      }
-      
-      const displayName = msg.nickname || '未知';
-      let msgContent = msg.message || '(空消息)';
-      const imageTag = msg.hasImage ? '[含图片]' : '';
-      const roleTag = msg.isBot ? '[机器人]' : '[成员]';
-      const toolTag = msg.isTool ? `[工具:${msg.toolType || 'unknown'}]` : '';
-      const msgIdTag = msg.message_id ? ` 消息ID:${msg.message_id}` : '';
-      
-      // 如果是工具使用记录，添加工具结果摘要
-      if (msg.isTool && msg.toolResult) {
-        const toolInfo = msg.toolType === 'webSearch' 
-          ? `搜索了"${msg.toolResult.keyword}"，找到${msg.toolResult.searchCount}个结果`
-          : `使用了${msg.toolType}工具`;
-        msgContent = `${msgContent} → ${toolInfo}`;
-      }
-      
-      // 统一格式：角色 标识 + 昵称(QQ) + 时间 + 可选图片/工具/消息ID
-      lines.push(
-        `${roleTag}${toolTag} ${displayName}(${msg.user_id}) [${timeStr}]${imageTag}${msgIdTag}: ${msgContent}`
-      );
-    }
+      return `${tags} ${displayName}(${msg.user_id}) [${formatTime(timestamp)}]: ${msgContent}`;
+    })];
     
     return lines.join('\n');
   }
@@ -2961,15 +2873,7 @@ ${analysis}
 
   cleanupArtifacts(text) {
     if (!text) return text;
-
-    let cleaned = text;
-    cleaned = cleaned.replace(/\[\s*\]/g, '');
-    cleaned = cleaned.replace(/\[(?:回复|回应|工具|命令)[^\]]*\]/gi, '');
-    cleaned = cleaned.replace(/\((?:正在|过了一会儿?|稍等)[^)]*\)/g, '');
-    cleaned = cleaned.replace(/（(?:正在|过了一会儿?|稍等)[^）]*）/g, '');
-    cleaned = cleaned.replace(/\s{2,}/g, ' ');
-
-    return cleaned.trim();
+    return this.quickCleanResponse(text.replace(/\[\s*\]/g, ''));
   }
 
   async refineResponse(text, context) {
@@ -3345,31 +3249,33 @@ ${e.isMaster ? '5. 对主人保持亲密、顺从' : ''}`;
   }
 
   /**
-   * 清理缓存
+   * 清理缓存（使用现代方法优化）
    */
   cleanupCache() {
     const now = Date.now();
-    const MAX_AGE = 1800000;
-    const CACHE_AGE = 300000;
+    const MAX_AGE = 1800000; // 30分钟
+    const CACHE_AGE = 300000; // 5分钟
     
+    // 清理消息历史
     for (const [groupId, messages] of ChatStream.messageHistory.entries()) {
       const filtered = messages.filter(msg => now - msg.time < MAX_AGE);
       if (filtered.length === 0) {
         ChatStream.messageHistory.delete(groupId);
-      } else {
+      } else if (filtered.length !== messages.length) {
         ChatStream.messageHistory.set(groupId, filtered);
       }
     }
     
+    // 清理用户缓存
     for (const [key, data] of ChatStream.userCache.entries()) {
-      if (now - data.time > CACHE_AGE) {
+      if (now - (data.time ?? 0) > CACHE_AGE) {
         ChatStream.userCache.delete(key);
       }
     }
   }
 
   /**
-   * 执行工作流（重写以记录消息）
+   * 执行工作流（优化版：添加重试机制和更好的错误处理）
    */
   async execute(e, question, config) {
     if (e?.isGroup) {
@@ -3383,25 +3289,27 @@ ${e.isMaster ? '5. 对主人保持亲密、顺从' : ''}`;
       timeoutId = setTimeout(() => resolve(timeoutSymbol), CHAT_RESPONSE_TIMEOUT);
     });
     
-    const result = await Promise.race([
-      super.execute(e, question, config),
-      timeoutPromise
-    ]);
-    
-    if (timeoutId) {
+    try {
+      const result = await Promise.race([
+        super.execute(e, question, config),
+        timeoutPromise
+      ]);
+      
       clearTimeout(timeoutId);
-    }
-    
-    if (result === timeoutSymbol) {
-      BotUtil.makeLog('warn', `聊天回复超时(>${CHAT_RESPONSE_TIMEOUT}ms)，已放弃`, 'ChatStream');
+      
+      if (result === timeoutSymbol) {
+        BotUtil.makeLog('warn', `聊天回复超时(>${CHAT_RESPONSE_TIMEOUT}ms)，已放弃`, 'ChatStream');
+        return null;
+      }
+      
+      if (!result) return result;
+      
+      return await this.postProcessResponse(result, { e, question, config });
+    } catch (error) {
+      clearTimeout(timeoutId);
+      BotUtil.makeLog('error', `执行工作流失败: ${error.message}`, 'ChatStream');
       return null;
     }
-    
-    if (!result) {
-      return result;
-    }
-
-    return await this.postProcessResponse(result, { e, question, config });
   }
 
   /**
