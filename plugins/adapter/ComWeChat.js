@@ -20,15 +20,14 @@ Bot.adapter.push(new class ComWeChatAdapter {
     this.echo.set(echo, cache)
     const timeout = setTimeout(() => {
       cache.reject(Bot.makeError("请求超时", request, { timeout: this.timeout }))
-      Bot.makeLog("error", ["请求超时", request], data.self_id)
-      ws.terminate()
+      Bot.makeLog("warn", ["请求超时", request], data.self_id)
     }, this.timeout)
 
     return cache.promise.then(data => {
       if (data.retcode !== 0)
         throw Bot.makeError(data.message, request, { error: data })
       return data.data ? new Proxy(data, {
-        get: (target, prop) => target.data[prop] ?? target[prop],
+        get: (target, prop) => target.data[prop] || target[prop],
       }) : data
     }).finally(() => {
       clearTimeout(timeout)
@@ -244,8 +243,9 @@ Bot.adapter.push(new class ComWeChatAdapter {
   }
 
   pickMember(data, group_id, user_id) {
+    const memberMap = data.bot.gml.get(group_id)
     const i = {
-      ...data.bot.gml.get(group_id)?.get(user_id),
+      ...(memberMap && memberMap.get(user_id)),
       ...data,
       group_id,
       user_id,
@@ -312,11 +312,20 @@ Bot.adapter.push(new class ComWeChatAdapter {
     if (!Bot.uin.includes(data.self_id))
       Bot.uin.push(data.self_id)
 
-    data.bot.info = (await data.bot.sendApi("get_self_info").catch(i => i.error)).data
-    data.bot.version = {
-      ...(await data.bot.sendApi("get_version").catch(i => i.error)).data,
-      id: this.id,
-      name: this.name,
+    try {
+      data.bot.info = (await data.bot.sendApi("get_self_info")).data
+    } catch (err) {
+      Bot.makeLog("warn", `获取自身信息失败: ${err.message}`, data.self_id)
+    }
+    try {
+      data.bot.version = {
+        ...(await data.bot.sendApi("get_version")).data,
+        id: this.id,
+        name: this.name,
+      }
+    } catch (err) {
+      Bot.makeLog("warn", `获取版本信息失败: ${err.message}`, data.self_id)
+      data.bot.version = { id: this.id, name: this.name }
     }
 
     data.bot.getFriendMap()
@@ -372,10 +381,7 @@ Bot.adapter.push(new class ComWeChatAdapter {
 
   makeNotice(data) {
     data.post_type = data.type
-    if (data.group_id)
-      data.notice_type = "group"
-    else
-      data.notice_type = "friend"
+    data.notice_type = data.group_id ? "group" : "friend"
 
     switch (data.detail_type) {
       case "private_message_delete":
@@ -417,18 +423,14 @@ Bot.adapter.push(new class ComWeChatAdapter {
       default:
         Bot.makeLog("warn", `未知通知：${logger.magenta(data.raw)}`, data.self_id)
     }
-    if (!data.sub_type)
-      data.sub_type = data.detail_type.split("_").pop()
+    data.sub_type = data.sub_type || data.detail_type.split("_").pop()
 
     Bot.em(`${data.post_type}.${data.notice_type}.${data.sub_type}`, data)
   }
 
   makeRequest(data) {
     data.post_type = data.type
-    if (data.group_id)
-      data.notice_type = "group"
-    else
-      data.notice_type = "friend"
+    data.notice_type = data.group_id ? "group" : "friend"
 
     switch (data.detail_type) {
       case "wx.friend_request":
@@ -438,8 +440,7 @@ Bot.adapter.push(new class ComWeChatAdapter {
       default:
         Bot.makeLog("warn", `未知请求：${logger.magenta(data.raw)}`, data.self_id)
     }
-    if (!data.sub_type)
-      data.sub_type = data.detail_type.split("_").pop()
+    data.sub_type = data.sub_type || data.detail_type.split("_").pop()
 
     Bot.em(`${data.post_type}.${data.request_type}.${data.sub_type}`, data)
   }
@@ -468,7 +469,7 @@ Bot.adapter.push(new class ComWeChatAdapter {
       return Bot.makeLog("error", ["解码数据失败", data, err])
     }
 
-    if (data.self?.user_id) {
+    if (data.self && data.self.user_id) {
       data.self_id = data.self.user_id
     } else {
       data.self_id = data.id
@@ -499,8 +500,7 @@ Bot.adapter.push(new class ComWeChatAdapter {
   }
 
   load() {
-    if (!Array.isArray(Bot.wsf[this.path]))
-      Bot.wsf[this.path] = []
+    Bot.wsf[this.path] = Bot.wsf[this.path] || []
     Bot.wsf[this.path].push((ws, ...args) =>
       ws.on("message", data => this.message(data, ws, ...args))
     )

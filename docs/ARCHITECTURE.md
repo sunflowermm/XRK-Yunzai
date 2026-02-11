@@ -245,95 +245,124 @@ graph TB
 
 ### 3.1 消息处理流程
 
-```
-用户消息
-  ↓
-适配器（OneBot/Device/STDIN）
-  ↓
-Bot.em('message', rawData)
-  ↓
-Bot.prepareEvent(data)  // 注入 bot、friend、group、member
-  ↓
-PluginsLoader.deal(e)
-  ↓
-PluginsLoader.dealMsg(e)  // 解析消息、设置属性
-  ↓
-PluginsLoader.setupReply(e)  // 设置回复方法
-  ↓
-PluginsLoader.runPlugins(e)  // 匹配并执行插件
-  ↓
-plugin[rule.fnc](e)  // 插件处理函数
-  ↓
-e.reply()  // 回复消息
-  ↓
-适配器发送消息
+```mermaid
+flowchart TD
+    Start[用户消息] --> Adapter[适配器<br/>OneBot/Device/STDIN]
+    Adapter --> Em[Bot.em<br/>'message', rawData]
+    Em --> Prepare[Bot.prepareEvent<br/>注入 bot/friend/group/member]
+    Prepare --> Deal[PluginsLoader.deal<br/>处理事件]
+    Deal --> DealMsg[PluginsLoader.dealMsg<br/>解析消息、设置属性]
+    DealMsg --> SetupReply[PluginsLoader.setupReply<br/>设置回复方法]
+    SetupReply --> RunPlugins[PluginsLoader.runPlugins<br/>匹配并执行插件]
+    RunPlugins --> PluginFnc[plugin[rule.fnc]<br/>插件处理函数]
+    PluginFnc --> Reply[e.reply<br/>回复消息]
+    Reply --> Send[适配器发送消息]
+    
+    style Start fill:#4a90e2,stroke:#2c5aa0,color:#fff
+    style Adapter fill:#50c878,stroke:#2d8659,color:#fff
+    style PluginFnc fill:#feca57,stroke:#d68910,color:#000
+    style Send fill:#ff6b9d,stroke:#c44569,color:#fff
 ```
 
 ### 3.2 配置加载流程
 
-```
-应用启动
-  ↓
-Cfg.constructor()  // 初始化配置系统
-  ↓
-cfg.bot  // 首次访问触发加载
-  ↓
-Cfg.getConfig('bot')
-  ↓
-读取 data/server_bots/<port>/bot.yaml
-  ↓
-如果不存在，从 config/default_config/bot.yaml 复制
-  ↓
-Cfg.watch(file, 'bot', key)  // 创建文件监听器
-  ↓
-YAML 解析并缓存
-  ↓
-返回配置对象
+```mermaid
+flowchart TD
+    Start[应用启动] --> Constructor[Cfg.constructor<br/>初始化配置系统]
+    Constructor --> Access[cfg.bot<br/>首次访问触发加载]
+    Access --> GetConfig[Cfg.getConfig<br/>'bot']
+    GetConfig --> Check{检查文件存在<br/>data/server_bots/<port>/bot.yaml}
+    Check -->|不存在| Copy[从 config/default_config/bot.yaml<br/>复制到服务器目录]
+    Check -->|存在| Read[读取配置文件]
+    Copy --> Read
+    Read --> Watch[Cfg.watch<br/>创建文件监听器]
+    Watch --> Parse[YAML 解析并缓存]
+    Parse --> Return[返回配置对象]
+    
+    style Start fill:#4a90e2,stroke:#2c5aa0,color:#fff
+    style Check fill:#50c878,stroke:#2d8659,color:#fff
+    style Return fill:#feca57,stroke:#d68910,color:#000
 ```
 
 ### 3.3 Redis 初始化流程
 
-```
-应用启动
-  ↓
-redisInit()
-  ↓
-buildRedisUrl(cfg.redis)  // 构建连接URL
-  ↓
-buildClientConfig()  // 构建客户端配置
-  ↓
-createClient()  // 创建客户端
-  ↓
-client.connect()  // 尝试连接（最多重试3次）
-  ↓
-如果失败，attemptRedisStart()  // 开发环境自动启动
-  ↓
-registerEventHandlers()  // 注册事件监听
-  ↓
-startHealthCheck()  // 启动健康检查
-  ↓
-挂载到 global.redis
+```mermaid
+flowchart TD
+    Start[应用启动] --> Init[redisInit]
+    Init --> BuildUrl[buildRedisUrl<br/>构建连接URL]
+    BuildUrl --> BuildConfig[buildClientConfig<br/>构建客户端配置]
+    BuildConfig --> Create[createClient<br/>创建客户端]
+    Create --> Connect[client.connect<br/>尝试连接]
+    Connect --> Check{连接成功?}
+    Check -->|失败| Retry{重试次数<br/>< 3?}
+    Retry -->|是| Connect
+    Retry -->|否| DevCheck{开发环境?}
+    DevCheck -->|是| AutoStart[attemptRedisStart<br/>自动启动Redis]
+    DevCheck -->|否| Error[记录错误]
+    AutoStart --> Connect
+    Check -->|成功| Register[registerEventHandlers<br/>注册事件监听]
+    Register --> HealthCheck[startHealthCheck<br/>启动健康检查]
+    HealthCheck --> Mount[挂载到 global.redis]
+    
+    style Start fill:#4a90e2,stroke:#2c5aa0,color:#fff
+    style Check fill:#50c878,stroke:#2d8659,color:#fff
+    style Mount fill:#feca57,stroke:#d68910,color:#000
 ```
 
 ---
 
 <h2 align="center">4. 技术栈依赖关系</h2>
 
-```
-Bot (核心)
-  ├── Express (HTTP服务器)
-  ├── WebSocket (ws库)
-  ├── http-proxy-middleware (反向代理)
-  ├── PluginsLoader (插件系统)
-  │   └── plugin (插件基类)
-  │       └── AIStream (工作流)
-  │           └── MemorySystem (记忆系统)
-  │               └── Redis (缓存)
-  ├── ApiLoader (路由系统)
-  ├── Cfg (配置系统)
-  │   └── chokidar (文件监听)
-  └── logger (日志系统)
-      └── pino (日志库)
+```mermaid
+graph TB
+    subgraph Bot["🤖 Bot (核心)"]
+        BotCore[核心控制器]
+    end
+    
+    subgraph Web["🌐 Web服务层"]
+        Express[Express<br/>HTTP服务器]
+        WS[WebSocket<br/>ws库]
+        Proxy[http-proxy-middleware<br/>反向代理]
+    end
+    
+    subgraph PluginSys["🔌 插件系统"]
+        PluginsLoader[PluginsLoader]
+        Plugin[plugin<br/>插件基类]
+        AIStream[AIStream<br/>工作流]
+        Memory[MemorySystem<br/>记忆系统]
+    end
+    
+    subgraph Data["💾 数据层"]
+        Redis[Redis<br/>缓存]
+        Cfg[Cfg<br/>配置系统]
+        Chokidar[chokidar<br/>文件监听]
+    end
+    
+    subgraph Log["📊 日志系统"]
+        Logger[logger]
+        Pino[pino<br/>日志库]
+    end
+    
+    BotCore --> Express
+    BotCore --> WS
+    BotCore --> Proxy
+    BotCore --> PluginsLoader
+    BotCore --> Cfg
+    BotCore --> Logger
+    
+    PluginsLoader --> Plugin
+    Plugin --> AIStream
+    AIStream --> Memory
+    Memory --> Redis
+    
+    Cfg --> Chokidar
+    Logger --> Pino
+    
+    style Bot fill:#4a90e2,stroke:#2c5aa0,color:#fff
+    style Web fill:#50c878,stroke:#2d8659,color:#fff
+    style PluginSys fill:#feca57,stroke:#d68910,color:#000
+    style Data fill:#ff6b9d,stroke:#c44569,color:#fff
+    style Log fill:#9b59b6,stroke:#8e44ad,color:#fff
 ```
 
 ---
@@ -352,14 +381,11 @@ export default class MyAdapter {
   }
   
   async handleMessage(data) {
-    const e = {
+    Bot.em('message', {
       self_id: data.bot_id,
       user_id: data.user_id,
-      message: data.message,
-      // ... 其他字段
-    };
-    
-    Bot.em('message', e);  // 触发事件
+      message: data.message
+    });
   }
 }
 ```
@@ -368,25 +394,23 @@ export default class MyAdapter {
 
 ```javascript
 // 在 plugins/api/MyApi.js
-export default class MyApi {
-  constructor() {
-    this.name = 'my-api';
-  }
-  
-  register(app, bot) {
-    app.get('/api/my-endpoint', async (req, res) => {
-      // req.bot 可以访问 Bot 实例
+export default {
+  name: 'my-api',
+  routes: [{
+    method: 'GET',
+    path: '/api/my-endpoint',
+    handler: async (req, res, Bot) => {
       res.json({ success: true });
-    });
-  }
-}
+    }
+  }]
+};
 ```
 
 ### 5.3 插件开发
 
 ```javascript
 // 在 plugins/MyPlugin.js
-import plugin from '../../lib/plugins/plugin.js';
+// 假设已导入: import plugin from '../../lib/plugins/plugin.js';
 
 export default class MyPlugin extends plugin {
   constructor() {
@@ -394,9 +418,7 @@ export default class MyPlugin extends plugin {
       name: 'my-plugin',
       dsc: '我的插件',
       event: 'message',
-      rule: [
-        { reg: '^#测试$', fnc: 'test' }
-      ]
+      rule: [{ reg: '^#测试$', fnc: 'test' }]
     });
   }
   
@@ -436,6 +458,7 @@ export default class MyPlugin extends plugin {
 - [Bot对象手册](./reference/BOT.md) - Bot对象的完整方法
 - [插件基类文档](./PLUGIN_BASE_CLASS.md) - 插件开发指南
 - [工作流基类文档](./WORKFLOW_BASE_CLASS.md) - 工作流开发指南
+- [工厂模式文档](./FACTORY.md) - LLM工厂模式和提供商管理
 - [配置与Redis手册](./reference/CONFIG_AND_REDIS.md) - 配置和Redis使用
 - [技术栈概览](./TECH_STACK.md) - 技术栈依赖和工具
 

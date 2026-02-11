@@ -161,9 +161,10 @@ Bot.adapter.push(
     }
 
     pickMember(id, group_id, user_id) {
+      const memberMap = Bot[id].gml.get(group_id)
       const i = {
         ...Bot[id].fl.get(user_id),
-        ...Bot[id].gml.get(group_id)?.get(user_id),
+        ...(memberMap && memberMap.get(user_id)),
         self_id: id,
         bot: Bot[id],
         group_id: group_id,
@@ -324,7 +325,7 @@ Bot.adapter.push(
     }
 
     load() {
-      if (!Array.isArray(Bot.wsf[this.path])) Bot.wsf[this.path] = []
+      Bot.wsf[this.path] = Bot.wsf[this.path] || []
       Bot.wsf[this.path].push((ws, ...args) =>
         ws.on("message", data => this.message(data, ws, ...args)),
       )

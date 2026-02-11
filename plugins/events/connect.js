@@ -1,6 +1,6 @@
-import EventListener from "../../lib/listener/listener.js"
+﻿import EventListener from "../../lib/listener/listener.js"
 import cfg from "../../lib/config/config.js"
-import { takeScreenshot } from "../../components/util/takeScreenshot.js"
+import Renderer from "../../lib/renderer/loader.js"
 import fs from 'fs/promises'
 import path from 'path'
 import loader from '../../lib/plugins/loader.js'
@@ -10,6 +10,7 @@ export default class connectEvent extends EventListener {
     super({ event: "connect" })
     this.key = 'Yz:restart'
     this.dataDir = path.join(process.cwd(), 'data')
+    this.renderer = Renderer.getRenderer()
   }
 
   async execute(e) {
@@ -53,27 +54,56 @@ export default class connectEvent extends EventListener {
     await redis.del(`${this.key}:${currentUin}`)
   }
 
+  /**
+   * 使用 renderer 截图 HTML 文件
+   */
+  async takeScreenshot(htmlPath, name, options = {}) {
+    try {
+      const img = await this.renderer.screenshot(name, {
+        tplFile: htmlPath,
+        saveId: name,
+        ...options
+      })
+      return img || false
+    } catch (error) {
+      logger.error(`截图失败: ${error.message}`)
+      return false
+    }
+  }
+
   async sendWelcomeMessage() {
-    const htmlPath = await this.generateHTML('welcome', this.getWelcomeHTML())
-    const screenshotPath = await takeScreenshot(htmlPath, 'welcome_message', {
-      width: 520, height: null, deviceScaleFactor: 3, autoHeight: true
-    })
-    
-    Bot.sendMasterMsg([segment.image(screenshotPath)])
-    this.cleanupFile(htmlPath)
+    try {
+      const htmlPath = await this.generateHTML('welcome', this.getWelcomeHTML())
+      const img = await this.takeScreenshot(htmlPath, 'welcome_message', {
+        width: 520,
+        deviceScaleFactor: 3
+      })
+      if (img) {
+        Bot.sendMasterMsg([segment.image(img)])
+      }
+      this.cleanupFile(htmlPath)
+    } catch (error) {
+      logger.error(`发送欢迎消息失败: ${error.message}`)
+    }
   }
 
   async sendPluginLoadReport(target) {
-    const stats = loader.getPluginStats()
-    if (!stats?.plugins?.length) return logger.debug('没有插件加载统计信息')
-    
-    const htmlPath = await this.generateHTML('plugin_load', this.getPluginLoadHTML(stats))
-    const screenshotPath = await takeScreenshot(htmlPath, 'plugin_load_report', {
-      width: 800, height: null, deviceScaleFactor: 1.5, quality: 90, autoHeight: true
-    })
-    
-    await target.sendMsg([segment.image(screenshotPath)])
-    this.cleanupFile(htmlPath)
+    try {
+      const stats = loader.getPluginStats()
+      if (!stats?.plugins?.length) return logger.debug('没有插件加载统计信息')
+      
+      const htmlPath = await this.generateHTML('plugin_load', this.getPluginLoadHTML(stats))
+      const img = await this.takeScreenshot(htmlPath, 'plugin_load_report', {
+        width: 800,
+        deviceScaleFactor: 1.5
+      })
+      if (img) {
+        await target.sendMsg([segment.image(img)])
+      }
+      this.cleanupFile(htmlPath)
+    } catch (error) {
+      logger.error(`发送插件加载报告失败: ${error.message}`)
+    }
   }
 
   async generateHTML(prefix, content) {

@@ -20,14 +20,13 @@ Bot.adapter.push(
       this.echo.set(ReqId, cache)
       const timeout = setTimeout(() => {
         cache.reject(Bot.makeError("请求超时", request, { timeout: this.timeout }))
-        Bot.makeLog("error", ["请求超时", request], id)
-        ws.terminate()
+        Bot.makeLog("warn", ["请求超时", request], id)
       }, this.timeout)
 
       return cache.promise
         .then(data => {
-          if (data.CgiBaseResponse?.Ret !== 0)
-            throw Bot.makeError(data.CgiBaseResponse?.ErrMsg, request, { error: data })
+          if (data.CgiBaseResponse && data.CgiBaseResponse.Ret !== 0)
+            throw Bot.makeError(data.CgiBaseResponse.ErrMsg, request, { error: data })
           return data
         })
         .finally(() => {
@@ -293,7 +292,7 @@ Bot.adapter.push(
         gml = new Map()
         Bot[id].gml.set(data.group_id, gml)
       }
-      if (!gml.has(data.user_id)) gml.set(data.user_id, data.sender)
+      gml.set(data.user_id, data.sender)
 
       Bot.makeLog(
         "info",
@@ -384,7 +383,7 @@ Bot.adapter.push(
     }
 
     load() {
-      if (!Array.isArray(Bot.wsf[this.path])) Bot.wsf[this.path] = []
+      Bot.wsf[this.path] = Bot.wsf[this.path] || []
       Bot.wsf[this.path].push((ws, ...args) =>
         ws.on("message", data => this.message(data, ws, ...args)),
       )

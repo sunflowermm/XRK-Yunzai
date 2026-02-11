@@ -156,8 +156,8 @@ process.on('unhandledRejection', (reason, promise) => {
 // 优雅退出处理
 process.on('SIGINT', () => {
   console.log(chalk.yellow('\n[!] 收到退出信号，正在关闭...'));
-  if (global.Bot && typeof global.Bot.closeServer === 'function') {
-    global.Bot.closeServer().then(() => {
+  if (Bot.closeServer) {
+    Bot.closeServer().then(() => {
       console.log(chalk.green('[✓] 服务已优雅关闭'));
       process.exit(0);
     }).catch((error) => {

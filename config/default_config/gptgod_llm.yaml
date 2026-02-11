@@ -1,0 +1,43 @@
+# ========================================
+# GPTGod LLM 配置
+# ========================================
+# GPTGod大语言模型配置，支持识图功能
+# 接口地址: https://api.gptgod.online/v1
+# 
+# 配置说明:
+# - enabled: 是否启用此提供商
+# - baseUrl: API基础地址
+# - apiKey: API密钥（必填）
+# - model: 模型名称
+# - chatModel: 聊天模型名称（与model相同）
+# - temperature: 温度参数（0-2），控制输出随机性
+# - maxTokens: 最大Token数
+# - topP: 核采样参数（0-1）
+# - presencePenalty: 存在惩罚（-2到2）
+# - frequencyPenalty: 频率惩罚（-2到2）
+# - timeout: 请求超时时间（毫秒）
+# - enableStream: 是否启用流式输出
+# - enableTools: 是否启用工具调用
+# - proxy: 代理配置（可选）
+
+enabled: true
+baseUrl: "https://api.gptgod.online/v1"
+apiKey: ""
+model: "gemini-exp-1114"
+chatModel: "gemini-exp-1114"
+temperature: 0.8
+maxTokens: 6000
+max_tokens: 6000
+topP: 0.9
+top_p: 0.9
+presencePenalty: 0.6
+presence_penalty: 0.6
+frequencyPenalty: 0.6
+frequency_penalty: 0.6
+timeout: 360000
+enableStream: true
+enableTools: true
+proxy:
+  enabled: false
+  http: ""
+  https: ""

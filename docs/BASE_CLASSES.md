@@ -1,4 +1,14 @@
-# 项目基类文档
+<h1 align="center">项目基类文档</h1>
+
+<div align="center">
+
+![Base Classes](https://img.shields.io/badge/Base%20Classes-Overview-blue?style=flat-square)
+![Status](https://img.shields.io/badge/Status-Active-success?style=flat-square)
+![Version](https://img.shields.io/badge/Version-3.1.3-informational?style=flat-square)
+
+</div>
+
+> 📚 本文档概览 XRK-Yunzai 中所有核心基类，并引导你跳转到各自的详细开发文档。
 
 本文档介绍 XRK-Yunzai 项目中的所有基类及其使用方法。
 
@@ -32,12 +42,12 @@
 - **记忆系统**: 自动场景隔离的记忆管理
 - **功能注册**: AI可以在回复中使用注册的功能
 - **推理调优**: 支持多轮推理和响应润色
-- **参数优先级**: execute传入 > 构造函数 > kuizai.yaml > 默认值
+- **参数优先级**: execute传入 > 构造函数 > aistream配置/LLM提供商配置 > 默认值
 
 ### 使用方法
 
 ```javascript
-import AIStream from '../../lib/aistream/aistream.js';
+// 假设已导入: import AIStream from '../../lib/aistream/aistream.js';
 
 export default class MyWorkflow extends AIStream {
   constructor() {
@@ -104,7 +114,7 @@ const result = await this.executeWorkflow('chat', '你好');
 ### 完整示例
 
 ```javascript
-import plugin from '../../lib/plugins/plugin.js';
+// 假设已导入: import plugin from '../../lib/plugins/plugin.js';
 
 export default class MyPlugin extends plugin {
   constructor() {
@@ -113,21 +123,12 @@ export default class MyPlugin extends plugin {
       dsc: '我的插件',
       event: 'message',
       priority: 5000,
-      rule: [
-        {
-          reg: '^#测试$',
-          fnc: 'test'
-        }
-      ]
+      rule: [{ reg: '^#测试$', fnc: 'test' }]
     });
   }
 
   async test(e) {
-    // 调用chat工作流
-    const result = await this.callWorkflow('chat', {
-      question: e.msg
-    }, { e });
-    
+    const result = await this.callWorkflow('chat', { question: e.msg }, { e });
     return this.reply(result);
   }
 }
@@ -155,29 +156,24 @@ export default {
   name: 'my-api',
   dsc: '我的API',
   priority: 100,
-  routes: [
-    {
-      method: 'GET',
-      path: '/api/test',
-      handler: async (req, res, Bot) => {
-        res.json({ success: true });
-      }
+  routes: [{
+    method: 'GET',
+    path: '/api/test',
+    handler: async (req, res, Bot) => {
+      res.json({ success: true });
     }
-  ],
+  }],
   init: async (app, Bot) => {
     // 初始化逻辑
   }
 };
 
 // 方式2: 继承HttpApi类
-import HttpApi from '../../lib/http/http.js';
+// 假设已导入: import HttpApi from '../../lib/http/http.js';
 
 export default class MyApi extends HttpApi {
   constructor() {
-    super({
-      name: 'my-api',
-      routes: [/* ... */]
-    });
+    super({ name: 'my-api', routes: [/* ... */] });
   }
 }
 ```
@@ -204,19 +200,14 @@ export default class MyApi extends HttpApi {
 ### 使用方法
 
 ```javascript
-import EventListener from '../../lib/listener/listener.js';
+// 假设已导入: import EventListener from '../../lib/listener/listener.js';
 
 export default class MyListener extends EventListener {
   constructor() {
-    super({
-      prefix: 'my',
-      event: 'message',
-      once: false
-    });
+    super({ prefix: 'my', event: 'message', once: false });
   }
 
   async execute(e) {
-    // 处理事件
     this.plugins.deal(e);
   }
 }
@@ -245,23 +236,15 @@ export default class MyListener extends EventListener {
 ### 使用方法
 
 ```javascript
-import Renderer from '../../lib/renderer/Renderer.js';
+// 假设已导入: import Renderer from '../../lib/renderer/Renderer.js';
 
 export default class MyRenderer extends Renderer {
   constructor() {
-    super({
-      id: 'my-renderer',
-      type: 'image',
-      render: 'render'
-    });
+    super({ id: 'my-renderer', type: 'image', render: 'render' });
   }
 
   async render(tpl, data) {
-    // 渲染逻辑
-    return await this.dealTpl('my-template', {
-      tplFile: tpl,
-      data: data
-    });
+    return await this.dealTpl('my-template', { tplFile: tpl, data });
   }
 }
 ```
@@ -313,23 +296,48 @@ await Bot.sendMasterMsg(message);
 
 ## 基类关系图
 
-```
-Bot (主类)
-├── PluginsLoader (插件加载器)
-│   └── Plugin (插件基类)
-│       ├── getStream() - 获取工作流
-│       ├── callWorkflow() - 调用工作流
-│       └── callWorkflows() - 调用多个工作流
-├── StreamLoader (工作流加载器)
-│   └── AIStream (工作流基类)
-│       ├── MemorySystem (记忆系统)
-│       └── WorkflowManager (工作流管理器)
-├── ApiLoader (API加载器)
-│   └── HttpApi (HTTP API基类)
-├── ListenerLoader (监听器加载器)
-│   └── EventListener (事件监听基类)
-└── RendererLoader (渲染器加载器)
-    └── Renderer (渲染器基类)
+```mermaid
+graph TB
+    subgraph Bot["🤖 Bot (主类)"]
+        BotCore[核心控制器]
+    end
+    
+    subgraph Loaders["📦 加载器层"]
+        PluginLoader[PluginsLoader<br/>插件加载器]
+        StreamLoader[StreamLoader<br/>工作流加载器]
+        ApiLoader[ApiLoader<br/>API加载器]
+        ListenerLoader[ListenerLoader<br/>监听器加载器]
+        RendererLoader[RendererLoader<br/>渲染器加载器]
+    end
+    
+    subgraph BaseClasses["🏗️ 基类层"]
+        Plugin[Plugin<br/>插件基类]
+        AIStream[AIStream<br/>工作流基类]
+        HttpApi[HttpApi<br/>HTTP API基类]
+        EventListener[EventListener<br/>事件监听基类]
+        Renderer[Renderer<br/>渲染器基类]
+    end
+    
+    subgraph Systems["⚙️ 子系统"]
+        Memory[MemorySystem<br/>记忆系统]
+        WorkflowMgr[WorkflowManager<br/>工作流管理器]
+    end
+    
+    BotCore --> Loaders
+    PluginLoader --> Plugin
+    StreamLoader --> AIStream
+    ApiLoader --> HttpApi
+    ListenerLoader --> EventListener
+    RendererLoader --> Renderer
+    
+    AIStream --> Memory
+    AIStream --> WorkflowMgr
+    Plugin --> AIStream
+    
+    style Bot fill:#4a90e2,stroke:#2c5aa0,color:#fff
+    style Loaders fill:#50c878,stroke:#2d8659,color:#fff
+    style BaseClasses fill:#feca57,stroke:#d68910,color:#000
+    style Systems fill:#ff6b9d,stroke:#c44569,color:#fff
 ```
 
 ---
@@ -350,5 +358,7 @@ Bot (主类)
 ## 相关文档
 
 - [工作流基类开发文档](./WORKFLOW_BASE_CLASS.md)
+- [工厂模式文档](./FACTORY.md) - LLM提供商管理
+- [配置优先级文档](./CONFIG_PRIORITY.md) - 配置优先级说明
 - [项目README](../README.md)
 

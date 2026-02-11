@@ -36,7 +36,6 @@ adapter/**
 api/**
 !api/bot.js
 !api/core.js
-!api/device.js
 !api/files.js
 !api/loader.js
 !api/plugin.js
@@ -49,7 +48,6 @@ api/**
 events/**
 !events/online.js
 !events/connect.js
-!events/device.js
 !events/message.js
 !events/notice.js
 !events/request.js
@@ -57,7 +55,6 @@ events/**
 !stream
 stream/**
 !stream/chat.js
-!stream/device.js
 
 *.psd
 *.map

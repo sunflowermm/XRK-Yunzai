@@ -41,8 +41,6 @@ setInterval(() => {
 
 export class StdinHandler {
   constructor() {
-    if (global.stdinHandler) return global.stdinHandler;
-    
     this.rl = createInterface({
       input: process.stdin,
       output: process.stdout,
@@ -125,7 +123,7 @@ export class StdinHandler {
         buffer = filePath;
         // 尝试检测文件类型
         const fileType = await BotUtil.fileType({ buffer });
-        fileExt = fileType?.type?.ext || 'file';
+        fileExt = (fileType && fileType.type && fileType.type.ext) || 'file';
         fileName = `${ulid()}.${fileExt}`;
       } else if (typeof filePath === 'string') {
         // 检查文件是否存在
@@ -369,8 +367,8 @@ export class StdinHandler {
         
         buffer = fileInfo.buffer;
         fileName = fileInfo.name || item.name;
-        fileExt = fileInfo.type?.ext || 'file';
-        mimeType = fileInfo.type?.mime || 'application/octet-stream';
+        fileExt = (fileInfo.type && fileInfo.type.ext) || 'file';
+        mimeType = (fileInfo.type && fileInfo.type.mime) || 'application/octet-stream';
         
         // 如果没有获取到buffer，尝试读取本地文件
         if (!buffer && item.path && fs.existsSync(item.path)) {
@@ -595,7 +593,7 @@ export class StdinHandler {
       if (typeof item === "string") {
         textLogs.push(item);
         processedItems.push({ type: 'text', text: item });
-      } else if (item?.type) {
+      } else if (item && item.type) {
         if (['image', 'video', 'audio', 'file'].includes(item.type)) {
           const processed = await this.processMediaFile(item);
           processedItems.push(processed);
@@ -613,7 +611,7 @@ export class StdinHandler {
             'poke': `[戳一戳:${item.id || item.qq}]`,
             'xml': '[XML消息]',
             'json': '[JSON消息]',
-            'task': `[任务:${item.data?.name || '未知'}]`
+            'task': `[任务:${(item.data && item.data.name) || '未知'}]`
           };
           textLogs.push(typeMap[item.type] || `[${item.type}]`);
           processedItems.push(item);

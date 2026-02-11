@@ -14,7 +14,7 @@ export default {
       handler: async (req, res, Bot) => {
         const bots = Object.entries(Bot.bots)
           .filter(([uin, bot]) => {
-            if (typeof bot !== 'object' || !bot) return false;
+            if (!bot) return false;
             const excludeKeys = ['port', 'apiKey', 'stdin', 'logger', '_eventsCount', 'url'];
             if (excludeKeys.includes(uin)) return false;
             if (bot.device) return false;
@@ -22,11 +22,11 @@ export default {
           })
           .map(([uin, bot]) => ({
             uin,
-            online: bot.stat?.online || false,
+            online: bot.stat && bot.stat.online || false,
             nickname: bot.nickname || uin,
-            adapter: bot.adapter?.name || 'unknown',
-            friends: bot.fl?.size || 0,
-            groups: bot.gl?.size || 0
+            adapter: bot.adapter && bot.adapter.name || 'unknown',
+            friends: bot.fl && bot.fl.size || 0,
+            groups: bot.gl && bot.gl.size || 0
           }));
 
         res.json({ success: true, bots });
@@ -90,7 +90,7 @@ export default {
               if (Array.isArray(parsed)) {
                 processedMessage = parsed;
               }
-            } catch (e) {
+            } catch {
               processedMessage = message;
             }
           }
@@ -116,24 +116,25 @@ export default {
             });
           }
 
+          const messageId = sendResult && sendResult.message_id;
           const result = {
-            message_id: sendResult?.message_id,
+            message_id: messageId,
             time: Date.now() / 1000,
             raw_message: processedMessage
           };
 
           Bot.em('message.send', {
-            bot_id: bot_id ? bot_id : Bot.uin[0],
+            bot_id: bot_id || Bot.uin[0],
             type,
             target_id,
             message: processedMessage,
-            message_id: sendResult?.message_id,
+            message_id: messageId,
             time: Math.floor(Date.now() / 1000)
           });
 
           res.json({ 
             success: true, 
-            message_id: sendResult?.message_id,
+            message_id: messageId,
             results: [result],
             timestamp: Date.now()
           });

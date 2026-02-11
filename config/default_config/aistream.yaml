@@ -3,6 +3,11 @@ enabled: true
   
 # 工作流目录路径（相对于项目根目录）
 streamDir: "plugins/stream"
+
+# 默认LLM运营商配置
+# 可选值: gptgod, volcengine, xiaomimimo, openai, gemini, openai_compat, anthropic, azure_openai
+# 如果不指定，将使用第一个启用的运营商
+defaultProvider: ""
   
 # 工作流全局设置
 global:

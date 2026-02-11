@@ -119,7 +119,9 @@ export default class PuppeteerRenderer extends Renderer {
       if (this.browserMacKey) {
         try {
           browserWSEndpoint = await redis.get(this.browserMacKey);
-        } catch (e) {}
+        } catch {
+          // Redis 获取失败，使用配置的 wsEndpoint
+        }
       }
       if (!browserWSEndpoint && this.config.wsEndpoint) {
         browserWSEndpoint = this.config.wsEndpoint;
@@ -426,9 +428,7 @@ export default class PuppeteerRenderer extends Renderer {
         this.healthCheckTimer = null;
       }
 
-      if (global.gc) {
-        global.gc();
-      }
+      global.gc();
       
       BotUtil.makeLog("info", "Browser restart completed", "PuppeteerRenderer");
     } catch (err) {

@@ -1,10 +1,16 @@
-# HTTP API基类开发文档
+<h1 align="center">HTTP API 基类开发文档</h1>
 
-## 概述
+<div align="center">
 
-`HttpApi` 是所有HTTP API模块的基类，提供路由注册、WebSocket处理、中间件等功能。所有API模块应继承此类或使用对象导出。
+![HTTP Base](https://img.shields.io/badge/HttpApi-Base%20Class-blue?style=flat-square)
+![Status](https://img.shields.io/badge/Status-Stable-success?style=flat-square)
+![Version](https://img.shields.io/badge/Version-3.1.3-informational?style=flat-square)
 
-**文件路径**: `lib/http/http.js`
+</div>
+
+> 🌐 `HttpApi` 是所有 HTTP / WebSocket API 模块的基类，统一封装路由注册、中间件链与 WS 升级处理。所有 API 模块应 **继承此类** 或使用 **对象导出** 结构。
+
+**📁 文件路径**: `lib/http/http.js`
 
 ## 使用方式
 
@@ -33,16 +39,11 @@ export default {
 ### 方式2: 继承HttpApi类
 
 ```javascript
-import HttpApi from '../../lib/http/http.js';
+// 假设已导入: import HttpApi from '../../lib/http/http.js';
 
 export default class MyApi extends HttpApi {
   constructor() {
-    super({
-      name: 'my-api',
-      dsc: '我的API',
-      priority: 100,
-      routes: [/* ... */]
-    });
+    super({ name: 'my-api', dsc: '我的API', priority: 100, routes: [/* ... */] });
   }
 }
 ```
@@ -285,6 +286,8 @@ export default {
 ### 示例2: 带中间件的API
 
 ```javascript
+// 假设已导入: import BotUtil from '../../lib/common/util.js';
+
 export default {
   name: 'auth-api',
   dsc: '认证API',
@@ -292,7 +295,7 @@ export default {
   middleware: [
     // 全局中间件：记录请求
     (req, res, next) => {
-      console.log(`[${req.method}] ${req.path}`);
+      BotUtil.makeLog('debug', `[${req.method}] ${req.path}`, 'AuthAPI');
       next();
     }
   ],
@@ -324,18 +327,20 @@ export default {
 ### 示例3: WebSocket API
 
 ```javascript
+// 假设已导入: import BotUtil from '../../lib/common/util.js';
+
 export default {
   name: 'ws-api',
   dsc: 'WebSocket API',
   priority: 100,
   ws: {
     '/api/ws': (conn, req, bot, socket, head) => {
-      console.log('WebSocket连接建立');
+      BotUtil.makeLog('info', 'WebSocket连接建立', 'MyAPI');
       
       conn.on('message', (msg) => {
         try {
           const data = JSON.parse(msg);
-          console.log('收到消息:', data);
+          BotUtil.makeLog('debug', `收到消息: ${JSON.stringify(data)}`, 'MyAPI');
           
           // 回复消息
           conn.send(JSON.stringify({
@@ -351,11 +356,11 @@ export default {
       });
       
       conn.on('close', () => {
-        console.log('WebSocket连接关闭');
+        BotUtil.makeLog('info', 'WebSocket连接关闭', 'MyAPI');
       });
       
       conn.on('error', (error) => {
-        console.error('WebSocket错误:', error);
+        BotUtil.makeLog('error', 'WebSocket错误', 'MyAPI', error);
       });
     }
   }
@@ -365,7 +370,7 @@ export default {
 ### 示例4: 继承HttpApi类
 
 ```javascript
-import HttpApi from '../../lib/http/http.js';
+// 假设已导入: import HttpApi from '../../lib/http/http.js';
 
 export default class MyApi extends HttpApi {
   constructor() {
@@ -373,22 +378,12 @@ export default class MyApi extends HttpApi {
       name: 'my-api',
       dsc: '我的API',
       priority: 100,
-      routes: [
-        {
-          method: 'GET',
-          path: '/api/info',
-          handler: this.getInfo.bind(this)
-        }
-      ]
+      routes: [{ method: 'GET', path: '/api/info', handler: this.getInfo.bind(this) }]
     });
   }
 
   async getInfo(req, res, Bot) {
-    res.json({
-      name: this.name,
-      description: this.dsc,
-      version: '1.0.0'
-    });
+    res.json({ name: this.name, description: this.dsc, version: '1.0.0' });
   }
 }
 ```
@@ -396,56 +391,33 @@ export default class MyApi extends HttpApi {
 ### 示例5: 使用工作流
 
 ```javascript
-import StreamLoader from '../../lib/aistream/loader.js';
+// 假设已导入: import StreamLoader from '../../lib/aistream/loader.js';
 
 export default {
   name: 'ai-api',
   dsc: 'AI API',
   priority: 100,
-  routes: [
-    {
-      method: 'POST',
-      path: '/api/ai/chat',
-      handler: async (req, res, Bot) => {
-        const { question } = req.body;
-        
-        if (!question) {
-          return res.status(400).json({ error: '缺少question参数' });
-        }
-        
-        try {
-          const stream = StreamLoader.getStream('chat');
-          const result = await stream.execute(null, question);
-          
-          res.json({
-            success: true,
-            result: result
-          });
-        } catch (error) {
-          res.status(500).json({
-            success: false,
-            error: error.message
-          });
-        }
+  routes: [{
+    method: 'POST',
+    path: '/api/ai/chat',
+    handler: async (req, res, Bot) => {
+      const { question } = req.body;
+      if (!question) {
+        return res.status(400).json({ error: '缺少question参数' });
+      }
+      try {
+        const stream = StreamLoader.getStream('chat');
+        const result = await stream.execute(null, question);
+        res.json({ success: true, result });
+      } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
       }
     }
-  ]
+  }]
 };
 ```
 
-## API存放路径
-
-API文件应存放在以下目录：
-
-```
-plugins/api/
-├── core.js          # 核心API
-├── bot.js          # Bot相关API
-├── device.js       # 设备相关API
-└── [自定义].js     # 自定义API
-```
-
-**注意:** API文件名即为API标识，建议使用小写字母和连字符。
+> **注意**: API文件存放路径说明见 [工作流基类文档](./WORKFLOW_BASE_CLASS.md) 中的"工作流存放路径"部分（API文件遵循相同的路径规则，将 `stream/` 替换为 `http/` 或 `api/`）。
 
 ## 错误处理
 
@@ -505,4 +477,5 @@ A: 检查路径是否正确，确保在 `bot.wsf` 中注册，查看日志获取
 - [工作流基类文档](./WORKFLOW_BASE_CLASS.md)
 - [插件基类文档](./PLUGIN_BASE_CLASS.md)
 - [项目基类总览](./BASE_CLASSES.md)
+- [工厂模式文档](./FACTORY.md) - LLM提供商管理
 

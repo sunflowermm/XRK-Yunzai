@@ -1,12 +1,78 @@
-# 工作流基类开发文档
+<h1 align="center">工作流基类开发文档</h1>
 
-## 概述
+<div align="center">
 
-`AIStream` 是所有工作流的基类，提供了统一的AI调用、记忆系统、功能管理等能力。继承此基类可以快速创建自定义工作流。
+![Workflow Base](https://img.shields.io/badge/AIStream-Workflow%20Base%20Class-blue?style=flat-square)
+![Status](https://img.shields.io/badge/Status-Stable-success?style=flat-square)
+![Version](https://img.shields.io/badge/Version-3.1.3-informational?style=flat-square)
 
-**文件路径**: `lib/aistream/aistream.js`
+</div>
 
-**工作流存放路径**: `plugins/stream/`
+> 🤖 `AIStream` 是所有工作流的基类，提供统一的 AI 调用、记忆系统、Embedding 与功能编排能力。继承此基类可以快速创建自定义工作流，统一接入不同 LLM 提供商。
+
+**📁 文件路径**: `lib/aistream/aistream.js`
+
+**📂 工作流存放路径**: 支持多个位置（按优先级从高到低）
+
+---
+
+### 1. 插件专用目录（推荐）
+
+每个插件可以在自己的目录下创建 `stream/` 子目录来存放专属的工作流：
+
+```
+plugins/
+├── myplugin/
+│   └── stream/
+│       ├── workflow1.js      # 插件专属工作流
+│       └── workflow2.js
+└── anotherplugin/
+    └── stream/
+        └── workflow.js
+```
+
+**优点：**
+- 插件代码集中管理，便于维护
+- 插件可以独立分发，不依赖 `plugins/stream/` 目录
+- 支持插件级别的热重载
+
+### 2. 默认工作流目录
+
+传统的工作流存放位置，适用于全局工作流：
+
+```
+plugins/stream/
+├── chat.js          # 聊天工作流
+├── device.js        # 设备工作流
+└── [自定义].js     # 自定义工作流
+```
+
+### 3. Core目录（兼容XRK-AGT结构）
+
+如果项目包含 `core/` 目录，可以从其中加载：
+
+```
+core/
+├── module1/
+│   └── stream/
+│       └── workflow.js
+└── module2/
+    └── stream/
+        └── workflow.js
+```
+
+### 加载优先级
+
+1. **插件目录** (`plugins/*/stream/`) - 优先级最高
+2. **默认目录** (`plugins/stream/`) - 中等优先级
+3. **Core目录** (`core/*/stream/`) - 优先级最低
+
+如果多个位置存在同名工作流，系统会按照优先级选择，优先级更高的工作流会覆盖优先级较低的。
+
+**注意:** 
+- 工作流必须继承 `AIStream` 基类
+- 工作流的 `name` 属性用于标识，如果同名，优先级更高的会覆盖优先级较低的
+- 工作流的 `priority` 属性影响加载顺序，数字越小优先级越高
 
 ## 类结构
 
@@ -22,7 +88,7 @@ export default class MyWorkflow extends AIStream {
       version: '1.0.0',                // 版本号
       author: 'YourName',              // 作者
       priority: 100,                   // 优先级（数字越小优先级越高）
-      config: {                        // AI配置（可选，会与kuizai.yaml合并）
+      config: {                        // AI配置（可选，会与aistream配置和LLM提供商配置合并）
         enabled: true,                 // 是否启用
         baseUrl: '',                   // API基础URL
         apiKey: '',                    // API密钥
@@ -105,7 +171,7 @@ export default class MyWorkflow extends AIStream {
 
 ## 参数优先级
 
-**execute传入参数 > 构造函数config > kuizai.yaml配置 > 默认值**
+**execute传入参数 > 构造函数config > aistream配置/LLM提供商配置 > 默认值**
 
 ```javascript
 // 1. execute方法传入的config（最高优先级）
@@ -116,15 +182,14 @@ await stream.execute(e, question, {
 // 2. 构造函数中的config（次高优先级）
 super({
   config: {
-    temperature: 0.9  // 这个会覆盖kuizai.yaml和默认值
+    temperature: 0.9  // 这个会覆盖aistream配置和默认值
   }
 });
 
-// 3. kuizai.yaml配置（中等优先级）
-// config/default_config/kuizai.yaml
-kuizai:
-  ai:
-    temperature: 0.8  // 如果上面没有指定，使用这个
+// 3. aistream配置/LLM提供商配置（中等优先级）
+// config/default_config/aistream.yaml 或 config/commonconfig/*_llm.js
+aistream:
+  temperature: 0.8  // 如果上面没有指定，使用这个
 
 // 4. 默认值（最低优先级）
 // 如果上面都没有，使用基类的默认值
@@ -132,10 +197,12 @@ kuizai:
 
 **实际合并顺序（在execute方法中）：**
 ```javascript
+const provider = config.provider || this.config.provider || 'gptgod';
 const finalConfig = { 
-  ...this.config,           // 构造函数config（已包含kuizai.yaml的默认值）
-  ...cfg.kuizai?.ai,        // kuizai.yaml配置
-  ...config                 // execute传入的参数（最高优先级）
+  ...this.config,                    // 构造函数config
+  ...cfg.aistream,                   // aistream配置
+  ...cfg.getLLMConfig(provider),    // LLM提供商配置
+  ...config                          // execute传入的参数（最高优先级）
 };
 ```
 
@@ -173,7 +240,13 @@ async buildChatContext(e, question) {
 
 ```javascript
 async execute(e, question, config) {
-  const finalConfig = { ...this.config, ...cfg.kuizai?.ai, ...config };
+  const provider = config.provider || this.config.provider || 'gptgod';
+  const finalConfig = { 
+    ...this.config, 
+    ...cfg.aistream,
+    ...cfg.getLLMConfig(provider),
+    ...config 
+  };
   const messages = await this.buildChatContext(e, question);
   const response = await this.callAI(messages, finalConfig);
   return response;
@@ -239,8 +312,10 @@ const response = await this.callAI(messages, {
 流式调用AI。
 
 ```javascript
+import BotUtil from '../../lib/common/util.js';
+
 await this.callAIStream(messages, this.config, (delta) => {
-  console.log('收到:', delta);
+  BotUtil.makeLog('debug', `收到: ${delta}`, 'MyWorkflow');
 });
 ```
 
@@ -292,15 +367,10 @@ const response = await chatStream.execute(e, question, config);
 ### 同时调用多个工作流
 
 ```javascript
-import { WorkflowManager } from '../../lib/aistream/workflow-manager.js';
+// 假设已导入: import { WorkflowManager } from '../../lib/aistream/workflow-manager.js';
 
 const workflowManager = new WorkflowManager();
-
-// 并行调用
-const results = await workflowManager.runMultiple([
-  'chat',
-  'file'
-], {}, { e, question, config });
+const results = await workflowManager.runMultiple(['chat', 'file'], {}, { e, question, config });
 ```
 
 **效果：**
@@ -359,11 +429,12 @@ const results = await workflowManager.runMultiple([
 
 ## 完整示例
 
-```javascript
-import AIStream from '../../lib/aistream/aistream.js';
-import cfg from '../../lib/config/config.js';
-import fs from 'fs/promises';
+> **注意**: 以下示例中，假设已导入必要的模块：
+> - `import AIStream from '../../lib/aistream/aistream.js'`
+> - `import cfg from '../../lib/config/config.js'`
+> - `import fs from 'fs/promises'`
 
+```javascript
 export default class FileWorkflow extends AIStream {
   constructor() {
     super({
@@ -428,7 +499,13 @@ ${this.buildFunctionsPrompt()}`;
   }
 
   async execute(e, question, config) {
-    const finalConfig = { ...this.config, ...cfg.kuizai?.ai, ...config };
+    const provider = config.provider || this.config.provider || 'gptgod';
+    const finalConfig = { 
+      ...this.config, 
+      ...cfg.aistream,
+      ...cfg.getLLMConfig(provider),
+      ...config 
+    };
     const messages = await this.buildChatContext(e, question);
     const response = await this.callAI(messages, finalConfig);
     
@@ -445,7 +522,7 @@ ${this.buildFunctionsPrompt()}`;
 
 ## 最佳实践
 
-1. **参数合并**：在execute中使用 `{ ...this.config, ...cfg.kuizai?.ai, ...config }` 确保优先级
+1. **参数合并**：在execute中使用 `{ ...this.config, ...cfg.aistream, ...cfg.getLLMConfig(provider), ...config }` 确保优先级
 2. **记忆系统**：在 `buildChatContext` 中使用 `buildMemorySummary` 增强上下文
 3. **功能注册**：在 `init` 方法中注册功能，而不是构造函数
 4. **错误处理**：所有异步操作都要有错误处理
@@ -454,37 +531,23 @@ ${this.buildFunctionsPrompt()}`;
 
 ## 配置参考
 
+### aistream配置
+
 ```yaml
-# config/default_config/kuizai.yaml
-kuizai:
-  ai:
-    enabled: true
-    baseUrl: 'https://api.example.com/v1'
-    apiKey: 'your-key'
-    chatModel: 'deepseek-r1-0528'
-    temperature: 0.8
-    max_tokens: 2000
-    top_p: 0.9
-    presence_penalty: 0.6
-    frequency_penalty: 0.6
-    timeout: 30000
+# config/default_config/aistream.yaml
+aistream:
+  enabled: true
+  temperature: 0.8
+  max_tokens: 2000
+  top_p: 0.9
+  presence_penalty: 0.6
+  frequency_penalty: 0.6
+  timeout: 30000
 ```
 
-## 工作流存放路径
+### LLM提供商配置
 
-工作流文件应存放在以下目录：
-
-```
-plugins/stream/
-├── chat.js      # 聊天工作流
-├── device.js    # 设备工作流
-└── [自定义].js  # 自定义工作流
-```
-
-**注意:** 
-- 工作流文件名即为工作流标识（name）
-- 建议使用小写字母和连字符
-- 工作流会自动被 `StreamLoader` 加载
+通过 CommonConfig 系统管理，详见 [工厂模式文档](./FACTORY.md) 和 [CommonConfig基类文档](./COMMONCONFIG_BASE.md)。
 
 ## 常见问题
 
@@ -492,7 +555,7 @@ plugins/stream/
 A: 不能。每个工作流独立执行，AI只能看到当前工作流的功能。如果需要多个功能，使用 `WorkflowManager.runMultiple()` 并行调用多个工作流，每个工作流处理自己的部分。
 
 **Q: 参数优先级如何确定？**
-A: execute传入参数 > 构造函数config > kuizai.yaml > 默认值。在execute中使用 `{ ...this.config, ...cfg.kuizai?.ai, ...config }` 合并。
+A: execute传入参数 > 构造函数config > aistream配置/LLM提供商配置 > 默认值。在execute中使用 `{ ...this.config, ...cfg.aistream, ...cfg.getLLMConfig(provider), ...config }` 合并。
 
 **Q: 如何访问记忆系统？**
 A: 使用 `this.getMemorySystem()` 或 `this.buildMemorySummary(e)`。所有工作流自动获得记忆系统。
@@ -511,3 +574,5 @@ A: 工作流由 `lib/aistream/loader.js` 自动扫描 `plugins/stream/` 目录�
 - [插件基类文档](./PLUGIN_BASE_CLASS.md) - 如何在插件中使用工作流
 - [HTTP API基类文档](./HTTP_API_BASE_CLASS.md) - 如何在API中使用工作流
 - [项目基类总览](./BASE_CLASSES.md) - 所有基类的概览
+- [工厂模式文档](./FACTORY.md) - LLM提供商管理和客户端创建
+- [配置优先级文档](./CONFIG_PRIORITY.md) - 详细的配置优先级说明

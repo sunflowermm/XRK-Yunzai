@@ -280,7 +280,6 @@ PluginsLoader.setupReply(e)  // 设置回复方法
 }
 ```
 
-设备事件（`plugins/api/device.js`）会构造简化版 `e` 并复用同样的增强逻辑，因此插件无需区分协议。
 
 ---
 
@@ -425,7 +424,9 @@ bot:
 | `cfg.bot` | `Object` | 机器人配置（默认 + 服务器配置合并） |
 | `cfg.server` | `Object` | 服务器配置（HTTP/HTTPS/代理/安全） |
 | `cfg.redis` | `Object` | Redis 连接配置 |
-| `cfg.kuizai` | `Object` | 快哉配置（AI相关） |
+| `cfg.llm` | `Object` | 所有LLM提供商配置对象 |
+| `cfg.aistream` | `Object` | AI工作流配置对象 |
+| `cfg.getLLMConfig(provider)` | `Function` | 获取指定LLM提供商配置 |
 | `cfg.masterQQ` | `Array` | 主人QQ号数组，插件常用于权限判断 |
 | `cfg.getGroup(groupId)` | `Function` | 返回群配置（默认 + 群自定义） |
 | `cfg.setConfig(name, data)` | `Function` | 保存配置并触发文件监听器 |
@@ -502,7 +503,7 @@ Redis 客户端提供高性能的缓存和存储服务，在整个技术栈中�
 `redisInit()` 会在应用启动时调用，连接 Redis 并将客户端挂载到 `global.redis`：
 
 ```javascript
-import redisInit from './lib/config/redis.js';
+// 假设已导入: import redisInit from './lib/config/redis.js';
 
 // 在 app.js 或 start.js 中
 await redisInit();
@@ -587,32 +588,50 @@ const map = Bot.getMap('my-cache', { ttl: 60000 });
 
 <h2 align="center">8. 对象关系图</h2>
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                      Bot (核心)                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │   prepareEvent│  │      em()    │  │  closeServer │ │
-│  └──────┬───────┘  └──────┬───────┘  └──────────────┘ │
-└─────────┼──────────────────┼────────────────────────────┘
-          │                  │
-          ▼                  ▼
-    ┌──────────┐      ┌──────────┐
-    │ 事件对象 e │      │ 插件系统  │
-    └────┬─────┘      └────┬────┘
-         │                  │
-         │                  │
-    ┌────▼──────────────────▼────┐
-    │    PluginsLoader.deal()    │
-    │    └─ dealMsg(e)           │
-    │    └─ setupReply(e)         │
-    │    └─ runPlugins(e)         │
-    └────────────────────────────┘
-              │
-              ▼
-    ┌─────────────────────┐
-    │   plugin[fnc](e)   │
-    │   └─ this.reply()  │
-    └─────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Bot["🤖 Bot (核心)"]
+        PrepareEvent[prepareEvent<br/>准备事件]
+        Em[em<br/>触发事件]
+        CloseServer[closeServer<br/>关闭服务器]
+    end
+    
+    subgraph Event["📨 事件对象 e"]
+        EventData[事件数据]
+    end
+    
+    subgraph PluginSys["🔌 插件系统"]
+        PluginsLoader[PluginsLoader]
+        Deal[deal<br/>处理事件]
+        DealMsg[dealMsg<br/>解析消息]
+        SetupReply[setupReply<br/>设置回复]
+        RunPlugins[runPlugins<br/>执行插件]
+    end
+    
+    subgraph Plugin["⚙️ 插件"]
+        PluginFnc[plugin[fnc]<br/>插件函数]
+        Reply[reply<br/>回复消息]
+    end
+    
+    Bot --> PrepareEvent
+    Bot --> Em
+    Bot --> CloseServer
+    
+    Em --> EventData
+    PrepareEvent --> EventData
+    
+    EventData --> PluginsLoader
+    PluginsLoader --> Deal
+    Deal --> DealMsg
+    DealMsg --> SetupReply
+    SetupReply --> RunPlugins
+    RunPlugins --> PluginFnc
+    PluginFnc --> Reply
+    
+    style Bot fill:#4a90e2,stroke:#2c5aa0,color:#fff
+    style Event fill:#50c878,stroke:#2d8659,color:#fff
+    style PluginSys fill:#feca57,stroke:#d68910,color:#000
+    style Plugin fill:#ff6b9d,stroke:#c44569,color:#fff
 ```
 
 ---
@@ -637,6 +656,7 @@ const map = Bot.getMap('my-cache', { ttl: 60000 });
 - 协议适配器示例：`plugins/adapter/OneBotv11.js`
 - 事件增强实现：`lib/plugins/loader.js`, `lib/bot.js`
 - 插件示例：`plugins/` 目录下的各种插件
+- 工厂模式示例：`lib/factory/llm/LLMFactory.js`
 
 ---
 
@@ -645,30 +665,21 @@ const map = Bot.getMap('my-cache', { ttl: 60000 });
 ### 10.1 在插件中访问核心对象
 
 ```javascript
-import plugin from '../../lib/plugins/plugin.js';
-import cfg from '../../lib/config/config.js';
+// 假设已导入: import plugin from '../../lib/plugins/plugin.js';
+//            import cfg from '../../lib/config/config.js';
 
 export default class MyPlugin extends plugin {
   async test(e) {
-    // 访问事件对象
     const msg = e.msg;
     const isMaster = e.isMaster;
-    
-    // 访问 Bot 实例
     const bot = e.bot;
-    
-    // 访问配置
     const masterQQ = cfg.masterQQ;
     
-    // 访问 Redis
     if (global.redis) {
       await global.redis.set('key', 'value');
     }
     
-    // 使用 logger
     logger.info('这是一条日志');
-    
-    // 回复消息
     return this.reply('回复内容');
   }
 }
@@ -691,12 +702,14 @@ Bot.em('message', e);  // 触发事件
 
 ```javascript
 // 在 API 路由中
-export default class MyApi {
-  register(app, bot) {
-    app.get('/api/test', (req, res) => {
-      // req.bot 可以访问 Bot 实例
+export default {
+  name: 'my-api',
+  routes: [{
+    method: 'GET',
+    path: '/api/test',
+    handler: async (req, res, Bot) => {
       res.json({ success: true });
-    });
-  }
-}
+    }
+  }]
+};
 ```

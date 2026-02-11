@@ -150,32 +150,48 @@ XRK-Yunzai/
 ├── data/                  # 字体 / 渲染输出 / 登录数据
 ├── docs/                  # 开发文档 & 参考
 ├── renderers/             # Puppeteer / Playwright
-├── www/                   # Web Panel & 静态资源
-└── components/            # TTS/ASR/Utility 组件
+└── www/                   # Web Panel & 静态资源
 ```
 
 ---
 
 ## 📘 Documentation Hub & 导航
 
+### 开发者总览
+
 | 主题 | 入口 | 说明 |
 |------|------|------|
 | 技术栈全景 | [`docs/TECH_STACK.md`](./docs/TECH_STACK.md) | 框架栈、依赖、部署策略。 |
 | 开发者导航（可视化） | [`docs/overview/DEVELOPER_HUB.md`](./docs/overview/DEVELOPER_HUB.md) | Mermaid 拓扑展示 `Bot → Plugins → Workflows` 关系及基类入口。 |
-| 核心对象 | [`docs/CORE_OBJECTS.md`](./docs/CORE_OBJECTS.md) | Bot / 事件 `e` / `logger` / `cfg` / `segment` / `redis` 速查。 |
 | 技术架构 | [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | 系统架构、核心对象作用、数据流、技术栈依赖关系。 |
+| 核心对象速查 | [`docs/CORE_OBJECTS.md`](./docs/CORE_OBJECTS.md) | Bot / 事件 `e` / `logger` / `cfg` / `segment` / `redis`。 |
+| 用户使用指南 | [`USER_GUIDE.md`](./USER_GUIDE.md) | Web 面板、REST / WS API、curl / 代码示例。 |
+
+### 基类与运行时
+
+| 主题 | 入口 | 说明 |
+|------|------|------|
+| 项目基类总览 | [`docs/BASE_CLASSES.md`](./docs/BASE_CLASSES.md) | 所有基类清单与关系图。 |
+| 工作流基类 | [`docs/WORKFLOW_BASE_CLASS.md`](./docs/WORKFLOW_BASE_CLASS.md) | `AIStream` 开发指南、记忆系统、函数调用。 |
+| 插件基类 | [`docs/PLUGIN_BASE_CLASS.md`](./docs/PLUGIN_BASE_CLASS.md) | 插件构造、规则匹配、上下文管理、工作流集成。 |
+| HTTP API 基类 | [`docs/HTTP_API_BASE_CLASS.md`](./docs/HTTP_API_BASE_CLASS.md) | `HttpApi` 路由注册、WS 处理、中间件。 |
+| CommonConfig 基类 | [`docs/COMMONCONFIG_BASE.md`](./docs/COMMONCONFIG_BASE.md) | 配置基类 `ConfigBase`、schema 驱动校验与前后端协作。 |
+| 配置优先级 | [`docs/CONFIG_PRIORITY.md`](./docs/CONFIG_PRIORITY.md) | AIStream / LLM 调用时各层配置合并规则。 |
+| 工厂模式（LLM） | [`docs/FACTORY.md`](./docs/FACTORY.md) | LLM 工厂模式、提供商注册与客户端创建。 |
+
+### 函数级 Reference
+
+| 主题 | 入口 | 说明 |
+|------|------|------|
 | Bot 函数全集 | [`docs/reference/BOT.md`](./docs/reference/BOT.md) | Server 生命周期、代理、好友/群等全部方法。 |
 | 工作流 & 记忆 | [`docs/reference/WORKFLOWS.md`](./docs/reference/WORKFLOWS.md) | `AIStream` / `MemorySystem` / `WorkflowManager` 全函数。 |
-| 插件运行时 | [`docs/reference/PLUGINS.md`](./docs/reference/PLUGINS.md) | 上下文管理、工作流调用、渲染。 |
-| HTTP / WS API | [`docs/reference/HTTP.md`](./docs/reference/HTTP.md) | `HttpApi` 生命周期、路由/WS 注册。 |
-| 配置 & Redis | [`docs/reference/CONFIG_AND_REDIS.md`](./docs/reference/CONFIG_AND_REDIS.md) | `cfg` API、Redis 初始化/事件。 |
-| Logger 完整手册 | [`docs/reference/LOGGER.md`](./docs/reference/LOGGER.md) | `logger` 全部方法、颜色工具、格式化、计时器等。 |
-| 适配器 & 路由 | [`docs/reference/ADAPTER_AND_ROUTING.md`](./docs/reference/ADAPTER_AND_ROUTING.md) | 适配器与路由系统如何与Bot交互、完整方法列表。 |
-| 用户使用指南 | [`USER_GUIDE.md`](./USER_GUIDE.md) | Web界面访问、API接口使用、curl示例、WebSocket通信。 |
+| 插件运行时 | [`docs/reference/PLUGINS.md`](./docs/reference/PLUGINS.md) | 规则、上下文管理、工作流调用、渲染。 |
+| HTTP / WS API | [`docs/reference/HTTP.md`](./docs/reference/HTTP.md) | `HttpApi` 生命周期、REST / WS 注册。 |
+| 配置 & Redis | [`docs/reference/CONFIG_AND_REDIS.md`](./docs/reference/CONFIG_AND_REDIS.md) | `cfg` API、Redis 初始化 / 事件。 |
+| Logger 完整手册 | [`docs/reference/LOGGER.md`](./docs/reference/LOGGER.md) | `logger` 方法、颜色工具、格式化、计时器等。 |
+| 适配器 & 路由 | [`docs/reference/ADAPTER_AND_ROUTING.md`](./docs/reference/ADAPTER_AND_ROUTING.md) | 适配器与路由系统如何与 Bot 交互。 |
 
-> 基类的开发策略、调用顺序与示例在导航页集中展示，可从 README 直接跳转到子文档。
-
-所有 reference 文件均针对源码中每个函数提供签名、参数类型、返回值与示例，不再遗漏。
+> 基类的开发策略、调用顺序与示例在导航页集中展示，可从 README 直接跳转到子文档；`docs/reference/*` 针对源码中每个函数提供签名、参数与返回值说明。
 
 ---
 
@@ -183,7 +199,8 @@ XRK-Yunzai/
 
 主要配置位于 `config/default_config/*.yaml`，首次运行自动复制到 `data/server_bots/<port>/`。
 
-- `kuizai.yaml`：AI 接口、推理、润色、工作流默认值。
+- `aistream.yaml`：AI 工作流通用配置。
+- LLM提供商配置：通过 CommonConfig 系统管理（如 `config/commonconfig/openai_llm.js`）。
 - `server.yaml`：HTTP/HTTPS、CORS、安全策略、静态目录。
 - `redis.yaml`：Redis 连接信息与数据库序号。
 - `device.yaml` / `group.yaml` / `notice.yaml`：设备、群、通知策略。
@@ -223,6 +240,25 @@ export default class WorkflowDemo extends plugin {
 <details>
 <summary>独立 REST API</summary>
 
+**方式1：插件目录（推荐）**
+
+```js
+// plugins/myplugin/http/ping.js
+export default {
+  name: 'ping-api',
+  dsc: '健康检查',
+  routes: [{
+    method: 'GET',
+    path: '/api/ping',
+    handler: async (req, res) => {
+      res.json({ success: true, pong: Date.now() });
+    }
+  }]
+};
+```
+
+**方式2：全局API目录**
+
 ```js
 // plugins/api/ping.js
 export default {
@@ -242,6 +278,36 @@ export default {
 
 <details>
 <summary>自定义工作流</summary>
+
+**方式1：插件目录（推荐）**
+
+```js
+// plugins/myplugin/stream/file-builder.js
+import AIStream from '../../../lib/aistream/aistream.js';
+
+export default class FileBuilder extends AIStream {
+  constructor() {
+    super({
+      name: 'file-builder',
+      description: '根据提示生成文本，落地为文件',
+      config: { temperature: 0.6 }
+    });
+  }
+
+  buildSystemPrompt() {
+    return '你是文件生成器，只输出可写入文件的纯文本。';
+  }
+
+  async buildChatContext(e, question) {
+    return [
+      { role: 'system', content: this.buildSystemPrompt({ e, question }) },
+      { role: 'user', content: question?.text || String(question) }
+    ];
+  }
+}
+```
+
+**方式2：全局工作流目录**
 
 ```js
 // plugins/stream/file-builder.js

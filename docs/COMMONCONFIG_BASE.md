@@ -1,6 +1,18 @@
-## CommonConfig 基类指南
+<h1 align="center">CommonConfig 基类指南</h1>
+
+<div align="center">
+
+![Config Base](https://img.shields.io/badge/CommonConfig-Base%20Class-blue?style=flat-square)
+![Status](https://img.shields.io/badge/Status-Active-success?style=flat-square)
+![Version](https://img.shields.io/badge/Version-3.1.3-informational?style=flat-square)
+
+</div>
+
+> ⚙️ `lib/commonconfig/commonconfig.js` 提供了 XRK-Yunzai 所有配置文件的统一基类（`ConfigBase`），用于在「配置文件 → API → 前端 UI」之间打通一套类型、安全与校验链路。
 
 `lib/commonconfig/commonconfig.js` 提供了 XRK-Yunzai 所有配置文件的统一基类（`ConfigBase`）。本指南总结该基类的能力、扩展方式以及与前后端交互时需要遵循的约定，帮助插件或系统作者快速构建一致、可靠的配置体验。
+
+---
 
 ### 1. 主要职责
 - **统一路径解析**：支持静态/动态 `filePath`，并自动拼接项目根目录。
@@ -72,3 +84,65 @@
 
 通过以上约定，`ConfigBase` 成为连接配置文件、API、前端 UI 的中心枢纽。无论配置类型如何演进，只要遵循 schema 的约束即可获得一致的类型、验证和编辑体验。
 
+## 配置文件存放路径
+
+配置文件可以存放在以下目录（按优先级从高到低）：
+
+### 1. 插件专用目录（推荐）
+
+每个插件可以在自己的目录下创建 `commonconfig/` 子目录来存放专属的配置：
+
+```
+plugins/
+├── myplugin/
+│   └── commonconfig/
+│       ├── config1.js      # 插件专属配置
+│       └── config2.js
+└── anotherplugin/
+    └── commonconfig/
+        └── config.js
+```
+
+**优点：**
+- 插件代码集中管理，便于维护
+- 插件可以独立分发，不依赖 `config/commonconfig/` 目录
+- 支持插件级别的热重载
+
+### 2. 默认配置目录
+
+传统的配置存放位置，适用于全局配置：
+
+```
+config/commonconfig/
+├── server.js          # 服务器配置
+├── bot.js            # Bot配置
+└── [自定义].js       # 自定义配置
+```
+
+### 3. Core目录（兼容XRK-AGT结构）
+
+如果项目包含 `core/` 目录，可以从其中加载：
+
+```
+core/
+├── module1/
+│   └── commonconfig/
+│       └── config.js
+└── module2/
+    └── commonconfig/
+        └── config.js
+```
+
+### 加载优先级
+
+1. **插件目录** (`plugins/*/commonconfig/`) - 优先级最高
+2. **默认目录** (`config/commonconfig/`) - 中等优先级
+3. **Core目录** (`core/*/commonconfig/`) - 优先级最低
+
+如果多个位置存在同名配置文件，系统会按照上述优先级选择，路径更具体的会覆盖路径更简单的。
+
+**注意:** 
+- 配置文件必须导出 `default`，可以是类或对象
+- 插件目录下的配置 key 格式为：`插件名_文件名`（例如：`myplugin_config1`）
+- Core目录下的配置 key 格式为：`模块名_文件名`（例如：`module1_config`）
+- 默认目录下的配置 key 格式为：`文件名`（例如：`server`）

@@ -1,0 +1,37 @@
+# ========================================
+# Gemini LLM 配置
+# ========================================
+# Google Generative Language API配置
+# 接口地址: https://generativelanguage.googleapis.com/v1beta
+# 
+# 配置说明:
+# - enabled: 是否启用此提供商
+# - baseUrl: API基础地址
+# - apiKey: Google Gemini API密钥（必填）
+# - model: 模型名称（如gemini-pro）
+# - chatModel: 聊天模型名称
+# - temperature: 温度参数（0-2）
+# - maxTokens: 最大Token数
+# - topP: 核采样参数（0-1）
+# - timeout: 请求超时时间（毫秒）
+# - enableStream: 是否启用流式输出
+# - enableTools: 是否启用工具调用
+# - proxy: 代理配置（可选）
+
+enabled: true
+baseUrl: "https://generativelanguage.googleapis.com/v1beta"
+apiKey: ""
+model: "gemini-pro"
+chatModel: "gemini-pro"
+temperature: 0.9
+maxTokens: 8192
+max_tokens: 8192
+topP: 1
+top_p: 1
+timeout: 60000
+enableStream: true
+enableTools: false
+proxy:
+  enabled: false
+  http: ""
+  https: ""

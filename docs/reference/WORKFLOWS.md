@@ -13,7 +13,7 @@
 
 ### constructor(options = {})
 - **签名**: `new AIStream({ name?, description?, version?, author?, priority?, config?, functionToggles?, embedding? })`
-- **要点**: 合并 `cfg.kuizai.ai` 生成默认推理配置，初始化 `MemorySystem`、函数开关与 embedding 配置。
+- **要点**: 合并 `cfg.aistream` 和 `cfg.getLLMConfig(provider)` 生成默认推理配置，初始化 `MemorySystem`、函数开关与 embedding 配置。
 
 ### init()
 - **签名**: `async init(): Promise<void>`

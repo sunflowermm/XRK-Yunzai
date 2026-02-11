@@ -73,6 +73,8 @@ class App {
     this._asrSessionId = null;
     this._asrChunkIndex = 0;
     this._systemThemeWatcher = null;
+    this._statusInterval = null;
+    this._reconnectTimer = null;
     this.theme = 'light';
     
     this.init();
@@ -87,15 +89,24 @@ class App {
     this.handleRoute();
     this.ensureDeviceWs();
     
+    // 路由变化监听
     window.addEventListener('hashchange', () => this.handleRoute());
+    
+    // 页面可见性变化监听（优化：避免重复调用）
+    let visibilityTimer = null;
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) {
-        this.checkConnection();
-        this.ensureDeviceWs();
+        // 防抖处理，避免频繁调用
+        if (visibilityTimer) clearTimeout(visibilityTimer);
+        visibilityTimer = setTimeout(() => {
+          this.checkConnection();
+          this.ensureDeviceWs();
+        }, 100);
       }
     });
     
-    setInterval(() => {
+    // 系统状态定时刷新（仅在首页时刷新）
+    this._statusInterval = setInterval(() => {
       if (this.currentPage === 'home') this.loadSystemStatus();
     }, 60000);
   }
@@ -103,9 +114,11 @@ class App {
   async loadAPIConfig() {
     try {
       const res = await fetch('api-config.json');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       this.apiConfig = await res.json();
     } catch (e) {
-      console.error('Failed to load API config:', e);
+      console.warn('[App] API配置加载失败，使用默认配置:', e.message);
+      this.apiConfig = {};
     }
   }
 
@@ -137,7 +150,8 @@ class App {
       this.refreshChatWorkflowOptions();
       this.refreshChatModelOptions();
     } catch (e) {
-      console.warn('未能加载 LLM 档位信息:', e.message || e);
+      console.warn('[App] LLM选项加载失败，使用默认配置:', e.message);
+      this._llmOptions = { profiles: [], defaultProfile: '', workflows: [] };
     }
   }
 
@@ -214,7 +228,9 @@ class App {
       if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) {
         return 'dark';
       }
-    } catch {}
+    } catch (e) {
+      console.warn('[App] 系统主题检测失败:', e.message);
+    }
     return 'light';
   }
 
@@ -307,10 +323,14 @@ class App {
         status.classList.remove('online');
         status.querySelector('.status-text').textContent = '未授权';
       }
-    } catch {
+    } catch (e) {
+      console.warn('[App] 连接状态检查失败:', e.message);
       const status = document.getElementById('connectionStatus');
-      status.classList.remove('online');
-      status.querySelector('.status-text').textContent = '连接失败';
+      if (status) {
+        status.classList.remove('online');
+        const textEl = status.querySelector('.status-text');
+        if (textEl) textEl.textContent = '连接失败';
+      }
     }
   }
 
@@ -540,20 +560,22 @@ class App {
         this.refreshChatWorkflowOptions();
       }
     } catch (e) {
-      console.error('Failed to load system status:', e);
+      // 系统状态加载失败，静默处理
       this.renderBotsPanel();
       this.renderWorkflowInfo();
       this.renderNetworkInfo();
+      console.warn('[App] 系统状态加载失败:', e.message);
     }
   }
   
   async loadBotsInfo() {
     try {
       const res = await fetch(`${this.serverUrl}/api/status`, { headers: this.getHeaders() });
-      if (!res.ok) throw new Error('接口异常');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       this.renderBotsPanel(data.bots || []);
-    } catch {
+    } catch (e) {
+      console.warn('[App] 机器人信息加载失败:', e.message);
       this.renderBotsPanel();
     }
   }
@@ -1131,12 +1153,28 @@ class App {
       </div>
     `;
     
-    document.getElementById('chatSendBtn').addEventListener('click', () => this.sendChatMessage());
-    document.getElementById('chatInput').addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') this.sendChatMessage();
+    // 聊天相关事件绑定（优化：统一处理）
+    const chatHandlers = {
+      'chatSendBtn': () => this.sendChatMessage(),
+      'micBtn': () => this.toggleMic(),
+      'clearChatBtn': () => this.clearChat()
+    };
+    
+    Object.entries(chatHandlers).forEach(([id, handler]) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('click', handler);
     });
-    document.getElementById('micBtn').addEventListener('click', () => this.toggleMic());
-    document.getElementById('clearChatBtn').addEventListener('click', () => this.clearChat());
+    
+    // 输入框回车发送（支持 Shift+Enter 换行）
+    const chatInput = document.getElementById('chatInput');
+    if (chatInput) {
+      chatInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          this.sendChatMessage();
+        }
+      });
+    }
     this.initChatControls();
     
     this.restoreChatHistory();
@@ -1146,8 +1184,12 @@ class App {
 
   _loadChatHistory() {
     try {
-      return JSON.parse(localStorage.getItem('chatHistory') || '[]');
-    } catch { return []; }
+      const history = localStorage.getItem('chatHistory');
+      return history ? JSON.parse(history) : [];
+    } catch (e) {
+      console.warn('[App] 聊天历史加载失败:', e.message);
+      return [];
+    }
   }
 
   _saveChatHistory() {
@@ -2555,12 +2597,11 @@ class App {
     if (this._configState?.mode !== 'form') return;
     const wrapper = document.getElementById('configFormWrapper');
     if (!wrapper) return;
+    const handler = (el) => () => this.handleConfigFieldChange(el);
     wrapper.querySelectorAll('[data-field]').forEach(el => {
-      const evt = el.type === 'checkbox' ? 'change' : 'input';
-      el.addEventListener(evt, () => this.handleConfigFieldChange(el));
-      if (evt !== 'change') {
-        el.addEventListener('change', () => this.handleConfigFieldChange(el));
-      }
+      // 根据元素类型选择合适的事件类型，避免重复绑定
+      const evt = el.type === 'checkbox' || el.tagName === 'SELECT' ? 'change' : 'input';
+      el.addEventListener(evt, handler(el));
     });
   }
 
@@ -3149,7 +3190,7 @@ class App {
     const section = document.getElementById('apiTestSection');
     
     if (!welcome || !section) {
-      console.error('API页面元素不存在');
+      // API 页面元素不存在，静默返回
       return;
     }
     
@@ -3230,45 +3271,42 @@ class App {
       <div id="responseSection"></div>
     `;
     
-    // 等待DOM更新后绑定事件
-    setTimeout(() => {
-      const executeBtn = document.getElementById('executeBtn');
-      const fillExampleBtn = document.getElementById('fillExampleBtn');
-      const formatJsonBtn = document.getElementById('formatJsonBtn');
-      const copyJsonBtn = document.getElementById('copyJsonBtn');
+    // 使用 requestAnimationFrame 优化 DOM 更新后的操作
+    requestAnimationFrame(() => {
+      // 使用事件委托统一处理按钮点击
+      const buttonHandlers = {
+        'executeBtn': () => this.executeRequest(),
+        'fillExampleBtn': () => this.fillExample(),
+        'formatJsonBtn': () => this.formatJSON(),
+        'copyJsonBtn': () => this.copyJSON()
+      };
       
-      if (executeBtn) {
-        executeBtn.addEventListener('click', () => this.executeRequest());
-      }
-      
-      if (fillExampleBtn) {
-        fillExampleBtn.addEventListener('click', () => this.fillExample());
-      }
-      
-      if (formatJsonBtn) {
-        formatJsonBtn.addEventListener('click', () => this.formatJSON());
-      }
-      
-      if (copyJsonBtn) {
-        copyJsonBtn.addEventListener('click', () => this.copyJSON());
-      }
+      Object.entries(buttonHandlers).forEach(([id, handler]) => {
+        const btn = document.getElementById(id);
+        if (btn) btn.addEventListener('click', handler);
+      });
       
       // 文件上传设置
       if (apiId === 'file-upload') {
         this.setupFileUpload();
       }
     
-    // 监听输入变化
-    section.querySelectorAll('input, textarea, select').forEach(el => {
-      el.addEventListener('input', () => this.updateJSONPreview());
-        el.addEventListener('change', () => this.updateJSONPreview());
-    });
+      // 监听输入变化（使用事件委托优化）
+      const updateHandler = () => this.updateJSONPreview();
+      section.querySelectorAll('input, textarea, select').forEach(el => {
+        // 对于 input/textarea 使用 input 事件，对于 select 使用 change 事件
+        if (el.tagName === 'SELECT') {
+          el.addEventListener('change', updateHandler);
+        } else {
+          el.addEventListener('input', updateHandler);
+        }
+      });
     
       // 初始化JSON编辑器
       this.initJSONEditor().then(() => {
-    this.updateJSONPreview();
+        this.updateJSONPreview();
       });
-    }, 0);
+    });
   }
 
   renderParamInput(param) {
@@ -3455,7 +3493,7 @@ class App {
       await loadJS(`${base}/lib/codemirror.min.js`);
       await loadJS(`${base}/mode/javascript/javascript.min.js`);
     } catch (e) {
-      console.warn('Failed to load CodeMirror:', e);
+      // CodeMirror 加载失败，使用普通 textarea
     }
   }
 
@@ -3729,7 +3767,7 @@ class App {
                 timestamp: Date.now()
               }));
             } catch (e) {
-              console.warn('心跳发送失败:', e);
+              // 心跳发送失败，静默处理
             }
           }
         }, 30000);
@@ -3748,14 +3786,16 @@ class App {
           this._heartbeatTimer = null;
         }
         this._deviceWs = null;
-        setTimeout(() => this.ensureDeviceWs(), 5000);
+        // 延迟重连，避免频繁重连
+        if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
+        this._reconnectTimer = setTimeout(() => this.ensureDeviceWs(), 5000);
       };
       
-      this._deviceWs.onerror = (e) => {
-        console.warn('WebSocket错误:', e);
+      this._deviceWs.onerror = (error) => {
+        console.warn('[App] WebSocket错误:', error);
       };
     } catch (e) {
-      console.warn('WebSocket连接失败:', e);
+      console.warn('[App] WebSocket连接失败:', e.message);
     }
   }
 
@@ -3963,10 +4003,13 @@ class App {
     
     container.appendChild(toast);
     
-    setTimeout(() => {
-      toast.classList.add('hide');
-      setTimeout(() => toast.remove(), 300);
-    }, 3000);
+    // 使用 requestAnimationFrame 优化动画
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        toast.classList.add('hide');
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    });
   }
 }
 

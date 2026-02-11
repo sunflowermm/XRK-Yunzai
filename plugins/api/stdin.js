@@ -169,11 +169,9 @@ export default {
   },
 
   async init(app, Bot) {
-    if (!global.stdinHandler) {
-      const StdinModule = await import('../adapter/stdin.js');
-      if (StdinModule.StdinHandler) {
-        global.stdinHandler = new StdinModule.StdinHandler();
-      }
+    const StdinModule = await import('../adapter/stdin.js');
+    if (StdinModule.StdinHandler) {
+      global.stdinHandler = new StdinModule.StdinHandler();
     }
     
     // 设置Bot的URL

@@ -16,34 +16,7 @@
 
 ## 🏗️ 类结构
 
-### 基础示例
-
-```javascript
-import plugin from '../../lib/plugins/plugin.js';
-
-export default class MyPlugin extends plugin {
-  constructor() {
-    super({
-      name: 'my-plugin',
-      dsc: '我的插件',
-      event: 'message',
-      priority: 5000,
-      rule: [
-        {
-          reg: '^#测试$',
-          fnc: 'test'
-        }
-      ]
-    });
-  }
-
-  async test(e) {
-    return this.reply('测试成功');
-  }
-}
-```
-
-> 💡 **提示**: 所有插件都应继承 `plugin` 基类，并实现相应的处理函数。
+> 💡 **提示**: 所有插件都应继承 `plugin` 基类，并实现相应的处理函数。基础示例见下方"完整示例"部分。
 
 ## 构造函数参数
 
@@ -369,11 +342,11 @@ const img = await this.renderImg('my-plugin', './template.html', { data: 'value'
 
 ## 完整示例
 
+> **注意**: 以下示例中，假设已通过 `import plugin from '../../lib/plugins/plugin.js'` 导入插件基类。
+
 ### 示例1: 基础插件
 
 ```javascript
-import plugin from '../../lib/plugins/plugin.js';
-
 export default class MyPlugin extends plugin {
   constructor() {
     super({
@@ -381,12 +354,7 @@ export default class MyPlugin extends plugin {
       dsc: '我的插件',
       event: 'message',
       priority: 5000,
-      rule: [
-        {
-          reg: '^#测试$',
-          fnc: 'test'
-        }
-      ]
+      rule: [{ reg: '^#测试$', fnc: 'test' }]
     });
   }
 
@@ -399,8 +367,6 @@ export default class MyPlugin extends plugin {
 ### 示例2: 使用工作流
 
 ```javascript
-import plugin from '../../lib/plugins/plugin.js';
-
 export default class AIPlugin extends plugin {
   constructor() {
     super({
@@ -408,26 +374,16 @@ export default class AIPlugin extends plugin {
       dsc: 'AI对话插件',
       event: 'message',
       priority: 5000,
-      rule: [
-        {
-          reg: '^#AI (.+)$',
-          fnc: 'aiChat'
-        }
-      ]
+      rule: [{ reg: '^#AI (.+)$', fnc: 'aiChat' }]
     });
   }
 
   async aiChat(e) {
     const question = e.msg.replace(/^#AI\s+/, '');
-    
     // 方式1: 直接执行工作流
     const result = await this.executeWorkflow('chat', question);
-    
     // 方式2: 调用工作流管理器
-    const result2 = await this.callWorkflow('chat', {
-      question: question
-    }, { e });
-    
+    const result2 = await this.callWorkflow('chat', { question }, { e });
     return this.reply(result || result2.content);
   }
 }
@@ -436,8 +392,6 @@ export default class AIPlugin extends plugin {
 ### 示例3: 多工作流组合
 
 ```javascript
-import plugin from '../../lib/plugins/plugin.js';
-
 export default class MultiWorkflowPlugin extends plugin {
   constructor() {
     super({
@@ -473,8 +427,6 @@ export default class MultiWorkflowPlugin extends plugin {
 ### 示例4: 上下文管理
 
 ```javascript
-import plugin from '../../lib/plugins/plugin.js';
-
 export default class ContextPlugin extends plugin {
   constructor() {
     super({
@@ -509,19 +461,7 @@ export default class ContextPlugin extends plugin {
 }
 ```
 
-## 插件存放路径
-
-插件应存放在以下目录：
-
-```
-plugins/
-├── example/          # 示例插件
-├── system/          # 系统插件
-├── other/           # 其他插件
-└── [自定义目录]/    # 自定义插件目录
-```
-
-**注意:** 插件文件名即为插件标识，建议使用小写字母和连字符。
+> **注意**: 插件存放路径说明见 [工作流基类文档](./WORKFLOW_BASE_CLASS.md) 中的"工作流存放路径"部分（插件文件存放在 `plugins/` 目录下）。
 
 ## 权限控制
 
@@ -570,4 +510,6 @@ A: 检查工作流名称是否正确，确保工作流已加载，查看日志�
 - [工作流基类文档](./WORKFLOW_BASE_CLASS.md)
 - [HTTP API基类文档](./HTTP_API_BASE_CLASS.md)
 - [项目基类总览](./BASE_CLASSES.md)
+- [工厂模式文档](./FACTORY.md) - LLM提供商管理
+- [配置优先级文档](./CONFIG_PRIORITY.md) - 配置优先级说明
 

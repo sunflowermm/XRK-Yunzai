@@ -142,7 +142,9 @@ export default class PlaywrightRenderer extends Renderer {
         try {
           await redis.del(this.browserMacKey);
           BotUtil.makeLog("info", "Cleaned up invalid browser instance record", "PlaywrightRenderer");
-        } catch (e) {}
+        } catch {
+          // Redis 删除失败，忽略错误
+        }
       }
       return null;
     }
@@ -185,7 +187,9 @@ export default class PlaywrightRenderer extends Renderer {
       if (this.browserMacKey) {
         try {
           wsEndpoint = await redis.get(this.browserMacKey);
-        } catch (e) {}
+        } catch {
+          // Redis 获取失败，使用配置的 wsEndpoint
+        }
       }
       if (!wsEndpoint && this.config.wsEndpoint) {
         wsEndpoint = this.config.wsEndpoint;
@@ -226,7 +230,9 @@ export default class PlaywrightRenderer extends Renderer {
         if (this.browserMacKey) {
           try {
             await redis.del(this.browserMacKey);
-          } catch (e) {}
+          } catch {
+            // Redis 删除失败，忽略错误
+          }
         }
         
         if (!this.isClosing) {
@@ -419,12 +425,16 @@ export default class PlaywrightRenderer extends Renderer {
       if (page) {
         try {
           await page.close({ runBeforeUnload: false });
-        } catch (e) {}
+        } catch {
+          // 页面关闭失败，忽略错误
+        }
       }
       if (context) {
         try {
           await context.close();
-        } catch (e) {}
+        } catch {
+          // 上下文关闭失败，忽略错误
+        }
       }
       this.shoting = this.shoting.filter(item => item !== name);
     }
@@ -471,9 +481,7 @@ export default class PlaywrightRenderer extends Renderer {
         this.healthCheckTimer = null;
       }
 
-      if (global.gc) {
-        global.gc();
-      }
+      global.gc();
 
       BotUtil.makeLog("info", `${this.browserType} restart completed`, "PlaywrightRenderer");
     } catch (err) {

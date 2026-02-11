@@ -1,0 +1,42 @@
+# ========================================
+# OpenAI 兼容 LLM 配置
+# ========================================
+# 任意 OpenAI-like Chat Completions配置
+# 支持自定义baseUrl、path、认证方式等
+# 
+# 配置说明:
+# - enabled: 是否启用此提供商
+# - baseUrl: API基础地址（自定义）
+# - path: API路径（默认/chat/completions）
+# - apiKey: API密钥（必填）
+# - authMode: 认证模式（bearer/header/query）
+# - authHeader: 认证头名称（默认Authorization）
+# - headers: 自定义请求头（对象）
+# - model: 模型名称
+# - chatModel: 聊天模型名称
+# - temperature: 温度参数（0-2）
+# - maxTokens: 最大Token数
+# - timeout: 请求超时时间（毫秒）
+# - enableStream: 是否启用流式输出
+# - enableTools: 是否启用工具调用
+# - proxy: 代理配置（可选）
+
+enabled: true
+baseUrl: "https://api.example.com/v1"
+path: "/chat/completions"
+apiKey: ""
+authMode: "bearer"
+authHeader: "Authorization"
+headers: {}
+model: "gpt-3.5-turbo"
+chatModel: "gpt-3.5-turbo"
+temperature: 0.7
+maxTokens: 4000
+max_tokens: 4000
+timeout: 60000
+enableStream: true
+enableTools: false
+proxy:
+  enabled: false
+  http: ""
+  https: ""

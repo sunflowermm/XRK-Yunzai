@@ -1,0 +1,37 @@
+# ========================================
+# 火山引擎 LLM 配置
+# ========================================
+# 火山引擎豆包大模型配置
+# 接口地址: https://ark.cn-beijing.volces.com/api/v3
+# 
+# 配置说明:
+# - enabled: 是否启用此提供商
+# - baseUrl: API基础地址
+# - apiKey: 火山引擎API密钥（必填）
+# - model: 模型端点名称（ep-开头）
+# - chatModel: 聊天模型端点名称
+# - temperature: 温度参数（0-2）
+# - maxTokens: 最大Token数
+# - topP: 核采样参数（0-1）
+# - timeout: 请求超时时间（毫秒）
+# - enableStream: 是否启用流式输出
+# - enableTools: 是否启用工具调用
+# - proxy: 代理配置（可选）
+
+enabled: true
+baseUrl: "https://ark.cn-beijing.volces.com/api/v3"
+apiKey: ""
+model: "ep-20241220101210-xxxxx"
+chatModel: "ep-20241220101210-xxxxx"
+temperature: 0.8
+maxTokens: 4000
+max_tokens: 4000
+topP: 0.9
+top_p: 0.9
+timeout: 60000
+enableStream: true
+enableTools: false
+proxy:
+  enabled: false
+  http: ""
+  https: ""

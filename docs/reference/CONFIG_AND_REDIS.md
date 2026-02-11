@@ -54,13 +54,17 @@
   - `server.port: <port>` - 服务器端口
 - **用途**: 机器人账号、日志、渲染器等配置
 
-#### get other() / getOther()
+#### get other()
 - **返回**: `Object` - 其他配置对象
 - **来源**: 合并默认和服务器级 `other.yaml`
 - **常用字段**:
   - `masterQQ` - 主人QQ号数组
-  - 其他自定义配置项
-- **注意**: `getOther()` 是方法形式，功能相同
+  - `autoFriend` - 自动同意加好友
+  - `autoQuit` - 自动退群人数
+  - `disablePrivate` - 禁用私聊
+  - `disableMsg` - 禁用私聊提示
+  - `whiteGroup`, `whiteQQ` - 白名单
+  - `blackGroup`, `blackQQ` - 黑名单
 
 #### get redis()
 - **返回**: `Object` - Redis 连接配置
@@ -82,10 +86,13 @@
   5. 为每个配置文件创建 `chokidar` 监听器，支持热更新
 - **支持的渲染器类型**: `playwright`, `puppeteer`
 
-#### get notice() / getNotice()
+#### get notice()
 - **返回**: `Object` - 通知配置对象
 - **来源**: 合并默认和服务器级 `notice.yaml`
-- **用途**: 系统通知、提醒等配置
+- **常用字段**:
+  - `iyuu` - IYUU通知配置
+  - `sct` - Server酱配置
+  - `feishu_webhook` - 飞书Webhook配置
 
 #### get server()
 - **返回**: `Object` - 服务器配置对象
@@ -111,10 +118,11 @@
 - **来源**: `monitor.yaml`
 - **用途**: 系统监控相关配置
 
-#### get kuizai()
-- **返回**: `Object` - 快哉配置对象
-- **来源**: `kuizai.yaml`
-- **用途**: AI 相关配置
+#### get llm()
+- **返回**: `Object` - 所有LLM提供商配置对象
+- **结构**: `{ gptgod: {...}, openai: {...}, anthropic: {...}, ... }`
+- **动态获取**: 优先从 `LLMFactory` 动态获取已注册的厂商
+- **用途**: 获取所有LLM厂商的配置
 
 #### get aistream()
 - **返回**: `Object` - AI工作流配置对象
@@ -162,10 +170,9 @@
   5. 返回合并后的配置（默认 + 服务器）
 - **用途**: 获取服务器级配置（会覆盖默认配置）
 
-#### getGroup(groupId = '', userID = '')
+#### getGroup(groupId = '')
 - **参数**:
   - `groupId` (string|number) - 群组ID
-  - `userID` (string) - 用户ID（可选，暂未使用）
 - **返回**: `Object` - 群组配置对象
 - **流程**:
   1. 读取默认群配置 `group.yaml` 的 `default` 字段

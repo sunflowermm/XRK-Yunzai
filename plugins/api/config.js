@@ -82,20 +82,13 @@ export default {
 
         let configName = null;
         try {
-          configName = req.params?.name;
+          configName = req.params && req.params.name;
           const { path: keyPath } = req.query || {};
 
           if (!configName) {
             return res.status(400).json({
               success: false,
               message: '配置名称不能为空'
-            });
-          }
-
-          if (!global.ConfigManager) {
-            return res.status(503).json({
-              success: false,
-              message: '配置管理器未初始化'
             });
           }
 
@@ -171,7 +164,7 @@ export default {
 
         let configName = null;
         try {
-          configName = req.params?.name;
+          configName = req.params && req.params.name;
           const { data, path: keyPath, backup = true, validate = true } = req.body || {};
 
           BotUtil.makeLog('info', `收到配置写入请求 [${configName}] path: ${keyPath || 'none'}`, 'ConfigAPI');
@@ -180,14 +173,6 @@ export default {
             return res.status(400).json({
               success: false,
               message: '配置名称不能为空'
-            });
-          }
-
-          if (!global.ConfigManager) {
-            BotUtil.makeLog('error', '配置管理器未初始化', 'ConfigAPI');
-            return res.status(503).json({
-              success: false,
-              message: '配置管理器未初始化'
             });
           }
 
@@ -241,7 +226,7 @@ export default {
             message: '配置已保存'
           });
         } catch (error) {
-          const errorName = configName || req.params?.name || 'unknown';
+          const errorName = configName || (req.params && req.params.name) || 'unknown';
           BotUtil.makeLog('error', `写入配置失败 [${errorName}]: ${error.message}`, 'ConfigAPI', error);
           res.status(500).json({
             success: false,
@@ -590,7 +575,7 @@ export default {
           // 处理 system 配置的子配置
           if (name === 'system' && childPath) {
             const structure = config.getStructure();
-            const childConfig = structure.configs?.[childPath];
+            const childConfig = structure.configs && structure.configs[childPath];
             if (childConfig) {
               // 优先使用 schema，如果没有则从 fields 构建
               if (childConfig.schema && childConfig.schema.fields) {
@@ -726,8 +711,8 @@ export default {
           let schema = null;
           if (name === 'system' && childPath) {
             const structure = config.getStructure();
-            const childConfig = structure.configs?.[childPath];
-            schema = childConfig?.schema || { fields: childConfig?.fields || {} };
+            const childConfig = structure.configs && structure.configs[childPath];
+            schema = childConfig && childConfig.schema || { fields: childConfig && childConfig.fields || {} };
           } else {
             const structure = config.getStructure();
             schema = structure.schema || { fields: structure.fields || {} };

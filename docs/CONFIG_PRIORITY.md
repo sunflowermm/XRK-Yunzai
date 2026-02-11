@@ -1,8 +1,22 @@
-# 配置优先级说明
+<h1 align="center">配置优先级说明</h1>
+
+<div align="center">
+
+![Config Priority](https://img.shields.io/badge/Config-Priority-blue?style=flat-square)
+![AIStream](https://img.shields.io/badge/Scope-AIStream%20%7C%20LLM-success?style=flat-square)
+![Version](https://img.shields.io/badge/Version-3.1.3-informational?style=flat-square)
+
+</div>
+
+> ⚖️ 本文档说明 AI 工作流与 LLM 调用时各层配置的合并顺序，帮助你在插件和工作流中稳定地「谁优先、谁兜底」。
+
+---
 
 ## 配置优先级规则
 
-**execute传入参数 > 构造函数config > kuizai.yaml配置 > 默认值**
+**execute 传入参数 > 构造函数 config > aistream 配置 / LLM 提供商配置 > 默认值**
+
+---
 
 ## 详细说明
 
@@ -43,22 +57,47 @@ export default class MyWorkflow extends AIStream {
 ```
 
 **说明：**
-- 构造函数中的 `config` 会覆盖 `kuizai.yaml` 和默认值
+- 构造函数中的 `config` 会覆盖 `aistream` 配置和默认值
 - 但会被 `execute` 传入的参数覆盖
 
-### 3. kuizai.yaml配置（中等优先级）
+### 3. aistream配置/LLM提供商配置（中等优先级）
+
+配置来源包括：
+- `cfg.aistream`：AI工作流通用配置（`config/default_config/aistream.yaml`）
+- `cfg.getLLMConfig(provider)`：特定LLM提供商配置（如 `config/commonconfig/openai_llm.js`）
 
 ```yaml
-# config/default_config/kuizai.yaml
-kuizai:
-  ai:
-    chatModel: 'deepseek-r1-0528'
-    temperature: 0.8
-    max_tokens: 2000
+# config/default_config/aistream.yaml
+aistream:
+  enabled: true
+  temperature: 0.8
+  max_tokens: 2000
+```
+
+或通过 CommonConfig 系统：
+
+```javascript
+// config/commonconfig/openai_llm.js
+export default class OpenAILLMConfig extends ConfigBase {
+  constructor() {
+    super({
+      name: 'openai_llm',
+      schema: {
+        fields: {
+          enabled: { type: 'boolean', default: false },
+          baseUrl: { type: 'string', default: 'https://api.openai.com/v1' },
+          apiKey: { type: 'string', default: '' },
+          model: { type: 'string', default: 'gpt-3.5-turbo' },
+          temperature: { type: 'number', default: 0.7 }
+        }
+      }
+    });
+  }
+}
 ```
 
 **说明：**
-- 如果上面没有指定，使用这个配置
+- 如果上面没有指定，使用这些配置
 - 会被构造函数和 `execute` 传入的参数覆盖
 
 ### 4. 默认值（最低优先级）
@@ -85,8 +124,9 @@ async execute(e, question, config) {
   // 1. 先合并基础配置
   const baseConfig = { ...this.config };  // 构造函数config（已包含默认值）
   
-  // 2. 合并kuizai.yaml配置
-  const kuizaiConfig = { ...cfg.kuizai?.ai };
+  // 2. 合并aistream配置和LLM提供商配置
+  const aistreamConfig = { ...cfg.aistream };
+  const llmConfig = cfg.getLLMConfig(provider || 'gptgod');
   
   // 3. 合并用户传入的config（最高优先级）
   const userConfig = config || {};
@@ -94,7 +134,8 @@ async execute(e, question, config) {
   // 4. 最终配置（用户配置覆盖所有）
   const finalConfig = { 
     ...baseConfig, 
-    ...kuizaiConfig, 
+    ...aistreamConfig,
+    ...llmConfig,
     ...userConfig 
   };
   
@@ -110,8 +151,13 @@ async callAI(messages, apiConfig = {}) {
   // 1. 用户传入的配置（最高优先级）
   const userConfig = apiConfig || {};
   
-  // 2. 基础配置（构造函数 + kuizai.yaml）
-  const baseConfig = { ...this.config, ...cfg.kuizai?.ai };
+  // 2. 基础配置（构造函数 + aistream配置 + LLM提供商配置）
+  const provider = apiConfig.provider || this.config.provider || 'gptgod';
+  const baseConfig = { 
+    ...this.config, 
+    ...cfg.aistream,
+    ...cfg.getLLMConfig(provider)
+  };
   
   // 3. 最终配置（用户配置覆盖基础配置）
   const config = { ...baseConfig, ...userConfig };
@@ -151,7 +197,7 @@ export default class MyPlugin extends plugin {
 }
 ```
 
-**结果：** 会使用 `gemini-3-pro-preview` 模型，而不是 `kuizai.yaml` 中配置的模型。
+**结果：** 会使用 `gemini-3-pro-preview` 模型，而不是配置文件中配置的模型。
 
 ### 示例2: 使用callWorkflow方法
 
@@ -236,8 +282,9 @@ BotUtil.makeLog('debug', `[AI] 使用模型: ${model}`, 'AIStream');
 
 A: 合并顺序：
 1. `this.config`（构造函数config，已包含默认值）
-2. `cfg.kuizai?.ai`（kuizai.yaml配置）
-3. `userConfig`（execute传入的config，最高优先级）
+2. `cfg.aistream`（aistream配置）
+3. `cfg.getLLMConfig(provider)`（LLM提供商配置）
+4. `userConfig`（execute传入的config，最高优先级）
 
 **Q: 如何确保使用我的配置？**
 
@@ -259,4 +306,6 @@ await chatStream.execute(e, question, API_CONFIG);
 
 - [工作流基类开发文档](./WORKFLOW_BASE_CLASS.md)
 - [插件基类开发文档](./PLUGIN_BASE_CLASS.md)
+- [工厂模式文档](./FACTORY.md) - LLM提供商配置管理
+- [CommonConfig基类文档](./COMMONCONFIG_BASE.md) - 配置系统使用
 

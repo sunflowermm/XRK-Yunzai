@@ -69,7 +69,7 @@ async function extractStructuredText(html, selector) {
     const texts = $(selector)
       .map((_, element) => $(element).text().trim())
       .get()
-      .filter(text => text?.length > 10);
+      .filter(text => text && text.length > 10);
     
     return texts.join('\n\n');
   } catch (error) {
@@ -128,8 +128,8 @@ async function simulateUserMessageEvent(e, simulatedMessage, extra = {}) {
     const trimmedMessage = simulatedMessage.trim();
 
     // 确保必要字段存在，提高健壮性
-    const userId = e.user_id || e.sender?.user_id;
-    const selfId = e.self_id || (typeof Bot !== 'undefined' && Bot.uin) || 0;
+    const userId = e.user_id || (e.sender && e.sender.user_id);
+    const selfId = e.self_id || Bot.uin || 0;
     const groupId = e.group_id || null;
     const isGroup = e.isGroup !== undefined ? e.isGroup : !!groupId;
 
@@ -155,13 +155,13 @@ async function simulateUserMessageEvent(e, simulatedMessage, extra = {}) {
       sender: {
         ...(e.sender || {}),
         user_id: userId,
-        nickname: e.sender?.nickname || e.nickname || '用户',
-        card: e.sender?.card || e.card || ''
+        nickname: (e.sender && e.sender.nickname) || e.nickname || '用户',
+        card: (e.sender && e.sender.card) || e.card || ''
       },
       ...extra
     };
 
-    if (typeof Bot !== 'undefined' && Bot.em) {
+    if (Bot.em) {
       const eventType = isGroup
         ? 'message.group.normal'
         : 'message.private.friend';
@@ -340,7 +340,7 @@ class ChatWorkflowManager extends WorkflowManager {
   }
 
   async summarizeHotNews(newsList, context = {}) {
-    if (!this.stream?.callAI) return null;
+    if (!this.stream || !this.stream.callAI) return null;
 
     const briefing = newsList.map(item => {
       const heat = item.heat ? `热度${item.heat}` : '热度未知';
@@ -460,7 +460,7 @@ class ChatWorkflowManager extends WorkflowManager {
    */
   async runMemory(params = {}, context = {}) {
     const memorySystem = this.stream.getMemorySystem();
-    if (!memorySystem?.isEnabled()) {
+    if (!memorySystem || !memorySystem.isEnabled()) {
       return { type: 'text', content: '记忆系统暂时不可用～' };
     }
 
@@ -498,7 +498,7 @@ class ChatWorkflowManager extends WorkflowManager {
    */
   async runMemoryRecall(params = {}, context = {}) {
     const memorySystem = this.stream.getMemorySystem();
-    if (!memorySystem?.isEnabled()) {
+    if (!memorySystem || !memorySystem.isEnabled()) {
       return { type: 'text', content: '记忆系统暂时不可用～' };
     }
 
@@ -515,7 +515,7 @@ class ChatWorkflowManager extends WorkflowManager {
    */
   async runMemoryForget(params = {}, context = {}) {
     const memorySystem = this.stream.getMemorySystem();
-    if (!memorySystem?.isEnabled()) {
+    if (!memorySystem || !memorySystem.isEnabled()) {
       return { type: 'text', content: '记忆系统暂时不可用～' };
     }
 
@@ -593,12 +593,12 @@ export default class ChatStream extends AIStream {
     // 创建聊天特定的工作流管理器
     this.workflowManager = new ChatWorkflowManager(this);
 
-    const polishCfg = cfg.kuizai?.ai?.responsePolish || {};
+    // 使用默认的响应润色配置
     this.responsePolishConfig = {
-      enabled: polishCfg.enabled ?? RESPONSE_POLISH_DEFAULT.enabled,
-      instructions: polishCfg.instructions || RESPONSE_POLISH_DEFAULT.instructions,
-      maxTokens: polishCfg.maxTokens || RESPONSE_POLISH_DEFAULT.maxTokens,
-      temperature: polishCfg.temperature ?? RESPONSE_POLISH_DEFAULT.temperature
+      enabled: RESPONSE_POLISH_DEFAULT.enabled,
+      instructions: RESPONSE_POLISH_DEFAULT.instructions,
+      maxTokens: RESPONSE_POLISH_DEFAULT.maxTokens,
+      temperature: RESPONSE_POLISH_DEFAULT.temperature
     };
   }
 
@@ -807,12 +807,12 @@ export default class ChatStream extends AIStream {
         
         try {
           // 优先使用新的Napcat API
-          if (context.e.bot?.setMessageReaction) {
+          if (context.e.bot && context.e.bot.setMessageReaction) {
             const result = await context.e.bot.setMessageReaction(msgId, emojiId);
-            if (result?.success === false && context.e.group?.setEmojiLike) {
+            if (result && result.success === false && context.e.group && context.e.group.setEmojiLike) {
               await context.e.group.setEmojiLike(msgId, emojiId);
             }
-          } else if (context.e.group?.setEmojiLike) {
+          } else if (context.e.group && context.e.group.setEmojiLike) {
             await context.e.group.setEmojiLike(msgId, emojiId);
           }
           await BotUtil.sleep(200);
@@ -2065,7 +2065,7 @@ export default class ChatStream extends AIStream {
       
       const msgData = {
         user_id: String(e.self_id ?? ''),
-        nickname: (typeof Bot !== 'undefined' && Bot.nickname) || 'Bot',
+          nickname: Bot.nickname || 'Bot',
         message: messageText,
         message_id: Date.now().toString(),
         timestamp,
@@ -2573,7 +2573,7 @@ ${resultsText}
       // 记录搜索工具使用
       const searchRecord = {
         user_id: String(e.self_id || ''),
-        nickname: (typeof Bot !== 'undefined' && Bot.nickname) || 'Bot',
+          nickname: Bot.nickname || 'Bot',
         message: `[工具:搜索] 搜索关键词: ${keyword}`,
         message_id: `search_${Date.now()}`,
         timestamp,

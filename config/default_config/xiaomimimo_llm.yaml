@@ -1,0 +1,34 @@
+# ========================================
+# 小米 MiMo LLM 配置
+# ========================================
+# 小米 MiMo 大语言模型配置（仅文本）
+# 接口地址: https://api.xiaomimimo.com/v1
+# 
+# 配置说明:
+# - enabled: 是否启用此提供商
+# - baseUrl: API基础地址
+# - apiKey: 小米 MiMo API密钥（必填）
+# - model: 模型名称（如mimo-1.5）
+# - chatModel: 聊天模型名称
+# - temperature: 温度参数（0-2）
+# - maxTokens: 最大Token数
+# - timeout: 请求超时时间（毫秒）
+# - enableStream: 是否启用流式输出
+# - enableTools: 是否启用工具调用
+# - proxy: 代理配置（可选）
+
+enabled: true
+baseUrl: "https://api.xiaomimimo.com/v1"
+apiKey: ""
+model: "mimo-1.5"
+chatModel: "mimo-1.5"
+temperature: 0.8
+maxTokens: 4000
+max_tokens: 4000
+timeout: 60000
+enableStream: true
+enableTools: false
+proxy:
+  enabled: false
+  http: ""
+  https: ""

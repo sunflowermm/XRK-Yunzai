@@ -31,7 +31,7 @@ export default {
               name: plugin.name || p.key,
               priority: p.priority,
               dsc: plugin.dsc || '暂无描述',
-              rule: plugin.rule?.length || 0,
+              rule: plugin.rule && plugin.rule.length || 0,
               task: plugin.task ? 1 : 0
             });
           } catch (error) {
@@ -85,7 +85,7 @@ export default {
         const tasks = taskList.map(t => ({
           name: t.name,
           cron: t.cron,
-          nextRun: t.job?.nextInvocation ? t.job.nextInvocation() : null
+          nextRun: t.job && t.job.nextInvocation ? t.job.nextInvocation() : null
         }));
 
         res.json({ success: true, tasks });
@@ -117,7 +117,7 @@ export default {
             try {
               const plugin = new p.class();
               totalPlugins++;
-              if (plugin.rule?.length) withRules++;
+              if (plugin.rule && plugin.rule.length) withRules++;
               if (plugin.task) withTasks++;
             } catch (error) {
               // 忽略初始化失败的插件
