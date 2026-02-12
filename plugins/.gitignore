@@ -10,6 +10,7 @@ other/**
 !other/sendLog.js
 !other/update.js
 !other/add.js
+!other/此文件夹业务层的保留是为了适配很多底层插件！！！
 
 *.psd
 *.map
