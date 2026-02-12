@@ -63,13 +63,13 @@ Redis 连接策略：
 | `lib/aistream/aistream.js` | AI 工作流基架，封装 Chat Completion、功能解析、上下文增强。 |
 | Memory System | Redis ZSet + JSON 存储长短期记忆，按场景隔离。 |
 | Workflow Manager | 注册/串行/并行执行工作流，带超时控制。 |
-| Embedding provider | 轻量 BM25（默认）、ONNX、本地 fastText、HF API、自定义 HTTP API。 |
+| BM25 相似度 | 轻量 BM25 语义检索，无外部向量引擎依赖。 |
 | `node-fetch` | 统一对外 HTTP 请求，支持 Abort 超时。 |
 
 设计亮点：
 - 工作流执行 pipeline：`buildChatContext → buildEnhancedContext → callAI → parseFunctions → runActionTimeline`。
 - 函数调用解析器可由工作流自定义 `registerFunction`、`parser`、`handler`。
-- Embedding 支持多提供商自动降级，结果落地 Redis 以供语义检索。
+- 使用 BM25 基于 Redis 中的历史对话做轻量级语义检索，无需下载模型或调用外部 Embedding 服务。
 
 ---
 
@@ -78,10 +78,10 @@ Redis 连接策略：
 | 目录 | 说明 |
 |------|------|
 | `lib/plugins/plugin.js` | 插件运行时：上下文、工作流调用、热重载钩子。 |
-| `plugins/stream/` | 工作流脚本目录（Chat、Device、文件处理等）。 |
-| `plugins/api/` | REST/SSE/WS API 声明式路由。 |
+| `plugins/<插件根>/stream/` | 插件内工作流脚本目录（Chat、Device、文件处理等）。 |
+| `plugins/<插件根>/http/` | 插件内 REST/SSE/WS API 声明式路由。 |
 | `plugins/adapter/` | 协议适配器（OneBotv11、ComWeChat 等）。 |
-| `plugins/system/` | 内置权限、好友维护、邀请处理。 |
+| `plugins/system/` | 内置权限、好友维护、邀请处理（已迁移至 `plugins/system-plugin` 体系）。 |
 
 特性：
 - 插件定义 `rule` 以正则/函数匹配事件。

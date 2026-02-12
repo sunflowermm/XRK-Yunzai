@@ -1,20 +1,12 @@
-<h1 align="center">工作流基类开发文档</h1>
+# 工作流基类开发文档
 
-<div align="center">
+## 概述
 
-![Workflow Base](https://img.shields.io/badge/AIStream-Workflow%20Base%20Class-blue?style=flat-square)
-![Status](https://img.shields.io/badge/Status-Stable-success?style=flat-square)
-![Version](https://img.shields.io/badge/Version-3.1.3-informational?style=flat-square)
+`AIStream` 是所有工作流的基类，提供了统一的AI调用、记忆系统、功能管理等能力。继承此基类可以快速创建自定义工作流。
 
-</div>
+**文件路径**: `lib/aistream/aistream.js`
 
-> 🤖 `AIStream` 是所有工作流的基类，提供统一的 AI 调用、记忆系统、Embedding 与功能编排能力。继承此基类可以快速创建自定义工作流，统一接入不同 LLM 提供商。
-
-**📁 文件路径**: `lib/aistream/aistream.js`
-
-**📂 工作流存放路径**: 支持多个位置（按优先级从高到低）
-
----
+**工作流存放路径**: 支持多个位置（按优先级从高到低）
 
 ### 1. 插件专用目录（推荐）
 
@@ -36,38 +28,18 @@ plugins/
 - 插件可以独立分发，不依赖 `plugins/stream/` 目录
 - 支持插件级别的热重载
 
-### 2. 默认工作流目录
+### 2. 工作流加载规则
 
-传统的工作流存放位置，适用于全局工作流：
+当前版本仅从插件内部加载工作流：
 
 ```
-plugins/stream/
+plugins/<插件根>/stream/
 ├── chat.js          # 聊天工作流
 ├── device.js        # 设备工作流
 └── [自定义].js     # 自定义工作流
 ```
 
-### 3. Core目录（兼容XRK-AGT结构）
-
-如果项目包含 `core/` 目录，可以从其中加载：
-
-```
-core/
-├── module1/
-│   └── stream/
-│       └── workflow.js
-└── module2/
-    └── stream/
-        └── workflow.js
-```
-
-### 加载优先级
-
-1. **插件目录** (`plugins/*/stream/`) - 优先级最高
-2. **默认目录** (`plugins/stream/`) - 中等优先级
-3. **Core目录** (`core/*/stream/`) - 优先级最低
-
-如果多个位置存在同名工作流，系统会按照优先级选择，优先级更高的工作流会覆盖优先级较低的。
+`StreamLoader` 不再扫描 `plugins/stream/` 或 `core/*/stream/`，统一约定**每个插件自带自己的 `stream/` 业务层目录**。
 
 **注意:** 
 - 工作流必须继承 `AIStream` 基类
@@ -101,21 +73,11 @@ export default class MyWorkflow extends AIStream {
         timeout: 30000                 // 超时时间（毫秒）
       },
       functionToggles: {},              // 功能开关（可选）
-      embedding: {                     // Embedding配置（可选）
-        enabled: false,                // 是否启用embedding
-        provider: 'lightweight',       // 提供商：'lightweight'/'onnx'/'hf'/'fasttext'/'api'
-        maxContexts: 5,               // 最大上下文数量
+      embedding: {                     // 轻量语义检索配置（可选，基于 BM25）
+        enabled: false,                // 是否启用语义检索
+        maxContexts: 5,                // 最大上下文数量
         similarityThreshold: 0.6,      // 相似度阈值
-        cacheExpiry: 86400,            // 缓存过期时间（秒）
-        cachePath: './data/models',    // 缓存路径
-        onnxModel: 'Xenova/all-MiniLM-L6-v2', // ONNX模型
-        onnxQuantized: true,           // 是否使用量化模型
-        hfToken: null,                  // HuggingFace Token
-        hfModel: 'sentence-transformers/all-MiniLM-L6-v2', // HF模型
-        fasttextModel: 'cc.zh.300.bin', // FastText模型
-        apiUrl: null,                  // API URL
-        apiKey: null,                  // API密钥
-        apiModel: 'text-embedding-3-small' // API模型
+        cacheExpiry: 86400             // 缓存过期时间（秒）
       }
     });
   }
@@ -133,7 +95,7 @@ export default class MyWorkflow extends AIStream {
 | `priority` | `number` | 否 | `100` | 优先级，数字越小优先级越高 |
 | `config` | `object` | 否 | 见下方 | AI配置对象 |
 | `functionToggles` | `object` | 否 | `{}` | 功能开关，用于控制注册的功能是否启用 |
-| `embedding` | `object` | 否 | 见下方 | Embedding配置对象 |
+| `embedding` | `object` | 否 | 见下方 | 语义检索（BM25）配置对象 |
 
 **config 对象字段：**
 
@@ -150,24 +112,14 @@ export default class MyWorkflow extends AIStream {
 | `frequencyPenalty` | `number` | `0.6` | 频率惩罚（-2到2） |
 | `timeout` | `number` | `30000` | 超时时间（毫秒） |
 
-**embedding 对象字段：**
+**embedding 对象字段（BM25）**
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `enabled` | `boolean` | `false` | 是否启用embedding |
-| `provider` | `string` | `'lightweight'` | 提供商：`'lightweight'`/`'onnx'`/`'hf'`/`'fasttext'`/`'api'` |
-| `maxContexts` | `number` | `5` | 最大上下文数量 |
-| `similarityThreshold` | `number` | `0.6` | 相似度阈值（0-1） |
-| `cacheExpiry` | `number` | `86400` | 缓存过期时间（秒） |
-| `cachePath` | `string` | `'./data/models'` | 缓存路径 |
-| `onnxModel` | `string` | `'Xenova/all-MiniLM-L6-v2'` | ONNX模型名称 |
-| `onnxQuantized` | `boolean` | `true` | 是否使用量化模型 |
-| `hfToken` | `string\|null` | `null` | HuggingFace Token |
-| `hfModel` | `string` | `'sentence-transformers/all-MiniLM-L6-v2'` | HuggingFace模型 |
-| `fasttextModel` | `string` | `'cc.zh.300.bin'` | FastText模型文件名 |
-| `apiUrl` | `string\|null` | `null` | API URL |
-| `apiKey` | `string\|null` | `null` | API密钥 |
-| `apiModel` | `string` | `'text-embedding-3-small'` | API模型名称 |
+| `enabled` | `boolean` | `false` | 是否启用语义检索 |
+| `maxContexts` | `number` | `5` | 最大返回的历史上下文数量 |
+| `similarityThreshold` | `number` | `0.6` | 相似度阈值（0-1），低于此值将被丢弃 |
+| `cacheExpiry` | `number` | `86400` | Redis 中历史对话缓存过期时间（秒） |
 
 ## 参数优先级
 
@@ -567,7 +519,7 @@ A: AI在回复中使用特定格式（如`[创建文件:test.txt:内容]`），�
 A: 不能。每个工作流独立执行，AI只能看到当前工作流的功能。这是模块化设计的核心：每个工作流专注自己的功能，通过组合实现复杂需求。
 
 **Q: 工作流如何被加载？**
-A: 工作流由 `lib/aistream/loader.js` 自动扫描 `plugins/stream/` 目录并加载。确保文件导出默认类并继承 `AIStream`。
+A: 工作流由 `lib/aistream/loader.js` 自动扫描 `plugins/<插件根>/stream/` 目录并加载。确保文件导出默认类并继承 `AIStream`。
 
 ## 相关文档
 

@@ -57,7 +57,7 @@
 ### 3. 类型标准化流程
 1. **读取**：`read()` 在解析 YAML/JSON 后立即调用 `cleanConfigData`，根据 schema 把每个字段转换为目标类型（数字、布尔、数组、对象等），确保缓存与 API 输出的数据结构统一。
 2. **写入**：`write()` 在 transform 与 validate 之前再次执行 `cleanConfigData`。这样即使前端传来字符串数字或 `'on'/'off'` 之类值，也能在落盘前被转换为正确的 YAML 类型。
-3. **API 层**：`plugins/api/config.js` 复用同一个 `cleanConfigData`，对局部 `set`/`write` 请求做相同的类型收敛，避免重复判断。
+3. **API 层**：`plugins/<插件根>/http/config.js` 复用同一个 `cleanConfigData`，对局部 `set`/`write` 请求做相同的类型收敛，避免重复判断。
 4. **前端**：`www/xrk/app.js` 在可视化表单和 JSON 编辑模式中都通过 schema key 调用 `_normalizeConfigData`，保持与后端一致的类型约束，防止组件之间出现值冲突。
 
 > 统一的标准化流程意味着任何一段配置数据，从 UI → API → 底层文件，始终使用同一份 schema 信息来决定真实数据类型，彻底消除“字符串数字”“真假值”以及数组/对象结构不一致的问题。

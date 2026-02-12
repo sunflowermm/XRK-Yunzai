@@ -50,7 +50,7 @@ services:
       retries: 3
       start_period: 60s
 
-  # Redis 服务（必需，用于 AI 记忆、Embedding 缓存等）
+  # Redis 服务（必需，用于 AI 记忆、语义检索索引等）
   redis:
     image: redis:7-alpine
     container_name: xrk-redis

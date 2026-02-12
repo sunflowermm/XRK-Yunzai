@@ -153,7 +153,7 @@ process.on('unhandledRejection', (reason, promise) => {
   }
 });
 
-// 优雅退出处理
+// 优雅退出处理（debug 模式下仍保持简单行为，但不影响正式多端口管理逻辑）
 process.on('SIGINT', () => {
   console.log(chalk.yellow('\n[!] 收到退出信号，正在关闭...'));
   if (Bot.closeServer) {

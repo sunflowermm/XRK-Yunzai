@@ -24,6 +24,7 @@ import path from 'path';
 import { spawnSync } from 'child_process';
 import inquirer from 'inquirer';
 import chalk from 'chalk';
+import cfg from './lib/config/config.js';
 
 /** 增加事件监听器上限以支持复杂的进程管理 */
 process.setMaxListeners(30);
@@ -454,37 +455,21 @@ class ServerManager extends BaseManager {
   }
 
   /**
-   * 复制默认配置文件
-   * @private
-   * @param {string} targetDir - 目标目录
+   * 确保指定端口的配置目录与默认配置就绪
+   * @param {number} port - 端口号
    * @returns {Promise<void>}
    */
-  async copyDefaultConfigs(targetDir, silent = false) {
+  async ensurePortConfig(port) {
+    const portDir = path.join(PATHS.SERVER_BOTS, port.toString());
+
     try {
-      const defaultConfigFiles = await fs.readdir(PATHS.DEFAULT_CONFIG);
-      const created = [];
-      
-      for (const file of defaultConfigFiles) {
-        if (file.endsWith('.yaml') && file !== 'qq.yaml') {
-          const sourcePath = path.join(PATHS.DEFAULT_CONFIG, file);
-          const targetPath = path.join(targetDir, file);
-          
-          // 只在文件不存在时复制
-          if (await copyFileIfMissing(sourcePath, targetPath)) {
-            created.push(file);
-          }
-        }
-      }
-      
-      if (!silent) {
-        if (created.length > 0) {
-          await this.logger.success(`配置文件已就绪: ${targetDir} (新建: ${created.join(', ')})`);
-        } else {
-          await this.logger.success(`配置文件已就绪: ${targetDir}`);
-        }
-      }
+      // 交给配置系统按“端口级配置”列表初始化（不会复制全局配置）
+      cfg.ensurePortConfigs(port);
+
+      await this.logger.success(`端口 ${port} 的配置已就绪 (${portDir})`);
     } catch (error) {
-      await this.logger.error(`创建配置文件失败: ${error.message}\n${error.stack}`);
+      await this.logger.error(`初始化端口 ${port} 配置失败: ${error.message}\n${error.stack}`);
+      throw error;
     }
   }
 
@@ -544,15 +529,14 @@ class ServerManager extends BaseManager {
       
       const exitCode = await this.runServerProcess(port, restartCount > 0);
       
-      /** 正常退出或重启请求 */
-      if (exitCode === 0 || exitCode === 255) {
-        await this.logger.log('正常退出');
+      // 0 = 正常关闭（回到菜单，不再自动重启）；其余视为异常，按策略自动重启
+      if (exitCode === 0) {
+        await this.logger.log('正常退出，返回菜单');
         return;
       }
       
-      await this.logger.log(`进程退出，状态码: ${exitCode}`);
+      await this.logger.log(`进程退出，状态码: ${exitCode}，准备根据策略自动重启`);
       
-      /** 计算重启延迟 */
       const waitTime = this.calculateRestartDelay(Date.now() - startTime, restartCount);
       if (waitTime > 0) {
         await this.logger.warning(`将在 ${waitTime / 1000} 秒后重启`);
@@ -561,7 +545,7 @@ class ServerManager extends BaseManager {
       restartCount++;
     }
     
-    await this.logger.error(`达到最大重启次数 (${CONFIG.MAX_RESTARTS})，停止重启`);
+    await this.logger.error(`达到最大重启次数 (${CONFIG.MAX_RESTARTS})，停止自动重启并返回菜单`);
   }
 
   /**
@@ -589,7 +573,19 @@ class ServerManager extends BaseManager {
       detached: false
     });
     
-    return result.status || 0;
+    // 如果是被信号终止（例如 Ctrl+C -> SIGINT），不要把它当成“正常退出 0”
+    // 这里将常见信号映射为特定退出码，交给上层决定是否继续自动重启
+    if (result.signal) {
+      await this.logger.warning(`子进程被信号 ${result.signal} 终止`);
+      if (result.signal === 'SIGINT') {
+        // 约定：SIGINT 统一使用 130（Linux 约定），触发自动重启
+        return 130;
+      }
+      // 其他信号也避免返回 0，使用 1 代表异常
+      return 1;
+    }
+    
+    return typeof result.status === 'number' ? result.status : 0;
   }
 
   /**
@@ -797,15 +793,16 @@ class MenuManager {
         const selected = await this.showMainMenu();
         shouldExit = await this.handleMenuAction(selected);
       } catch (error) {
-        if (error.isTtyError) {
+        // 保持与 XRK-AGT 一致的行为：不在这里直接退出，由 SignalHandler 统一处理 Ctrl+C 等信号
+        if (error?.isTtyError) {
           console.error(chalk.red('无法在当前环境中渲染菜单'));
           console.error(chalk.yellow('提示: 请确保终端支持交互式输入'));
           break;
         }
-        await this.serverManager.logger.error(`菜单操作出错: ${error.message}`);
-        if (error.stack) {
-          console.error(chalk.red(error.stack));
-        }
+
+        const errMsg = error?.stack || error?.message || String(error);
+        await this.serverManager.logger.error(`菜单操作出错: ${errMsg}`);
+        console.error(chalk.red(errMsg));
       }
     }
   }

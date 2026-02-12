@@ -298,7 +298,7 @@ Bot.wsf['MyProtocol'].push((conn, req, bot, socket, head) => {
 
 路由系统通过 `ApiLoader` 管理所有 HTTP API 路由。路由可以注册 REST API、WebSocket 处理器和中间件。
 
-**路由存放路径**: `plugins/api/`
+**路由存放路径**: `plugins/<插件根>/http/`
 
 ### 2.2 路由注册流程
 

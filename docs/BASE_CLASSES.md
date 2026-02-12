@@ -1,14 +1,4 @@
-<h1 align="center">项目基类文档</h1>
-
-<div align="center">
-
-![Base Classes](https://img.shields.io/badge/Base%20Classes-Overview-blue?style=flat-square)
-![Status](https://img.shields.io/badge/Status-Active-success?style=flat-square)
-![Version](https://img.shields.io/badge/Version-3.1.3-informational?style=flat-square)
-
-</div>
-
-> 📚 本文档概览 XRK-Yunzai 中所有核心基类，并引导你跳转到各自的详细开发文档。
+# 项目基类文档
 
 本文档介绍 XRK-Yunzai 项目中的所有基类及其使用方法。
 
@@ -180,7 +170,7 @@ export default class MyApi extends HttpApi {
 
 ### 路径
 
-- **API文件**: `plugins/api/`
+- **API文件**: `plugins/<插件根>/http/`
 - **基类文件**: `lib/http/http.js`
 - **加载器**: `lib/http/loader.js`
 
@@ -215,7 +205,7 @@ export default class MyListener extends EventListener {
 
 ### 路径
 
-- **监听器文件**: `plugins/events/`
+- **监听器文件**: `plugins/<插件根>/events/`
 - **基类文件**: `lib/listener/listener.js`
 - **加载器**: `lib/listener/loader.js`
 

@@ -130,9 +130,8 @@ export default class MyWorkflow extends AIStream {
 
 - 📝 继承 `AIStream`，实现 `buildSystemPrompt` 与 `buildChatContext`
 - 🌐 **推荐方式**：在插件目录下创建 `stream/` 子目录（如 `plugins/myplugin/stream/workflow.js`）
-- 🌐 **传统方式**：在 `plugins/stream/` 目录下创建全局工作流
 - 🔧 通过 `registerFunction` 暴露插件可调用的指令
-- 🧠 若需记忆或语义检索，开启 `embeddingConfig` 并使用 `MemorySystem`
+- 🧠 若需记忆或语义检索，在工作流构造函数中配置 `embedding`（BM25）并使用 `MemorySystem`
 - 📖 详见 [`WORKFLOW_BASE_CLASS.md`](../WORKFLOW_BASE_CLASS.md)
 
 ### 4️⃣ 暴露 HTTP/WS
@@ -151,7 +150,6 @@ export default {
 ```
 
 - 🌐 **推荐方式**：在插件目录下创建 `http/` 子目录（如 `plugins/myplugin/http/api.js`）
-- 🌐 **传统方式**：在 `plugins/api/` 目录下创建全局API
 - 📖 详见 [`HTTP_API_BASE_CLASS.md`](../HTTP_API_BASE_CLASS.md)
 - 📡 使用 `routes` 声明 REST，`ws` 注册长链接
 

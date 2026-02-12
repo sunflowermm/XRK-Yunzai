@@ -488,7 +488,7 @@ Bot.adapter.push(
 ### 示例2: 在路由中使用 Bot
 
 ```javascript
-// plugins/api/my-api.js
+// plugins/<插件根>/http/my-api.js
 export default {
   routes: [{
     method: 'POST',

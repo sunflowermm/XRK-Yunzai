@@ -1,6 +1,6 @@
 # HTTP / WebSocket API 手册 (`lib/http/http.js`)
 
-> 适用于 `plugins/api/*.js`，无论是对象式导出还是继承类方式，本文件涵盖所有方法。
+> 适用于 `plugins/<插件根>/http/*.js`，无论是对象式导出还是继承类方式，本文件涵盖所有方法。
 
 ---
 
@@ -59,7 +59,7 @@
 ## 4. 定义示例
 
 ```js
-// plugins/api/example.js
+// plugins/my-plugin/http/example.js
 import HttpApi from '../../lib/http/http.js';
 
 export default class ExampleApi extends HttpApi {

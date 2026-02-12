@@ -1,22 +1,8 @@
-<h1 align="center">配置优先级说明</h1>
-
-<div align="center">
-
-![Config Priority](https://img.shields.io/badge/Config-Priority-blue?style=flat-square)
-![AIStream](https://img.shields.io/badge/Scope-AIStream%20%7C%20LLM-success?style=flat-square)
-![Version](https://img.shields.io/badge/Version-3.1.3-informational?style=flat-square)
-
-</div>
-
-> ⚖️ 本文档说明 AI 工作流与 LLM 调用时各层配置的合并顺序，帮助你在插件和工作流中稳定地「谁优先、谁兜底」。
-
----
+# 配置优先级说明
 
 ## 配置优先级规则
 
-**execute 传入参数 > 构造函数 config > aistream 配置 / LLM 提供商配置 > 默认值**
-
----
+**execute传入参数 > 构造函数config > aistream配置/LLM提供商配置 > 默认值**
 
 ## 详细说明
 

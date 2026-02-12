@@ -13,7 +13,7 @@
 
 ### constructor(options = {})
 - **签名**: `new AIStream({ name?, description?, version?, author?, priority?, config?, functionToggles?, embedding? })`
-- **要点**: 合并 `cfg.aistream` 和 `cfg.getLLMConfig(provider)` 生成默认推理配置，初始化 `MemorySystem`、函数开关与 embedding 配置。
+- **要点**: 合并 `cfg.aistream` 和 `cfg.getLLMConfig(provider)` 生成默认推理配置，初始化 `MemorySystem`、函数开关与 BM25 语义检索配置。
 
 ### init()
 - **签名**: `async init(): Promise<void>`
@@ -21,56 +21,11 @@
 
 ### initEmbedding()
 - **签名**: `async initEmbedding(): Promise<void>`
-- **作用**: 根据 `embeddingConfig.provider` 初始化，并在失败时尝试降级到 `lightweight`。
-
-### tryInitProvider(provider)
-- **签名**: `async tryInitProvider(provider: 'lightweight'|'onnx'|'hf'|'fasttext'|'api'): Promise<void>`
-- **作用**: 分派到对应 `init*Embedding`。
-
-### initLightweightEmbedding()
-- **作用**: 构造 `LightweightSimilarity`（BM25）。
-
-### initONNXEmbedding()
-- **作用**: 下载/加载 ONNX 模型与 tokenizer，创建 `onnxruntime-node` session。
-
-### downloadONNXModel(modelName)
-- **作用**: 如本地不存在则从 HuggingFace 下载 `model_quantized.onnx`。
-
-### loadONNXTokenizer(modelName)
-- **作用**: 暂用字符编码法生成 512 长度输入。
-
-### initHFEmbedding()
-- **作用**: 使用 `@huggingface/inference`，需提供 `embeddingConfig.hfToken`。
-
-### initFastTextEmbedding()
-- **作用**: 下载 fastText 模型（如 `cc.zh.300.bin`）并加载。
-
-### downloadFastTextModel(modelName)
-- **作用**: 从 `dl.fbaipublicfiles.com` 获取 fastText 模型文件。
-
-### initAPIEmbedding()
-- **作用**: 校验 `apiUrl/apiKey/apiModel` 并进行连通性测试。
-
-### testEmbeddingModel() / testHFConnection() / testAPIConnection()
-- **作用**: 通过生成一次向量验证 embedding 是否可用。
-
-### generateEmbedding(text)
-- **签名**: `async generateEmbedding(text: string): Promise<number[]|string|null>`
-- **作用**: 封装 provider 分支以及异常降级。
-
-### generateONNXEmbedding(text)
-- **作用**: 利用 ONNX session 推理，并对 token 向量取平均值 + 归一化。
-
-### generateHFEmbedding(text) / generateFastTextEmbedding(text) / generateAPIEmbedding(text)
-- **作用**: 分别调用 HF API、fastText、本地/远程 API 生成向量。
-
-### cosineSimilarity(vec1, vec2)
-- **签名**: `(number[], number[]) => number`
-- **作用**: 计算余弦相似度，用于 embedding 检索。
+- **作用**: 为 BM25 初始化轻量相似度计算器（`LightweightSimilarity`），当前实现基本无额外开销，仅作为扩展点保留。
 
 ### storeMessageWithEmbedding(groupId, message)
 - **签名**: `async storeMessageWithEmbedding(groupId: string|number, message: { user_id, nickname, message, message_id, time }): Promise<void>`
-- **作用**: 若启用 embedding，则在 Redis 列表 `ai:embedding:${name}:${groupId}` 中存储向量。
+- **作用**: 若启用语义检索，则在 Redis 列表 `ai:embedding:${name}:${groupId}` 中存储**对话文本及基础元数据**（不再存储向量）。
 
 ### retrieveRelevantContexts(groupId, query)
 - **签名**: `async retrieveRelevantContexts(groupId: string, query: string): Promise<Array<{ message, similarity, time, userId, nickname }>>`
@@ -131,7 +86,7 @@
 
 ### execute(e, question, config)
 - **签名**: `async execute(e, question: any, config?: Partial<AIConfig>): Promise<string|null>`
-- **流程**: 合并配置 → 构造上下文 → `callAI` → `preprocessResponse` → `parseFunctions` → `runActionTimeline` → 存储记忆/embedding。
+- **流程**: 合并配置 → 构造上下文 → `callAI` → `preprocessResponse` → `parseFunctions` → `runActionTimeline` → 存储记忆/语义检索索引。
 
 ### preprocessResponse(response, context)
 - **默认**: 返回原值；子类可重写进行二次加工。
@@ -150,7 +105,7 @@
 - **作用**: 调用 `MemorySystem.buildSummary`，通常用于提示词注入。
 
 ### cleanup()
-- **作用**: 释放 embedding 资源（session/model/tokenizer），重置初始化标记。
+- **作用**: 清理工作流内部状态（如 `_initialized`），通常在重载或关闭时调用。
 
 ---
 
@@ -232,5 +187,5 @@
 
 ---
 
-如需了解 `StreamLoader`/`PluginsLoader` 如何装载自定义工作流，请配合阅读 `plugins/stream/*.js` 示例与 `docs/reference/PLUGINS.md`。***
+如需了解 `StreamLoader`/`PluginsLoader` 如何装载自定义工作流，请配合阅读 `plugins/<插件根>/stream/*.js` 示例与 `docs/reference/PLUGINS.md`。***
 

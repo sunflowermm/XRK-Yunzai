@@ -136,6 +136,8 @@ config/test/*
 logs/
 resources/
 
+config/server_config/
+
 # Docker file
 redis
 yunzai
@@ -174,3 +176,4 @@ desktop.ini
 *.swp
 *.swo
 *~
+node_modules

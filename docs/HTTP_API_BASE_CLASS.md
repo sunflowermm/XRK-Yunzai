@@ -1,16 +1,10 @@
-<h1 align="center">HTTP API 基类开发文档</h1>
+# HTTP API基类开发文档
 
-<div align="center">
+## 概述
 
-![HTTP Base](https://img.shields.io/badge/HttpApi-Base%20Class-blue?style=flat-square)
-![Status](https://img.shields.io/badge/Status-Stable-success?style=flat-square)
-![Version](https://img.shields.io/badge/Version-3.1.3-informational?style=flat-square)
+`HttpApi` 是所有HTTP API模块的基类，提供路由注册、WebSocket处理、中间件等功能。所有API模块应继承此类或使用对象导出。
 
-</div>
-
-> 🌐 `HttpApi` 是所有 HTTP / WebSocket API 模块的基类，统一封装路由注册、中间件链与 WS 升级处理。所有 API 模块应 **继承此类** 或使用 **对象导出** 结构。
-
-**📁 文件路径**: `lib/http/http.js`
+**文件路径**: `lib/http/http.js`
 
 ## 使用方式
 
@@ -417,7 +411,8 @@ export default {
 };
 ```
 
-> **注意**: API文件存放路径说明见 [工作流基类文档](./WORKFLOW_BASE_CLASS.md) 中的"工作流存放路径"部分（API文件遵循相同的路径规则，将 `stream/` 替换为 `http/` 或 `api/`）。
+> **注意**: API 文件推荐存放在插件目录的 `http/` 子目录（如 `plugins/myplugin/http/api.js`），
+> 其路径规则与工作流类似：将 `stream/` 替换为 `http/`。
 
 ## 错误处理
 

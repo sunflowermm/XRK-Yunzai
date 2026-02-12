@@ -1,3 +1,5 @@
+import importPlugin from 'eslint-plugin-import';
+
 export default [
   {
     languageOptions: {
@@ -40,33 +42,15 @@ export default [
         segment: 'readonly'
       }
     },
+    plugins: {
+      import: importPlugin
+    },
     rules: {
-      // 关闭所有规则，实现零告警
-      'no-unused-vars': 'off',
-      'no-undef': 'off',
-      'no-console': 'off',
-      'no-empty': 'off',
-      'no-useless-escape': 'off',
-      'no-prototype-builtins': 'off',
-      'no-case-declarations': 'off',
-      'no-fallthrough': 'off',
-      'no-redeclare': 'off',
-      'no-constant-condition': 'off',
-      'no-extra-boolean-cast': 'off',
-      'no-extra-semi': 'off',
-      'no-irregular-whitespace': 'off',
-      'no-unreachable': 'off',
-      'no-unsafe-finally': 'off',
-      'no-unsafe-negation': 'off',
-      'use-isnan': 'off',
-      'valid-typeof': 'off',
-      'prefer-object-spread': 'off',
-      'prefer-rest-params': 'off',
-      'prefer-spread': 'off',
-      'prefer-arrow-callback': 'off',
-      'prefer-const': 'off',
-      'arrow-body-style': 'off',
-      'eqeqeq': 'off'
+      // 关键规则：用于提前发现这类路径/未定义问题
+      'import/no-unresolved': 'error',
+      'no-undef': 'error',
+      // 其他规则保持宽松，避免一次性出现过多告警
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }]
     }
   },
   {
