@@ -121,5 +121,5 @@ Redis 连接策略：
 
 ---
 
-> 进一步的函数级 API 说明，请查阅 `docs/reference/*.md`。***
+> 进一步的函数级 API 说明，请查阅 `docs/reference/*.md`。
 

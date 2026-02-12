@@ -187,5 +187,5 @@
 
 ---
 
-如需了解 `StreamLoader`/`PluginsLoader` 如何装载自定义工作流，请配合阅读 `plugins/<插件根>/stream/*.js` 示例与 `docs/reference/PLUGINS.md`。***
+如需了解 `StreamLoader`/`PluginsLoader` 如何装载自定义工作流，请配合阅读 `plugins/<插件根>/stream/*.js` 示例与 `docs/reference/PLUGINS.md`。
 

@@ -80,5 +80,5 @@ export default class ExampleApi extends HttpApi {
 }
 ```
 
-> **提示**：对象式导出与继承方式仅在语法上不同，`loader` 会自动兼容。***
+> **提示**：对象式导出与继承方式仅在语法上不同，`loader` 会自动兼容。
 

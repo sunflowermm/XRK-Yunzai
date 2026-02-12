@@ -551,5 +551,5 @@ export default class MyPlugin extends plugin {
 - [插件运行时文档](./PLUGINS.md) - 插件如何使用Bot
 - [HTTP API基类文档](../HTTP_API_BASE_CLASS.md) - 路由开发指南
 
-所有函数的源代码与逻辑细节可直接参阅 `lib/bot.js`。如需扩展/重写，可在自定义模块中继承 `Bot` 或通过 Proxy 拓展。***
+所有函数的源代码与逻辑细节可直接参阅 `lib/bot.js`。如需扩展/重写，可在自定义模块中继承 `Bot` 或通过 Proxy 拓展。
 
