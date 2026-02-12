@@ -7,7 +7,7 @@
 
 <div align="center">
 
-![License](https://img.shields.io/badge/License-向日葵工作室开源许可证-blue?style=flat-square)
+![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)
 ![Version](https://img.shields.io/badge/Version-3.1.3-brightgreen?style=flat-square)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-green?style=flat-square&logo=node.js)
 ![Redis](https://img.shields.io/badge/Redis-5%2B-red?style=flat-square&logo=redis)
@@ -81,7 +81,7 @@ git clone --depth=1 https://gitcode.com/Xrkseek/XRK-Yunzai.git
 git clone --depth=1 https://gitee.com/xrkseek/XRK-Yunzai.git
 
 # GitHub
-git clone --depth=1 https://github.com/Xrkseek/XRK-Yunzai.git
+git clone --depth=1 https://github.com/sunflowermm/XRK-Yunzai.git
 
 cd XRK-Yunzai
 pnpm install   # 或 npm install / yarn

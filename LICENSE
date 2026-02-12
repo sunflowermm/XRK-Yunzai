@@ -1,171 +1,21 @@
-向日葵工作室开源许可证
-Sunflower Studio Open Source License
-
-版本 1.0
-Version 1.0
-
-版权所有 (C) 2025 向日葵工作室
-Copyright (C) 2025 Sunflower Studio
-
----
-
-## 前言
-
-本许可证适用于 XRK-Yunzai 项目及其衍生作品。
-
-XRK-Yunzai 是在 Yunzai v3.0、Miao-Yunzai、TRSS-Yunzai 等优秀项目基础上持续改进和发展的智能工作流机器人框架。我们深深感谢这些项目的贡献者和维护者，他们的工作为本项目奠定了坚实的基础。
-
-本许可证旨在保护原作者和贡献者的权益，同时鼓励社区参与和协作。
-
----
-
-## 第一条 定义
-
-1. **"本许可证"** 指向日葵工作室开源许可证版本 1.0。
-
-2. **"软件"** 指受本许可证保护的 XRK-Yunzai 项目及其源代码、文档、配置文件等所有组成部分。
-
-3. **"衍生作品"** 指基于本软件进行修改、扩展、翻译或改编的作品。
-
-4. **"贡献者"** 指向本软件提交代码、文档或其他贡献的个人或组织。
-
-5. **"原始项目"** 指 Yunzai v3.0、Miao-Yunzai、TRSS-Yunzai 等本项目所基于的开源项目。
-
----
-
-## 第二条 授权范围
-
-在遵守本许可证的前提下，您享有以下权利：
-
-1. **使用**：您可以自由使用本软件，包括商业用途。
-
-2. **复制**：您可以复制本软件的全部或部分内容。
-
-3. **修改**：您可以修改本软件，创建衍生作品。
-
-4. **分发**：您可以分发本软件的原版或修改版本。
-
-5. **私有使用**：您可以在私有环境中使用和修改本软件，无需公开源代码。
-
----
-
-## 第三条 义务与限制
-
-在使用、修改或分发本软件时，您必须遵守以下义务：
-
-1. **保留版权声明**：
-   - 您必须在所有副本中保留原始的版权声明和本许可证全文。
-   - 您必须在显著位置标注本软件基于原始项目（Yunzai v3.0、Miao-Yunzai、TRSS-Yunzai）开发。
-
-2. **标注修改**：
-   - 如果您修改了本软件，必须在修改的文件中明确标注修改日期和修改内容。
-   - 您不得移除或修改原始项目的版权声明。
-
-3. **尊重原始贡献**：
-   - 您不得声称本软件完全由您原创开发。
-   - 您必须在文档、README 或相关文件中明确说明本软件与原始项目的关系。
-
-4. **许可证兼容性**：
-   - 如果您将本软件与其他软件合并，合并后的作品必须遵守本许可证。
-   - 您不得将本软件与采用不兼容许可证的软件合并。
-
----
-
-## 第四条 免责声明
-
-1. **无担保**：本软件按"现状"提供，不提供任何明示或暗示的担保，包括但不限于：
-   - 适销性担保
-   - 特定用途适用性担保
-   - 不侵权担保
-
-2. **责任限制**：在任何情况下，作者或版权持有人均不对因使用或无法使用本软件而产生的任何损害承担责任，包括但不限于：
-   - 直接损害
-   - 间接损害
-   - 后果性损害
-   - 利润损失
-   - 数据丢失
-
----
-
-## 第五条 专利授权
-
-如果您拥有可能影响本软件使用的专利，您在此授予所有用户免费、非独占、不可撤销的专利许可，允许他们使用、修改和分发本软件。
-
----
-
-## 第六条 商标
-
-本许可证不授予您使用"XRK-Yunzai"、"向日葵工作室"、"Sunflower Studio"或任何相关商标、服务标记的权利。未经书面许可，您不得使用这些商标。
-
----
-
-## 第七条 终止
-
-如果您违反本许可证的任何条款，您使用本软件的权利将自动终止。终止后，您必须：
-- 停止使用本软件
-- 销毁所有副本
-- 删除所有衍生作品
-
----
-
-## 第八条 适用法律
-
-本许可证受中华人民共和国法律管辖。因本许可证引起的任何争议，应通过友好协商解决；协商不成的，应提交至有管辖权的人民法院解决。
-
----
-
-## 第九条 版本更新
-
-向日葵工作室保留更新本许可证的权利。新版本的许可证将适用于新发布的软件版本。对于已发布的软件版本，将继续使用其发布时对应的许可证版本。
-
----
-
-## 第十条 特别说明
-
-1. **原始项目贡献**：
-   - 本软件基于 Yunzai v3.0（作者：乐神）、Miao-Yunzai（作者：喵喵）、TRSS-Yunzai（作者：时雨）等优秀项目开发。
-   - 我们在此向所有原始项目的贡献者表示最诚挚的感谢。
-   - 本软件的发展离不开这些项目的坚实基础和社区支持。
-
-2. **社区贡献**：
-   - 我们欢迎社区成员向本项目贡献代码、文档、建议等。
-   - 贡献者保留对其贡献内容的版权，但同意按照本许可证授权使用。
-
-3. **兼容性**：
-   - 本许可证与 MIT 许可证、Apache 2.0 许可证兼容。
-   - 您可以自由地将采用本许可证的代码与采用 MIT 或 Apache 2.0 许可证的代码合并。
-
----
-
-## 附录：原始项目致谢
-
-本软件在以下优秀项目的基础上发展而来：
-
-- **Yunzai v3.0** (https://gitee.com/le-niao/Yunzai-Bot)
-  - 作者：乐神
-  - 贡献：提供了机器人框架的基础架构和核心功能
-
-- **Miao-Yunzai** (https://gitee.com/yoimiya-kokomi/Miao-Yunzai)
-  - 作者：喵喵
-  - 贡献：功能优化和原神相关适配
-
-- **TRSS-Yunzai** (https://gitee.com/TimeRainStarSky/Yunzai)
-  - 作者：时雨
-  - 贡献：Node 端底层设计灵感
-
-我们向这些项目的所有贡献者表示最诚挚的感谢和敬意。没有他们的努力，本项目不可能存在。
-
----
-
-## 联系信息
-
-如有关于本许可证的疑问，请联系：
-
-- 项目地址：https://gitee.com/xrkseek/XRK-Yunzai
-- 邮箱：请通过项目 Issues 联系
-
----
-
-**向日葵工作室**
-**Sunflower Studio**
-**2025年**
+MIT License
+
+Copyright (c) 2025 Sunflower Studio
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
