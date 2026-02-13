@@ -1,87 +1,10 @@
 import path from 'path';
 import fs from 'fs';
-import fetch from 'node-fetch';
-import axios from 'axios';
 import AIStream from '../../../lib/aistream/aistream.js';
-import { WorkflowManager } from '../../../lib/aistream/workflow-manager.js';
 import BotUtil from '../../../lib/util.js';
-import cfg from '../../../lib/config/config.js';
 
-// 动态导入cheerio（避免在文件顶部导入，支持按需加载）
-let cheerioModule = null;
-async function getCheerio() {
-  if (!cheerioModule) {
-    try {
-      cheerioModule = await import('cheerio');
-      return cheerioModule.default || cheerioModule;
-    } catch (error) {
-      BotUtil.makeLog('error', `cheerio导入失败: ${error.message}`, 'ChatStream');
-      throw new Error('cheerio模块未安装，请运行: pnpm add cheerio');
-    }
-  }
-  return cheerioModule.default || cheerioModule;
-}
-
-/**
- * 提取HTML中的纯文本内容（去除标签、脚本、样式等）
- */
-function extractPlainText(html, maxLength = 5000) {
-  if (!html) return '';
-  
-  try {
-    // 快速去除脚本和样式
-    let text = html
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '')
-      .replace(/<!--[\s\S]*?-->/g, '');
-    
-    // 提取文本内容
-    text = text
-      .replace(/<[^>]+>/g, ' ') // 移除所有HTML标签
-      .replace(/\s+/g, ' ') // 合并多个空格
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .trim();
-    
-    // 限制长度
-    if (text.length > maxLength) {
-      text = text.substring(0, maxLength) + '...';
-    }
-    
-    return text;
-  } catch (error) {
-    return '';
-  }
-}
-
-/**
- * 使用cheerio提取结构化文本（保留作为工具函数）
- */
-async function extractStructuredText(html, selector) {
-  try {
-    const cheerio = await getCheerio();
-    const $ = cheerio.load(html);
-    const texts = $(selector)
-      .map((_, element) => $(element).text().trim())
-      .get()
-      .filter(text => text && text.length > 10);
-    
-    return texts.join('\n\n');
-  } catch (error) {
-    return extractPlainText(html);
-  }
-}
-
-const _path = process.cwd();
-// 统一路径处理：使用path.resolve确保跨平台兼容
-const EMOTIONS_DIR = path.resolve(_path, 'resources', 'aiimages');
+const EMOTIONS_DIR = path.join(process.cwd(), 'resources/aiimages');
 const EMOTION_TYPES = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
-const CHAT_RESPONSE_TIMEOUT = 190000; // 缩短到120秒，提高响应速度
 
 // 表情回应映射
 const EMOJI_REACTIONS = {
@@ -95,478 +18,28 @@ const EMOJI_REACTIONS = {
   '生气': ['8', '23', '39', '86', '179', '265']
 };
 
-const RESPONSE_POLISH_DEFAULT = {
-  enabled: false,
-  maxTokens: 400,
-  temperature: 0.3,
-  instructions: `你是QQ聊天润色器，只能做轻微整理：
-1. 删除舞台提示、括号或方括号里未执行的工具描述（例如[回复:xxx]、(正在... )等）
-2. 保留原意，语气自然，像正常聊天，尽量简短，用常用标点分句
-3. 不要添加新信息或Markdown，只输出纯文本`
-};
-
-/**
- * 统一封装：模拟触发用户消息事件
- * 用于从聊天工作流内部，伪造一条用户消息，交由其他插件按正常指令流程处理
- * @param {Object} e 原始事件对象
- * @param {string} simulatedMessage 要模拟发送的文本消息，例如 "#点歌南山南"
- * @param {Object} extra 可选扩展字段，覆盖默认的模拟事件属性
- */
-async function simulateUserMessageEvent(e, simulatedMessage, extra = {}) {
-  if (!e) {
-    BotUtil.makeLog('warn', '[ChatStream] 模拟用户消息事件：缺少事件对象', 'ChatStream');
-    return false;
-  }
-
-  if (!simulatedMessage || typeof simulatedMessage !== 'string' || !simulatedMessage.trim()) {
-    BotUtil.makeLog('warn', '[ChatStream] 模拟用户消息事件：消息内容无效', 'ChatStream');
-    return false;
-  }
-
-  try {
-    const now = Date.now();
-    const trimmedMessage = simulatedMessage.trim();
-
-    // 确保必要字段存在，提高健壮性
-    const userId = e.user_id || (e.sender && e.sender.user_id);
-    const selfId = e.self_id || Bot.uin || 0;
-    const groupId = e.group_id || null;
-    const isGroup = e.isGroup !== undefined ? e.isGroup : !!groupId;
-
-    if (!userId) {
-      BotUtil.makeLog('warn', '[ChatStream] 模拟用户消息事件：无法获取用户ID', 'ChatStream');
-      return false;
-    }
-
-    const simulatedEvent = {
-      ...e,
-      raw_message: trimmedMessage,
-      message: [{ type: 'text', text: trimmedMessage }],
-      msg: trimmedMessage,
-      message_id: `${now}_${Math.random().toString(36).slice(2, 9)}`,
-      time: now,
-      user_id: userId,
-      self_id: selfId,
-      post_type: 'message',
-      message_type: isGroup ? 'group' : 'private',
-      sub_type: isGroup ? 'normal' : 'friend',
-      group_id: groupId,
-      isGroup: isGroup,
-      sender: {
-        ...(e.sender || {}),
-        user_id: userId,
-        nickname: (e.sender && e.sender.nickname) || e.nickname || '用户',
-        card: (e.sender && e.sender.card) || e.card || ''
-      },
-      ...extra
-    };
-
-    if (Bot.em) {
-      const eventType = isGroup
-        ? 'message.group.normal'
-        : 'message.private.friend';
-
-      BotUtil.makeLog(
-        'info',
-        `[ChatStream] 模拟用户消息事件: ${eventType} -> ${trimmedMessage} (用户: ${userId})`,
-        'ChatStream'
-      );
-
-      // 使用setTimeout确保事件异步触发，避免阻塞
-      setTimeout(() => {
-        try {
-          Bot.em(eventType, simulatedEvent);
-        } catch (emitError) {
-          BotUtil.makeLog(
-            'error',
-            `[ChatStream] 触发事件失败: ${emitError.message}`,
-            'ChatStream'
-          );
-        }
-      }, 0);
-
-      return true;
-    } else {
-      BotUtil.makeLog(
-        'warn',
-        '[ChatStream] Bot.em 不可用，无法触发模拟 message 事件',
-        'ChatStream'
-      );
-      return false;
-    }
-  } catch (error) {
-    BotUtil.makeLog(
-      'error',
-      `[ChatStream] 模拟用户消息事件失败: ${error.message}`,
-      'ChatStream'
-    );
-    return false;
-  }
+function randomRange(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
 }
-
-/**
- * 聊天工作流管理器（扩展WorkflowManager）
- * 处理聊天场景特定的工作流
- */
-class ChatWorkflowManager extends WorkflowManager {
-  constructor(stream) {
-    super();
-    this.stream = stream;
-    this.cache = new Map();
-    this.cacheTTL = 5 * 60 * 1000; // 5分钟缓存
-    this.requestCache = new Map(); // 请求去重缓存
-    
-    // 注册聊天特定的工作流
-    this.registerChatWorkflows();
-  }
-  
-  /**
-   * 带缓存的请求（防止重复请求）
-   */
-  async cachedRequest(key, requestFn, ttl = this.cacheTTL) {
-    const cached = this.cache.get(key);
-    if (cached && Date.now() - cached.time < ttl) {
-      return cached.data;
-    }
-    
-    // 检查是否正在请求中（防止并发重复请求）
-    const pending = this.requestCache.get(key);
-    if (pending) {
-      return pending;
-    }
-    
-    const promise = requestFn().then(data => {
-      this.cache.set(key, { data, time: Date.now() });
-      this.requestCache.delete(key);
-      return data;
-    }).catch(error => {
-      this.requestCache.delete(key);
-      throw error;
-    });
-    
-    this.requestCache.set(key, promise);
-    return promise;
-  }
-
-  registerChatWorkflows() {
-    // 热点新闻
-    this.registerWorkflow('hot-news', this.runHotNews.bind(this), {
-      description: '获取热点新闻',
-      enabled: true,
-      priority: 50
-    });
-    this.registerWorkflow('hotnews', this.runHotNews.bind(this));
-    this.registerWorkflow('热点', this.runHotNews.bind(this));
-    this.registerWorkflow('热点新闻', this.runHotNews.bind(this));
-    this.registerWorkflow('热点资讯', this.runHotNews.bind(this));
-    
-    // 记忆相关
-    this.registerWorkflow('memory', this.runMemory.bind(this), {
-      description: '记住信息',
-      enabled: true,
-      priority: 30
-    });
-    this.registerWorkflow('remember', this.runMemory.bind(this));
-    
-    this.registerWorkflow('memory-recall', this.runMemoryRecall.bind(this), {
-      description: '回忆记忆',
-      enabled: true,
-      priority: 30
-    });
-    this.registerWorkflow('recall-memory', this.runMemoryRecall.bind(this));
-    
-    // 删除记忆
-    this.registerWorkflow('memory-forget', this.runMemoryForget.bind(this), {
-      description: '删除记忆',
-      enabled: true,
-      priority: 30
-    });
-    this.registerWorkflow('forget-memory', this.runMemoryForget.bind(this));
-    this.registerWorkflow('删除记忆', this.runMemoryForget.bind(this));
-  }
-
-  async runHotNews(params = {}, context = {}) {
-    const keyword = params.argument?.trim();
-    const newsList = await this.fetchHotNews(keyword);
-
-    if (!newsList || newsList.length === 0) {
-      return {
-        type: 'text',
-        content: '暂时没查到新的热点新闻，要不我们聊点别的？'
-      };
-    }
-
-    const summary = await this.summarizeHotNews(newsList, context).catch(() => null);
-    return {
-      type: 'text',
-      content: summary || this.formatHotNews(newsList)
-    };
-  }
-
-  async fetchHotNews(keyword) {
-    const cacheKey = keyword ? `hot-news:${keyword}` : 'hot-news:all';
-    
-    return this.cachedRequest(cacheKey, async () => {
-      try {
-        const response = await fetch('https://top.baidu.com/api/board?tab=realtime', {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (XRK-Yunzai Bot)'
-          },
-          timeout: 5000
-        });
-
-        if (!response.ok) {
-          throw new Error(`热点接口响应异常: ${response.status}`);
-        }
-
-        const payload = await response.json();
-        const items = payload?.data?.cards?.[0]?.content ?? [];
-        const normalized = items.slice(0, 8).map((item, index) => ({
-          index: index + 1,
-          title: item.query ?? item.word,
-          summary: item.desc ?? item.biz_ext?.abstract ?? '',
-          heat: item.hotScore ?? item.hotVal ?? '',
-          url: item.url ?? `https://m.baidu.com/s?word=${encodeURIComponent(item.query ?? '')}`
-        })).filter(item => item.title);
-
-        return keyword 
-          ? normalized.filter(item => item.title.includes(keyword) || item.summary.includes(keyword))
-          : normalized;
-      } catch (error) {
-        BotUtil.makeLog('warn', `获取热点失败: ${error.message}`, 'ChatStream');
-        return [];
-      }
-    });
-  }
-
-  async summarizeHotNews(newsList, context = {}) {
-    if (!this.stream || !this.stream.callAI) return null;
-
-    const briefing = newsList.map(item => {
-      const heat = item.heat ? `热度${item.heat}` : '热度未知';
-      const summary = item.summary ? ` - ${item.summary}` : '';
-      return `${item.index}. ${item.title}（${heat}）${summary}`;
-    }).join('\n');
-
-    const persona = context.persona || context.question?.persona || '我是AI助手';
-    const messages = [
-      {
-        role: 'system',
-        content: `${persona}
-
-【重要要求】
-1. 必须使用纯文本，绝对不要使用Markdown格式
-2. 禁止使用以下符号：星号(*)、下划线(_)、反引号(backtick)、井号(#)、方括号([])用于标题
-3. 不要使用###、**、__等Markdown标记
-4. 用普通文字、括号、冒号来表达层次，比如用"一、"、"二、"或"1."、"2."来分点
-5. 语气要符合你的人设，自然轻松，像QQ聊天一样
-6. 条理清晰，易于阅读
-
-请根据以下热点内容，用纯文本格式整理推送：`
-      },
-      {
-        role: 'user',
-        content: briefing
-      }
-    ];
-
-    const apiConfig = context.config || context.question?.config || {};
-    const result = await this.stream.callAI(messages, apiConfig);
-    
-    if (!result) return null;
-    
-    return result.replace(/\*\*/g, '').replace(/###\s*/g, '').replace(/__/g, '').trim();
-  }
-
-  formatHotNews(newsList) {
-    return newsList
-      .map(item => {
-        const heat = item.heat ? `（热度 ${item.heat}）` : '';
-        const summary = item.summary ? ` - ${item.summary}` : '';
-        return `${item.index}. ${item.title}${heat}${summary}`;
-      })
-      .join('\n');
-  }
-
-  /**
-   * 解析记忆参数（群聊场景特定）
-   */
-  parseMemoryArguments(rawArg = '', e) {
-    const tokens = rawArg.split('|').map(t => t.trim()).filter(Boolean);
-    let scope = null;
-    let layer = null;
-    const contentTokens = [];
-
-    const scopeMap = new Map([
-      ['群', 'group'],
-      ['群聊', 'group'],
-      ['group', 'group'],
-      ['user', 'user'],
-      ['个人', 'user'],
-      ['用户', 'user'],
-      ['私聊', 'user']
-    ]);
-
-    const layerMap = new Map([
-      ['long', 'long'],
-      ['长期', 'long'],
-      ['长期记忆', 'long'],
-      ['short', 'short'],
-      ['短期', 'short'],
-      ['临时', 'short']
-    ]);
-
-    for (const token of tokens) {
-      const key = token.toLowerCase();
-      if (!scope && scopeMap.has(key)) {
-        scope = scopeMap.get(key);
-        continue;
-      }
-      if (!layer && layerMap.has(key)) {
-        layer = layerMap.get(key);
-        continue;
-      }
-      contentTokens.push(token);
-    }
-
-    const content = contentTokens.join(' ').trim();
-    
-    // 使用记忆系统的场景提取
-    const memorySystem = this.stream.getMemorySystem();
-    const { ownerId, scene } = memorySystem.extractScene(e);
-    
-    // 如果指定了scope，覆盖场景
-    let finalScene = scene;
-    let finalOwnerId = ownerId;
-    
-    if (scope === 'group' && e?.group_id) {
-      finalScene = 'group';
-      finalOwnerId = `group:${e.group_id}`;
-    } else if (scope === 'user' && e?.user_id) {
-      finalScene = 'private';
-      finalOwnerId = String(e.user_id);
-    }
-
-    return {
-      ownerId: finalOwnerId,
-      scene: finalScene,
-      layer,
-      content
-    };
-  }
-
-  /**
-   * 记住信息（使用基类记忆系统）
-   */
-  async runMemory(params = {}, context = {}) {
-    const memorySystem = this.stream.getMemorySystem();
-    if (!memorySystem || !memorySystem.isEnabled()) {
-      return { type: 'text', content: '记忆系统暂时不可用～' };
-    }
-
-    const rawArg = params.argument?.trim();
-    if (!rawArg) {
-      return { type: 'text', content: '想记住什么呀？内容空空的。' };
-    }
-
-    const parsed = this.parseMemoryArguments(rawArg, context.e);
-    if (!parsed.content) {
-      return { type: 'text', content: '记忆内容还没说清楚，换种说法再来一次？' };
-    }
-
-    const saved = await memorySystem.remember({
-      ownerId: parsed.ownerId,
-      scene: parsed.scene,
-      layer: parsed.layer,
-      content: parsed.content,
-      metadata: {
-        groupId: context.e?.group_id ? String(context.e.group_id) : null,
-        channel: context.e?.message_type || 'unknown'
-      },
-      authorId: context.e?.self_id
-    });
-
-    if (!saved) {
-      return { type: 'text', content: '这条记忆没记住，再试试？' };
-    }
-
-    return { type: 'text', content: '记住啦～想看的时候可以叫我回忆。' };
-  }
-
-  /**
-   * 回忆记忆（使用基类记忆系统）
-   */
-  async runMemoryRecall(params = {}, context = {}) {
-    const memorySystem = this.stream.getMemorySystem();
-    if (!memorySystem || !memorySystem.isEnabled()) {
-      return { type: 'text', content: '记忆系统暂时不可用～' };
-    }
-
-    const summary = await memorySystem.buildSummary(context.e, { preferUser: true });
-    if (!summary) {
-      return { type: 'text', content: '现在脑子里还没有新的记忆。' };
-    }
-
-    return { type: 'text', content: summary };
-  }
-
-  /**
-   * 删除记忆（AI可以删除自己的记忆）
-   */
-  async runMemoryForget(params = {}, context = {}) {
-    const memorySystem = this.stream.getMemorySystem();
-    if (!memorySystem || !memorySystem.isEnabled()) {
-      return { type: 'text', content: '记忆系统暂时不可用～' };
-    }
-
-    const rawArg = params.argument?.trim();
-    if (!rawArg) {
-      return { type: 'text', content: '想删除什么记忆呀？说清楚内容或ID。' };
-    }
-
-    const { ownerId, scene } = memorySystem.extractScene(context.e);
-    
-    // 解析参数：支持 memoryId 或 content 关键词
-    let memoryId = null;
-    let content = null;
-    
-    // 尝试解析为ID（格式：id:xxx）
-    if (rawArg.startsWith('id:')) {
-      memoryId = rawArg.substring(3).trim();
-    } else if (rawArg.startsWith('ID:')) {
-      memoryId = rawArg.substring(3).trim();
-    } else {
-      // 否则作为内容关键词
-      content = rawArg;
-    }
-
-    const success = await memorySystem.forget(ownerId, scene, memoryId, content);
-    
-    if (success) {
-      return { type: 'text', content: '记忆已删除～' };
-    } else {
-      return { type: 'text', content: '没找到要删除的记忆，可能已经删除了？' };
-    }
-  }
-}
-
-// MemoryManager已移除，改用基类的记忆系统
-
-/**
- * 生成随机数范围（使用现代箭头函数）
- */
-const randomRange = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
 /**
  * 聊天工作流
- * 支持表情包、群管理、戳一戳、表情回应等功能
+ * 
+ * 功能分类：
+ * - MCP工具（返回JSON）：getGroupInfoEx（获取群信息ex）、getAtAllRemain（获取@全体剩余）、getBanList（获取禁言列表）
+ * 
+ *   - 互动功能：poke（戳一戳）、emojiReaction（表情回应）、thumbUp（点赞）、sign（签到）
+ *   - 群管理：mute/unmute（禁言/解禁）、muteAll/unmuteAll（全员禁言）、setCard（改名片）、setGroupName（改群名）
+ *   - 权限管理：setAdmin/unsetAdmin（设置/取消管理员）、setTitle（设置头衔）、kick（踢人）
+ *   - 消息管理：setEssence/removeEssence（设置/取消精华）、announce（群公告）、recall（撤回）、setGroupTodo（群代办）
+ *   - 消息格式：at（@某人）、reply（回复消息）
+ * 
+ * 支持表情包、群管理、表情回应等功能
  */
 export default class ChatStream extends AIStream {
   static emotionImages = {};
   static messageHistory = new Map();
-  static userCache = new Map();
   static cleanupTimer = null;
-  static initialized = false;
 
   constructor() {
     super({
@@ -583,22 +56,8 @@ export default class ChatStream extends AIStream {
         presencePenalty: 0.6,
         frequencyPenalty: 0.6
       },
-      embedding: {
-        enabled: true
-      }
+      embedding: { enabled: true }
     });
-
-    // 使用基类的记忆系统（已在AIStream中初始化）
-    // 创建聊天特定的工作流管理器
-    this.workflowManager = new ChatWorkflowManager(this);
-
-    // 使用默认的响应润色配置
-    this.responsePolishConfig = {
-      enabled: RESPONSE_POLISH_DEFAULT.enabled,
-      instructions: RESPONSE_POLISH_DEFAULT.instructions,
-      maxTokens: RESPONSE_POLISH_DEFAULT.maxTokens,
-      temperature: RESPONSE_POLISH_DEFAULT.temperature
-    };
   }
 
   /**
@@ -606,10 +65,6 @@ export default class ChatStream extends AIStream {
    */
   async init() {
     await super.init();
-    
-    if (ChatStream.initialized) {
-      return;
-    }
     
     try {
       await BotUtil.mkdir(EMOTIONS_DIR);
@@ -619,8 +74,6 @@ export default class ChatStream extends AIStream {
       if (!ChatStream.cleanupTimer) {
         ChatStream.cleanupTimer = setInterval(() => this.cleanupCache(), 300000);
       }
-      
-      ChatStream.initialized = true;
     } catch (error) {
       BotUtil.makeLog('error', 
         `[${this.name}] 初始化失败: ${error.message}`, 
@@ -635,8 +88,7 @@ export default class ChatStream extends AIStream {
    */
   async loadEmotionImages() {
     for (const emotion of EMOTION_TYPES) {
-      // 使用path.resolve确保跨平台兼容
-      const emotionDir = path.resolve(EMOTIONS_DIR, emotion);
+      const emotionDir = path.join(EMOTIONS_DIR, emotion);
       try {
         await BotUtil.mkdir(emotionDir);
         const files = await fs.promises.readdir(emotionDir);
@@ -644,7 +96,7 @@ export default class ChatStream extends AIStream {
           /\.(jpg|jpeg|png|gif)$/i.test(file)
         );
         ChatStream.emotionImages[emotion] = imageFiles.map(file => 
-          path.resolve(emotionDir, file)
+          path.join(emotionDir, file)
         );
       } catch {
         ChatStream.emotionImages[emotion] = [];
@@ -653,1272 +105,725 @@ export default class ChatStream extends AIStream {
   }
 
   /**
+   * 检查是否为群聊环境
+   * @param {Object} context - 上下文对象
+   * @returns {Object|null} 如果不是群聊返回错误对象，否则返回null
+   */
+  _requireGroup(context) {
+    if (!context.e?.isGroup) {
+      return { success: false, error: '非群聊环境' };
+    }
+    return null;
+  }
+
+  /**
+   * 统一错误处理包装器
+   * @param {Function} fn - 要执行的异步函数
+   * @param {number} [delay=300] - 执行后的延迟（毫秒）
+   * @returns {Promise<Object>} 返回结果对象
+   */
+  async _wrapHandler(fn, delay = 300) {
+    try {
+      const result = await fn();
+      if (delay > 0) await BotUtil.sleep(delay);
+      return result;
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
    * 注册所有功能
+   * 
+   * 所有功能都通过 MCP 工具提供
    */
   registerAllFunctions() {
-    // 1. 表情包
-    this.registerFunction('emotion', {
-      description: '发送表情包',
-      prompt: `【表情包】
-[开心] [惊讶] [伤心] [大笑] [害怕] [生气] - 发送对应表情包（一次只能用一个）`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        
-        const emotionRegex = /\[(开心|惊讶|伤心|大笑|害怕|生气)\]/g;
-        let match;
-        while ((match = emotionRegex.exec(text))) {
-          if (functions.length >= 1) break;
-          functions.push({ 
-            type: 'emotion', 
-            params: { emotion: match[1] },
-            raw: match[0]
-          });
-        }
+    // 表情包（作为消息段的一部分，不在工具调用/函数解析中处理）
+    // 表情包标记会在parseCQToSegments中解析，保持顺序
 
-        if (functions.length > 0) {
-          cleanText = text.replace(/\[(开心|惊讶|伤心|大笑|害怕|生气)\]/g, '').trim();
-        }
-        
-        return { functions, cleanText };
-      },
-      handler: async (params, context) => {
-        const image = this.getRandomEmotionImage(params.emotion);
-        if (image && context.e) {
-          await context.e.reply(segment.image(image));
-          await BotUtil.sleep(300);
-        }
-      },
-      enabled: true
-    });
-
-    // 2. @功能
-    this.registerFunction('at', {
-      description: '@某人',
-      prompt: `[CQ:at,qq=QQ号] - @某人`,
-      parser: (text, context) => {
-        return { functions: [], cleanText: text };
-      },
-      enabled: true
-    });
-
-    // 3. 戳一戳
-    this.registerFunction('poke', {
-      description: '戳一戳',
-      prompt: `[CQ:poke,qq=QQ号] - 戳一戳某人
-示例：[CQ:poke,qq=123456789] 戳一戳QQ号为123456789的用户`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        const pokeRegex = /\[CQ:poke,qq=(\d+)\]/g;
-        let match;
-        
-        while ((match = pokeRegex.exec(text))) {
-          functions.push({ 
-            type: 'poke', 
-            params: { qq: match[1] },
-            raw: match[0]
-          });
-        }
-        
-        if (functions.length > 0) {
-          cleanText = text.replace(pokeRegex, '').trim();
-        }
-        
-        return { functions, cleanText };
-      },
-      handler: async (params, context) => {
-        if (context.e?.isGroup) {
-          try {
-            await context.e.group.pokeMember(params.qq);
-            await BotUtil.sleep(300);
-          } catch (error) {
-            BotUtil.makeLog('debug', `戳一戳失败: ${error.message}`, 'ChatStream');
+    /**
+     * @某人
+     * 
+     * @description 在群聊中@指定用户。此工具仅执行@操作，不附带文本内容，文本内容由LLM正常回复。
+     * 
+     * @param {string} qq - 要@的用户QQ号（必填）
+     * 
+     * @returns {Object} 返回结果对象
+     * @returns {boolean} returns.success - 是否成功
+     * @returns {string} returns.message - 操作结果消息
+     * @returns {Object} returns.data - 数据对象
+     * @returns {string} returns.data.qq - 被@的用户QQ号
+     * @returns {string} returns.error - 失败时的错误信息
+     * 
+     * @example
+     * { qq: "123456789" }
+     * 
+     * @note 此功能仅在群聊环境中可用。如无特殊需要，不要对同一用户重复调用。
+     */
+    this.registerMCPTool('at', {
+      description: '@群成员。在群聊中@指定用户，仅执行@操作，不附带文本内容。仅群聊环境可用。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          qq: {
+            type: 'string',
+            description: '要@的用户QQ号（必填）。例如："123456789"。必须是群内的成员QQ号。'
           }
-        }
+        },
+        required: ['qq']
       },
-      enabled: true
-    });
+      handler: async (args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
 
-    // 4. 回复
-    this.registerFunction('reply', {
-      description: '回复消息',
-      prompt: `[CQ:reply,id=消息ID] - 回复某条消息
-重要：消息ID可以从聊天记录中看到，格式为 [ID:消息ID]
-示例：[CQ:reply,id=1234567890] 回复消息ID为1234567890的消息`,
-      parser: (text, context) => {
-        return { functions: [], cleanText: text };
-      },
-      enabled: true
-    });
+        const qq = String(args.qq || '').trim();
+        if (!qq) {
+          return { success: false, error: 'QQ号不能为空' };
+        }
 
-    // 5. 表情回应（优化版：支持多种格式的消息ID）
-    this.registerFunction('emojiReaction', {
-      description: '表情回应',
-      prompt: `[回应:消息ID:表情类型] - 给消息添加表情回应
-重要说明：
-1. 消息ID可以从聊天记录中看到，格式为 [ID:消息ID]，使用时直接使用数字部分
-2. 表情类型支持: 开心/惊讶/伤心/大笑/害怕/喜欢/爱心/生气
-3. 示例：[回应:1234567890:开心] 给消息ID为1234567890的消息添加开心的表情回应
-4. 可以同时回应多条消息，每条消息单独使用一个[回应:消息ID:表情类型]`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        // 支持多种格式：ID:123456 或 123456
-        const regex = /\[回应:(?:ID:)?([^:]+):([^\]]+)\]/g;
-        let match;
-        
-        while ((match = regex.exec(text))) {
-          const msgId = match[1].trim();
-          const emojiType = match[2].trim();
-          if (msgId && emojiType && EMOJI_REACTIONS[emojiType]) {
-            functions.push({ 
-              type: 'emojiReaction', 
-              params: { msgId, emojiType },
-              raw: match[0]
-            });
-          }
-        }
-        
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
-      },
-      handler: async (params, context) => {
-        if (!context.e?.isGroup || !EMOJI_REACTIONS[params.emojiType]) {
-          return;
-        }
-        
-        // 清理消息ID（支持 ID:123456 或 123456 格式）
-        const msgId = params.msgId?.startsWith('ID:') 
-          ? params.msgId.substring(3).trim() 
-          : params.msgId?.trim();
-        
-        if (!msgId) {
-          BotUtil.makeLog('warn', '表情回应：消息ID为空', 'ChatStream');
-          return;
-        }
-        
-        const emojiIds = EMOJI_REACTIONS[params.emojiType];
-        const emojiId = emojiIds[Math.floor(Math.random() * emojiIds.length)];
-        
-        try {
-          // 优先使用新的Napcat API
-          if (context.e.bot && context.e.bot.setMessageReaction) {
-            const result = await context.e.bot.setMessageReaction(msgId, emojiId);
-            if (result && result.success === false && context.e.group && context.e.group.setEmojiLike) {
-              await context.e.group.setEmojiLike(msgId, emojiId);
-            }
-          } else if (context.e.group && context.e.group.setEmojiLike) {
-            await context.e.group.setEmojiLike(msgId, emojiId);
-          }
-          await BotUtil.sleep(200);
-        } catch (error) {
-          BotUtil.makeLog('debug', `表情回应失败: ${error.message}`, 'ChatStream');
-        }
-      },
-      enabled: true
-    });
-
-    // 6. 联网搜索功能
-    this.registerFunction('webSearch', {
-      description: '联网搜索',
-      prompt: `[搜索:关键词] - 联网搜索实时信息，获取最新资讯
-示例：[搜索:2024年最新AI技术]`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        const regex = /\[搜索:([^\]]+)\]/g;
-        let match;
-        
-        while ((match = regex.exec(text))) {
-          functions.push({ 
-            type: 'webSearch', 
-            params: { keyword: match[1].trim() },
-            raw: match[0]
-          });
-        }
-        
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
-      },
-      handler: async (params, context) => {
-        if (!params.keyword) {
-          return { type: 'text', content: '搜索关键词不能为空' };
-        }
-        
-        try {
-          BotUtil.makeLog('info', `开始联网搜索: ${params.keyword}`, 'ChatStream');
-          
-          // 执行搜索流程：搜索 -> 分析（3次） -> 润色（1次）
-          const searchResult = await this.runWebSearch(params.keyword, context);
-          
-          // 确保返回有效结果
-          if (!searchResult || !searchResult.content) {
-            return { 
-              type: 'text', 
-              content: `抱歉，搜索"${params.keyword}"未找到相关信息。可能是关键词不够准确，建议尝试更具体的关键词或换个说法。` 
-            };
-          }
-          
-          // 将搜索结果整合到聊天记录中
-          if (context.e?.isGroup && searchResult.metadata) {
-            await this.recordSearchResult(context.e, params.keyword, searchResult);
-          }
-          
-          return searchResult;
-        } catch (error) {
-          BotUtil.makeLog('error', `联网搜索失败: ${error.message}`, 'ChatStream');
-          return { 
-            type: 'text', 
-            content: `搜索过程中出现错误，请稍后再试。如果问题持续，可以尝试换个关键词搜索。` 
+        return this._wrapHandler(async () => {
+          const seg = global.segment || segment;
+          await context.e.reply([seg.at(qq)]);
+          return {
+            success: true,
+            message: `已在当前群聊中成功 @ 了 QQ=${qq} 的用户，如无特殊需要请不要再次对同一用户调用此工具。`,
+            data: { qq }
           };
-        }
+        }, 200);
       },
       enabled: true
     });
 
-    // 7. 扩展工作流
-    this.registerFunction('workflow', {
-      description: '调用扩展工作流（热点资讯等）',
-      prompt: `[工作流:类型:可选参数] - 触发扩展动作，如 [工作流:hot-news] 或 [工作流:memory:长期|group|用户喜欢原神] 或 [工作流:memory-forget:要删除的内容]`,
-      parser: (text) => {
-        const functions = [];
-        let cleanText = text;
-        const regex = /\[工作流:([^\]:]+)(?::([^\]]+))?\]/g;
-        let match;
-
-        while ((match = regex.exec(text))) {
-          functions.push({
-            type: 'workflow',
-            params: {
-              workflow: match[1]?.trim(),
-              argument: match[2]?.trim()
-            },
-            raw: match[0]
-          });
-        }
-
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-
-        return { functions, cleanText };
+    /**
+     * 戳一戳群成员
+     * 
+     * @description 戳一戳指定的群成员。如果未指定QQ号，默认戳当前触发消息的用户。
+     * 
+     * @param {string} [qq] - 要戳的成员QQ号（可选，默认是当前说话用户）
+     * 
+     * @returns {Object} 返回结果对象
+     * @returns {boolean} returns.success - 是否成功
+     * @returns {string} returns.message - 操作结果消息
+     * @returns {Object} returns.data - 数据对象
+     * @returns {string} returns.data.qq - 被戳的用户QQ号
+     * @returns {string} returns.error - 失败时的错误信息
+     * 
+     * @example
+     * // 戳指定用户
+     * { qq: "123456789" }
+     * 
+     * // 戳当前说话用户
+     * {}
+     * 
+     * @note 此功能仅在群聊环境中可用
+     */
+    this.registerMCPTool('poke', {
+      description: '戳一戳群成员。如果未指定QQ号，默认戳当前触发消息的用户。仅群聊环境可用。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          qq: {
+            type: 'string',
+            description: '要戳的成员QQ号（可选，默认是当前说话用户）'
+          }
+        },
+        required: []
       },
-      handler: async (params, context) => {
-        if (!this.workflowManager) {
-          return { type: 'text', content: '' };
+      handler: async (args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
+
+        const e = context.e;
+        const targetQq = String(args.qq || e.user_id || '').trim();
+        if (!targetQq) {
+          return { success: false, error: '无法确定要戳的成员QQ号' };
         }
-        
-        const enrichedContext = {
-          ...context,
-          persona: context.question?.persona || context.persona,
-          config: context.config || context.question?.config
+
+        return this._wrapHandler(async () => {
+          await e.group.pokeMember(targetQq);
+          return { success: true, message: '戳一戳成功', data: { qq: targetQq } };
+        });
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('reply', {
+      description: '回复消息',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          messageId: {
+            type: 'string',
+            description: '要回复的消息ID'
+          },
+          content: {
+            type: 'string',
+            description: '回复内容'
+          }
+        },
+        required: ['content']
+      },
+      handler: async (args = {}, _context = {}) => {
+        return { success: true, message: '消息已回复', data: { content: args.content } };
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('emojiReaction', {
+      description: '对群消息进行表情回应。支持：开心、惊讶、伤心、大笑、害怕、喜欢、爱心、生气。不指定消息ID时自动选择最近一条他人消息。仅群聊环境可用。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          msgId: {
+            type: 'string',
+            description: '要回应的消息ID（可选，不填则自动选择最近一条消息）'
+          },
+          emojiType: {
+            type: 'string',
+            description: '表情类型（必填）。可选值：开心、惊讶、伤心、大笑、害怕、喜欢、爱心、生气。根据消息内容和用户意图选择合适的表情。',
+            enum: ['开心', '惊讶', '伤心', '大笑', '害怕', '喜欢', '爱心', '生气']
+          }
+        },
+        required: ['emojiType']
+      },
+      handler: async (args = {}, context = {}) => {
+        const e = context.e;
+        BotUtil.makeLog(
+          'debug',
+          `[chat.emojiReaction] 调用上下文: hasE=${Boolean(e)}, isGroup=${e?.isGroup}, message_type=${e?.message_type}, group_id=${e?.group_id}, user_id=${e?.user_id}`,
+          'ChatStream'
+        );
+        if (!e?.isGroup) {
+          return { success: false, error: '非群聊环境' };
+        }
+
+        // 兼容英文枚举到内部中文映射
+        const typeMap = {
+          like: '喜欢',
+          love: '爱心',
+          laugh: '大笑',
+          wow: '惊讶',
+          sad: '伤心',
+          angry: '生气'
         };
-        
-        const result = await this.workflowManager.run(params.workflow, params, enrichedContext);
-        return result;
-      },
-      enabled: true
-    });
+        let emojiType = args.emojiType;
+        if (emojiType && typeMap[emojiType]) {
+          emojiType = typeMap[emojiType];
+        }
 
-    // 7. 点赞
-    this.registerFunction('thumbUp', {
-      description: '点赞',
-      prompt: `[点赞:QQ号:次数] - 给某人点赞（1-50次）`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        const regex = /\[点赞:(\d+):(\d+)\]/g;
-        let match;
-        
-        while ((match = regex.exec(text))) {
-          functions.push({ 
-            type: 'thumbUp', 
-            params: { qq: match[1], count: match[2] },
-            raw: match[0]
-          });
+        if (!EMOJI_REACTIONS[emojiType]) {
+          return { success: false, error: '无效表情类型' };
         }
-        
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
+
+        const emojiIds = EMOJI_REACTIONS[emojiType];
+        if (!emojiIds || emojiIds.length === 0) {
+          return { success: false, error: '表情类型无可用表情ID' };
         }
-        
-        return { functions, cleanText };
-      },
-      handler: async (params, context) => {
-        if (context.e?.isGroup) {
-          const thumbCount = Math.min(parseInt(params.count) || 1, 50);
-          try {
-            const member = context.e.group.pickMember(params.qq);
-            await member.thumbUp(thumbCount);
-            await BotUtil.sleep(300);
-          } catch (error) {
-            // 静默失败
+
+        // 如果没有传 msgId，则尝试使用最近一条他人消息的 ID
+        let msgId = String(args.msgId ?? '').trim();
+        if (!msgId && e.group_id) {
+          const history = ChatStream.messageHistory.get(e.group_id) || [];
+          const lastOtherMsg = [...history].reverse().find(
+            m => String(m.user_id) !== String(e.self_id) && m.message_id
+          );
+          if (lastOtherMsg) {
+            msgId = String(lastOtherMsg.message_id);
           }
         }
+
+        if (!msgId) {
+          return { success: false, error: '找不到可回应的消息ID' };
+        }
+
+        const emojiId = Number(emojiIds[Math.floor(Math.random() * emojiIds.length)]);
+
+        try {
+          const group = e.group;
+          if (group && typeof group.setEmojiLike === 'function') {
+            const result = await group.setEmojiLike(msgId, emojiId, true);
+            if (result !== undefined) {
+              await BotUtil.sleep(200);
+              return { success: true, message: '表情回应成功', data: { msgId, emojiId, emojiType } };
+            }
+          }
+          return { success: false, error: '表情回应功能不可用' };
+        } catch (error) {
+          return { success: false, error: error.message };
+        }
       },
       enabled: true
     });
 
-    // 8. 签到
-    this.registerFunction('sign', {
+    this.registerMCPTool('thumbUp', {
+      description: '给群成员点赞',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          qq: {
+            type: 'string',
+            description: '要点赞的成员QQ号'
+          },
+          count: {
+            type: 'number',
+            description: '点赞次数（1-50）',
+            default: 1
+          }
+        },
+        required: ['qq']
+      },
+      handler: async (args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
+        
+        const thumbCount = Math.min(parseInt(args.count) || 1, 50);
+          const member = context.e.group?.pickMember(args.qq);
+        if (!member || typeof member.thumbUp !== 'function') {
+          return { success: false, error: '点赞功能不可用' };
+        }
+
+        return this._wrapHandler(async () => {
+          await member.thumbUp(thumbCount);
+          return { success: true, message: '点赞成功', data: { qq: args.qq, count: thumbCount } };
+        });
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('sign', {
       description: '群签到',
-      prompt: `[签到] - 执行群签到`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        
-        const regex = /\[签到\]/g;
-        let match;
-        while ((match = regex.exec(text))) {
-          functions.push({ type: 'sign', params: {}, raw: match[0] });
-        }
-
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        required: []
       },
-      handler: async (params, context) => {
-        if (context.e?.isGroup) {
-          try {
-            await context.e.group.sign();
-            await BotUtil.sleep(300);
-          } catch (error) {
-            // 静默失败
-          }
-        }
+      handler: async (_args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
+        
+        return this._wrapHandler(async () => {
+          await context.e.group.sign();
+          return { success: true, message: '签到成功' };
+        });
       },
       enabled: true
     });
 
-    // 9. 禁言
-    this.registerFunction('mute', {
-      description: '禁言群成员',
-      prompt: `[禁言:QQ号:时长] - 禁言某人（时长单位：秒，最大2592000秒/30天）
-示例：[禁言:123456:600] 禁言10分钟`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        const regex = /\[禁言:(\d+):(\d+)\]/g;
-        let match;
-        
-        while ((match = regex.exec(text))) {
-          const duration = Math.min(parseInt(match[2]), 2592000);
-          functions.push({ 
-            type: 'mute', 
-            params: { qq: match[1], duration },
-            raw: match[0]
-          });
-        }
-        
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
-      },
-      handler: async (params, context) => {
-        if (context.e?.isGroup) {
-          try {
-            await context.e.group.muteMember(params.qq, params.duration);
-            await BotUtil.sleep(300);
-          } catch (error) {
-            BotUtil.makeLog('warn', `禁言失败: ${error.message}`, 'ChatStream');
+    this.registerMCPTool('mute', {
+      description: '禁言群成员。需要管理员或群主权限。仅群聊环境可用。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          qq: {
+            type: 'string',
+            description: '要禁言的成员QQ号'
+          },
+          duration: {
+            type: 'number',
+            description: '禁言时长（秒）'
           }
-        }
+        },
+        required: ['qq', 'duration']
       },
-      enabled: true,
-      requireAdmin: true
+      handler: async (args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
+        
+        return this._wrapHandler(async () => {
+          await context.e.group.muteMember(args.qq, args.duration);
+          return { success: true, message: '禁言成功', data: { qq: args.qq, duration: args.duration } };
+        });
+      },
+      enabled: true
     });
 
-    // 10. 解禁
-    this.registerFunction('unmute', {
+    this.registerMCPTool('unmute', {
       description: '解除禁言',
-      prompt: `[解禁:QQ号] - 解除某人的禁言`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        const regex = /\[解禁:(\d+)\]/g;
-        let match;
-        
-        while ((match = regex.exec(text))) {
-          functions.push({ 
-            type: 'unmute', 
-            params: { qq: match[1] },
-            raw: match[0]
-          });
-        }
-        
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
-      },
-      handler: async (params, context) => {
-        if (context.e?.isGroup) {
-          try {
-            await context.e.group.muteMember(params.qq, 0);
-            await BotUtil.sleep(300);
-          } catch (error) {
-            BotUtil.makeLog('warn', `解禁失败: ${error.message}`, 'ChatStream');
+      inputSchema: {
+        type: 'object',
+        properties: {
+          qq: {
+            type: 'string',
+            description: '要解禁的成员QQ号'
           }
-        }
+        },
+        required: ['qq']
       },
-      enabled: true,
-      requireAdmin: true
+      handler: async (args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
+        
+        return this._wrapHandler(async () => {
+          await context.e.group.muteMember(args.qq, 0);
+          return { success: true, message: '解禁成功', data: { qq: args.qq } };
+        });
+      },
+      enabled: true
     });
 
-    // 11. 全员禁言
-    this.registerFunction('muteAll', {
+    this.registerMCPTool('muteAll', {
       description: '全员禁言',
-      prompt: `[全员禁言] - 开启全员禁言`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        
-        const regex = /\[全员禁言\]/g;
-        let match;
-        
-        while ((match = regex.exec(text))) {
-          functions.push({ type: 'muteAll', params: { enable: true }, raw: match[0] });
-        }
-
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        required: []
       },
-      handler: async (params, context) => {
-        if (context.e?.isGroup) {
-          try {
-            await context.e.group.muteAll(true);
-            await BotUtil.sleep(300);
-          } catch (error) {
-            BotUtil.makeLog('warn', `全员禁言失败: ${error.message}`, 'ChatStream');
-          }
-        }
+      handler: async (_args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
+        
+        return this._wrapHandler(async () => {
+          await context.e.group.muteAll(true);
+          return { success: true, message: '全员禁言成功' };
+        });
       },
-      enabled: true,
-      requireAdmin: true
+      enabled: true
     });
 
-    // 12. 解除全员禁言
-    this.registerFunction('unmuteAll', {
+    this.registerMCPTool('unmuteAll', {
       description: '解除全员禁言',
-      prompt: `[解除全员禁言] - 关闭全员禁言`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        
-        const regex = /\[解除全员禁言\]/g;
-        let match;
-
-        while ((match = regex.exec(text))) {
-          functions.push({ type: 'unmuteAll', params: { enable: false }, raw: match[0] });
-        }
-
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        required: []
       },
-      handler: async (params, context) => {
-        if (context.e?.isGroup) {
-          try {
-            await context.e.group.muteAll(false);
-            await BotUtil.sleep(300);
-          } catch (error) {
-            BotUtil.makeLog('warn', `解除全员禁言失败: ${error.message}`, 'ChatStream');
-          }
-        }
+      handler: async (_args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
+        
+        return this._wrapHandler(async () => {
+          await context.e.group.muteAll(false);
+          return { success: true, message: '解除全员禁言成功' };
+        });
       },
-      enabled: true,
-      requireAdmin: true
+      enabled: true
     });
 
-    // 13. 改群名片
-    this.registerFunction('setCard', {
-      description: '修改群名片',
-      prompt: `[改名片:QQ号:新名片] - 修改某人的群名片
-示例：[改名片:123456:小明]`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        const regex = /\[改名片:(\d+):([^\]]+)\]/g;
-        let match;
-        
-        while ((match = regex.exec(text))) {
-          functions.push({ 
-            type: 'setCard', 
-            params: { qq: match[1], card: match[2] },
-            raw: match[0]
-          });
-        }
-        
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
-      },
-      handler: async (params, context) => {
-        if (context.e?.isGroup) {
-          try {
-            await context.e.group.setCard(params.qq, params.card);
-            await BotUtil.sleep(300);
-          } catch (error) {
-            BotUtil.makeLog('warn', `改名片失败: ${error.message}`, 'ChatStream');
+    this.registerMCPTool('setCard', {
+      description: '修改群名片。未指定QQ号时默认修改机器人自己的名片。需要管理员或群主权限。仅群聊环境可用。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          qq: {
+            type: 'string',
+            description: '成员QQ号'
+          },
+          card: {
+            type: 'string',
+            description: '新名片'
           }
-        }
+        },
+        required: ['card']
       },
-      enabled: true,
-      requireAdmin: true
+      handler: async (args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
+        
+          const e = context.e;
+          let targetQq = String(args.qq || '').trim();
+          if (!targetQq) {
+            targetQq = String(e.self_id || e.bot?.uin || '').trim() || String(e.user_id || '').trim();
+          }
+          if (!targetQq) {
+            return { success: false, error: '无法确定要修改名片的成员QQ号' };
+          }
+
+        return this._wrapHandler(async () => {
+          await context.e.group.setCard(targetQq, args.card);
+          return { success: true, message: '修改名片成功', data: { qq: targetQq, card: args.card } };
+        });
+      },
+      enabled: true
     });
 
-    // 14. 改群名
-    this.registerFunction('setGroupName', {
+    this.registerMCPTool('setGroupName', {
       description: '修改群名',
-      prompt: `[改群名:新群名] - 修改当前群的群名
-示例：[改群名:快乐大家庭]`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        const regex = /\[改群名:([^\]]+)\]/g;
-        let match;
-        
-        while ((match = regex.exec(text))) {
-          functions.push({ 
-            type: 'setGroupName', 
-            params: { name: match[1] },
-            raw: match[0]
-          });
-        }
-        
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
-      },
-      handler: async (params, context) => {
-        if (context.e?.isGroup) {
-          try {
-            await context.e.group.setName(params.name);
-            await BotUtil.sleep(300);
-          } catch (error) {
-            BotUtil.makeLog('warn', `改群名失败: ${error.message}`, 'ChatStream');
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: '新群名'
           }
-        }
+        },
+        required: ['name']
       },
-      enabled: true,
-      requireAdmin: true
+      handler: async (args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
+        
+        return this._wrapHandler(async () => {
+          await context.e.group.setName(args.name);
+          return { success: true, message: '修改群名成功', data: { name: args.name } };
+        });
+      },
+      enabled: true
     });
 
-    // 15. 设置管理员
-    this.registerFunction('setAdmin', {
+    this.registerMCPTool('setAdmin', {
       description: '设置管理员',
-      prompt: `[设管:QQ号] - 设置某人为管理员`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        const regex = /\[设管:(\d+)\]/g;
-        let match;
-        
-        while ((match = regex.exec(text))) {
-          functions.push({ 
-            type: 'setAdmin', 
-            params: { qq: match[1], enable: true },
-            raw: match[0]
-          });
-        }
-        
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
-      },
-      handler: async (params, context) => {
-        if (context.e?.isGroup) {
-          try {
-            await context.e.group.setAdmin(params.qq, true);
-            await BotUtil.sleep(300);
-          } catch (error) {
-            BotUtil.makeLog('warn', `设置管理员失败: ${error.message}`, 'ChatStream');
+      inputSchema: {
+        type: 'object',
+        properties: {
+          qq: {
+            type: 'string',
+            description: '成员QQ号'
           }
-        }
+        },
+        required: ['qq']
       },
-      enabled: true,
-      requireOwner: true
+      handler: async (args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
+        
+        return this._wrapHandler(async () => {
+          await context.e.group.setAdmin(args.qq, true);
+          return { success: true, message: '设置管理员成功', data: { qq: args.qq } };
+        });
+      },
+      enabled: true
     });
 
-    // 16. 取消管理员
-    this.registerFunction('unsetAdmin', {
+    this.registerMCPTool('unsetAdmin', {
       description: '取消管理员',
-      prompt: `[取管:QQ号] - 取消某人的管理员`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        const regex = /\[取管:(\d+)\]/g;
-        let match;
-        
-        while ((match = regex.exec(text))) {
-          functions.push({ 
-            type: 'unsetAdmin', 
-            params: { qq: match[1], enable: false },
-            raw: match[0]
-          });
-        }
-        
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
-      },
-      handler: async (params, context) => {
-        if (context.e?.isGroup) {
-          try {
-            await context.e.group.setAdmin(params.qq, false);
-            await BotUtil.sleep(300);
-          } catch (error) {
-            BotUtil.makeLog('warn', `取消管理员失败: ${error.message}`, 'ChatStream');
+      inputSchema: {
+        type: 'object',
+        properties: {
+          qq: {
+            type: 'string',
+            description: '成员QQ号'
           }
-        }
+        },
+        required: ['qq']
       },
-      enabled: true,
-      requireOwner: true
+      handler: async (args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
+        
+        return this._wrapHandler(async () => {
+          await context.e.group.setAdmin(args.qq, false);
+          return { success: true, message: '取消管理员成功', data: { qq: args.qq } };
+        });
+      },
+      enabled: true
     });
 
-    // 17. 设置头衔
-    this.registerFunction('setTitle', {
+    this.registerMCPTool('setTitle', {
       description: '设置专属头衔',
-      prompt: `[头衔:QQ号:头衔名:时长] - 设置某人的专属头衔
-时长：-1为永久，单位秒
-示例：[头衔:123456:大佬:-1]`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        const regex = /\[头衔:(\d+):([^:]+):(-?\d+)\]/g;
-        let match;
-        
-        while ((match = regex.exec(text))) {
-          functions.push({ 
-            type: 'setTitle', 
-            params: { 
-              qq: match[1], 
-              title: match[2],
-              duration: parseInt(match[3])
-            },
-            raw: match[0]
-          });
-        }
-        
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
-      },
-      handler: async (params, context) => {
-        if (context.e?.isGroup) {
-          try {
-            await context.e.group.setTitle(params.qq, params.title, params.duration);
-            await BotUtil.sleep(300);
-          } catch (error) {
-            BotUtil.makeLog('warn', `设置头衔失败: ${error.message}`, 'ChatStream');
+      inputSchema: {
+        type: 'object',
+        properties: {
+          qq: {
+            type: 'string',
+            description: '成员QQ号'
+          },
+          title: {
+            type: 'string',
+            description: '头衔名称'
+          },
+          duration: {
+            type: 'number',
+            description: '持续时间（秒）',
+            default: -1
           }
-        }
+        },
+        required: ['qq', 'title']
       },
-      enabled: true,
-      requireOwner: true
+      handler: async (args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
+        
+        return this._wrapHandler(async () => {
+          await context.e.group.setTitle(args.qq, args.title, args.duration || -1);
+          return { success: true, message: '设置头衔成功', data: { qq: args.qq, title: args.title } };
+        });
+      },
+      enabled: true
     });
 
-    // 18. 踢人
-    this.registerFunction('kick', {
+    this.registerMCPTool('kick', {
       description: '踢出群成员',
-      prompt: `[踢人:QQ号] - 踢出某人
-[踢人:QQ号:拒绝] - 踢出某人并拒绝再次加群`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        const regex = /\[踢人:(\d+)(?::([^\]]+))?\]/g;
-        let match;
-        
-        while ((match = regex.exec(text))) {
-          functions.push({ 
-            type: 'kick', 
-            params: { 
-              qq: match[1],
-              reject: match[2] === '拒绝'
-            },
-            raw: match[0]
-          });
-        }
-        
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
-      },
-      handler: async (params, context) => {
-        if (context.e?.isGroup) {
-          try {
-            await context.e.group.kickMember(params.qq, params.reject);
-            await BotUtil.sleep(300);
-          } catch (error) {
-            BotUtil.makeLog('warn', `踢人失败: ${error.message}`, 'ChatStream');
+      inputSchema: {
+        type: 'object',
+        properties: {
+          qq: {
+            type: 'string',
+            description: '要踢出的成员QQ号'
+          },
+          reject: {
+            type: 'boolean',
+            description: '是否拒绝再次申请',
+            default: false
           }
-        }
+        },
+        required: ['qq']
       },
-      enabled: true,
-      requireAdmin: true
+      handler: async (args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
+        
+        return this._wrapHandler(async () => {
+          await context.e.group.kickMember(args.qq, args.reject || false);
+          return { success: true, message: '踢出成员成功', data: { qq: args.qq } };
+        });
+      },
+      enabled: true
     });
 
-    // 19. 设置精华消息
-    this.registerFunction('setEssence', {
+    this.registerMCPTool('setEssence', {
       description: '设置精华消息',
-      prompt: `[设精华:消息ID] - 将某条消息设为精华
-重要：消息ID可以从聊天记录中看到，格式为 [ID:消息ID]，使用时直接使用数字部分
-示例：[设精华:1234567890] 将消息ID为1234567890的消息设为精华`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        // 支持 ID:123456 或 123456 格式
-        const regex = /\[设精华:(?:ID:)?([^\]]+)\]/g;
-        let match;
-        
-        while ((match = regex.exec(text))) {
-          functions.push({ 
-            type: 'setEssence', 
-            params: { msgId: String(match[1].trim()) },
-            raw: match[0]
-          });
-        }
-        
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
-      },
-      handler: async (params, context) => {
-        if (context.e?.isGroup && context.e.bot) {
-          try {
-            // 清理消息ID（支持 ID:123456 或 123456 格式）
-            let msgId = String(params.msgId).trim();
-            if (msgId.startsWith('ID:')) {
-              msgId = msgId.substring(3).trim();
-            }
-            if (msgId) {
-              await context.e.bot.setEssenceMessage(msgId);
-              await BotUtil.sleep(300);
-            }
-          } catch (error) {
-            BotUtil.makeLog('warn', `设置精华失败: ${error.message}`, 'ChatStream');
+      inputSchema: {
+        type: 'object',
+        properties: {
+          msgId: {
+            type: 'string',
+            description: '消息ID'
           }
-        }
+        },
+        required: ['msgId']
       },
-      enabled: true,
-      requireAdmin: true
+      handler: async (args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
+        
+        const msgId = String(args.msgId ?? '').trim();
+        if (!msgId) {
+          return { success: false, error: '消息ID不能为空' };
+        }
+        
+        return this._wrapHandler(async () => {
+          const group = context.e.group;
+          if (group && typeof group.setEssenceMessage === 'function') {
+            await group.setEssenceMessage(msgId);
+            return { success: true, message: '设置精华成功', data: { msgId } };
+          } else if (context.e.bot?.sendApi) {
+            await context.e.bot.sendApi('set_essence_msg', { message_id: msgId });
+            return { success: true, message: '设置精华成功', data: { msgId } };
+          }
+          return { success: false, error: 'API不可用' };
+        });
+      },
+      enabled: true
     });
 
-    // 20. 取消精华消息
-    this.registerFunction('removeEssence', {
+    this.registerMCPTool('removeEssence', {
       description: '取消精华消息',
-      prompt: `[取消精华:消息ID] - 取消某条精华消息
-重要：消息ID可以从聊天记录中看到，格式为 [ID:消息ID]，使用时直接使用数字部分
-示例：[取消精华:1234567890] 取消消息ID为1234567890的精华消息`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        // 支持 ID:123456 或 123456 格式
-        const regex = /\[取消精华:(?:ID:)?([^\]]+)\]/g;
-        let match;
-        
-        while ((match = regex.exec(text))) {
-          functions.push({ 
-            type: 'removeEssence', 
-            params: { msgId: String(match[1].trim()) },
-            raw: match[0]
-          });
-        }
-        
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
-      },
-      handler: async (params, context) => {
-        if (context.e?.isGroup && context.e.bot) {
-          try {
-            // 清理消息ID（支持 ID:123456 或 123456 格式）
-            let msgId = String(params.msgId).trim();
-            if (msgId.startsWith('ID:')) {
-              msgId = msgId.substring(3).trim();
-            }
-            if (msgId) {
-              await context.e.bot.removeEssenceMessage(msgId);
-              await BotUtil.sleep(300);
-            }
-          } catch (error) {
-            BotUtil.makeLog('warn', `取消精华失败: ${error.message}`, 'ChatStream');
+      inputSchema: {
+        type: 'object',
+        properties: {
+          msgId: {
+            type: 'string',
+            description: '消息ID'
           }
-        }
+        },
+        required: ['msgId']
       },
-      enabled: true,
-      requireAdmin: true
+      handler: async (args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
+        
+        const msgId = String(args.msgId ?? '').trim();
+        if (!msgId) {
+          return { success: false, error: '消息ID不能为空' };
+        }
+        
+        return this._wrapHandler(async () => {
+          const group = context.e.group;
+          if (group && typeof group.removeEssenceMessage === 'function') {
+            await group.removeEssenceMessage(msgId);
+            return { success: true, message: '取消精华成功', data: { msgId } };
+          }
+          return { success: false, error: 'API不可用' };
+        });
+      },
+      enabled: true
     });
 
-    // 21. 发送群公告
-    this.registerFunction('announce', {
+    this.registerMCPTool('announce', {
       description: '发送群公告',
-      prompt: `[公告:公告内容] - 发送群公告
-示例：[公告:明天晚上8点开会]`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        const regex = /\[公告:([^\]]+)\]/g;
-        let match;
-        
-        while ((match = regex.exec(text))) {
-          functions.push({ 
-            type: 'announce', 
-            params: { content: match[1] },
-            raw: match[0]
-          });
-        }
-        
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
+      inputSchema: {
+        type: 'object',
+        properties: {
+          content: {
+            type: 'string',
+            description: '公告内容'
+          },
+          image: {
+            type: 'string',
+            description: '公告图片URL（可选）'
+          }
+        },
+        required: ['content']
       },
-      handler: async (params, context) => {
-        if (context.e?.isGroup && context.e.bot) {
-          try {
-            await context.e.bot.sendApi('_send_group_notice', {
-              group_id: context.e.group_id,
-              content: params.content
-            });
-            await BotUtil.sleep(300);
-          } catch (error) {
-            BotUtil.makeLog('warn', `发送公告失败: ${error.message}`, 'ChatStream');
-          }
-        }
-      },
-      enabled: true,
-      requireAdmin: true
-    });
-
-    // 22. 点歌功能（钩子：触发 message 事件）
-    this.registerFunction('playMusic', {
-      description: '点歌功能',
-      prompt: `[点歌:歌曲名] - 触发点歌功能，模拟用户发送#点歌指令
-示例：[点歌:南山南]`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        const regex = /\[点歌:([^\]]+)\]/g;
-        let match;
+      handler: async (args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
         
-        while ((match = regex.exec(text))) {
-          functions.push({ 
-            type: 'playMusic', 
-            params: { songName: match[1].trim() },
-            raw: match[0]
-          });
+        const content = String(args.content ?? '').trim();
+        if (!content) {
+          return { success: false, error: '公告内容不能为空' };
         }
         
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
-      },
-      handler: async (params, context) => {
-        if (!context.e) {
-          BotUtil.makeLog('warn', '点歌功能：缺少事件对象', 'ChatStream');
-          return;
-        }
-        
-        try {
-          const songName = params?.songName?.trim();
-          if (!songName) {
-            BotUtil.makeLog('warn', '点歌功能：歌曲名为空', 'ChatStream');
-            return;
-          }
-
-          // 模拟用户发送 #点歌 指令，触发 message 事件
-          const simulatedMessage = `#点歌${songName}`;
-          const success = await simulateUserMessageEvent(context.e, simulatedMessage);
-          if (!success) {
-            BotUtil.makeLog('warn', '点歌功能：触发消息事件失败', 'ChatStream');
-          }
-        } catch (error) {
-          BotUtil.makeLog('error', `点歌功能失败: ${error.message}`, 'ChatStream');
-          // 尝试重试一次
-          try {
-            const songName = params?.songName?.trim();
-            if (songName) {
-              await simulateUserMessageEvent(context.e, `#点歌${songName}`);
-            }
-          } catch (retryError) {
-            BotUtil.makeLog('error', `点歌功能重试失败: ${retryError.message}`, 'ChatStream');
-          }
-        }
-      },
-      enabled: true
-    });
-
-    // 23. 网易点歌功能（钩子：触发 message 事件）
-    this.registerFunction('neteasePlayMusic', {
-      description: '网易云点歌功能',
-      prompt: `[网易点歌:歌曲名] - 触发网易云点歌功能，模拟用户发送#网易点歌指令
-示例：[网易点歌:晴天]`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        const regex = /\[网易点歌:([^\]]+)\]/g;
-        let match;
-        
-        while ((match = regex.exec(text))) {
-          functions.push({ 
-            type: 'neteasePlayMusic', 
-            params: { songName: match[1].trim() },
-            raw: match[0]
-          });
-        }
-        
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
-      },
-      handler: async (params, context) => {
-        if (!context.e) {
-          BotUtil.makeLog('warn', '网易点歌功能：缺少事件对象', 'ChatStream');
-          return;
-        }
-
-        try {
-          const songName = params?.songName?.trim();
-          if (!songName) {
-            BotUtil.makeLog('warn', '网易点歌功能：歌曲名为空', 'ChatStream');
-            return;
-          }
-
-          // 模拟用户发送 #网易点歌 指令，触发 message 事件
-          const simulatedMessage = `#网易点歌${songName}`;
-          const success = await simulateUserMessageEvent(context.e, simulatedMessage);
-          if (!success) {
-            BotUtil.makeLog('warn', '网易点歌功能：触发消息事件失败', 'ChatStream');
-          }
-        } catch (error) {
-          BotUtil.makeLog('error', `网易点歌功能失败: ${error.message}`, 'ChatStream');
-          // 尝试重试一次
-          try {
-            const songName = params?.songName?.trim();
-            if (songName) {
-              await simulateUserMessageEvent(context.e, `#网易点歌${songName}`);
-            }
-          } catch (retryError) {
-            BotUtil.makeLog('error', `网易点歌功能重试失败: ${retryError.message}`, 'ChatStream');
-          }
-        }
-      },
-      enabled: true
-    });
-
-    // 24. 查天气功能（钩子：触发 message 事件）
-    this.registerFunction('queryWeather', {
-      description: '查天气功能',
-      prompt: `[查天气:城市名] - 触发查天气功能，模拟用户发送#查天气指令，用户要查天气优先使用这个
-示例：[查天气:上海]`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        const regex = /\[查天气:([^\]]+)\]/g;
-        let match;
-        
-        while ((match = regex.exec(text))) {
-          functions.push({ 
-            type: 'queryWeather', 
-            params: { cityName: match[1].trim() },
-            raw: match[0]
-          });
-        }
-        
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
-      },
-      handler: async (params, context) => {
-        if (!context.e) {
-          BotUtil.makeLog('warn', '查天气功能：缺少事件对象', 'ChatStream');
-          return;
-        }
-
-        try {
-          const cityName = params?.cityName?.trim();
-          if (!cityName) {
-            BotUtil.makeLog('warn', '查天气功能：城市名为空', 'ChatStream');
-            return;
-          }
-
-          // 模拟用户发送 #查天气 指令，触发 message 事件
-          const simulatedMessage = `#查天气${cityName}`;
-          const success = await simulateUserMessageEvent(context.e, simulatedMessage);
-          if (!success) {
-            BotUtil.makeLog('warn', '查天气功能：触发消息事件失败', 'ChatStream');
-          }
-        } catch (error) {
-          BotUtil.makeLog('error', `查天气功能失败: ${error.message}`, 'ChatStream');
-          // 尝试重试一次
-          try {
-            const cityName = params?.cityName?.trim();
-            if (cityName) {
-              await simulateUserMessageEvent(context.e, `#查天气${cityName}`);
-            }
-          } catch (retryError) {
-            BotUtil.makeLog('error', `查天气功能重试失败: ${retryError.message}`, 'ChatStream');
-          }
-        }
-      },
-      enabled: true
-    });
-
-    // 25. 今日运势功能（钩子：触发 message 事件）
-    this.registerFunction('todayFortune', {
-      description: '今日运势功能',
-      prompt: `[今日运势] - 触发今日运势功能，模拟用户发送#今日运势指令，帮用户查运势
-示例：[今日运势]`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        const regex = /\[今日运势\]/g;
-        let match;
-        
-        while ((match = regex.exec(text))) {
-          functions.push({ 
-            type: 'todayFortune', 
-            params: {},
-            raw: match[0]
-          });
-        }
-        
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
-      },
-      handler: async (params, context) => {
-        if (!context.e) {
-          BotUtil.makeLog('warn', '今日运势功能：缺少事件对象', 'ChatStream');
-          return;
-        }
-
-        try {
-          // 模拟用户发送 #今日运势 指令，触发 message 事件
-          const simulatedMessage = '#今日运势';
-          const success = await simulateUserMessageEvent(context.e, simulatedMessage);
-          if (!success) {
-            BotUtil.makeLog('warn', '今日运势功能：触发消息事件失败', 'ChatStream');
-          }
-        } catch (error) {
-          BotUtil.makeLog('error', `今日运势功能失败: ${error.message}`, 'ChatStream');
-          // 尝试重试一次
-          try {
-            await simulateUserMessageEvent(context.e, '#今日运势');
-          } catch (retryError) {
-            BotUtil.makeLog('error', `今日运势功能重试失败: ${retryError.message}`, 'ChatStream');
-          }
-        }
-      },
-      enabled: true
-    });
-
-    // 26. 基于记忆触发指令（智能体记忆触发）
-    this.registerFunction('triggerCommand', {
-      description: '基于记忆触发指令',
-      prompt: `[当前:指令] - 根据记忆触发用户指令，AI可以通过记忆自动触发指令
-示例：[当前:#帮助] 会以事件记录的这个人的名义发送#帮助指令
-使用场景：当AI记住了"我想看帮助就触发#帮助"时，AI可以发送[当前:#帮助]来触发帮助指令
-支持所有指令格式，如 [当前:#点歌南山南]、[当前:#查天气北京] 等`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        const regex = /\[当前:([^\]]+)\]/g;
-        let match;
-        
-        while ((match = regex.exec(text))) {
-          const command = match[1].trim();
-          if (command) {
-            functions.push({ 
-              type: 'triggerCommand', 
-              params: { command: command },
-              raw: match[0]
-            });
-          }
-        }
-        
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
-      },
-      handler: async (params, context) => {
-        if (!context.e) {
-          BotUtil.makeLog('warn', '触发指令功能：缺少事件对象', 'ChatStream');
-          return;
-        }
-        
-        try {
-          const command = params.command;
-          if (!command) {
-            BotUtil.makeLog('warn', '触发指令功能：指令为空', 'ChatStream');
-            return;
-          }
-
-          // 从记忆系统中查找相关记忆
-          const memorySystem = this.getMemorySystem();
-          if (memorySystem?.isEnabled()) {
-            const { ownerId, scene } = memorySystem.extractScene(context.e);
-            const memories = await memorySystem.getMemories(ownerId, scene, { 
-              limit: 10, 
-              layers: ['long', 'short', 'master'] 
-            });
-            
-            // 查找与当前指令相关的记忆
-            const relevantMemories = memories.filter(mem => {
-              const memContent = mem.content?.toLowerCase() || '';
-              const cmdLower = command.toLowerCase();
-              return memContent.includes(cmdLower) || 
-                     memContent.includes('触发') || 
-                     memContent.includes('发送');
-            });
-            
-            if (relevantMemories.length > 0) {
-              BotUtil.makeLog('info', 
-                `[触发指令] 找到${relevantMemories.length}条相关记忆，触发指令: ${command}`, 
-                'ChatStream'
-              );
-            }
-          }
-
-          // 模拟用户发送指令，触发 message 事件
-          // 确保指令以#开头（如果没有的话）
-          const simulatedMessage = command.startsWith('#') ? command : `#${command}`;
-          await simulateUserMessageEvent(context.e, simulatedMessage);
+        return this._wrapHandler(async () => {
+          const group = context.e.group;
+          const image = args.image ? String(args.image).trim() : undefined;
           
-          BotUtil.makeLog('info', 
-            `[触发指令] 已触发指令: ${simulatedMessage} (用户: ${context.e.user_id})`, 
-            'ChatStream'
-          );
-        } catch (error) {
-          BotUtil.makeLog('error', 
-            `触发指令功能失败: ${error.message}`, 
-            'ChatStream'
-          );
-          // 即使出错也尝试触发，提高健壮性
-          try {
-            const command = params.command;
-            const simulatedMessage = command.startsWith('#') ? command : `#${command}`;
-            await simulateUserMessageEvent(context.e, simulatedMessage);
-          } catch (retryError) {
-            BotUtil.makeLog('error', 
-              `触发指令重试失败: ${retryError.message}`, 
-              'ChatStream'
-            );
+          if (group && typeof group.sendNotice === 'function') {
+            const result = await group.sendNotice(content, image ? { image } : {});
+            if (result !== undefined) {
+              return { success: true, message: '发送群公告成功', data: { content } };
+            }
+          } else if (context.e.bot?.sendApi) {
+            const apiParams = { group_id: context.e.group_id, content };
+            if (image) apiParams.image = image;
+            const result = await context.e.bot.sendApi('_send_group_notice', apiParams);
+            if (result?.status === 'ok') {
+              return { success: true, message: '发送群公告成功', data: { content } };
+            }
           }
-        }
+          return { success: false, error: 'API不可用' };
+        });
       },
       enabled: true
     });
 
-    // 23. 撤回消息
-    this.registerFunction('recall', {
+    this.registerMCPTool('recall', {
       description: '撤回消息',
-      prompt: `[撤回:消息ID] - 撤回指定消息
-重要说明：
-1. 消息ID可以从聊天记录中看到，格式为 [ID:消息ID]，使用时直接使用数字部分
-2. 撤回别人的消息需要管理员权限
-3. 撤回自己的消息需要在3分钟内
-示例：[撤回:1234567890] 或 [撤回:ID:1234567890]`,
-      parser: (text, context) => {
-        const functions = [];
-        let cleanText = text;
-        // 支持 ID:123456 或 123456 格式
-        const regex = /\[撤回:(?:ID:)?([^\]]+)\]/g;
-        let match;
-        
-        while ((match = regex.exec(text))) {
-          functions.push({ 
-            type: 'recall', 
-            params: { msgId: String(match[1].trim()) },
-            raw: match[0]
-          });
-        }
-        
-        if (functions.length > 0) {
-          cleanText = text.replace(regex, '').trim();
-        }
-        
-        return { functions, cleanText };
+      inputSchema: {
+        type: 'object',
+        properties: {
+          msgId: {
+            type: 'string',
+            description: '要撤回的消息ID'
+          }
+        },
+        required: ['msgId']
       },
-      handler: async (params, context) => {
-        if (!context.e) return;
+      handler: async (args = {}, context = {}) => {
+        if (!context.e) {
+          return { success: false, error: '事件对象不存在' };
+        }
         
         try {
-          // 清理消息ID（支持 ID:123456 或 123456 格式）
-          let msgId = String(params.msgId ?? '').trim();
-          if (msgId.startsWith('ID:')) {
-            msgId = msgId.substring(3).trim();
-          }
-          if (!msgId) {
-            BotUtil.makeLog('warn', '撤回消息：消息ID为空', 'ChatStream');
-            return;
-          }
-          
           let canRecall = false;
           let messageInfo = null;
           
-          try {
-            if (context.e.bot?.sendApi) {
-              messageInfo = await context.e.bot.sendApi('get_msg', { message_id: msgId });
+          if (context.e.bot && context.e.bot.sendApi) {
+            try {
+              messageInfo = await context.e.bot.sendApi('get_msg', { message_id: args.msgId });
+            } catch {
+              // 忽略获取消息信息失败
             }
-          } catch (error) {
-            // 忽略获取消息信息失败
           }
           
           if (context.e.isGroup) {
-            // 群聊消息撤回逻辑
             const botRole = await this.getBotRole(context.e);
             const isAdmin = botRole === '管理员' || botRole === '群主';
             
-            if (messageInfo?.data) {
+            if (messageInfo && messageInfo.data) {
               const msgData = messageInfo.data;
               const isSelfMsg = String(msgData.sender?.user_id) === String(context.e.self_id);
-              const msgTime = msgData.time ?? 0;
+              const msgTime = msgData.time || 0;
               const currentTime = Math.floor(Date.now() / 1000);
               const timeDiff = currentTime - msgTime;
               
@@ -1927,52 +832,344 @@ export default class ChatStream extends AIStream {
               } else if (isAdmin) {
                 canRecall = true;
               } else {
-                BotUtil.makeLog('warn', 
-                  `无法撤回: ${isSelfMsg ? '消息已超过3分钟' : '需要管理员权限'}`, 
-                  'ChatStream'
-                );
-                return;
+                return { success: false, error: isSelfMsg ? '消息已超过3分钟' : '需要管理员权限' };
               }
             } else if (isAdmin) {
               canRecall = true;
             }
           } else {
-            // 私聊消息撤回逻辑
-            if (messageInfo?.data) {
+            if (messageInfo && messageInfo.data) {
               const msgData = messageInfo.data;
               const isSelfMsg = String(msgData.sender?.user_id) === String(context.e.self_id);
-              const msgTime = msgData.time ?? 0;
+              const msgTime = msgData.time || 0;
               const currentTime = Math.floor(Date.now() / 1000);
               const timeDiff = currentTime - msgTime;
               
               if (isSelfMsg && timeDiff <= 180) {
                 canRecall = true;
               } else {
-                BotUtil.makeLog('warn', 
-                  `无法撤回私聊消息: ${isSelfMsg ? '已超过3分钟' : '不是自己的消息'}`, 
-                  'ChatStream'
-                );
-                return;
+                return { success: false, error: isSelfMsg ? '已超过3分钟' : '不是自己的消息' };
               }
             } else {
               canRecall = true;
             }
           }
           
-          if (canRecall) {
-            if (context.e.isGroup && context.e.group) {
-              await context.e.group.recallMsg(msgId);
-            } else if (context.e.bot?.sendApi) {
-              await context.e.bot.sendApi('delete_msg', { message_id: msgId });
-            }
-            await BotUtil.sleep(300);
+          if (!canRecall) {
+            return { success: false, error: '无法撤回消息' };
           }
+
+          return this._wrapHandler(async () => {
+            if (context.e.isGroup && context.e.group) {
+              await context.e.group.recallMsg(args.msgId);
+            } else if (context.e.bot) {
+              await context.e.bot.sendApi('delete_msg', { message_id: args.msgId });
+            }
+            return { success: true, message: '消息撤回成功', data: { msgId: args.msgId } };
+          });
         } catch (error) {
-          BotUtil.makeLog('warn', `撤回消息失败: ${error.message}`, 'ChatStream');
+          return { success: false, error: error.message };
         }
       },
-      enabled: true,
-      requirePermissionCheck: true
+      enabled: true
+    });
+
+    /**
+     * 获取群的扩展详细信息
+     * 
+     * @description 获取当前群的扩展详细信息，包括更多群信息（如群等级、成员数上限等）。
+     * 
+     * @param {} 无需参数
+     * 
+     * @returns {Object} 返回结果对象
+     * @returns {boolean} returns.success - 是否成功
+     * @returns {Object} returns.data - 群的扩展信息对象
+     * @returns {string} returns.error - 失败时的错误信息
+     * 
+     * @example
+     * // 调用示例
+     * {}
+     * 
+     * @note 此功能仅在群聊环境中可用
+     */
+    this.registerMCPTool('getGroupInfoEx', {
+      description: '获取群的扩展详细信息（包括更多群信息）。此功能仅在群聊中可用。',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        required: []
+      },
+      handler: async (_args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
+        
+        return this._wrapHandler(async () => {
+          const group = context.e.group;
+          if (group && typeof group.getInfoEx === 'function') {
+            const info = await group.getInfoEx();
+            BotUtil.makeLog('debug', `获取群信息ex成功: ${JSON.stringify(info)}`, 'ChatStream');
+            return { success: true, data: info };
+          }
+          return { success: false, error: 'API不可用' };
+        }, 0).catch(error => {
+          BotUtil.makeLog('warn', `获取群信息ex失败: ${error.message}`, 'ChatStream');
+          return { success: false, error: error.message };
+        });
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('getAtAllRemain', {
+      description: '获取群@全体成员的剩余次数',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        required: []
+      },
+      handler: async (_args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
+        
+        return this._wrapHandler(async () => {
+          const group = context.e.group;
+          if (group && typeof group.getAtAllRemain === 'function') {
+            const remain = await group.getAtAllRemain();
+            BotUtil.makeLog('debug', `@全体成员剩余次数: ${JSON.stringify(remain)}`, 'ChatStream');
+            return { success: true, data: remain };
+          }
+          return { success: false, error: 'API不可用' };
+        }, 0).catch(error => {
+          BotUtil.makeLog('warn', `获取@全体剩余次数失败: ${error.message}`, 'ChatStream');
+          return { success: false, error: error.message };
+        });
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('getBanList', {
+      description: '获取当前被禁言的成员列表',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        required: []
+      },
+      handler: async (_args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
+        
+        return this._wrapHandler(async () => {
+          const group = context.e.group;
+          if (group && typeof group.getBanList === 'function') {
+            const banList = await group.getBanList();
+            BotUtil.makeLog('debug', `群禁言列表: ${JSON.stringify(banList)}`, 'ChatStream');
+            return { success: true, data: banList };
+          }
+          return { success: false, error: 'API不可用' };
+        }, 0).catch(error => {
+          BotUtil.makeLog('warn', `获取禁言列表失败: ${error.message}`, 'ChatStream');
+          return { success: false, error: error.message };
+        });
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('setGroupTodo', {
+      description: '设置群代办',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          msgId: {
+            type: 'string',
+            description: '消息ID'
+          }
+        },
+        required: ['msgId']
+      },
+      handler: async (args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
+        
+        const msgId = String(args.msgId ?? '').trim();
+        if (!msgId) {
+          return { success: false, error: '消息ID不能为空' };
+        }
+        
+        return this._wrapHandler(async () => {
+          const e = context.e;
+          const botRole = await this.getBotRole(e);
+          const isAdmin = botRole === '管理员' || botRole === '群主';
+          if (!isAdmin) {
+            return { success: false, error: '需要管理员或群主权限才能设置群代办' };
+          }
+
+          if (e.bot?.sendApi) {
+            const result = await e.bot.sendApi('set_group_todo', {
+              group_id: e.group_id,
+              message_id: msgId
+            });
+            if (result !== undefined) {
+              return { success: true, message: '设置群代办成功', data: { msgId } };
+            }
+          }
+          return { success: false, error: 'API不可用' };
+        });
+      },
+      enabled: true
+    });
+
+    // 获取好友列表（QQ号、昵称、备注）
+    this.registerMCPTool('getFriendList', {
+      description: '获取当前机器人的好友列表（QQ号、昵称、备注）',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        required: []
+      },
+      handler: async (_args = {}, context = {}) => {
+        const e = context.e;
+        const bot = e?.bot;
+        if (!bot || typeof bot.getFriendMap !== 'function') {
+          return { success: false, error: '当前适配器不支持获取好友列表' };
+        }
+
+        try {
+          const map = await bot.getFriendMap();
+          const friends = [];
+          if (map && typeof map.forEach === 'function') {
+            map.forEach((info, uid) => {
+              if (!uid) return;
+              const qq = String(uid);
+              const nickname = info?.nickname || '';
+              const remark = info?.remark || '';
+              friends.push({ qq, nickname, remark });
+            });
+          }
+
+          BotUtil.makeLog(
+            'debug',
+            `[chat.getFriendList] 好友数量: ${friends.length}`,
+            'ChatStream'
+          );
+
+          return {
+            success: true,
+            data: { friends }
+          };
+        } catch (error) {
+          return { success: false, error: error.message };
+        }
+      },
+      enabled: true
+    });
+
+    // 获取当前群成员列表（包含QQ号、昵称、名片、角色、是否管理员/群主）
+    /**
+     * 获取群成员列表
+     * 
+     * @description 获取当前群的所有成员列表，包含QQ号、昵称、名片、角色、是否管理员/群主等信息。
+     * 
+     * @param {} 无需参数
+     * 
+     * @returns {Object} 返回结果对象
+     * @returns {boolean} returns.success - 是否成功
+     * @returns {Object} returns.data - 数据对象
+     * @returns {Array} returns.data.members - 成员列表，每个元素包含 { qq, nickname, card, role, is_owner, is_admin }
+     * @returns {string} returns.error - 失败时的错误信息
+     * 
+     * @example
+     * // 调用示例
+     * {}
+     * 
+     * // 返回示例
+     * {
+     *   success: true,
+     *   data: {
+     *     members: [
+     *       { qq: "123456789", nickname: "用户A", card: "名片", role: "owner", is_owner: true, is_admin: true }
+     *     ]
+     *   }
+     * }
+     * 
+     * @note 此功能仅在群聊环境中可用
+     */
+    this.registerMCPTool('getGroupMembers', {
+      description: '获取群成员列表。返回当前群的所有成员列表，包含QQ号、昵称、名片、角色等信息。仅群聊环境可用。',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        required: []
+      },
+      handler: async (_args = {}, context = {}) => {
+        const groupCheck = this._requireGroup(context);
+        if (groupCheck) return groupCheck;
+
+        const group = context.e.group;
+        if (!group) {
+          return { success: false, error: '群对象不存在' };
+        }
+
+        try {
+          // 优先使用 getMemberMap（包含完整信息）
+          let memberMap = null;
+          if (typeof group.getMemberMap === 'function') {
+            memberMap = await group.getMemberMap();
+          }
+
+          const members = [];
+
+          if (memberMap && typeof memberMap.forEach === 'function') {
+            memberMap.forEach((info, uid) => {
+              if (!uid) return;
+              const qq = String(uid);
+              const role = info?.role || 'member';
+              const is_owner = role === 'owner';
+              const is_admin = role === 'admin' || role === 'owner';
+              members.push({
+                qq,
+                nickname: info?.nickname || '',
+                card: info?.card || '',
+                role,
+                is_owner,
+                is_admin
+              });
+            });
+          } else if (typeof group.getMemberArray === 'function') {
+            // 兼容只提供成员数组的情况
+            const arr = await group.getMemberArray();
+            for (const info of Array.isArray(arr) ? arr : []) {
+              if (!info || info.user_id === undefined) continue;
+              const qq = String(info.user_id);
+              const role = info?.role || 'member';
+              const is_owner = role === 'owner';
+              const is_admin = role === 'admin' || role === 'owner';
+              members.push({
+                qq,
+                nickname: info?.nickname || '',
+                card: info?.card || '',
+                role,
+                is_owner,
+                is_admin
+              });
+            }
+          } else {
+            return { success: false, error: '当前适配器不支持获取群成员列表' };
+          }
+
+          BotUtil.makeLog(
+            'debug',
+            `[chat.getGroupMembers] 群 ${e.group_id} 成员数量: ${members.length}`,
+            'ChatStream'
+          );
+
+          return {
+            success: true,
+            data: { members }
+          };
+        } catch (error) {
+          return { success: false, error: error.message };
+        }
+      },
+      enabled: true
     });
   }
 
@@ -1986,1119 +1183,705 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 构建消息文本（从消息段提取，使用现代方法）
-   */
-  extractMessageText(e) {
-    if (e.raw_message) return e.raw_message;
-    if (typeof e.msg === 'string') return e.msg;
-    if (!Array.isArray(e.message)) return '';
-    
-    const typeMap = {
-      text: (seg) => seg.text ?? '',
-      image: () => '[图片]',
-      at: (seg) => `@${seg.qq ?? ''}`,
-      reply: (seg) => `[回复:${seg.id ?? ''}]`,
-      face: (seg) => `[表情:${seg.id ?? ''}]`,
-      poke: (seg) => `[戳了戳 ${seg.target ?? ''}]`
-    };
-    
-    return e.message
-      .map(seg => (typeMap[seg.type]?.(seg) ?? ''))
-      .filter(Boolean)
-      .join('')
-      .trim();
-  }
-
-  /**
-   * 记录消息（使用现代JavaScript特性优化）
+   * 记录消息到历史（多平台兼容）
+   * 历史记录包含：用户信息、消息内容、消息ID、时间戳
+   * 支持onebot、其他平台的事件对象
    */
   recordMessage(e) {
-    if (!e?.isGroup || !e?.group_id) return;
+    if (!e) return;
     
     try {
-      const groupId = String(e.group_id);
-      const MAX_HISTORY = 50;
+      // 多平台兼容：获取群组ID或用户ID
+      const groupId = e.group_id || e.groupId || null;
+      const userId = e.user_id || e.userId || e.user?.id || null;
+      const historyKey = groupId || `private_${userId}`;
+
+      // 多平台兼容：提取消息内容
+      let message = '';
+      if (e.raw_message) {
+        message = e.raw_message;
+      } else if (e.msg) {
+        message = e.msg;
+      } else if (e.message) {
+        if (typeof e.message === 'string') {
+          message = e.message;
+        } else if (Array.isArray(e.message)) {
+          // onebot格式：消息段数组
+          message = e.message.map(seg => {
+            switch (seg.type) {
+              case 'text': return seg.text || '';
+              case 'image': return '[图片]';
+              case 'at': return `@${seg.qq || seg.user_id || ''}`;
+              case 'reply': return `[回复:${seg.id || ''}]`;
+              default: return '';
+            }
+          }).join('');
+        }
+      } else if (e.content) {
+        message = typeof e.content === 'string' ? e.content : e.content.text || '';
+      }
+
+      // 多平台兼容：获取用户信息
+      const nickname = e.sender?.card || e.sender?.nickname || 
+                      e.user?.name || e.user?.nickname || 
+                      e.from?.name || '未知';
       
-      const history = ChatStream.messageHistory.get(groupId) ?? [];
-      const messageText = this.extractMessageText(e);
-      const timestamp = Math.floor((e.time ?? Date.now()) / 1000);
+      // 优先使用真实的消息ID，确保准确
+      // 优先级：message_id > real_id > messageId > id > source?.id
+      // 参考 tasker 层消息结构：message_id 和 real_id 都是有效的消息ID
+      let messageId = e.message_id || e.real_id || e.messageId || e.id || e.source?.id;
       
-      const msgData = {
-        user_id: String(e.user_id ?? ''),
-        nickname: e.sender?.card ?? e.sender?.nickname ?? '未知',
-        message: messageText,
-        message_id: String(e.message_id ?? ''),
-        timestamp,
-        time: Date.now(),
-        hasImage: !!(e.img?.length > 0 || e.message?.some(s => s.type === 'image')),
-        isBot: String(e.user_id ?? '') === String(e.self_id ?? '')
-      };
-      
-      // 避免重复记录
-      if (history[history.length - 1]?.message_id !== msgData.message_id) {
-        history.push(msgData);
-        if (history.length > MAX_HISTORY) history.shift();
-        ChatStream.messageHistory.set(groupId, history);
+      // 如果消息ID不存在，尝试从消息段中提取（回复消息的ID）
+      if (!messageId && e.message && Array.isArray(e.message)) {
+        const replySeg = e.message.find(seg => seg.type === 'reply');
+        if (replySeg && replySeg.id) {
+          messageId = replySeg.id;
+        }
       }
       
-      // 异步存储语义检索索引（不阻塞主流程）
-      if (this.embeddingConfig?.enabled && messageText?.length > 5) {
-        this.storeMessageWithEmbedding(groupId, msgData).catch(() => {});
+      // 如果仍然没有消息ID，使用时间戳作为临时ID（不推荐，但作为兜底）
+      if (!messageId) {
+        messageId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        BotUtil.makeLog('debug', `消息ID缺失，使用临时ID: ${messageId}`, 'ChatStream');
+      } else {
+        messageId = String(messageId);
+      }
+
+      const msgData = {
+        user_id: userId,
+        nickname,
+        message,
+        message_id: messageId,
+        time: e.time || Date.now(),
+        platform: e.platform || 'onebot' // 标识平台类型
+      };
+
+      // 群聊内存历史（仅群聊，最多保留50条）
+      if (groupId && e.isGroup !== false) {
+        if (!ChatStream.messageHistory.has(groupId)) {
+          ChatStream.messageHistory.set(groupId, []);
+        }
+        const history = ChatStream.messageHistory.get(groupId);
+        history.push(msgData);
+        if (history.length > 50) {
+          ChatStream.messageHistory.set(groupId, history.slice(-50));
+        }
+      }
+
+      // 语义检索存储（启用embedding时）
+      if (this.embeddingConfig?.enabled && message && message.length > 5) {
+        this.storeMessageWithEmbedding(historyKey, msgData).catch(() => {});
       }
     } catch (error) {
       BotUtil.makeLog('debug', `记录消息失败: ${error.message}`, 'ChatStream');
     }
   }
 
-  /**
-   * 记录Bot回复（优化版）
-   */
-  async recordBotReply(e, messageText) {
-    if (!e?.isGroup || !e?.group_id || !messageText) return;
-    
-    try {
-      const groupId = String(e.group_id);
-      const MAX_HISTORY = 50;
-      const history = ChatStream.messageHistory.get(groupId) ?? [];
-      const timestamp = Math.floor(Date.now() / 1000);
-      
-      const msgData = {
-        user_id: String(e.self_id ?? ''),
-          nickname: Bot.nickname || 'Bot',
-        message: messageText,
-        message_id: Date.now().toString(),
-        timestamp,
-        time: Date.now(),
-        hasImage: false,
-        isBot: true
-      };
-      
-      history.push(msgData);
-      if (history.length > MAX_HISTORY) history.shift();
-      ChatStream.messageHistory.set(groupId, history);
-    } catch (error) {
-      BotUtil.makeLog('debug', `记录Bot回复失败: ${error.message}`, 'ChatStream');
-    }
-  }
-
-  /**
-   * 执行联网搜索流程（优化版：抓取实际内容 -> 单次AI分析生成回应）
-   * 流程：
-   * 1. 爬虫：执行搜索，筛选最相关结果
-   * 2. 抓取：抓取实际网页内容，清洗HTML提取正文
-   * 3. AI分析：一次性分析内容并生成符合人设的回应（合并分析和回应）
-   * 4. 快速润色：简单清理工具描述
-   */
-  async runWebSearch(keyword, context) {
-    try {
-      // 步骤1: 执行搜索并筛选
-      BotUtil.makeLog('info', `[搜索] 开始搜索: ${keyword}`, 'ChatStream');
-      const searchResults = await this.executeSearch(keyword);
-      
-      if (!searchResults || searchResults.length === 0) {
-        BotUtil.makeLog('warn', `[搜索] 搜索无结果`, 'ChatStream');
-        return { 
-          type: 'text', 
-          content: `抱歉，搜索"${keyword}"未找到相关信息。建议换个关键词或稍后再试。` 
-        };
-      }
-      
-      // 筛选最相关的前2-3个结果
-      const topResults = this.filterAndExtractResults(searchResults, keyword).slice(0, 3);
-      BotUtil.makeLog('info', `[搜索] 筛选出${topResults.length}个最相关结果`, 'ChatStream');
-      
-      if (!this.callAI) {
-        return {
-          type: 'text',
-          content: this.formatSearchResults(topResults),
-          metadata: { keyword, searchCount: topResults.length }
-        };
-      }
-      
-      // 步骤2: 抓取实际网页内容（只抓取前2个，提高速度）
-      BotUtil.makeLog('info', `[抓取] 开始抓取网页内容`, 'ChatStream');
-      const webContents = await this.fetchWebContents(topResults.slice(0, 2), keyword);
-      
-      // 步骤3: AI一次性分析并生成回应（合并分析和回应步骤）
-      BotUtil.makeLog('info', `[AI] 分析内容并生成回应`, 'ChatStream');
-      const finalResponse = await this.analyzeAndGenerateResponse(webContents, keyword, context);
-      
-      if (!finalResponse || finalResponse.trim().length === 0) {
-        BotUtil.makeLog('warn', `[AI] 生成失败，使用格式化结果`, 'ChatStream');
-        return {
-          type: 'text',
-          content: this.formatSearchResults(topResults),
-          metadata: { keyword, searchCount: topResults.length }
-        };
-      }
-      
-      // 步骤4: 快速清理工具描述
-      const cleanedResponse = this.quickCleanResponse(finalResponse);
-      
-      return {
-        type: 'text',
-        content: cleanedResponse,
-        metadata: {
-          keyword,
-          searchCount: topResults.length,
-          fetchedPages: webContents.length
-        }
-      };
-    } catch (error) {
-      BotUtil.makeLog('error', `搜索流程失败: ${error.message}`, 'ChatStream');
-      return { 
-        type: 'text', 
-        content: `搜索过程中出现错误，请稍后再试。如果问题持续，可以尝试换个关键词搜索。` 
-      };
-    }
-  }
-
-  /**
-   * 爬虫阶段主动筛选和提取关键信息（优化版：使用现代方法）
-   */
-  filterAndExtractResults(searchResults, keyword) {
-    if (!searchResults?.length) return [];
-    
-    const keywordLower = keyword.toLowerCase();
-    const keywords = keywordLower.split(/\s+/);
-    const officialKeywords = ['政府', '官方', '国务院', 'gov.cn'];
-    const timeKeywords = ['最新', '2024', '2025'];
-    
-    const scoredResults = searchResults.map(item => {
-      let score = 0;
-      const titleLower = item.title?.toLowerCase() ?? '';
-      const snippetLower = (item.snippet ?? '').toLowerCase();
-      
-      // 关键词匹配评分
-      keywords.forEach(kw => {
-        if (titleLower.includes(kw)) score += 3;
-        if (snippetLower.includes(kw)) score += 1;
-      });
-      
-      // 官方来源加分
-      if (officialKeywords.some(kw => titleLower.includes(kw))) score += 2;
-      
-      // 时间相关加分
-      if (timeKeywords.some(kw => titleLower.includes(kw) || snippetLower.includes(kw))) {
-        score += 1;
-      }
-      
-      return { ...item, score };
-    });
-    
-    // 按分数排序，取前3个
-    return scoredResults
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3);
-  }
-
-  /**
-   * 抓取实际网页内容并清洗（优化版：支持重试、并行处理）
-   */
-  async fetchWebContents(searchResults, keyword) {
-    const TIMEOUT = 5000;
-    const MAX_CONTENT_LENGTH = 2000;
-    const MIN_CONTENT_LENGTH = 100;
-    const CONTENT_SELECTORS = [
-      'article', 'main', '.content', '.article-content', 
-      '.post-content', '#content', '.main-content', '[role="main"]'
-    ];
-    
-    const DEFAULT_HEADERS = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
-    };
-    
-    // 并行抓取前2个结果（提高速度）
-    const fetchPromises = searchResults.slice(0, 2).map(async (result) => {
-      try {
-        BotUtil.makeLog('debug', `[抓取] 正在抓取: ${result.url}`, 'ChatStream');
-        
-        const response = await axios.get(result.url, {
-          headers: DEFAULT_HEADERS,
-          timeout: TIMEOUT,
-          maxRedirects: 3
-        });
-        
-        if (!response?.data || response.data.length < 100) {
-          return { ...result, content: result.snippet || '无法获取内容' };
-        }
-        
-        const cheerio = await getCheerio();
-        const $ = cheerio.load(response.data);
-        
-        // 移除干扰元素
-        $('script, style, nav, header, footer, aside, .ad, .advertisement, .ads').remove();
-        
-        // 提取主要内容
-        let mainContent = '';
-        for (const selector of CONTENT_SELECTORS) {
-          const text = $(selector).first().text().trim();
-          if (text.length > 200) {
-            mainContent = text;
-            break;
-          }
-        }
-        
-        // 备用方案：提取body文本
-        if (mainContent.length < 200) {
-          $('nav, header, footer, .menu, .navigation').remove();
-          mainContent = $('body').text().trim();
-        }
-        
-        // 清洗和限制长度
-        mainContent = mainContent
-          .replace(/\s+/g, ' ')
-          .replace(/\n\s*\n/g, '\n')
-          .trim();
-        
-        if (mainContent.length > MAX_CONTENT_LENGTH) {
-          mainContent = `${mainContent.substring(0, MAX_CONTENT_LENGTH)}...`;
-        }
-        
-        if (mainContent.length > MIN_CONTENT_LENGTH) {
-          BotUtil.makeLog('debug', `[抓取] 成功提取${mainContent.length}字内容`, 'ChatStream');
-          return { title: result.title, url: result.url, content: mainContent };
-        }
-        
-        return { ...result, content: result.snippet || '无法获取内容' };
-      } catch (error) {
-        BotUtil.makeLog('debug', `[抓取] 失败: ${result.url} - ${error.message}`, 'ChatStream');
-        return { ...result, content: result.snippet || '无法获取内容' };
-      }
-    });
-    
-    const results = await Promise.allSettled(fetchPromises);
-    return results
-      .filter(r => r.status === 'fulfilled')
-      .map(r => r.value)
-      .filter(c => c?.content);
-  }
-
-  /**
-   * AI一次性分析内容并生成符合人设的回应（合并分析和回应步骤）
-   */
-  async analyzeAndGenerateResponse(webContents, keyword, context) {
-    if (!webContents || webContents.length === 0) {
-      return null;
-    }
-    
-    const persona = context?.question?.persona || context?.persona || '我是AI助手';
-    const e = context?.e;
-    const isGroup = e?.isGroup || false;
-    
-    // 构建内容文本（精简格式）
-    const contentsText = webContents.map((item, idx) => 
-      `[来源${idx + 1}] ${item.title}\n${item.content.substring(0, 1500)}`
-    ).join('\n\n---\n\n');
-    
-    const messages = [
-      {
-        role: 'system',
-        content: `${persona}
-
-你是QQ聊天助手，需要分析网页内容并生成符合人设的友好回复。
-
-要求：
-1. 分析网页内容，提取与"${keyword}"最相关的2-3个核心要点
-2. 用简洁明了的语言总结（控制在150字以内）
-3. 生成符合你人设的友好回复（2-3句话）
-4. 纯文本格式，不用Markdown
-5. 语气自然轻松，像QQ聊天一样
-6. 开头可以说明"我搜索了一下"或类似表达
-
-${isGroup ? '当前在群聊中' : '当前在私聊中'}`
-      },
-      {
-        role: 'user',
-        content: `请分析以下网页内容，提取与"${keyword}"相关的核心信息，并生成符合你人设的友好回复：
-
-${contentsText}
-
-要求：提取2-3个核心要点，生成2-3句话的友好回复。`
-      }
-    ];
-    
-    const apiConfig = context?.config || context?.question?.config || {};
-    const result = await this.callAI(messages, {
-      ...apiConfig,
-      maxTokens: 500, // 适中的token，确保质量
-      temperature: 0.7
-    });
-    
-    return result;
-  }
-
-  /**
-   * 快速清理工具描述（使用现代正则和链式调用）
-   */
-  quickCleanResponse(response) {
-    if (!response) return response;
-    
-    const CLEANUP_PATTERNS = [
-      /\[(?:回复|回应|工具|命令|搜索)[^\]]*\]/gi,
-      /\((?:正在|过了一会儿?|稍等)[^)]*\)/g,
-      /（(?:正在|过了一会儿?|稍等)[^）]*）/g,
-      /\s{2,}/g
-    ];
-    
-    return CLEANUP_PATTERNS.reduce((text, pattern) => text.replace(pattern, ' '), response).trim();
-  }
-
-
-  /**
-   * 统一搜索接口（优化版：并行搜索多个引擎，取最快成功的结果）
-   */
-  async executeSearch(keyword) {
-    if (!keyword?.trim()) return [];
-    
-    const engines = ['baidu', 'bing', 'sogou'];
-    const searchPromises = engines.map(engine => 
-      this.performFastSearch(keyword, engine).catch(() => [])
-    );
-    
-    const results = await Promise.allSettled(searchPromises);
-    
-    // 返回第一个成功的结果
-    for (const result of results) {
-      if (result.status === 'fulfilled' && result.value?.length > 0) {
-        return result.value;
-      }
-    }
-    
-    return [];
-  }
-
-
-
-
-  /**
-   * 统一搜索方法（使用配置化方式，支持多种搜索引擎）
-   */
-  async performFastSearch(keyword, engine = 'baidu') {
-    const SEARCH_CONFIGS = {
-      baidu: {
-        url: (kw) => `https://www.baidu.com/s?wd=${encodeURIComponent(kw)}`,
-        selectors: {
-          container: '.result, .c-container',
-          title: 'h3 a, .t a',
-          link: 'h3 a, .t a',
-          snippet: '.content-right_8Zs40, .c-abstract, .c-span9'
-        },
-        linkCleaner: (link) => {
-          if (link?.startsWith('/link?url=')) {
-            const match = link.match(/url=([^&]+)/);
-            return match ? decodeURIComponent(match[1]) : link;
-          }
-          return link;
-        }
-      },
-      bing: {
-        url: (kw) => `https://www.bing.com/search?q=${encodeURIComponent(kw)}&count=10`,
-        selectors: {
-          container: '.b_algo',
-          title: 'h2 a',
-          link: 'h2 a',
-          snippet: '.b_caption p, .b_caption'
-        },
-        linkCleaner: (link) => link
-      },
-      sogou: {
-        url: (kw) => `https://www.sogou.com/web?query=${encodeURIComponent(kw)}`,
-        selectors: {
-          container: '.vrwrap, .rb',
-          title: 'h3 a, .vr-title a',
-          link: 'h3 a, .vr-title a',
-          snippet: '.str-text, .str-info'
-        },
-        linkCleaner: (link) => link
-      }
-    };
-    
-    const config = SEARCH_CONFIGS[engine];
-    if (!config) return [];
-    
-    const TIMEOUT = 5000;
-    const MAX_RESULTS = 8;
-    const DEFAULT_HEADERS = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
-    };
-    
-    try {
-      const response = await axios.get(config.url(keyword), {
-        headers: DEFAULT_HEADERS,
-        timeout: TIMEOUT,
-        maxRedirects: 3
-      });
-      
-      if (!response?.data || response.data.length < 100) return [];
-      
-      const cheerio = await getCheerio();
-      const $ = cheerio.load(response.data);
-      const results = [];
-      const { container, title: titleSel, link: linkSel, snippet: snippetSel } = config.selectors;
-      
-      $(container).each((_, element) => {
-        if (results.length >= MAX_RESULTS) return false;
-        
-        const $el = $(element);
-        const titleEl = $el.find(titleSel).first();
-        const title = titleEl.text().trim();
-        let link = titleEl.attr('href') || '';
-        const snippet = $el.find(snippetSel).first().text().trim();
-        
-        // 清理和验证链接
-        link = config.linkCleaner(link);
-        if (!link?.startsWith('http')) return;
-        if (!title) return;
-        
-        const cleanSnippet = snippet?.length > 200 
-          ? `${snippet.substring(0, 200)}...` 
-          : (snippet || '暂无摘要');
-        
-        results.push({
-          title,
-          url: link,
-          snippet: cleanSnippet,
-          index: results.length + 1
-        });
-      });
-      
-      return results;
-    } catch (error) {
-      BotUtil.makeLog('debug', `${engine}搜索失败: ${error.message}`, 'ChatStream');
-      return [];
-    }
-  }
-
-
-  /**
-   * 分析搜索结果（统一方法，支持多轮分析）
-   */
-  async analyzeSearchResults(searchResults, keyword, context, round = 1, previousAnalysis = null) {
-    if (!this.callAI) {
-      return this.formatSearchResults(searchResults);
-    }
-    
-    const topResults = searchResults.slice(0, round === 1 ? 5 : 8);
-    const resultsText = topResults.map(item => 
-      `${item.index}. ${item.title}\n   链接: ${item.url}\n   摘要: ${item.snippet}`
-    ).join('\n\n');
-    
-    const prompts = {
-      1: `请快速分析以下搜索结果，提取与"${keyword}"最相关的关键信息（3-5个要点）：
-      
-${resultsText}
-
-要求：简洁明了，纯文本格式，标注信息来源`,
-      2: `综合以下信息，形成最终回复：
-
-第一轮分析：
-${previousAnalysis || '无'}
-
-搜索结果：
-${resultsText}
-
-要求：整合关键信息，去除冗余，准备用于最终回复（纯文本格式）`,
-      3: `综合前两轮分析，形成最终的综合分析：
-
-第一轮分析：
-${previousAnalysis || '无'}
-
-搜索结果：
-${resultsText}
-
-要求：整合所有关键信息，去除重复和冗余，按照重要性排序，准备用于最终回复`
-    };
-    
-    const messages = [
-      {
-        role: 'system',
-        content: '你是信息分析专家。要求：1. 纯文本格式，不用Markdown 2. 语言简洁 3. 突出重点'
-      },
-      {
-        role: 'user',
-        content: prompts[round] || prompts[1]
-      }
-    ];
-    
-    const apiConfig = context?.config ?? context?.question?.config ?? {};
-    const result = await this.callAI(messages, {
-      ...apiConfig,
-      maxTokens: round === 1 ? 1000 : 1500,
-      temperature: 0.7
-    });
-    
-    return result || this.formatSearchResults(searchResults);
-  }
-
-
-  /**
-   * 格式化搜索结果（优化版）
-   */
-  formatSearchResults(searchResults) {
-    if (!searchResults?.length) {
-      return '未找到相关搜索结果';
-    }
-    
-    const formatted = searchResults
-      .slice(0, 5)
-      .map(item => `${item.index}. ${item.title}\n   ${item.snippet ?? '暂无摘要'}`)
-      .join('\n\n');
-    
-    return `搜索结果：\n\n${formatted}`;
-  }
-
-  /**
-   * 记录搜索结果到聊天记录
-   */
-  async recordSearchResult(e, keyword, searchResult) {
-    if (!e?.isGroup || !e.group_id) return;
-    
-    try {
-      const groupId = String(e.group_id);
-      const MAX_HISTORY = 50;
-      
-      if (!ChatStream.messageHistory.has(groupId)) {
-        ChatStream.messageHistory.set(groupId, []);
-      }
-      
-      const history = ChatStream.messageHistory.get(groupId);
-      const timestamp = Math.floor(Date.now() / 1000);
-      
-      // 记录搜索工具使用
-      const searchRecord = {
-        user_id: String(e.self_id || ''),
-          nickname: Bot.nickname || 'Bot',
-        message: `[工具:搜索] 搜索关键词: ${keyword}`,
-        message_id: `search_${Date.now()}`,
-        timestamp,
-        time: Date.now(),
-        hasImage: false,
-        isBot: true,
-        isTool: true,
-        toolType: 'webSearch',
-        toolResult: searchResult.metadata
-      };
-      
-      history.push(searchRecord);
-      
-      if (history.length > MAX_HISTORY) {
-        history.shift();
-      }
-    } catch (error) {
-      BotUtil.makeLog('debug', `记录搜索结果失败: ${error.message}`, 'ChatStream');
-    }
-  }
-
-  /**
-   * 格式化聊天记录供AI阅读（优化版：突出显示消息ID）
-   */
-  formatHistoryForAI(messages, isGlobalTrigger = false) {
-    if (!messages?.length) return '';
-    
-    const now = Math.floor(Date.now() / 1000);
-    const formatTime = (timestamp) => {
-      const timeDiff = now - timestamp;
-      if (timeDiff < 60) return `${timeDiff}秒前`;
-      if (timeDiff < 3600) return `${Math.floor(timeDiff / 60)}分钟前`;
-      const date = new Date(timestamp * 1000);
-      return `${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
-    };
-    
-    const formatToolInfo = (msg) => {
-      if (!msg.isTool || !msg.toolResult) return '';
-      return msg.toolType === 'webSearch'
-        ? ` → 搜索了"${msg.toolResult.keyword}"，找到${msg.toolResult.searchCount}个结果`
-        : ` → 使用了${msg.toolType}工具`;
-    };
-    
-    const lines = ['[群聊记录]', ...messages.map(msg => {
-      const timestamp = msg.timestamp ?? Math.floor(msg.time / 1000);
-      const displayName = msg.nickname ?? '未知';
-      const msgContent = `${msg.message ?? '(空消息)'}${formatToolInfo(msg)}`;
-      const msgId = msg.message_id ? `[ID:${msg.message_id}]` : '';
-      const tags = [
-        msg.isBot ? '[机器人]' : '[成员]',
-        msg.isTool ? `[工具:${msg.toolType ?? 'unknown'}]` : '',
-        msg.hasImage ? '[含图片]' : '',
-        msgId
-      ].filter(Boolean).join(' ');
-      
-      return `${tags} ${displayName}(${msg.user_id}) [${formatTime(timestamp)}]: ${msgContent}`;
-    })];
-    
-    return lines.join('\n');
-  }
-
-  async preprocessResponse(response, context) {
-    return this.cleanupArtifacts(response);
-  }
-
-  cleanupArtifacts(text) {
-    if (!text) return text;
-    return this.quickCleanResponse(text.replace(/\[\s*\]/g, ''));
-  }
-
-  async refineResponse(text, context) {
-    if (!text || !this.responsePolishConfig?.enabled) {
-      return text;
-    }
-
-    const polishConfig = this.responsePolishConfig;
-    const persona = context?.question?.persona ?? '保持原角色语气';
-
-    const messages = [
-      {
-        role: 'system',
-        content: `${persona}
-
-${polishConfig.instructions ?? RESPONSE_POLISH_DEFAULT.instructions}`
-      },
-      {
-        role: 'user',
-        content: text
-      }
-    ];
-
-    const apiConfig = {
-      ...context?.config,
-      maxTokens: polishConfig.maxTokens ?? RESPONSE_POLISH_DEFAULT.maxTokens,
-      temperature: polishConfig.temperature ?? RESPONSE_POLISH_DEFAULT.temperature
-    };
-
-    try {
-      const refined = await this.callAI(messages, apiConfig);
-      return refined?.trim() ?? text;
-    } catch (error) {
-      BotUtil.makeLog('warn', `润色响应失败: ${error.message}`, 'ChatStream');
-      return text;
-    }
-  }
-
-  async postProcessResponse(text, context) {
-    if (!text) return text;
-    let processed = this.cleanupArtifacts(text);
-    if (!processed) return processed;
-
-    if (this.responsePolishConfig?.enabled) {
-      processed = await this.refineResponse(processed, context);
-    }
-
-    return processed;
-  }
-
-  /**
-   * 获取Bot角色
-   */
   async getBotRole(e) {
     if (!e.isGroup) return '成员';
-    
-    const cacheKey = `bot_role_${e.group_id}`;
-    const cached = ChatStream.userCache.get(cacheKey);
-    
-    if (cached && Date.now() - cached.time < 300000) {
-      return cached.role;
-    }
-    
-    try {
-      const member = e.group.pickMember(e.self_id);
-      const info = await member.getInfo();
-      const role = info.role === 'owner' ? '群主' : 
-                   info.role === 'admin' ? '管理员' : '成员';
-      
-      ChatStream.userCache.set(cacheKey, { role, time: Date.now() });
-      return role;
-    } catch {
-      return '成员';
-    }
+    const member = e.group?.pickMember(e.self_id);
+    const roleValue = member?.role;
+    return roleValue === 'owner' ? '群主' : 
+           roleValue === 'admin' ? '管理员' : '成员';
   }
 
-  /**
-   * 构建系统提示
-   */
-  buildSystemPrompt(context) {
-    const { e, question } = context;
-    const persona = question?.persona || '我是AI助手';
-    const isGlobalTrigger = question?.isGlobalTrigger || false;
-    const botRole = question?.botRole || '成员';
-    const dateStr = question?.dateStr || new Date().toLocaleString('zh-CN');
+  recordAIResponse(e, text, executedFunctions = []) {
+    if (!text || !text.trim()) return;
     
-    let functionsPrompt = this.buildFunctionsPrompt();
-    
-    // 根据权限过滤功能
-    if (botRole === '成员') {
-      functionsPrompt = functionsPrompt
-        .split('\n')
-        .filter(line => {
-          const restrictedKeywords = [
-            '禁言', '解禁', '全员禁言', '改名片', '改群名', 
-            '设管', '取管', '头衔', '踢人', '精华', '公告'
-          ];
-          return !restrictedKeywords.some(keyword => line.includes(keyword));
-        })
-        .join('\n');
-    } else if (botRole === '管理员') {
-      functionsPrompt = functionsPrompt
-        .split('\n')
-        .filter(line => !line.includes('[设管') && !line.includes('[取管') && !line.includes('[头衔'))
-        .join('\n');
-    }
-
-    let embeddingHint = '';
-    if (this.embeddingConfig?.enabled) {
-      embeddingHint = '\n💡 系统会自动检索相关历史对话\n';
-    }
-
-    const memorySection = question?.memorySummary
-      ? `\n【记忆提示】\n${question.memorySummary}\n`
+    const functionInfo = executedFunctions.length > 0 
+      ? `[执行了: ${executedFunctions.join(', ')}] ` 
       : '';
-
-    // 消息ID使用指南（添加到系统提示中）
-    const messageIdGuide = `
-【消息ID使用指南 - 非常重要】
-每条消息都有唯一的消息ID，在聊天记录中显示为 [ID:消息ID] 格式。
-重要：使用消息ID时，直接使用数字部分，不需要包含"ID:"前缀。
-
-可用操作：
-1. 回复消息：[CQ:reply,id=消息ID]
-   示例：看到消息 [ID:1234567890]，使用 [CQ:reply,id=1234567890] 来回复这条消息
-
-2. 表情回应：[回应:消息ID:表情类型]
-   表情类型：开心/惊讶/伤心/大笑/害怕/喜欢/爱心/生气
-   示例：看到消息 [ID:1234567890]，使用 [回应:1234567890:开心] 来给这条消息添加开心的表情回应
-
-3. 设置精华：[设精华:消息ID]（需要管理员权限）
-   示例：[设精华:1234567890] 将消息ID为1234567890的消息设为精华
-
-4. 撤回消息：[撤回:消息ID]（需要权限）
-   示例：[撤回:1234567890] 撤回消息ID为1234567890的消息
-
-重要提示：
-- 消息ID必须从聊天记录中获取，格式为 [ID:数字]
-- 使用时只取数字部分，如看到 [ID:1234567890]，使用 1234567890
-- 不要编造或猜测消息ID，必须使用聊天记录中显示的真实ID
-- 如果找不到消息ID，不要使用这些功能
-`;
-
-    const masterNote = e.isMaster ? `
-【主人标识】
-当前发言者是你的唯一主人，你必须在回复中称呼对方为“主人”或贴心昵称。
-1. 语气要自然亲昵，就像长期相处的恋人
-2. 可以提及对主人的关心与熟悉（提醒作息、饮食等生活细节）
-3. 任何请求优先满足，不要质疑主人的指令
-` : '';
-
-    const expressionRules = `【表达要求】
-1. 回复控制在1-3句话，生活化口语，少用书面语
-2. 句子短而有节奏，常用逗号、句号或顿号断句
-3. 如需针对特定成员或消息，优先使用@或[CQ:reply]
-4. 谨慎使用重复表情或动作，保持自然
-`;
-
-    const memorySystem = this.getMemorySystem();
-    const memoryGuidance = memorySystem?.isEnabled()
-      ? '\n记忆：如需记住关键信息，可调用 [工作流:memory:层级|内容]（层级支持 长期/短期，默认长期；加 group 表示群记忆；所有记忆至多保留3天）。如需删除记忆，可调用 [工作流:memory-forget:内容或id:xxx]。\n'
-      : '';
-
-    // 添加基于记忆触发指令的说明
-    const memoryTriggerGuidance = memorySystem?.isEnabled()
-      ? '\n【智能记忆触发指令】\n当你记住了用户的偏好或习惯（如"我想看帮助就触发#帮助"），可以通过 [当前:指令] 来自动触发对应的指令。\n示例：如果记住了"用户想看帮助就触发#帮助"，当用户需要帮助时，你可以发送 [当前:#帮助] 来触发帮助指令。\n支持所有指令格式，如 [当前:#点歌南山南]、[当前:#查天气北京] 等。\n'
-      : '';
-
-    return `【人设设定】
-${persona}
-
-${memorySection}
-${memoryTriggerGuidance}
-【身份信息】
-名字：${Bot.nickname}
-QQ号：${e.self_id}
-${e.isGroup ? '群名：' + (e.group?.group_name || '未知') + '\n群号：' + e.group_id + '\n身份：' + botRole : ''}
-
-【时间信息】
-当前时间：${dateStr}
-
-【触发方式】
-${isGlobalTrigger ? '观察群聊后主动发言' : '被召唤回复'}
-${embeddingHint}
-${masterNote}
-【基础规则】
-1. 你是一个真实的QQ用户，不是AI助手
-2. 说话要自然、简洁、有个性，用QQ聊天的语气，不要用Markdown格式
-3. 回复中不要使用星号、下划线、反引号等Markdown标记符号
-4. 最多使用一个竖线分隔符(|)
-5. 互动功能按需使用，确保能实际执行
-6. 管理功能需谨慎使用，避免滥用
-
-${expressionRules}
-${memoryGuidance}
-${messageIdGuide}
-
-【联网搜索功能】
-当用户询问实时信息、最新资讯、新闻、数据等需要联网查询的内容时，优先使用 [搜索:关键词] 功能。
-搜索功能会自动：
-1. 联网搜索最新信息
-2. 智能分析搜索结果
-3. 润色成自然回复
-4. 将搜索过程记录到聊天记录中
-
-使用场景：询问最新新闻、事件、查询实时数据、了解最新技术等
-示例：[搜索:2024年最新AI技术] [搜索:今天北京天气]
-
-${functionsPrompt}
-
-【重要限制】
-1. 每次回复最多一个表情包
-2. 最多一个竖线(|)分隔
-3. @人前确认QQ号在群聊记录中
-4. 不要重复使用相同功能
-5. 管理操作要有正当理由
-6. 绝对禁止Markdown格式：不要用###、**、__、反引号、#等符号，用纯文本和普通标点
-7. 工作流调用时，确保输出符合人设且为纯文本格式
-8. 使用消息ID时，必须从聊天记录中获取准确的ID，不要编造ID
-
-【注意事项】
-${isGlobalTrigger ? 
-'1. 主动发言要有新意\n2. 语气自然\n3. 观察当下话题再插话' : 
-'1. 回复要有针对性\n2. 积极互动'}
-3. 适当使用表情包
-4. 管理功能仅在必要时使用
-${e.isMaster ? '5. 对主人保持亲密、顺从' : ''}`;
-  }
-
-  /**
-   * 构建聊天上下文
-   */
-  async buildChatContext(e, question) {
-    const messages = [];
-    
-    const now = new Date();
-    const dateStr = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日 ${now.getHours()}:${now.getMinutes().toString().padStart(2, '0')}`;
-    const botRole = await this.getBotRole(e);
-    const memorySummary = await this.buildMemorySummary(e);
-    
-    const enrichedQuestion = {
-      ...question,
-      botRole,
-      dateStr,
-      memorySummary
+    const botName = e.bot?.nickname || e.bot?.info?.nickname || e.bot?.name || 'Bot';
+    const message = `${functionInfo}${text}`;
+    const msgData = {
+      user_id: e.self_id,
+      nickname: botName,
+      message,
+      message_id: Date.now().toString(),
+      time: Date.now(),
+      platform: 'onebot'
     };
     
-    messages.push({
-      role: 'system',
-      content: this.buildSystemPrompt({ e, question: enrichedQuestion })
-    });
-    
-    if (e.isGroup) {
-      const history = ChatStream.messageHistory.get(String(e.group_id)) || [];
-      const recentCount = question?.isGlobalTrigger ? 15 : 12;
-      const recentMessages = history.slice(-recentCount);
-      
-      if (recentMessages.length > 0) {
-        const historyText = this.formatHistoryForAI(recentMessages, question?.isGlobalTrigger);
-        messages.push({
-          role: 'user',
-          content: question?.isGlobalTrigger 
-            ? `${historyText}\n\n请对当前话题发表你的看法。`
-            : historyText
-        });
+    if (e?.isGroup && e.group_id) {
+      const history = ChatStream.messageHistory.get(e.group_id) || [];
+      history.push(msgData);
+      if (history.length > 50) {
+        history.shift();
       }
-      
-      if (!question?.isGlobalTrigger) {
-        const userInfo = e.sender?.card ?? e.sender?.nickname ?? '未知';
-        let actualQuestion = typeof question === 'string' ? question : 
-                            (question?.content ?? question?.text ?? '');
-        
-        if (question?.imageDescriptions?.length > 0) {
-          actualQuestion += ' ' + question.imageDescriptions.join(' ');
-        }
-        
-        const msgId = e.message_id ? `[ID:${e.message_id}]` : '';
-        messages.push({
-          role: 'user',
-          content: `[当前消息] ${msgId}\n${userInfo}(${e.user_id}): ${actualQuestion}`
-        });
-      }
-    } else {
-      const userInfo = e.sender?.nickname || '未知';
-      let actualQuestion = typeof question === 'string' ? question : 
-                          (question?.content || question?.text || '');
-      
-      if (question?.imageDescriptions?.length > 0) {
-        actualQuestion += ' ' + question.imageDescriptions.join(' ');
-      }
-      
-      messages.push({
-        role: 'user',
-        content: `${userInfo}(${e.user_id}): ${actualQuestion}`
-      });
     }
     
+    if (this.embeddingConfig?.enabled) {
+      const historyKey = e.group_id || `private_${e.user_id}`;
+      this.storeMessageWithEmbedding(historyKey, msgData).catch(() => {});
+    }
+  }
+
+  async buildSystemPrompt(context) {
+    const { e, question } = context;
+    const persona =
+      question?.persona ||
+      '你是在这个QQ群里的普通聊天助手，正常聊天、帮忙解决问题即可，不要刻意卖萌或重复固定话术。';
+    const botRole = question?.botRole || await this.getBotRole(e);
+    const dateStr = question?.dateStr || new Date().toLocaleString('zh-CN');
+    
+    let embeddingHint = '';
+    if (this.embeddingConfig?.enabled) {
+      embeddingHint = '\n💡 系统会自动检索相关历史对话（通过子服务端向量服务）\n';
+    }
+
+    const botName = e.bot?.nickname || e.bot?.info?.nickname || e.bot?.name || 'Bot';
+    const isMaster = e.isMaster === true;
+    
+    return `人设（最高优先级，请始终遵守）：${persona}
+身份：昵称=${botName}，QQ=${e.self_id}，群=${e.group_id}，角色=${botRole}${isMaster ? '（当前说话的是主人，可以稍微亲近一点，但不要过头）' : ''}
+时间：${dateStr}
+${embeddingHint}
+说话风格：
+- 正常聊天或解决问题即可，回答紧贴用户内容。
+- 语言口语化、简洁，不要堆太多表情或套话。
+- 听不懂用户想干嘛时，用一句话简单确认，不要连续追问很多句。
+工具使用（必须遵守权限和安全）：
+- 需要群管/互动（@、戳一戳、改名片、禁言、踢人、设管理员、群代办等）时，直接调用对应工具完成，不要在回复里写指令或协议。
+- 修改群名片（setCard）时：
+  · “把你自己改成 X”→ 修改机器人自己的名片（QQ=${e.self_id}）。
+  · 明确 @ 某人或给出 QQ 时→ 修改那个人的名片。
+  · “把我改成 X”→ 修改当前说话人的名片（QQ=${e.user_id}）。
+- 禁言/解禁/踢人/设管理员等操作：
+  · 只有在用户明确提出、且理由合理（如刷屏、骂人）时才考虑执行。
+  · 如果当前机器人不是管理员或群主，只能礼貌说明权限不足，不要假装执行成功。
+- 设置群代办（setGroupTodo）等对全群有影响的操作，只在用户明确要求且语义清晰时执行，避免频繁创建无意义代办。
+回复要求：
+- 一次回复只做当前这一轮能完成的事。
+- 如果通过工具完成了操作，用很简短的话说明结果即可。
+- 在任何情况下，都不要违背上面的人设和权限约束。`;
+  }
+
+  async buildChatContext(e, question) {
+    if (Array.isArray(question)) {
+      return question;
+    }
+
+    const messages = [];
+    messages.push({
+      role: 'system',
+      content: await this.buildSystemPrompt({ e, question })
+    });
+
+    // 基础文本
+    const text = typeof question === 'string'
+      ? question
+      : (question?.content ?? question?.text ?? '');
+
+    // 从事件中提取图片（OneBot 消息段）
+    const images = [];
+    const replyImages = [];
+
+    if (e && Array.isArray(e.message)) {
+      let inReplyRegion = false;
+      for (const seg of e.message) {
+        if (seg.type === 'reply') {
+          inReplyRegion = true;
+          continue;
+        }
+        if (seg.type === 'image') {
+          const url = seg.url || seg.data?.url || seg.data?.file;
+          if (!url) continue;
+          if (inReplyRegion) {
+            replyImages.push(url);
+          } else {
+            images.push(url);
+          }
+        }
+      }
+    }
+
+    // 若无图片，则仍然用纯文本，兼容旧逻辑
+    if (images.length === 0 && replyImages.length === 0) {
+      messages.push({
+        role: 'user',
+        content: text
+      });
+    } else {
+      messages.push({
+        role: 'user',
+        content: {
+          text: text || '',
+          images,
+          replyImages
+        }
+      });
+    }
+
     return messages;
   }
 
-  /**
-   * 解析CQ码
-   */
-  async parseCQCodes(text, e) {
-    const segments = [];
-    const parts = text.split(/(\[CQ:[^\]]+\])/);
+  extractQueryFromMessages(messages) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role === 'user') {
+        if (typeof msg.content === 'string') {
+          return msg.content;
+        } else if (msg.content?.text) {
+          return msg.content.text;
+        }
+      }
+    }
+    return '';
+  }
+
+  async syncHistoryFromAdapter(e) {
+    if (!e?.isGroup) return;
+    const groupId = e.group_id;
+    if (!groupId) return;
+
+    const group = e.group;
+    const getter =
+      (group && typeof group.getChatHistory === 'function' && group.getChatHistory) ||
+      (typeof e.getChatHistory === 'function' && e.getChatHistory) ||
+      null;
+    if (!getter) return;
+
+    try {
+      let rawHistory;
+      try {
+        // 优先使用 (message_seq, count, reverseOrder) 签名，message_seq 为空表示从最近开始
+        rawHistory = await getter(undefined, 50, true);
+      } catch {
+        // 兼容只接受 (count) 的实现
+        rawHistory = await getter(50);
+      }
+
+      const history = ChatStream.messageHistory.get(groupId) || [];
+      const existingIds = new Set(
+        history.map(msg => String(msg.message_id || msg.real_id || ''))
+      );
+
+      const newMessages = [];
+      for (const msg of Array.isArray(rawHistory) ? rawHistory : []) {
+        if (!msg || typeof msg !== 'object') continue;
+        const mid = msg.real_id || msg.message_id || msg.message_seq;
+        if (!mid) continue;
+        const idStr = String(mid);
+        if (existingIds.has(idStr)) continue;
+
+        const sender = msg.sender || {};
+        const segments = Array.isArray(msg.message) ? msg.message : [];
+
+        let text = '';
+        if (segments.length > 0) {
+          text = segments.map(seg => {
+            if (!seg || typeof seg !== 'object') return '';
+            switch (seg.type) {
+              case 'text':
+                return seg.text || '';
+              case 'image':
+                return '[图片]';
+              case 'face':
+                return '[表情]';
+              case 'reply':
+                return `[回复:${seg.id || ''}]`;
+              case 'at':
+                return `@${seg.qq || seg.user_id || ''}`;
+              default:
+                return '';
+            }
+          }).join('');
+        } else {
+          text = msg.raw_message || '';
+        }
+
+        const nickname = sender.card || sender.nickname || '未知';
+        newMessages.push({
+          user_id: msg.user_id ?? sender.user_id,
+          nickname,
+          message: text,
+          message_id: idStr,
+          time: msg.time || Date.now(),
+          platform: 'onebot'
+        });
+      }
+
+      if (newMessages.length > 0) {
+        const merged = history.concat(newMessages);
+        const limited = merged.length > 50 ? merged.slice(-50) : merged;
+        ChatStream.messageHistory.set(groupId, limited);
+
+        BotUtil.makeLog(
+          'debug',
+          `[ChatStream.syncHistoryFromAdapter] group=${groupId}, 原有=${history.length}, 新增=${newMessages.length}, 合并后=${limited.length}`,
+          'ChatStream'
+        );
+      }
+    } catch (error) {
+      BotUtil.makeLog(
+        'debug',
+        `[ChatStream.syncHistoryFromAdapter] 获取聊天记录失败: ${error.message}`,
+        'ChatStream'
+      );
+    }
+  }
+
+  async mergeMessageHistory(messages, e) {
+    if (!e?.isGroup || messages.length < 2) {
+      return messages;
+    }
+
+    // 每次构建上下文前，同步一次外部聊天记录到内存缓存
+    await this.syncHistoryFromAdapter(e);
+
+    const userMessage = messages[messages.length - 1];
+    const isGlobalTrigger = userMessage.content?.isGlobalTrigger || false;
+    const history = ChatStream.messageHistory.get(e.group_id) || [];
     
-    for (const part of parts) {
-      if (part.startsWith('[CQ:')) {
-        const match = part.match(/\[CQ:(\w+)(?:,([^\]]+))?\]/);
-        if (match) {
-          const [, type, params] = match;
+    const mergedMessages = [messages[0]];
+    
+    // 获取当前用户消息的 message_id
+    const currentMsgId = e.message_id || e.real_id || e.messageId || e.id || e.source?.id || '未知';
+    const currentUserNickname = e.sender?.card || e.sender?.nickname || e.user?.name || '用户';
+    const currentContent = typeof userMessage.content === 'string' 
+      ? userMessage.content 
+      : (userMessage.content?.text ?? '');
+    
+    // 格式化单条消息
+    const formatMessage = (msg) => {
+      const msgId = msg.message_id || msg.real_id || '未知';
+      return `${msg.nickname}(${msg.user_id})[ID:${msgId}]: ${msg.message}`;
+    };
+    
+    // 过滤历史记录：排除当前消息（避免重复）
+    const filteredHistory = history.filter(msg => 
+      String(msg.message_id) !== String(currentMsgId)
+    );
+    
+    // 去重：按消息ID去重，保留最新的
+    const uniqueHistory = [];
+    const seenIds = new Set();
+    for (let i = filteredHistory.length - 1; i >= 0; i--) {
+      const msg = filteredHistory[i];
+      const msgId = msg.message_id || msg.real_id;
+      if (msgId && !seenIds.has(String(msgId))) {
+        seenIds.add(String(msgId));
+        uniqueHistory.unshift(msg);
+      }
+    }
+    
+    if (isGlobalTrigger) {
+      const recentMessages = uniqueHistory.slice(-15);
+      if (recentMessages.length > 0) {
+        mergedMessages.push({
+          role: 'user',
+          content: `[群聊记录]\n${recentMessages.map(formatMessage).join('\n')}\n\n你闲来无事点开群聊，看到这些发言。请根据你的个性和人设，自然地表达情绪和感受，不要试图解决问题。`
+        });
+      }
+    } else {
+      const recentMessages = uniqueHistory.slice(-10);
+      
+      // 分别显示历史记录和当前消息
+      if (recentMessages.length > 0) {
+        mergedMessages.push({
+          role: 'user',
+          content: `[群聊记录]\n${recentMessages.map(formatMessage).join('\n')}`
+        });
+      }
+      
+      // 当前消息单独显示
+      if (currentMsgId !== '未知' && currentContent) {
+        // 若原始内容包含图片结构，则保留图片，仅在 text 前加上当前消息标记
+        if (typeof userMessage.content === 'object' && userMessage.content !== null) {
+          const content = userMessage.content;
+          const baseText = content.text || content.content || currentContent;
+          mergedMessages.push({
+            role: 'user',
+            content: {
+              text: `[当前消息]\n${currentUserNickname}(${e.user_id})[ID:${currentMsgId}]: ${baseText}`,
+              images: content.images || [],
+              replyImages: content.replyImages || []
+            }
+          });
+        } else {
+          mergedMessages.push({
+            role: 'user',
+            content: `[当前消息]\n${currentUserNickname}(${e.user_id})[ID:${currentMsgId}]: ${currentContent}`
+          });
+        }
+      } else if (currentContent) {
+        // 如果无法获取消息ID，使用原始消息格式（保留多模态结构）
+        const content = userMessage.content;
+        if (typeof content === 'object' && content.text) {
+          mergedMessages.push({
+            role: 'user',
+            content: {
+              text: content.text,
+              images: content.images || [],
+              replyImages: content.replyImages || []
+            }
+          });
+        } else {
+          mergedMessages.push(userMessage);
+        }
+      }
+    }
+    
+    return mergedMessages;
+  }
+
+  async execute(e, messages, config) {
+    let StreamLoader = null;
+    
+    try {
+      // 构建消息上下文
+      if (!Array.isArray(messages)) {
+        messages = await this.buildChatContext(e, messages);
+      }
+      messages = await this.mergeMessageHistory(messages, e);
+      const query = Array.isArray(messages) ? this.extractQueryFromMessages(messages) : messages;
+      messages = await this.buildEnhancedContext(e, query, messages);
+      
+      // 在调用 AI 之前，挂载当前事件，供 MCP 工具在本轮对话中获取上下文（群/私聊信息）
+      try {
+        StreamLoader = (await import('../../../lib/aistream/loader.js')).default;
+        if (StreamLoader) {
+          StreamLoader.currentEvent = e || null;
+          BotUtil.makeLog(
+            'debug',
+            `[ChatStream.execute] 设置当前事件: isGroup=${e?.isGroup}, message_type=${e?.message_type}, group_id=${e?.group_id}, user_id=${e?.user_id}`,
+            'ChatStream'
+          );
+        }
+      } catch {
+        StreamLoader = null;
+      }
+      
+      // 打印给 LLM 的消息概要，便于调试 Prompt 结构（只截取前几百字符，避免刷屏）
+      try {
+        const preview = (messages || []).map((m, idx) => {
+          const role = m.role || `msg${idx}`;
+          let content = m.content;
+          if (typeof content === 'object') {
+            const text = content.text || content.content || '';
+            content = text;
+          }
+          return {
+            idx,
+            role,
+            text: String(content ?? '')
+          };
+        });
+        BotUtil.makeLog(
+          'debug',
+          `[ChatStream.execute] LLM消息预览: ${JSON.stringify(preview, null, 2)}`,
+          'ChatStream'
+        );
+      } catch {
+        // 调试日志失败直接忽略
+      }
+      
+      // 调用AI获取响应
+      const response = await this.callAI(messages, config);
+      
+      if (!response) {
+        return null;
+      }
+
+      // 工具调用由 LLM 工厂（tool calling + MCP）内部完成，这里只负责发送最终文本
+      const text = (response ?? '').toString().trim();
+      if (text) {
+        await this.sendMessages(e, text);
+        this.recordAIResponse(e, text, []);
+      }
+      return text || '';
+    } catch (error) {
+      BotUtil.makeLog('error', 
+        `工作流执行失败[${this.name}]: ${error.message}`, 
+        'ChatStream'
+      );
+      return null;
+    } finally {
+      // 清理当前事件，避免影响其他工作流/请求
+      if (StreamLoader && StreamLoader.currentEvent === e) {
+        StreamLoader.currentEvent = null;
+      }
+    }
+  }
+
+  /**
+   * 解析CQ码和表情包标记为segment数组，保持顺序
+   * @param {string} text - 包含CQ码和表情包标记的文本
+   * @param {Object} e - 事件对象
+   * @returns {Object} { replyId: string|null, segments: Array } - 回复ID和消息段数组
+   */
+  parseCQToSegments(text, e) {
+    const segments = [];
+    let replyId = null;
+    
+    // 先提取回复消息段（只取第一个）
+    const replyMatch = text.match(/\[CQ:reply,id=(\d+)\]/);
+    if (replyMatch) {
+      replyId = replyMatch[1];
+      // 从文本中移除回复CQ码
+      text = text.replace(/\[CQ:reply,id=\d+\]/g, '').trim();
+    }
+    
+    // 使用正则匹配所有标记（CQ码和表情包标记），按顺序处理
+    // 匹配模式：CQ码 [CQ:type,params] 或表情包 [表情类型]
+    const combinedPattern = /(\[CQ:[^\]]+\]|\[(开心|惊讶|伤心|大笑|害怕|生气)\])/g;
+    const markers = [];
+    let match;
+    
+    // 收集所有标记及其位置
+    while ((match = combinedPattern.exec(text)) !== null) {
+      markers.push({
+        content: match[0],
+        index: match.index,
+        emotion: match[2] // 如果是表情包，这里会有值
+      });
+    }
+    
+    // 按照标记顺序解析
+    let currentIndex = 0;
+    for (const marker of markers) {
+      // 添加标记前的文本
+      if (marker.index > currentIndex) {
+        const textBefore = text.slice(currentIndex, marker.index);
+        if (textBefore.trim()) {
+          segments.push(textBefore);
+        }
+      }
+      
+      // 处理标记
+      if (marker.emotion) {
+        // 表情包标记
+        const image = this.getRandomEmotionImage(marker.emotion);
+        if (image) {
+          const seg = global.segment || segment;
+          segments.push(seg.image(image));
+        }
+      } else if (marker.content.startsWith('[CQ:')) {
+        // CQ码
+        const cqMatch = marker.content.match(/\[CQ:(\w+)(?:,([^\]]+))?\]/);
+        if (cqMatch) {
+          const [, type, params] = cqMatch;
           const paramObj = {};
+          const seg = global.segment || segment;
           
           if (params) {
             params.split(',').forEach(p => {
               const [key, value] = p.split('=');
-              paramObj[key] = value;
+              if (key && value) {
+                paramObj[key.trim()] = value.trim();
+              }
             });
           }
           
           switch (type) {
             case 'at':
-              if (e.isGroup && paramObj.qq) {
-                const history = ChatStream.messageHistory.get(String(e.group_id)) ?? [];
-                const userExists = history.some(msg => 
-                  String(msg.user_id) === String(paramObj.qq)
-                );
-                
-                if (userExists || e.isMaster) {
-                  segments.push(segment.at(paramObj.qq));
-                }
-              }
-              break;
-            case 'reply':
-              if (paramObj.id) {
-                // 支持 ID:123456 或 123456 格式，清理消息ID
-                let msgId = paramObj.id.trim();
-                if (msgId.startsWith('ID:')) {
-                  msgId = msgId.substring(3).trim();
-                }
-                if (msgId) {
-                  segments.push(segment.reply(msgId));
+              if (paramObj.qq) {
+                // 验证QQ号是否在群聊记录中（如果是群聊）
+                if (e.isGroup) {
+                  const history = ChatStream.messageHistory.get(e.group_id) || [];
+                  const userExists = history.some(msg => 
+                    String(msg.user_id) === String(paramObj.qq)
+                  );
+                  
+                  if (userExists || e.isMaster) {
+                    segments.push(seg.at(paramObj.qq));
+                  }
+                } else {
+                  // 私聊直接添加
+                  segments.push(seg.at(paramObj.qq));
                 }
               }
               break;
             case 'image':
               if (paramObj.file) {
-                segments.push(segment.image(paramObj.file));
+                segments.push(seg.image(paramObj.file));
               }
               break;
-            default:
-              break;
+            // poke等其他不支持整合的CQ码：当前忽略或由下游按需扩展
           }
         }
-      } else if (part.trim()) {
-        segments.push(part);
+      }
+      
+      currentIndex = marker.index + marker.content.length;
+    }
+    
+    // 添加最后剩余的文本（如果没有标记，currentIndex为0，会添加整个文本）
+    if (currentIndex < text.length) {
+      const textAfter = text.slice(currentIndex);
+      if (textAfter.trim()) {
+        segments.push(textAfter);
       }
     }
     
-    return segments;
+    // 合并相邻的文本段，避免重复
+    const mergedSegments = [];
+    for (let i = 0; i < segments.length; i++) {
+      const current = segments[i];
+      const last = mergedSegments[mergedSegments.length - 1];
+      
+      // 如果当前段和上一段都是文本字符串，合并它们
+      if (typeof current === 'string' && typeof last === 'string') {
+        mergedSegments[mergedSegments.length - 1] = last + current;
+      } else {
+        mergedSegments.push(current);
+      }
+    }
+    
+    return { replyId, segments: mergedSegments };
   }
 
-  /**
-   * 发送消息
-   */
   async sendMessages(e, cleanText) {
-    if (cleanText.includes('|')) {
-      const messages = cleanText.split('|').map(m => m.trim()).filter(m => m);
+    if (!cleanText || !cleanText.trim()) return;
+
+    const messages = cleanText.split('|').map(m => m.trim()).filter(Boolean);
+    
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      if (!msg) continue;
       
-      for (let i = 0; i < messages.length; i++) {
-        const msg = messages[i];
-        const segments = await this.parseCQCodes(msg, e);
-        
-        if (segments.length > 0) {
+      // 解析CQ码为segment数组
+      const { replyId, segments } = this.parseCQToSegments(msg, e);
+      
+      // 如果有回复ID或解析出了segment，使用segment方式发送
+      if (replyId || segments.length > 0) {
+        if (replyId) {
+          // 有回复ID：回复段必须在最前面（OneBot协议要求）
+          // segment.reply返回 { type: "reply", id, ... }，makeMsg会转换为 { type: "reply", data: { id } }
+          const seg = global.segment || segment;
+          const replySegment = seg.reply(replyId);
+          const replySegments = segments.length > 0 
+            ? [replySegment, ...segments] 
+            : [replySegment, ' '];
+          await e.reply(replySegments);
+        } else {
+          // 没有回复ID：直接发送segments
           await e.reply(segments);
-          
-          if (i < messages.length - 1) {
-            await BotUtil.sleep(randomRange(800, 1500));
-          }
         }
+      } else {
+        // 如果没有解析出任何内容，直接发送原始文本
+        await e.reply(msg);
       }
-    } else if (cleanText) {
-      const segments = await this.parseCQCodes(cleanText, e);
       
-      if (segments.length > 0) {
-        await e.reply(segments);
+      if (i < messages.length - 1) {
+        await BotUtil.sleep(randomRange(800, 1500));
       }
     }
   }
 
-  /**
-   * 清理缓存（使用现代方法优化）
-   */
   cleanupCache() {
-    const now = Date.now();
-    const MAX_AGE = 1800000; // 30分钟
-    const CACHE_AGE = 300000; // 5分钟
-    
-    // 清理消息历史
     for (const [groupId, messages] of ChatStream.messageHistory.entries()) {
-      const filtered = messages.filter(msg => now - msg.time < MAX_AGE);
-      if (filtered.length === 0) {
+      if (!messages || messages.length === 0) {
         ChatStream.messageHistory.delete(groupId);
-      } else if (filtered.length !== messages.length) {
-        ChatStream.messageHistory.set(groupId, filtered);
+        continue;
+      }
+      // 始终只保留最近50条消息
+      if (messages.length > 50) {
+        ChatStream.messageHistory.set(groupId, messages.slice(-50));
       }
     }
     
-    // 清理用户缓存
-    for (const [key, data] of ChatStream.userCache.entries()) {
-      if (now - (data.time ?? 0) > CACHE_AGE) {
-        ChatStream.userCache.delete(key);
-      }
-    }
   }
 
-  /**
-   * 执行工作流（优化版：添加重试机制和更好的错误处理）
-   */
-  async execute(e, question, config) {
-    if (e?.isGroup) {
-      this.recordMessage(e);
-    }
-    
-    const timeoutSymbol = Symbol('chat_timeout');
-    let timeoutId = null;
-    
-    const timeoutPromise = new Promise(resolve => {
-      timeoutId = setTimeout(() => resolve(timeoutSymbol), CHAT_RESPONSE_TIMEOUT);
-    });
-    
-    try {
-      const result = await Promise.race([
-        super.execute(e, question, config),
-        timeoutPromise
-      ]);
-      
-      clearTimeout(timeoutId);
-      
-      if (result === timeoutSymbol) {
-        BotUtil.makeLog('warn', `聊天回复超时(>${CHAT_RESPONSE_TIMEOUT}ms)，已放弃`, 'ChatStream');
-        return null;
-      }
-      
-      if (!result) return result;
-      
-      return await this.postProcessResponse(result, { e, question, config });
-    } catch (error) {
-      clearTimeout(timeoutId);
-      BotUtil.makeLog('error', `执行工作流失败: ${error.message}`, 'ChatStream');
-      return null;
-    }
-  }
-
-  /**
-   * 清理资源
-   */
   async cleanup() {
     await super.cleanup();
     
@@ -3106,7 +1889,5 @@ ${e.isMaster ? '5. 对主人保持亲密、顺从' : ''}`;
       clearInterval(ChatStream.cleanupTimer);
       ChatStream.cleanupTimer = null;
     }
-    
-    ChatStream.initialized = false;
   }
 }

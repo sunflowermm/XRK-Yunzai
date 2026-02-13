@@ -112,8 +112,6 @@ function toBool(v) {
   return undefined;
 }
 
-// 使用LLMFactory.getProviderConfig替代，已删除冗余函数
-
 /** 提取消息文本内容（支持字符串和对象格式） */
 function extractMessageText(messages) {
   return messages.map(m => {

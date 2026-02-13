@@ -10,6 +10,8 @@ disableGuildMsg: true
 disablePrivate: false
 # 禁用私聊Bot提示内容
 disableMsg: "私聊功能已禁用"
+# 不向该QQ发送禁用提示（0表示不启用）
+qq: 0
 # 私聊通行字符串
 disableAdopt:
   - stoken

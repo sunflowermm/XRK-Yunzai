@@ -1,3 +1,5 @@
+# 是否输出调试信息（如错误堆栈）
+debug: false
 # 日志等级: trace, debug, info, warn, fatal, mark, error, off
 # mark 时只显示执行命令，不显示聊天记录
 log_level: info

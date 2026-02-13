@@ -1,0 +1,73 @@
+# plugin/
+plugin/*
+!plugin/进群退群通知.js
+!plugin/伪造消息.js
+!plugin/模拟定时输入.js
+!plugin/主动复读.js
+!plugin/葵崽插件.js
+!plugin/status.js
+!plugin/recallReply.js
+!plugin/quit.js
+!plugin/invite.js
+!plugin/disablePrivate.js
+!plugin/friend.js
+
+# stream/
+stream/*
+!stream/chat.js
+!stream/device.js
+!stream/memory.js
+!stream/database.js
+!stream/tools.js
+
+# http/
+http/*
+!http/ai.js
+!http/bot.js
+!http/config.js
+!http/core.js
+!http/files.js
+!http/mcp.js
+!http/plugin.js
+!http/stdin.js
+!http/write.js
+
+# commonconfig/
+commonconfig/*
+!commonconfig/system.js
+!commonconfig/gptgod_llm.js
+!commonconfig/xiaomimimo_llm.js
+!commonconfig/tools.js
+!commonconfig/volcengine_llm.js
+!commonconfig/openai_llm.js
+!commonconfig/openai_compat_llm.js
+!commonconfig/anthropic_llm.js
+!commonconfig/gemini_llm.js
+!commonconfig/azure_openai_llm.js
+!commonconfig/volcengine_asr.js
+!commonconfig/volcengine_tts.js
+
+# events/
+events/*
+!events/connect.js
+!events/message.js
+!events/notice.js
+!events/online.js
+!events/request.js
+
+# adapter/
+adapter/*
+!adapter/stdin.js
+!adapter/OneBotv11.js
+!adapter/QBQBot.js
+!adapter/ComWeChat.js
+!adapter/GSUIDCORE.js
+
+# www/xrk/
+www/*
+!www/xrk/
+www/xrk/*
+!www/xrk/app.js
+!www/xrk/api-config.json
+!www/xrk/index.html
+!www/xrk/styles.css

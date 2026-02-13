@@ -47,7 +47,7 @@ export class disPri extends plugin {
     /** 冷却cd 10s */
     let cd = 10
 
-    if (this.e.user_id == cfg.qq) return
+    if (cfg.other?.qq && Number(this.e.user_id) === Number(cfg.other.qq)) return
 
     /** cd */
     let key = `Yz:disablePrivate:${this.e.user_id}`

@@ -1,71 +1,65 @@
 import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
 
 /**
- * 火山引擎 LLM 配置
+ * 火山引擎 LLM 工厂配置管理（文本）
+ * 管理火山引擎大语言模型（LLM 文本聊天）相关配置
+ * 识图配置已经拆分到 volcengine_vision.yaml / volcengine_vision.js
+ * 支持前端编辑，配置文件位于 data/server_bots/{port}/volcengine_llm.yaml
  */
 export default class VolcengineLLMConfig extends ConfigBase {
   constructor() {
     super({
       name: 'volcengine_llm',
-      displayName: '火山引擎 LLM配置',
-      description: '火山引擎豆包大模型配置',
+      displayName: '火山引擎 LLM 工厂配置（文本）',
+      description: '火山引擎豆包大语言模型文本聊天配置',
       filePath: (cfg) => {
-        const port = cfg?._port || cfg?.server?.server?.port || 8086;
+        const port = cfg?._port ?? 8086;
         return port ? `data/server_bots/${port}/volcengine_llm.yaml` : `config/default_config/volcengine_llm.yaml`;
       },
       fileType: 'yaml',
       schema: {
         fields: {
-          enabled: {
-            type: 'boolean',
-            label: '启用',
-            default: true,
-            component: 'Switch'
-          },
           baseUrl: {
             type: 'string',
-            label: 'API地址',
+            label: 'API 基础地址',
+            description: '火山引擎豆包 API 基础地址',
             default: 'https://ark.cn-beijing.volces.com/api/v3',
             component: 'Input'
           },
           apiKey: {
             type: 'string',
-            label: 'API密钥',
-            description: '火山引擎API密钥',
+            label: 'API Key',
+            description: '火山引擎 API Key',
             default: '',
             component: 'InputPassword'
           },
-          model: {
+          region: {
             type: 'string',
-            label: '模型名称',
-            default: 'ep-20241220101210-xxxxx',
+            label: '区域',
+            description: '火山引擎服务区域，如 cn-beijing、cn-shanghai',
+            default: 'cn-beijing',
             component: 'Input'
           },
           chatModel: {
             type: 'string',
             label: '聊天模型',
-            default: 'ep-20241220101210-xxxxx',
+            description: '火山引擎聊天模型名称',
+            default: 'doubao-pro-4k',
             component: 'Input'
           },
           temperature: {
             type: 'number',
-            label: '温度参数',
+            label: '温度',
+            description: '生成文本的随机性，范围 0-2',
             min: 0,
             max: 2,
-            step: 0.1,
             default: 0.8,
             component: 'InputNumber'
           },
           maxTokens: {
             type: 'number',
-            label: '最大Token数',
-            min: 1,
-            default: 4000,
-            component: 'InputNumber'
-          },
-          max_tokens: {
-            type: 'number',
-            label: '最大Token数（兼容字段）',
+            label: '最大 Tokens',
+            description: '生成文本的最大长度',
             min: 1,
             default: 4000,
             component: 'InputNumber'
@@ -73,67 +67,85 @@ export default class VolcengineLLMConfig extends ConfigBase {
           topP: {
             type: 'number',
             label: 'Top P',
+            description: '核采样参数，范围 0-1',
             min: 0,
             max: 1,
-            step: 0.1,
             default: 0.9,
             component: 'InputNumber'
           },
-          top_p: {
+          presencePenalty: {
             type: 'number',
-            label: 'Top P（兼容字段）',
-            min: 0,
-            max: 1,
-            step: 0.1,
-            default: 0.9,
+            label: 'Presence Penalty',
+            description: '存在惩罚（-2 到 2），控制模型重复已出现的内容',
+            min: -2,
+            max: 2,
+            default: 0,
+            component: 'InputNumber'
+          },
+          frequencyPenalty: {
+            type: 'number',
+            label: 'Frequency Penalty',
+            description: '频率惩罚（-2 到 2），控制模型重复高频词汇',
+            min: -2,
+            max: 2,
+            default: 0,
             component: 'InputNumber'
           },
           timeout: {
             type: 'number',
-            label: '请求超时',
+            label: '超时时间 (ms)',
+            description: 'API 请求超时时间',
             min: 1000,
-            default: 60000,
+            default: 360000,
+            component: 'InputNumber'
+          },
+          path: {
+            type: 'string',
+            label: '接口路径',
+            description: 'API 接口路径',
+            default: '/chat/completions',
+            component: 'Input'
+          },
+          enableTools: {
+            type: 'boolean',
+            label: '启用工具调用',
+            description: '开启后会自动注入 MCP 工具列表（无需手写 tools）',
+            default: true,
+            component: 'Switch'
+          },
+          toolChoice: {
+            type: 'string',
+            label: '工具选择模式',
+            description: 'tool_choice（auto/none/required），豆包支持',
+            default: 'auto',
+            component: 'Input'
+          },
+          parallelToolCalls: {
+            type: 'boolean',
+            label: '并行工具调用',
+            description: 'parallel_tool_calls（豆包支持）',
+            default: true,
+            component: 'Switch'
+          },
+          maxToolRounds: {
+            type: 'number',
+            label: '最大工具轮次',
+            description: '多轮 tool calling 的最大轮次',
+            min: 1,
+            max: 20,
+            default: 5,
             component: 'InputNumber'
           },
           enableStream: {
             type: 'boolean',
             label: '启用流式输出',
+            description: '是否启用流式输出（默认启用，所有运营商均支持）',
             default: true,
             component: 'Switch'
-          },
-          enableTools: {
-            type: 'boolean',
-            label: '启用工具调用',
-            default: false,
-            component: 'Switch'
-          },
-          proxy: {
-            type: 'object',
-            label: '代理配置',
-            component: 'SubForm',
-            fields: {
-              enabled: {
-                type: 'boolean',
-                label: '启用代理',
-                default: false,
-                component: 'Switch'
-              },
-              http: {
-                type: 'string',
-                label: 'HTTP代理',
-                default: '',
-                component: 'Input'
-              },
-              https: {
-                type: 'string',
-                label: 'HTTPS代理',
-                default: '',
-                component: 'Input'
-              }
-            }
           }
         }
       }
     });
   }
 }
+

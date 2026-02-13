@@ -10,7 +10,7 @@ export default class GPTGodLLMConfig extends ConfigBase {
       displayName: 'GPTGod LLM配置',
       description: 'GPTGod大语言模型配置，支持识图功能',
       filePath: (cfg) => {
-        const port = cfg?._port || cfg?.server?.server?.port || 8086;
+        const port = cfg?._port ?? 8086;
         return port ? `data/server_bots/${port}/gptgod_llm.yaml` : `config/default_config/gptgod_llm.yaml`;
       },
       fileType: 'yaml',

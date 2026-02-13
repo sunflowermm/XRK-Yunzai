@@ -167,7 +167,7 @@ export default {
           configName = req.params && req.params.name;
           const { data, path: keyPath, backup = true, validate = true } = req.body || {};
 
-          BotUtil.makeLog('info', `收到配置写入请求 [${configName}] path: ${keyPath || 'none'}`, 'ConfigAPI');
+          BotUtil.makeLog('debug', `收到配置写入请求 [${configName}] path: ${keyPath || 'none'}`, 'ConfigAPI');
 
           if (!configName) {
             return res.status(400).json({

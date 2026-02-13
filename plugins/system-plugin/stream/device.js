@@ -1,0 +1,82 @@
+/**
+ * 设备工作流
+ * 业务层：plugins/system-plugin/stream/
+ */
+import AIStream from '../../../lib/aistream/aistream.js';
+import BotUtil from '../../../lib/util.js';
+
+export default class DeviceStream extends AIStream {
+  constructor() {
+    super({
+      name: 'device',
+      description: '设备工作流',
+      version: '1.0.5',
+      author: 'XRK',
+      priority: 5,
+      config: {
+        enabled: true,
+        temperature: 0.7,
+        maxTokens: 4000,
+        topP: 0.9,
+        presencePenalty: 0.3,
+        frequencyPenalty: 0.3
+      },
+      embedding: { enabled: false }
+    });
+  }
+
+  buildSystemPrompt(context) {
+    const persona = context?.persona || '你是一个简洁友好的设备语音助手，以地道中文回答。';
+    return `【人设】
+${persona}
+
+【表情标记说明】
+你的回复中包含表情标记格式时，系统会自动解析并驱动设备显示对应表情，然后从文本中移除标记格式。
+
+格式要求：精确匹配，如 [开心]、[惊讶]、[伤心]、[大笑]、[害怕]、[生气]
+可用表情：开心、惊讶、伤心、大笑、害怕、生气
+
+使用示例：
+- "[开心]你好" → 设备显示开心表情，并语音播放"你好"
+- "[惊讶]真的吗？" → 设备显示惊讶表情，并语音播放"真的吗？"
+
+【规则】
+1. 尽量简洁，优先中文
+2. 如需展示表情，在文本前加一个表情标记（可选）
+3. 最多一个表情标记
+4. 格式必须完全匹配，表情标记会被移除，用户只听到普通文本
+5. 不要输出多余解释`;
+  }
+
+  async buildChatContext(e, question) {
+    const text = typeof question === 'string' ? question : (question?.text || question?.content || '');
+    return [
+      { role: 'system', content: this.buildSystemPrompt({ persona: question?.persona }) },
+      { role: 'user', content: text || '你好' }
+    ];
+  }
+
+  async execute(deviceId, question, apiConfig, persona = '') {
+    try {
+      const messages = await this.buildChatContext(null, { text: question, persona });
+      const response = await this.callAI(messages, apiConfig);
+      if (!response) return null;
+      const { emotion, cleanText } = this.parseEmotion(response);
+      return { text: cleanText || '', emotion };
+    } catch (err) {
+      BotUtil.makeLog('error', `设备工作流失败: ${err.message}`, 'DeviceStream');
+      return null;
+    }
+  }
+
+  parseEmotion(text) {
+    const regex = /^\s*\[(开心|惊讶|伤心|大笑|害怕|生气)[\]\}]\s*/;
+    const match = regex.exec(text || '');
+    if (!match) {
+      return { emotion: null, cleanText: (text || '').trim() };
+    }
+    const emotion = match[1];
+    const cleanText = (text || '').replace(regex, '').trim();
+    return { emotion, cleanText };
+  }
+}

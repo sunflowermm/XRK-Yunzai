@@ -1,219 +1,93 @@
 import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
-import fs from 'fs/promises';
-import fsSync from 'fs';
 import path from 'path';
-import yaml from 'yaml';
-import BotUtil from '../../../lib/util.js';
+
+const paths = { root: process.cwd(), renderers: path.join(process.cwd(), 'renderers') };
 
 /**
  * 系统配置管理
- * 管理所有系统级配置文件
+ * 与 lib/config/config.js (cfg) 一致：默认来自 config/default_config，覆盖来自 data/server_bots/{port}。
+ * 路径：有端口时 data/server_bots/{port}/{name}.yaml，无端口时 config/default_config/{name}.yaml。
  */
 export default class SystemConfig extends ConfigBase {
   constructor() {
     super({
       name: 'system',
       displayName: '系统配置',
-      description: 'XRK-Yunzai 系统配置管理',
-      filePath: '', // 系统配置管理多个文件，此处留空
+      description: '系统配置管理（与 default_config 对齐）',
+      filePath: '',
       fileType: 'yaml'
     });
 
-    // 辅助函数：生成基于端口的动态路径
-    const getConfigPath = (configName) => {
-      return (cfg) => {
-        // 从 cfg 获取端口，路径格式：data/server_bots/{port}/{name}.yaml
-        const port = cfg?._port || cfg?.server?.server?.port || 8086;
-        return port ? `data/server_bots/${port}/${configName}.yaml` : `config/config/${configName}.yaml`;
-      };
+    const getPort = (c) => c?._port ?? 8086;
+    const getConfigPath = (configName) => (c) => {
+      const port = getPort(c);
+      return port ? `data/server_bots/${port}/${configName}.yaml` : `config/default_config/${configName}.yaml`;
     };
 
-    // 定义所有系统配置文件
-    // 使用动态路径函数，基于端口获取正确路径
     this.configFiles = {
       bot: {
         name: 'bot',
-        displayName: '机器人配置',
-        description: '机器人核心配置，包括日志、文件监听、Puppeteer等',
+        displayName: 'Bot 配置',
+        description: '日志、浏览器、文件系统等（对应 default_config/bot.yaml）',
         filePath: getConfigPath('bot'),
         fileType: 'yaml',
         schema: {
-          required: ['log_level'],
           fields: {
-            log_level: {
-              type: 'string',
-              label: '日志等级',
-              description: '日志输出等级。Mark时只显示执行命令，不显示聊天记录',
-              enum: ['trace', 'debug', 'info', 'warn', 'fatal', 'mark', 'error', 'off'],
-              default: 'info',
-              component: 'Select'
-            },
-            log_align: {
-              type: 'string',
-              label: '日志头内容',
-              description: '日志头内容自定义显示，例如设置为"XRKYZ"将显示[XRKYZ]',
-              default: 'XRKYZ',
-              component: 'Input'
-            },
-            log_color: {
-              type: 'string',
-              label: '日志头颜色方案',
-              description: '选择日志头的颜色主题',
-              enum: ['default', 'scheme1', 'scheme2', 'scheme3', 'scheme4', 'scheme5', 'scheme6', 'scheme7'],
-              default: 'default',
-              component: 'Select'
-            },
-            log_id_length: {
-              type: 'number',
-              label: '日志ID长度',
-              description: '日志ID长度（默认16个字符）',
-              min: 1,
-              max: 64,
-              default: 20,
-              component: 'InputNumber'
-            },
-            log_id_filler: {
-              type: 'string',
-              label: 'ID美化字符',
-              description: 'ID显示时的美化字符（用于填充空白）',
-              enum: ['.', '·', '─', '•', '═', '»', '→'],
-              default: '.',
-              component: 'Select'
-            },
+            debug: { type: 'boolean', label: '调试输出', description: '是否输出调试信息（如错误堆栈）', default: false, component: 'Switch' },
+            log_level: { type: 'string', label: '日志等级', enum: ['trace', 'debug', 'info', 'warn', 'fatal', 'mark', 'error', 'off'], default: 'info', component: 'Select' },
+            log_align: { type: 'string', label: '日志头内容', default: 'XRKYZ', component: 'Input' },
+            log_color: { type: 'string', label: '日志头颜色', enum: ['default', 'scheme1', 'scheme2', 'scheme3', 'scheme4', 'scheme5', 'scheme6', 'scheme7'], default: 'default', component: 'Select' },
+            log_id_length: { type: 'number', label: '日志ID长度', min: 1, max: 64, default: 20, component: 'InputNumber' },
+            log_id_filler: { type: 'string', label: 'ID美化字符', enum: ['.', '·', '─', '•', '═', '»', '→'], default: '.', component: 'Select' },
+            ignore_self: { type: 'boolean', label: '过滤自己的消息', default: true, component: 'Switch' },
+            chromium_path: { type: 'string', label: 'Chromium路径', default: '', component: 'Input' },
+            puppeteer_ws: { type: 'string', label: 'Puppeteer接口地址', default: '', component: 'Input' },
+            puppeteer_timeout: { type: 'number', label: 'Puppeteer截图超时(ms)', min: 0, default: 0, component: 'InputNumber' },
+            '/→#': { type: 'boolean', label: '斜杠转井号', default: true, component: 'Switch' },
             log_object: {
               type: 'object',
               label: '日志对象检查',
-              description: '日志对象检查配置',
               component: 'SubForm',
               fields: {
-                depth: {
-                  type: 'number',
-                  label: '检查深度',
-                  min: 1,
-                  default: 10,
-                  component: 'InputNumber'
-                },
-                colors: {
-                  type: 'boolean',
-                  label: '彩色输出',
-                  default: true,
-                  component: 'Switch'
-                },
-                showHidden: {
-                  type: 'boolean',
-                  label: '显示隐藏属性',
-                  default: true,
-                  component: 'Switch'
-                },
-                showProxy: {
-                  type: 'boolean',
-                  label: '显示代理对象',
-                  default: true,
-                  component: 'Switch'
-                },
-                getters: {
-                  type: 'boolean',
-                  label: '显示getters',
-                  default: true,
-                  component: 'Switch'
-                },
-                breakLength: {
-                  type: 'number',
-                  label: '换行长度',
-                  min: 1,
-                  default: 100,
-                  component: 'InputNumber'
-                },
-                maxArrayLength: {
-                  type: 'number',
-                  label: '最大数组长度',
-                  min: 1,
-                  default: 100,
-                  component: 'InputNumber'
-                },
-                maxStringLength: {
-                  type: 'number',
-                  label: '最大字符串长度',
-                  min: 1,
-                  default: 1000,
-                  component: 'InputNumber'
-                }
+                depth: { type: 'number', label: '检查深度', min: 1, default: 10, component: 'InputNumber' },
+                colors: { type: 'boolean', label: '彩色输出', default: true, component: 'Switch' },
+                showHidden: { type: 'boolean', label: '显示隐藏属性', default: true, component: 'Switch' },
+                showProxy: { type: 'boolean', label: '显示代理对象', default: true, component: 'Switch' },
+                getters: { type: 'boolean', label: '显示getters', default: true, component: 'Switch' },
+                breakLength: { type: 'number', label: '换行长度', min: 1, default: 100, component: 'InputNumber' },
+                maxArrayLength: { type: 'number', label: '最大数组长度', min: 1, default: 100, component: 'InputNumber' },
+                maxStringLength: { type: 'number', label: '最大字符串长度', min: 1, default: 1000, component: 'InputNumber' }
               }
             },
-            ignore_self: {
-              type: 'boolean',
-              label: '过滤自己',
-              description: '群聊和频道中过滤自己的消息',
-              default: true,
-              component: 'Switch'
-            },
-            '/→#': {
-              type: 'boolean',
-              label: '斜杠转井号',
-              description: '自动把 / 换成 #',
-              default: true,
-              component: 'Switch'
-            },
-            file_watch: {
-              type: 'boolean',
-              label: '监听文件变化',
-              description: '是否监听文件变化',
-              default: true,
-              component: 'Switch'
-            },
-            online_msg_exp: {
-              type: 'number',
-              label: '上线推送冷却',
-              description: '上线推送通知的冷却时间（秒）',
-              min: 0,
-              default: 86400,
-              component: 'InputNumber'
-            },
-            file_to_url_time: {
-              type: 'number',
-              label: '文件URL有效时间',
-              description: '文件URL有效时间（分钟）',
-              min: 1,
-              default: 60,
-              component: 'InputNumber'
-            },
-            file_to_url_times: {
-              type: 'number',
-              label: '文件URL访问次数',
-              description: '文件URL访问次数限制',
-              min: 1,
-              default: 5,
-              component: 'InputNumber'
-            },
-            chromium_path: {
-              type: 'string',
-              label: 'chromium路径',
-              description: 'chromium其他路径，默认无需填写',
-              default: '',
-              component: 'Input'
-            },
-            puppeteer_ws: {
-              type: 'string',
-              label: 'puppeteer接口地址',
-              description: 'puppeteer接口地址，默认无需填写',
-              default: '',
-              component: 'Input'
-            },
-            puppeteer_timeout: {
-              type: 'number',
-              label: 'puppeteer截图超时时间',
-              description: 'puppeteer截图超时时间（毫秒）',
-              min: 0,
-              default: 0,
-              component: 'InputNumber'
-            },
-            cache_group_member: {
-              type: 'boolean',
-              label: '缓存群成员列表',
-              description: '是否缓存群成员列表',
-              default: true,
-              component: 'Switch'
-            }
+            file_watch: { type: 'boolean', label: '监听文件变化', default: true, component: 'Switch' },
+            online_msg_exp: { type: 'number', label: '上线推送冷却(秒)', min: 0, default: 86400, component: 'InputNumber' },
+            file_to_url_time: { type: 'number', label: '文件URL有效时间(分钟)', min: 1, default: 60, component: 'InputNumber' },
+            file_to_url_times: { type: 'number', label: '文件URL访问次数', min: 1, default: 5, component: 'InputNumber' },
+            cache_group_member: { type: 'boolean', label: '缓存群成员列表', default: true, component: 'Switch' }
+          }
+        }
+      },
+
+      other: {
+        name: 'other',
+        displayName: '其他配置',
+        description: '主人、白名单、黑名单、自动处理、私聊等（对应 default_config/other.yaml）',
+        filePath: getConfigPath('other'),
+        fileType: 'yaml',
+        schema: {
+          fields: {
+            autoFriend: { type: 'number', label: '自动同意加好友', description: '1-同意 0-不处理', enum: [0, 1], default: 1, component: 'Select' },
+            autoQuit: { type: 'number', label: '自动退群人数', description: '群人数小于此值自动退出，0则不处理', min: 0, default: 50, component: 'InputNumber' },
+            masterQQ: { type: 'array', label: '主人QQ号', itemType: 'string', default: [], component: 'Tags' },
+            disableGuildMsg: { type: 'boolean', label: '禁用频道消息', default: true, component: 'Switch' },
+            disablePrivate: { type: 'boolean', label: '禁用私聊功能', default: false, component: 'Switch' },
+            disableMsg: { type: 'string', label: '禁用私聊提示', default: '私聊功能已禁用', component: 'Input' },
+            qq: { type: 'number', label: '不发送禁用提示的QQ', description: '不向该QQ发送禁用提示，0表示不启用', min: 0, default: 0, component: 'InputNumber' },
+            disableAdopt: { type: 'array', label: '私聊通行字符串', itemType: 'string', default: ['stoken'], component: 'Tags' },
+            whiteGroup: { type: 'array', label: '白名单群', itemType: 'string', default: [], component: 'Tags' },
+            whiteQQ: { type: 'array', label: '白名单QQ', itemType: 'string', default: [], component: 'Tags' },
+            blackGroup: { type: 'array', label: '黑名单群', itemType: 'string', default: [], component: 'Tags' },
+            blackQQ: { type: 'array', label: '黑名单QQ', itemType: 'string', default: [], component: 'Tags' }
           }
         }
       },
@@ -234,7 +108,6 @@ export default class SystemConfig extends ConfigBase {
                 name: {
                   type: 'string',
                   label: '服务器名称',
-                  default: 'XRK Server',
                   component: 'Input'
                 },
                 host: {
@@ -248,7 +121,7 @@ export default class SystemConfig extends ConfigBase {
                   type: 'string',
                   label: '外部访问URL',
                   description: '用于生成完整的访问链接，留空则自动检测',
-                  default: 'http://127.0.0.1',
+                  default: '',
                   component: 'Input'
                 }
               }
@@ -280,6 +153,58 @@ export default class SystemConfig extends ConfigBase {
                   default: 443,
                   component: 'InputNumber'
                 },
+                healthCheck: {
+                  type: 'object',
+                  label: '健康检查配置',
+                  component: 'SubForm',
+                  fields: {
+                    enabled: {
+                      type: 'boolean',
+                      label: '启用健康检查',
+                      default: false,
+                      component: 'Switch'
+                    },
+                    interval: {
+                      type: 'number',
+                      label: '检查间隔',
+                      description: '检查间隔（毫秒）',
+                      min: 1000,
+                      default: 30000,
+                      component: 'InputNumber'
+                    },
+                    maxFailures: {
+                      type: 'number',
+                      label: '最大失败次数',
+                      description: '超过后标记为不健康',
+                      min: 1,
+                      default: 3,
+                      component: 'InputNumber'
+                    },
+                    timeout: {
+                      type: 'number',
+                      label: '健康检查超时',
+                      description: '健康检查超时时间（毫秒）',
+                      min: 1000,
+                      default: 5000,
+                      component: 'InputNumber'
+                    },
+                    cacheTime: {
+                      type: 'number',
+                      label: '结果缓存时间',
+                      description: '健康检查结果缓存时间（毫秒），减少频繁检查',
+                      min: 0,
+                      default: 5000,
+                      component: 'InputNumber'
+                    },
+                    path: {
+                      type: 'string',
+                      label: '健康检查路径',
+                      description: '自定义健康检查路径（可选，默认/health）',
+                      component: 'Input',
+                      placeholder: '/health'
+                    }
+                  }
+                },
                 domains: {
                   type: 'array',
                   label: '域名配置列表',
@@ -303,8 +228,24 @@ export default class SystemConfig extends ConfigBase {
                     target: {
                       type: 'string',
                       label: '目标服务器',
+                      description: '单个服务器URL，或数组形式配置多个服务器启用负载均衡',
                       component: 'Input',
                       placeholder: 'http://localhost:3000'
+                    },
+                    loadBalance: {
+                      type: 'string',
+                      label: '负载均衡算法',
+                      description: '当target为数组时生效',
+                      enum: ['round-robin', 'weighted', 'least-connections', 'ip-hash', 'consistent-hash', 'least-response-time'],
+                      default: 'round-robin',
+                      component: 'Select'
+                    },
+                    healthUrl: {
+                      type: 'string',
+                      label: '自定义健康检查URL',
+                      description: '覆盖全局健康检查路径',
+                      component: 'Input',
+                      placeholder: 'http://localhost:3000/custom-health'
                     },
                     ssl: {
                       type: 'object',
@@ -376,6 +317,117 @@ export default class SystemConfig extends ConfigBase {
                       description: '代理超时时间（毫秒）',
                       min: 1000,
                       default: 30000,
+                      component: 'InputNumber'
+                    }
+                  }
+                }
+              }
+            },
+            redirects: {
+              type: 'array',
+              label: 'HTTP重定向配置',
+              description: '支持301/302/307/308重定向，支持通配符和条件匹配',
+              component: 'ArrayForm',
+              itemType: 'object',
+              fields: {
+                from: {
+                  type: 'string',
+                  label: '源路径',
+                  required: true,
+                  component: 'Input',
+                  placeholder: '/old-path'
+                },
+                to: {
+                  type: 'string',
+                  label: '目标路径',
+                  required: true,
+                  component: 'Input',
+                  placeholder: '/new-path'
+                },
+                status: {
+                  type: 'number',
+                  label: 'HTTP状态码',
+                  enum: [301, 302, 307, 308],
+                  default: 301,
+                  component: 'Select'
+                },
+                preserveQuery: {
+                  type: 'boolean',
+                  label: '保留查询参数',
+                  default: true,
+                  component: 'Switch'
+                },
+                condition: {
+                  type: 'string',
+                  label: '条件表达式',
+                  description: 'JavaScript条件表达式（可选）',
+                  component: 'Input',
+                  placeholder: "req.headers['user-agent'].includes('Mobile')"
+                }
+              }
+            },
+            cdn: {
+              type: 'object',
+              label: 'CDN配置',
+              component: 'SubForm',
+              fields: {
+                enabled: {
+                  type: 'boolean',
+                  label: '启用CDN',
+                  default: false,
+                  component: 'Switch'
+                },
+                domain: {
+                  type: 'string',
+                  label: 'CDN域名',
+                  component: 'Input',
+                  placeholder: 'cdn.example.com'
+                },
+                staticPrefix: {
+                  type: 'string',
+                  label: '静态资源前缀',
+                  default: '/static',
+                  component: 'Input'
+                },
+                https: {
+                  type: 'boolean',
+                  label: '使用HTTPS',
+                  default: true,
+                  component: 'Switch'
+                },
+                type: {
+                  type: 'string',
+                  label: 'CDN类型',
+                  description: '用于优化CDN特定头部',
+                  enum: ['general', 'cloudflare', 'aliyun', 'tencent', 'aws', 'baidu', 'qiniu', 'ucloud'],
+                  default: 'general',
+                  component: 'Select'
+                },
+                cacheControl: {
+                  type: 'object',
+                  label: '缓存控制',
+                  component: 'SubForm',
+                  fields: {
+                    static: {
+                      type: 'number',
+                      label: '静态资源缓存（秒）',
+                      description: 'CSS/JS/字体文件',
+                      min: 0,
+                      default: 31536000,
+                      component: 'InputNumber'
+                    },
+                    images: {
+                      type: 'number',
+                      label: '图片缓存（秒）',
+                      min: 0,
+                      default: 604800,
+                      component: 'InputNumber'
+                    },
+                    default: {
+                      type: 'number',
+                      label: '默认缓存（秒）',
+                      min: 0,
+                      default: 3600,
                       component: 'InputNumber'
                     }
                   }
@@ -478,7 +530,6 @@ export default class SystemConfig extends ConfigBase {
                 index: {
                   type: 'array',
                   label: '默认首页文件',
-                  description: '按顺序查找，返回第一个存在的文件',
                   itemType: 'string',
                   default: ['index.html', 'index.htm', 'default.html'],
                   component: 'Tags'
@@ -486,14 +537,35 @@ export default class SystemConfig extends ConfigBase {
                 extensions: {
                   type: 'boolean',
                   label: '自动添加扩展名',
-                  description: '例如：/page 会尝试 /page.html',
                   default: false,
                   component: 'Switch'
+                },
+                cache: {
+                  type: 'object',
+                  label: '缓存配置',
+                  component: 'SubForm',
+                  fields: {
+                    static: {
+                      type: 'number',
+                      label: '静态资源缓存（秒）',
+                      description: 'CSS/JS/字体文件',
+                      min: 0,
+                      default: 86400,
+                      component: 'InputNumber'
+                    },
+                    images: {
+                      type: 'number',
+                      label: '图片缓存（秒）',
+                      min: 0,
+                      default: 604800,
+                      component: 'InputNumber'
+                    }
+                  }
                 },
                 cacheTime: {
                   type: 'string',
                   label: '缓存时间',
-                  description: '支持格式：1d = 1天, 1h = 1小时, 1w = 1周',
+                  description: '支持格式：1d = 1天, 1h = 1小时',
                   default: '1d',
                   component: 'Input'
                 }
@@ -513,39 +585,6 @@ export default class SystemConfig extends ConfigBase {
                       type: 'boolean',
                       label: '启用Helmet',
                       default: true,
-                      component: 'Switch'
-                    }
-                  }
-                },
-                hsts: {
-                  type: 'object',
-                  label: 'HSTS配置',
-                  component: 'SubForm',
-                  fields: {
-                    enabled: {
-                      type: 'boolean',
-                      label: '启用HSTS',
-                      default: false,
-                      component: 'Switch'
-                    },
-                    maxAge: {
-                      type: 'number',
-                      label: '有效期',
-                      description: '有效期（秒），31536000 = 1年',
-                      min: 0,
-                      default: 31536000,
-                      component: 'InputNumber'
-                    },
-                    includeSubDomains: {
-                      type: 'boolean',
-                      label: '包含子域名',
-                      default: true,
-                      component: 'Switch'
-                    },
-                    preload: {
-                      type: 'boolean',
-                      label: '允许预加载',
-                      default: false,
                       component: 'Switch'
                     }
                   }
@@ -644,7 +683,7 @@ export default class SystemConfig extends ConfigBase {
                   type: 'array',
                   label: '白名单路径',
                   itemType: 'string',
-                  default: ['/', '/favicon.ico', '/health', '/status', '/robots.txt', '/xrk', '/media/*', '/uploads/*'],
+                  default: ['/', '/favicon.ico', '/health', '/status', '/robots.txt', '/media/*', '/uploads/*'],
                   component: 'Tags'
                 }
               }
@@ -816,6 +855,94 @@ export default class SystemConfig extends ConfigBase {
                 }
               }
             },
+            performance: {
+              type: 'object',
+              label: '性能优化配置',
+              component: 'SubForm',
+              fields: {
+                keepAlive: {
+                  type: 'object',
+                  label: 'Keep-Alive配置',
+                  component: 'SubForm',
+                  fields: {
+                    enabled: {
+                      type: 'boolean',
+                      label: '启用Keep-Alive',
+                      default: true,
+                      component: 'Switch'
+                    },
+                    initialDelay: {
+                      type: 'number',
+                      label: '初始延迟',
+                      description: '初始延迟（毫秒）',
+                      min: 0,
+                      default: 1000,
+                      component: 'InputNumber'
+                    },
+                    timeout: {
+                      type: 'number',
+                      label: '超时时间',
+                      description: '超时时间（毫秒）',
+                      min: 1000,
+                      default: 120000,
+                      component: 'InputNumber'
+                    }
+                  }
+                },
+                http2Push: {
+                  type: 'object',
+                  label: 'HTTP/2 Server Push',
+                  component: 'SubForm',
+                  fields: {
+                    enabled: {
+                      type: 'boolean',
+                      label: '启用HTTP/2 Push',
+                      description: '需要HTTP/2支持',
+                      default: false,
+                      component: 'Switch'
+                    },
+                    criticalAssets: {
+                      type: 'array',
+                      label: '关键资源列表',
+                      description: '自动推送的关键资源',
+                      itemType: 'string',
+                      component: 'Tags',
+                      default: []
+                    }
+                  }
+                },
+                connectionPool: {
+                  type: 'object',
+                  label: '连接池配置',
+                  component: 'SubForm',
+                  fields: {
+                    maxSockets: {
+                      type: 'number',
+                      label: '最大Socket数',
+                      description: '每个主机的最大socket数',
+                      min: 1,
+                      default: 50,
+                      component: 'InputNumber'
+                    },
+                    maxFreeSockets: {
+                      type: 'number',
+                      label: '最大空闲Socket数',
+                      min: 1,
+                      default: 10,
+                      component: 'InputNumber'
+                    },
+                    timeout: {
+                      type: 'number',
+                      label: 'Socket超时时间',
+                      description: 'socket超时时间（毫秒）',
+                      min: 1000,
+                      default: 30000,
+                      component: 'InputNumber'
+                    }
+                  }
+                }
+              }
+            },
             misc: {
               type: 'object',
               label: '其他配置',
@@ -839,98 +966,22 @@ export default class SystemConfig extends ConfigBase {
         }
       },
 
-      db: {
-        name: 'db',
-        displayName: '数据库配置',
-        description: 'Sequelize数据库连接配置',
-        filePath: getConfigPath('db'),
-        fileType: 'yaml',
-        schema: {
-          required: ['dialect'],
-          fields: {
-            dialect: {
-              type: 'string',
-              label: '数据库类型',
-              enum: ['sqlite', 'mysql', 'mariadb', 'postgres', 'mssql', 'db2'],
-              default: 'sqlite',
-              component: 'Select'
-            },
-            storage: {
-              type: 'string',
-              label: 'SQLite文件地址',
-              default: 'data/db/data.db',
-              component: 'Input'
-            },
-            logging: {
-              type: 'boolean',
-              label: '日志输出',
-              default: false,
-              component: 'Switch'
-            }
-          }
-        }
-      },
 
       device: {
         name: 'device',
         displayName: '设备管理配置',
-        description: '设备管理的核心参数配置',
+        description: '设备管理核心参数（对应 default_config/device.yaml）',
         filePath: getConfigPath('device'),
         fileType: 'yaml',
         schema: {
           fields: {
-            heartbeat_interval: {
-              type: 'number',
-              label: '心跳发送间隔',
-              description: '心跳发送间隔（秒）',
-              min: 1,
-              default: 30,
-              component: 'InputNumber'
-            },
-            heartbeat_timeout: {
-              type: 'number',
-              label: '心跳超时时间',
-              description: '心跳超时时间（秒）',
-              min: 1,
-              default: 120,
-              component: 'InputNumber'
-            },
-            max_devices: {
-              type: 'number',
-              label: '最大设备数量',
-              min: 1,
-              default: 100,
-              component: 'InputNumber'
-            },
-            max_logs_per_device: {
-              type: 'number',
-              label: '设备最大日志条数',
-              min: 1,
-              default: 100,
-              component: 'InputNumber'
-            },
-            max_data_per_device: {
-              type: 'number',
-              label: '设备最大数据条数',
-              min: 1,
-              default: 50,
-              component: 'InputNumber'
-            },
-            command_timeout: {
-              type: 'number',
-              label: '命令执行超时',
-              description: '命令执行超时时间（毫秒）',
-              min: 100,
-              default: 5000,
-              component: 'InputNumber'
-            },
-            batch_size: {
-              type: 'number',
-              label: '批量发送数量',
-              min: 1,
-              default: 100,
-              component: 'InputNumber'
-            }
+            heartbeat_interval: { type: 'number', label: '心跳发送间隔(秒)', min: 1, default: 30, component: 'InputNumber' },
+            heartbeat_timeout: { type: 'number', label: '心跳超时(秒)', min: 1, default: 120, component: 'InputNumber' },
+            max_devices: { type: 'number', label: '最大设备数', min: 1, default: 100, component: 'InputNumber' },
+            max_logs_per_device: { type: 'number', label: '每设备最大日志条数', min: 1, default: 100, component: 'InputNumber' },
+            max_data_per_device: { type: 'number', label: '每设备最大数据条数', min: 1, default: 50, component: 'InputNumber' },
+            command_timeout: { type: 'number', label: '命令超时(毫秒)', min: 100, default: 5000, component: 'InputNumber' },
+            batch_size: { type: 'number', label: '批量发送数量', min: 1, default: 100, component: 'InputNumber' }
           }
         }
       },
@@ -941,39 +992,22 @@ export default class SystemConfig extends ConfigBase {
         description: '群聊相关配置',
         filePath: getConfigPath('group'),
         fileType: 'yaml',
-        // 特殊处理：支持数字键（群号）和groups数组的转换
-        transformRead: (data) => {
-          if (!data || typeof data !== 'object') return data;
-          const result = { ...data };
-          // 将数字键转换为groups数组
-          const groups = [];
-          for (const [key, value] of Object.entries(result)) {
-            if (key !== 'default' && /^\d+$/.test(key)) {
-              groups.push({ groupId: key, ...value });
-              delete result[key];
-            }
-          }
-          if (groups.length > 0) {
-            result.groups = groups;
-          }
-          return result;
-        },
-        transformWrite: (data) => {
-          if (!data || typeof data !== 'object') return data;
-          const result = { ...data };
-          // 将groups数组转换回数字键
-          if (Array.isArray(result.groups)) {
-            for (const group of result.groups) {
-              if (group.groupId) {
-                const { groupId, ...config } = group;
-                result[groupId] = config;
-              }
-            }
-            delete result.groups;
-          }
-          return result;
-        },
         schema: {
+          meta: {
+            collections: [
+              {
+                name: 'groupOverrides',
+                type: 'keyedObject',
+                label: '群单独配置',
+                description: '为特定群覆盖默认配置，键为群号或标识',
+                basePath: '',
+                excludeKeys: ['default'],
+                keyLabel: '群号',
+                keyPlaceholder: '请输入群号',
+                valueTemplatePath: 'default'
+              }
+            ]
+          },
           fields: {
             default: {
               type: 'object',
@@ -1031,74 +1065,72 @@ export default class SystemConfig extends ConfigBase {
                   itemType: 'string',
                   default: [],
                   component: 'Tags'
-                }
-              }
-            },
-            groups: {
-              type: 'array',
-              label: '群组单独配置',
-              description: '为特定群组设置单独的配置，会覆盖默认配置',
-              component: 'ArrayForm',
-              itemType: 'object',
-              fields: {
-                groupId: {
-                  type: 'string',
-                  label: '群号',
-                  required: true,
-                  component: 'Input',
-                  placeholder: '123456'
                 },
-                groupGlobalCD: {
+                bannedWords: {
+                  type: 'object',
+                  label: '违禁词配置',
+                  component: 'SubForm',
+                  fields: {
+                    enabled: {
+                  type: 'boolean',
+                      label: '启用违禁词检测',
+                  default: true,
+                  component: 'Switch'
+                },
+                    muteTime: {
                   type: 'number',
-                  label: '整体冷却时间',
-                  description: '群聊中所有指令操作冷却时间（毫秒），0则无限制',
+                      label: '禁言时间',
+                  description: '违禁词触发禁言时间（分钟）',
                   min: 0,
-                  default: 500,
+                  default: 720,
                   component: 'InputNumber'
                 },
-                singleCD: {
-                  type: 'number',
-                  label: '个人冷却时间',
-                  description: '群聊中个人操作冷却时间（毫秒）',
-                  min: 0,
-                  default: 500,
-                  component: 'InputNumber'
+                    warnOnly: {
+                  type: 'boolean',
+                      label: '仅警告',
+                  description: '是否仅警告不禁言',
+                  default: false,
+                  component: 'Switch'
                 },
-                onlyReplyAt: {
+                    exemptRoles: {
+                  type: 'array',
+                      label: '免检角色',
+                  description: '免检角色列表（如：owner, admin）',
+                  itemType: 'string',
+                  default: [],
+                  component: 'Tags'
+                    }
+                  }
+                },
+                addLimit: {
                   type: 'number',
-                  label: '只关注At',
-                  description: '0-否 1-是 2-触发用户非主人只回复@',
+                  label: '添加限制',
+                  description: '添加限制：0-无限制 1-仅主人 2-管理员及以上',
                   enum: [0, 1, 2],
                   default: 0,
                   component: 'Select'
                 },
-                botAlias: {
-                  type: 'array',
-                  label: '机器人别名',
-                  itemType: 'string',
-                  default: [],
-                  component: 'Tags'
+                addReply: {
+                  type: 'boolean',
+                  label: '添加时回复',
+                  description: '添加时是否回复',
+                  default: true,
+                  component: 'Switch'
                 },
-                addPrivate: {
+                addAt: {
+                  type: 'boolean',
+                  label: '添加时@用户',
+                  description: '添加时是否@用户',
+                  default: false,
+                  component: 'Switch'
+                },
+                addRecall: {
                   type: 'number',
-                  label: '私聊添加',
-                  enum: [0, 1],
-                  default: 1,
-                  component: 'Select'
-                },
-                enable: {
-                  type: 'array',
-                  label: '功能白名单',
-                  itemType: 'string',
-                  default: [],
-                  component: 'Tags'
-                },
-                disable: {
-                  type: 'array',
-                  label: '功能黑名单',
-                  itemType: 'string',
-                  default: [],
-                  component: 'Tags'
+                  label: '添加回复撤回时间(秒)',
+                  description: '0表示不撤回',
+                  min: 0,
+                  default: 0,
+                  component: 'InputNumber'
                 }
               }
             }
@@ -1138,153 +1170,34 @@ export default class SystemConfig extends ConfigBase {
         }
       },
 
-      other: {
-        name: 'other',
-        displayName: '其他配置',
-        description: '其他杂项配置',
-        filePath: getConfigPath('other'),
-        fileType: 'yaml',
-        schema: {
-          fields: {
-            masterQQ: {
-              type: 'array',
-              label: '主人QQ',
-              itemType: 'string',
-              default: [],
-              component: 'Tags'
-            },
-            disableGuildMsg: {
-              type: 'boolean',
-              label: '禁用频道消息',
-              default: true,
-              component: 'Switch'
-            },
-            blackQQ: {
-              type: 'array',
-              label: '黑名单QQ',
-              itemType: 'string',
-              default: [],
-              component: 'Tags'
-            },
-            whiteQQ: {
-              type: 'array',
-              label: '白名单QQ',
-              itemType: 'string',
-              default: [],
-              component: 'Tags'
-            },
-            blackGroup: {
-              type: 'array',
-              label: '黑名单群',
-              itemType: 'string',
-              default: [],
-              component: 'Tags'
-            },
-            whiteGroup: {
-              type: 'array',
-              label: '白名单群',
-              itemType: 'string',
-              default: [],
-              component: 'Tags'
-            },
-            autoFriend: {
-              type: 'number',
-              label: '添加好友',
-              enum: [0, 1],
-              default: 1,
-              component: 'Select'
-            },
-            autoQuit: {
-              type: 'number',
-              label: '退群人数',
-              min: 0,
-              default: 50,
-              component: 'InputNumber'
-            },
-            disablePrivate: {
-              type: 'boolean',
-              label: '禁用私聊',
-              default: false,
-              component: 'Switch'
-            },
-            disableMsg: {
-              type: 'string',
-              label: '禁私聊提示',
-              default: '私聊功能已禁用',
-              component: 'Input'
-            },
-            disableAdopt: {
-              type: 'array',
-              label: '私聊通行字符串',
-              itemType: 'string',
-              default: ['stoken'],
-              component: 'Tags'
-            }
-          }
-        }
-      },
-
       redis: {
         name: 'redis',
-        displayName: 'Redis配置',
-        description: 'Redis服务器连接配置',
+        displayName: 'Redis 配置',
+        description: 'Redis 连接（对应 default_config/redis.yaml）',
         filePath: getConfigPath('redis'),
         fileType: 'yaml',
         schema: {
-          required: ['host', 'port', 'db'],
           fields: {
-            host: {
-              type: 'string',
-              label: 'Redis地址',
-              default: '127.0.0.1',
-              component: 'Input'
-            },
-            port: {
-              type: 'number',
-              label: 'Redis端口',
-              min: 1,
-              max: 65535,
-              default: 6379,
-              component: 'InputNumber'
-            },
-            username: {
-              type: 'string',
-              label: 'Redis用户名',
-              default: '',
-              component: 'Input'
-            },
-            password: {
-              type: 'string',
-              label: 'Redis密码',
-              default: '',
-              component: 'InputPassword'
-            },
-            db: {
-              type: 'number',
-              label: 'Redis数据库',
-              min: 0,
-              default: 0,
-              component: 'InputNumber'
-            }
+            host: { type: 'string', label: 'Redis 地址', default: '127.0.0.1', component: 'Input' },
+            port: { type: 'number', label: 'Redis 端口', min: 1, max: 65535, default: 6379, component: 'InputNumber' },
+            username: { type: 'string', label: '用户名', default: '', component: 'Input' },
+            password: { type: 'string', label: '密码', default: '', component: 'InputPassword' },
+            db: { type: 'number', label: '数据库索引', min: 0, default: 0, component: 'InputNumber' }
           }
         }
       },
 
-      renderer: {
-        name: 'renderer',
-        displayName: '渲染器配置',
-        description: '渲染后端配置',
-        filePath: getConfigPath('renderer'),
+      db: {
+        name: 'db',
+        displayName: '数据库配置',
+        description: 'Sequelize 配置（对应 default_config/db.yaml）',
+        filePath: getConfigPath('db'),
         fileType: 'yaml',
         schema: {
           fields: {
-            name: {
-              type: 'string',
-              label: '渲染后端',
-              enum: ['puppeteer'],
-              default: 'puppeteer',
-              component: 'Select'
-            }
+            dialect: { type: 'string', label: '数据库类型', description: 'mysql, postgres, sqlite, db2, mariadb, mssql', default: 'sqlite', component: 'Input' },
+            storage: { type: 'string', label: 'SQLite 文件路径', default: 'data/db/data.db', component: 'Input' },
+            logging: { type: 'boolean', label: '是否输出 SQL 日志', default: false, component: 'Switch' }
           }
         }
       },
@@ -1292,7 +1205,7 @@ export default class SystemConfig extends ConfigBase {
       aistream: {
         name: 'aistream',
         displayName: '工作流系统配置',
-        description: 'AI工作流系统配置',
+        description: 'AI工作流系统配置，仅负责选择工厂运营商，详细配置位于各自的工厂配置文件中',
         filePath: getConfigPath('aistream'),
         fileType: 'yaml',
         schema: {
@@ -1311,11 +1224,10 @@ export default class SystemConfig extends ConfigBase {
             },
             defaultProvider: {
               type: 'string',
-              label: '默认LLM运营商',
-              description: '默认使用的LLM运营商，留空则自动选择第一个启用的运营商',
-              enum: ['', 'gptgod', 'volcengine', 'xiaomimimo', 'openai', 'gemini', 'openai_compat', 'anthropic', 'azure_openai'],
+              label: '默认 LLM 运营商',
+              description: '留空则使用第一个启用的',
               default: '',
-              component: 'Select'
+              component: 'Input'
             },
             global: {
               type: 'object',
@@ -1324,8 +1236,7 @@ export default class SystemConfig extends ConfigBase {
               fields: {
                 maxTimeout: {
                   type: 'number',
-                  label: '最大执行超时',
-                  description: '最大执行超时时间（毫秒）',
+                  label: '最大执行超时（毫秒）',
                   min: 1000,
                   default: 30000,
                   component: 'InputNumber'
@@ -1372,223 +1283,835 @@ export default class SystemConfig extends ConfigBase {
                   component: 'InputNumber'
                 }
               }
-            }
-          }
-        }
-      },
-
-      renderer_puppeteer: {
-        name: 'renderer_puppeteer',
-        displayName: 'Puppeteer截图配置',
-        description: 'Puppeteer渲染器配置，用于网页截图',
-        filePath: (cfg) => {
-          const port = cfg?._port || cfg?.server?.server?.port || 8086;
-          return port ? `data/server_bots/${port}/renderers/puppeteer/config.yaml` : `renderers/puppeteer/config_default.yaml`;
-        },
-        fileType: 'yaml',
-        schema: {
-          fields: {
-            headless: {
-              type: 'string',
-              label: '无头模式',
-              description: '"new" 为新 headless 模式',
-              default: 'new',
-              component: 'Input'
             },
-            chromiumPath: {
-              type: 'string',
-              label: 'Chromium路径',
-              description: 'Chromium可执行文件路径（可选）',
-              default: '',
-              component: 'Input'
-            },
-            wsEndpoint: {
-              type: 'string',
-              label: 'WebSocket端点',
-              description: '连接到远程浏览器（可选）',
-              default: '',
-              component: 'Input'
-            },
-            puppeteerTimeout: {
-              type: 'number',
-              label: '截图超时时间',
-              description: '截图超时时间（毫秒）',
-              min: 1000,
-              default: 120000,
-              component: 'InputNumber'
-            },
-            restartNum: {
-              type: 'number',
-              label: '重启阈值',
-              description: '截图重启阈值',
-              min: 1,
-              default: 150,
-              component: 'InputNumber'
-            },
-            viewport: {
+            llm: {
               type: 'object',
-              label: '视口设置',
+              label: 'LLM工厂运营商选择',
+              description: '详细配置位于 data/server_bots/{port}/*_llm.yaml（如 volcengine_llm / xiaomimimo_llm / openai_llm / openai_compat_llm / gemini_llm / anthropic_llm / azure_openai_llm）',
               component: 'SubForm',
               fields: {
-                width: {
+                Provider: {
+                  type: 'string',
+                  label: 'LLM运营商',
+                  enum: ['volcengine', 'xiaomimimo', 'openai', 'openai_compat', 'gemini', 'anthropic', 'azure_openai'],
+                  default: 'volcengine',
+                  component: 'Select'
+                },
+                timeout: {
                   type: 'number',
-                  label: '宽度',
-                  min: 1,
-                  default: 1280,
+                  label: '请求超时时间（毫秒）',
+                  description: '默认360000（6分钟），超时会触发"operation was aborted"错误',
+                  min: 1000,
+                  default: 360000,
                   component: 'InputNumber'
                 },
-                height: {
-                  type: 'number',
-                  label: '高度',
-                  min: 1,
-                  default: 720,
-                  component: 'InputNumber'
-                },
-                deviceScaleFactor: {
-                  type: 'number',
-                  label: '设备缩放因子',
-                  min: 0.1,
-                  max: 5,
-                  step: 0.1,
-                  default: 1,
-                  component: 'InputNumber'
-                }
-              }
-            }
-          }
-        }
-      },
-
-      renderer_playwright: {
-        name: 'renderer_playwright',
-        displayName: 'Playwright截图配置',
-        description: 'Playwright渲染器配置，用于网页截图',
-        filePath: (cfg) => {
-          const port = cfg?._port || cfg?.server?.server?.port || 8086;
-          return port ? `data/server_bots/${port}/renderers/playwright/config.yaml` : `renderers/playwright/config_default.yaml`;
-        },
-        fileType: 'yaml',
-        schema: {
-          fields: {
-            browserType: {
-              type: 'string',
-              label: '浏览器类型',
-              enum: ['chromium', 'firefox', 'webkit'],
-              default: 'chromium',
-              component: 'Select'
-            },
-            headless: {
-              type: 'boolean',
-              label: '无头模式',
-              default: true,
-              component: 'Switch'
-            },
-            chromiumPath: {
-              type: 'string',
-              label: 'Chromium路径',
-              description: 'Chromium可执行文件路径（可选）',
-              default: '',
-              component: 'Input'
-            },
-            channel: {
-              type: 'string',
-              label: '浏览器通道',
-              description: '浏览器通道（可选）',
-              default: '',
-              component: 'Input'
-            },
-            wsEndpoint: {
-              type: 'string',
-              label: 'WebSocket端点',
-              description: '连接到远程浏览器（可选）',
-              default: '',
-              component: 'Input'
-            },
-            playwrightTimeout: {
-              type: 'number',
-              label: '截图超时时间',
-              description: '截图超时时间（毫秒）',
-              min: 1000,
-              default: 120000,
-              component: 'InputNumber'
-            },
-            healthCheckInterval: {
-              type: 'number',
-              label: '健康检查间隔',
-              description: '健康检查间隔（毫秒）',
-              min: 1000,
-              default: 60000,
-              component: 'InputNumber'
-            },
-            maxRetries: {
-              type: 'number',
-              label: '连接重试次数',
-              min: 0,
-              default: 3,
-              component: 'InputNumber'
-            },
-            retryDelay: {
-              type: 'number',
-              label: '重试延迟',
-              description: '重试延迟（毫秒）',
-              min: 0,
-              default: 2000,
-              component: 'InputNumber'
-            },
-            restartNum: {
-              type: 'number',
-              label: '重启阈值',
-              description: '截图重启阈值',
-              min: 1,
-              default: 150,
-              component: 'InputNumber'
-            },
-            viewport: {
-              type: 'object',
-              label: '视口设置',
-              component: 'SubForm',
-              fields: {
-                width: {
-                  type: 'number',
-                  label: '宽度',
-                  min: 1,
-                  default: 1280,
-                  component: 'InputNumber'
-                },
-                height: {
-                  type: 'number',
-                  label: '高度',
-                  min: 1,
-                  default: 720,
-                  component: 'InputNumber'
-                },
-                deviceScaleFactor: {
-                  type: 'number',
-                  label: '设备缩放因子',
-                  min: 0.1,
-                  max: 5,
-                  step: 0.1,
-                  default: 1,
-                  component: 'InputNumber'
+                retry: {
+                  type: 'object',
+                  label: '重试配置',
+                  component: 'SubForm',
+                  fields: {
+                    enabled: {
+                      type: 'boolean',
+                      label: '启用重试',
+                      default: true,
+                      component: 'Switch'
+                    },
+                    maxAttempts: {
+                      type: 'number',
+                      label: '最大重试次数',
+                      min: 1,
+                      max: 10,
+                      default: 3,
+                      component: 'InputNumber'
+                    },
+                    delay: {
+                      type: 'number',
+                      label: '重试延迟（毫秒）',
+                      min: 100,
+                      default: 2000,
+                      component: 'InputNumber'
+                    },
+                    retryOn: {
+                      type: 'array',
+                      label: '重试条件',
+                      description: 'timeout（超时）、network（网络错误）、5xx（服务器错误）、all（所有错误）',
+                      itemType: 'string',
+                      enum: ['timeout', 'network', '5xx', 'all'],
+                      default: ['timeout', 'network', '5xx'],
+                      component: 'MultiSelect'
+                    }
+                  }
                 }
               }
             },
-            contextOptions: {
+            // 识图能力已统一由各家 LLM 自身的多模态接口承担，这里不再单独暴露 Vision 工厂配置
+            asr: {
               type: 'object',
-              label: '上下文选项',
+              label: 'ASR工厂运营商选择',
+              description: '详细配置位于 data/server_bots/{port}/volcengine_asr.yaml。ASR识别结果直接返回文本。',
               component: 'SubForm',
               fields: {
-                bypassCSP: {
+                Provider: {
+                  type: 'string',
+                  label: 'ASR运营商',
+                  enum: ['volcengine'],
+                  default: 'volcengine',
+                  component: 'Select'
+                }
+              }
+            },
+            tts: {
+              type: 'object',
+              label: 'TTS工厂运营商选择',
+              description: '详细配置位于 data/server_bots/{port}/volcengine_tts.yaml',
+              component: 'SubForm',
+              fields: {
+                Provider: {
+                  type: 'string',
+                  label: 'TTS运营商',
+                  enum: ['volcengine'],
+                  default: 'volcengine',
+                  component: 'Select'
+                },
+                onlyForASR: {
                   type: 'boolean',
-                  label: '绕过CSP',
+                  label: '仅ASR触发TTS',
+                  description: '关闭后所有消息事件都能触发TTS',
+                  default: true,
+                  component: 'Switch'
+                }
+              }
+            },
+            mcp: {
+              type: 'object',
+              label: 'MCP服务配置',
+              description: 'Model Context Protocol (MCP) 服务配置，用于工具调用和跨平台集成',
+              component: 'SubForm',
+              fields: {
+                enabled: {
+                  type: 'boolean',
+                  label: '启用MCP服务',
+                  description: '启用MCP服务，允许其他平台连接和调用工具',
                   default: true,
                   component: 'Switch'
                 },
-                reducedMotion: {
+                port: {
+                  type: 'number',
+                  label: 'MCP服务端口',
+                  description: 'MCP服务监听的端口号（可选，默认使用HTTP API端口）',
+                  min: 1024,
+                  max: 65535,
+                  component: 'InputNumber'
+                },
+                autoRegister: {
+                  type: 'boolean',
+                  label: '自动注册工具',
+                  description: '自动从工作流中收集并注册MCP工具',
+                  default: true,
+                  component: 'Switch'
+                },
+                remote: {
+                  type: 'object',
+                  label: '远程MCP连接',
+                  description: '配置外部MCP服务器，支持多种协议（stdio/HTTP/SSE/WebSocket），兼容Claude Desktop配置格式',
+                  component: 'SubForm',
+                  fields: {
+                    enabled: {
+                      type: 'boolean',
+                      label: '启用远程MCP',
+                      default: false,
+                      component: 'Switch'
+                    },
+                    // 选中的远程MCP服务器（多选）
+                    selected: {
+                      type: 'array',
+                      label: '已选中的MCP服务器',
+                      description: '从可用服务器列表中选择要启用的MCP服务器（多选）',
+                      component: 'ArrayForm',
+                      itemType: 'string',
+                      fields: {
+                        value: { 
+                          type: 'string', 
+                          label: '服务器名称', 
+                          component: 'Input',
+                          description: '输入服务器名称（需在servers列表中已定义）'
+                        }
+                      }
+                    },
+                    // 服务器定义列表
+                    servers: {
+                      type: 'array',
+                      label: 'MCP服务器定义',
+                      description: '定义所有可用的远程MCP服务器，支持原生JSON格式（command/args）和HTTP格式（url/transport）',
+                      component: 'ArrayForm',
+                      itemType: 'object',
+                      fields: {
+                        name: { 
+                          type: 'string', 
+                          label: '服务器名称', 
+                          description: 'MCP服务器唯一标识（必填）',
+                          component: 'Input',
+                          required: true
+                        },
+                        // 原生JSON格式（command/args）- 用于stdio协议
+                        command: { 
+                          type: 'string', 
+                          label: '命令', 
+                          description: '启动MCP服务器的命令（如 npx、cmd、node 等，用于stdio协议）',
+                          component: 'Input'
+                        },
+                        args: {
+                          type: 'array',
+                          label: '命令参数',
+                          description: '命令的参数列表（如 ["-y", "bing-cn-mcp"]）',
+                          component: 'ArrayForm',
+                          itemType: 'string',
+                          fields: {
+                            value: { type: 'string', label: '参数', component: 'Input' }
+                          }
+                        },
+                        // HTTP格式（url/transport）- 用于HTTP/SSE/WebSocket协议
+                        url: { 
+                          type: 'string', 
+                          label: 'URL', 
+                          description: 'MCP服务器的HTTP地址（如 http://localhost:3000/mcp，用于HTTP/SSE/WebSocket协议）',
+                          component: 'Input'
+                        },
+                        transport: {
+                          type: 'string',
+                          label: '传输方式',
+                          description: '传输协议类型（仅HTTP格式需要）',
+                          enum: ['http', 'sse', 'websocket'],
+                          default: 'http',
+                          component: 'Select'
+                        },
+                        headers: { 
+                          type: 'object', 
+                          label: 'HTTP Headers', 
+                          description: 'HTTP请求头（仅HTTP格式需要，格式：{"Authorization":"Bearer token"}）',
+                          component: 'Textarea'
+                        },
+                        // 原生JSON配置（直接存储JSON字符串，用于复杂配置，优先级最高）
+                        config: {
+                          type: 'string',
+                          label: '原生JSON配置',
+                          description: '直接存储完整JSON配置字符串（如：{"command":"npx","args":["-y","bing-cn-mcp"]}），优先级高于单独字段',
+                          component: 'Textarea'
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            subserver: {
+              type: 'object',
+              label: 'Python子服务端配置',
+              description: 'Python子服务端地址配置，提供向量化、数据处理等服务',
+              component: 'SubForm',
+              fields: {
+                host: {
                   type: 'string',
-                  label: '减少动画',
-                  default: 'reduce',
+                  label: '服务地址',
+                  component: 'Input',
+                  default: '127.0.0.1',
+                  placeholder: '127.0.0.1'
+                },
+                port: {
+                  type: 'number',
+                  label: '服务端口',
+                  component: 'InputNumber',
+                  default: 8000,
+                  min: 1024,
+                  max: 65535
+                },
+                timeout: {
+                  type: 'number',
+                  label: '请求超时（毫秒）',
+                  component: 'InputNumber',
+                  default: 30000,
+                  min: 1000
+                }
+              }
+            },
+          }
+        }
+      },
+
+      monitor: {
+        name: 'monitor',
+        displayName: '系统监控配置',
+        description: '系统监控相关配置，包括浏览器、内存、CPU等资源监控',
+        filePath: getConfigPath('monitor'),
+        fileType: 'yaml',
+        schema: {
+          fields: {
+            enabled: {
+              type: 'boolean',
+              label: '监控总开关',
+              default: true,
+              component: 'Switch'
+            },
+            interval: {
+              type: 'number',
+              label: '监控检查间隔',
+              description: '监控检查间隔（毫秒）',
+              min: 1000,
+              default: 120000,
+              component: 'InputNumber'
+            },
+            browser: {
+              type: 'object',
+              label: '浏览器进程监控',
+              component: 'SubForm',
+              fields: {
+                enabled: {
+                  type: 'boolean',
+                  label: '启用浏览器监控',
+                  default: true,
+                  component: 'Switch'
+                },
+                maxInstances: {
+                  type: 'number',
+                  label: '最大浏览器实例数',
+                  min: 1,
+                  default: 5,
+                  component: 'InputNumber'
+                },
+                memoryThreshold: {
+                  type: 'number',
+                  label: '内存阈值（%）',
+                  description: '内存阈值（%）触发清理',
+                  min: 0,
+                  max: 100,
+                  default: 90,
+                  component: 'InputNumber'
+                },
+                reserveNewest: {
+                  type: 'boolean',
+                  label: '保留最新实例',
+                  default: true,
+                  component: 'Switch'
+                }
+              }
+            },
+            memory: {
+              type: 'object',
+              label: '系统内存监控',
+              component: 'SubForm',
+              fields: {
+                enabled: {
+                  type: 'boolean',
+                  label: '启用内存监控',
+                  default: true,
+                  component: 'Switch'
+                },
+                systemThreshold: {
+                  type: 'number',
+                  label: '系统内存阈值（%）',
+                  min: 0,
+                  max: 100,
+                  default: 85,
+                  component: 'InputNumber'
+                },
+                nodeThreshold: {
+                  type: 'number',
+                  label: 'Node堆内存阈值（%）',
+                  min: 0,
+                  max: 100,
+                  default: 85,
+                  component: 'InputNumber'
+                },
+                autoOptimize: {
+                  type: 'boolean',
+                  label: '自动优化',
+                  default: true,
+                  component: 'Switch'
+                },
+                gcInterval: {
+                  type: 'number',
+                  label: 'GC最小间隔（毫秒）',
+                  min: 1000,
+                  default: 600000,
+                  component: 'InputNumber'
+                },
+                leakDetection: {
+                  type: 'object',
+                  label: '内存泄漏检测',
+                  component: 'SubForm',
+                  fields: {
+                    enabled: {
+                      type: 'boolean',
+                      label: '启用泄漏检测',
+                      default: true,
+                      component: 'Switch'
+                    },
+                    threshold: {
+                      type: 'number',
+                      label: '泄漏阈值',
+                      description: '10%增长视为潜在泄漏',
+                      min: 0,
+                      max: 1,
+                      default: 0.1,
+                      component: 'InputNumber'
+                    },
+                    checkInterval: {
+                      type: 'number',
+                      label: '检查间隔（毫秒）',
+                      min: 1000,
+                      default: 300000,
+                      component: 'InputNumber'
+                    }
+                  }
+                }
+              }
+            },
+            cpu: {
+              type: 'object',
+              label: 'CPU监控',
+              component: 'SubForm',
+              fields: {
+                enabled: {
+                  type: 'boolean',
+                  label: '启用CPU监控',
+                  default: true,
+                  component: 'Switch'
+                },
+                threshold: {
+                  type: 'number',
+                  label: 'CPU使用率阈值（%）',
+                  min: 0,
+                  max: 100,
+                  default: 90,
+                  component: 'InputNumber'
+                },
+                checkDuration: {
+                  type: 'number',
+                  label: 'CPU检查持续时间（毫秒）',
+                  min: 1000,
+                  default: 30000,
+                  component: 'InputNumber'
+                }
+              }
+            },
+            optimize: {
+              type: 'object',
+              label: '优化策略',
+              component: 'SubForm',
+              fields: {
+                aggressive: {
+                  type: 'boolean',
+                  label: '激进模式',
+                  description: '激进模式（更频繁清理）',
+                  default: false,
+                  component: 'Switch'
+                },
+                autoRestart: {
+                  type: 'boolean',
+                  label: '自动重启',
+                  description: '严重时自动重启',
+                  default: false,
+                  component: 'Switch'
+                },
+                restartThreshold: {
+                  type: 'number',
+                  label: '重启阈值（%）',
+                  min: 0,
+                  max: 100,
+                  default: 95,
+                  component: 'InputNumber'
+                }
+              }
+            },
+            report: {
+              type: 'object',
+              label: '报告配置',
+              component: 'SubForm',
+              fields: {
+                enabled: {
+                  type: 'boolean',
+                  label: '启用报告',
+                  default: true,
+                  component: 'Switch'
+                },
+                interval: {
+                  type: 'number',
+                  label: '报告间隔（毫秒）',
+                  min: 1000,
+                  default: 3600000,
+                  component: 'InputNumber'
+                }
+              }
+            },
+            disk: {
+              type: 'object',
+              label: '磁盘优化',
+              component: 'SubForm',
+              fields: {
+                enabled: {
+                  type: 'boolean',
+                  label: '启用磁盘优化',
+                  default: true,
+                  component: 'Switch'
+                },
+                cleanupTemp: {
+                  type: 'boolean',
+                  label: '清理临时文件',
+                  default: true,
+                  component: 'Switch'
+                },
+                cleanupLogs: {
+                  type: 'boolean',
+                  label: '清理日志文件',
+                  default: true,
+                  component: 'Switch'
+                },
+                tempMaxAge: {
+                  type: 'number',
+                  label: '临时文件最大年龄（毫秒）',
+                  default: 86400000,
+                  component: 'InputNumber'
+                },
+                logMaxAge: {
+                  type: 'number',
+                  label: '日志文件最大年龄（毫秒）',
+                  default: 604800000,
+                  component: 'InputNumber'
+                },
+                maxLogSize: {
+                  type: 'number',
+                  label: '单个日志文件最大大小（字节）',
+                  default: 104857600,
+                  component: 'InputNumber'
+                }
+              }
+            },
+            network: {
+              type: 'object',
+              label: '网络优化',
+              component: 'SubForm',
+              fields: {
+                enabled: {
+                  type: 'boolean',
+                  label: '启用网络优化',
+                  default: true,
+                  component: 'Switch'
+                },
+                maxConnections: {
+                  type: 'number',
+                  label: '最大连接数阈值',
+                  min: 1,
+                  default: 1000,
+                  component: 'InputNumber'
+                },
+                cleanupIdle: {
+                  type: 'boolean',
+                  label: '清理空闲连接',
+                  default: true,
+                  component: 'Switch'
+                }
+              }
+            },
+            process: {
+              type: 'object',
+              label: '进程优化',
+              component: 'SubForm',
+              fields: {
+                enabled: {
+                  type: 'boolean',
+                  label: '启用进程优化',
+                  default: true,
+                  component: 'Switch'
+                },
+                priority: {
+                  type: 'string',
+                  label: '进程优先级',
+                  enum: ['low', 'normal', 'high'],
+                  default: 'normal',
+                  component: 'Select'
+                },
+                nice: {
+                  type: 'number',
+                  label: 'Linux nice值',
+                  description: 'Linux nice值 (-20到19)',
+                  min: -20,
+                  max: 19,
+                  default: 0,
+                  component: 'InputNumber'
+                }
+              }
+            },
+            system: {
+              type: 'object',
+              label: '系统级优化',
+              component: 'SubForm',
+              fields: {
+                enabled: {
+                  type: 'boolean',
+                  label: '启用系统优化',
+                  default: true,
+                  component: 'Switch'
+                },
+                clearCache: {
+                  type: 'boolean',
+                  label: '清理系统缓存',
+                  default: true,
+                  component: 'Switch'
+                },
+                optimizeCPU: {
+                  type: 'boolean',
+                  label: '优化CPU调度',
+                  default: true,
+                  component: 'Switch'
+                }
+              }
+            }
+          }
+        }
+      },
+
+      renderer: {
+        name: 'renderer',
+        displayName: '渲染器配置',
+        description: 'Puppeteer/Playwright 配置（data/server_bots/{port}/renderers/{type}/config.yaml）',
+        filePath: (c) => {
+          const port = getPort(c);
+          return port ? `data/server_bots/${port}/renderers/placeholder/config.yaml` : null;
+        },
+        fileType: 'yaml',
+        multiFile: {
+          keys: ['puppeteer', 'playwright'],
+          getFilePath: (key) => {
+            const port = getPort(global.cfg);
+            const root = paths.root;
+            return port
+              ? path.join(root, `data/server_bots/${port}/renderers/${key}/config.yaml`)
+              : path.join(root, 'renderers', key, 'config_default.yaml');
+          },
+          getDefaultFilePath: (key) => path.join(paths.renderers, key, 'config_default.yaml')
+        },
+        schema: {
+          fields: {
+            puppeteer: {
+              type: 'object',
+              label: 'Puppeteer配置',
+              description: 'Puppeteer渲染器配置，文件位置：data/server_bots/{port}/renderers/puppeteer/config.yaml',
+              component: 'SubForm',
+              fields: {
+                headless: {
+                  type: 'string',
+                  label: '无头模式',
+                  description: '"new" 为新 headless 模式，"false" 为有头模式',
+                  enum: ['new', 'old', 'false'],
+                  default: 'new',
+                  component: 'Select'
+                },
+                chromiumPath: {
+                  type: 'string',
+                  label: 'Chromium路径',
+                  description: 'Chromium可执行文件路径（可选）',
+                  default: '',
                   component: 'Input'
+                },
+                wsEndpoint: {
+                  type: 'string',
+                  label: 'WebSocket端点',
+                  description: '连接到远程浏览器的WebSocket端点（可选）',
+                  default: '',
+                  component: 'Input'
+                },
+                args: {
+                  type: 'array',
+                  label: '浏览器启动参数',
+                  description: 'Chromium启动参数列表',
+                  itemType: 'string',
+                  default: [
+                    '--disable-gpu',
+                    '--no-sandbox',
+                    '--disable-dev-shm-usage'
+                  ],
+                  component: 'Tags'
+                },
+                puppeteerTimeout: {
+                  type: 'number',
+                  label: '截图超时时间',
+                  description: '截图超时时间（毫秒）',
+                  min: 1000,
+                  default: 120000,
+                  component: 'InputNumber'
+                },
+                restartNum: {
+                  type: 'number',
+                  label: '重启阈值',
+                  description: '截图次数达到此值后重启浏览器',
+                  min: 1,
+                  default: 150,
+                  component: 'InputNumber'
+                },
+                viewport: {
+                  type: 'object',
+                  label: '视口设置',
+                  component: 'SubForm',
+                  fields: {
+                    width: {
+                      type: 'number',
+                      label: '宽度',
+                      min: 1,
+                      default: 1280,
+                      component: 'InputNumber'
+                    },
+                    height: {
+                      type: 'number',
+                      label: '高度',
+                      min: 1,
+                      default: 720,
+                      component: 'InputNumber'
+                    },
+                    deviceScaleFactor: {
+                      type: 'number',
+                      label: '设备缩放因子',
+                      min: 0.1,
+                      max: 5,
+                      default: 1,
+                      component: 'InputNumber'
+                    }
+                  }
+                }
+              }
+            },
+            playwright: {
+              type: 'object',
+              label: 'Playwright配置',
+              description: 'Playwright渲染器配置，文件位置：data/server_bots/{port}/renderers/playwright/config.yaml',
+              component: 'SubForm',
+              fields: {
+                browserType: {
+                  type: 'string',
+                  label: '浏览器类型',
+                  description: 'Playwright支持的浏览器类型',
+                  enum: ['chromium', 'firefox', 'webkit'],
+                  default: 'chromium',
+                  component: 'Select'
+                },
+                headless: {
+                  type: 'boolean',
+                  label: '无头模式',
+                  default: true,
+                  component: 'Switch'
+                },
+                chromiumPath: {
+                  type: 'string',
+                  label: 'Chromium路径',
+                  description: 'Chromium可执行文件路径（可选）',
+                  default: '',
+                  component: 'Input'
+                },
+                wsEndpoint: {
+                  type: 'string',
+                  label: 'WebSocket端点',
+                  description: '连接到远程浏览器的WebSocket端点（可选）',
+                  default: '',
+                  component: 'Input'
+                },
+                args: {
+                  type: 'array',
+                  label: '浏览器启动参数',
+                  description: '浏览器启动参数列表',
+                  itemType: 'string',
+                  default: [
+                    '--disable-gpu',
+                    '--no-sandbox',
+                    '--disable-dev-shm-usage'
+                  ],
+                  component: 'Tags'
+                },
+                playwrightTimeout: {
+                  type: 'number',
+                  label: '截图超时时间',
+                  description: '截图超时时间（毫秒）',
+                  min: 1000,
+                  default: 120000,
+                  component: 'InputNumber'
+                },
+                healthCheckInterval: {
+                  type: 'number',
+                  label: '健康检查间隔',
+                  description: '健康检查间隔（毫秒）',
+                  min: 1000,
+                  default: 60000,
+                  component: 'InputNumber'
+                },
+                maxRetries: {
+                  type: 'number',
+                  label: '最大重试次数',
+                  min: 0,
+                  default: 3,
+                  component: 'InputNumber'
+                },
+                retryDelay: {
+                  type: 'number',
+                  label: '重试延迟',
+                  description: '重试延迟（毫秒）',
+                  min: 100,
+                  default: 2000,
+                  component: 'InputNumber'
+                },
+                restartNum: {
+                  type: 'number',
+                  label: '重启阈值',
+                  description: '截图次数达到此值后重启浏览器',
+                  min: 1,
+                  default: 150,
+                  component: 'InputNumber'
+                },
+                viewport: {
+                  type: 'object',
+                  label: '视口设置',
+                  component: 'SubForm',
+                  fields: {
+                    width: {
+                      type: 'number',
+                      label: '宽度',
+                      min: 1,
+                      default: 1280,
+                      component: 'InputNumber'
+                    },
+                    height: {
+                      type: 'number',
+                      label: '高度',
+                      min: 1,
+                      default: 720,
+                      component: 'InputNumber'
+                    },
+                    deviceScaleFactor: {
+                      type: 'number',
+                      label: '设备缩放因子',
+                      min: 0.1,
+                      max: 5,
+                      default: 1,
+                      component: 'InputNumber'
+                    }
+                  }
+                },
+                contextOptions: {
+                  type: 'object',
+                  label: '上下文选项',
+                  component: 'SubForm',
+                  fields: {
+                    bypassCSP: {
+                      type: 'boolean',
+                      label: '绕过CSP',
+                      default: true,
+                      component: 'Switch'
+                    },
+                    reducedMotion: {
+                      type: 'string',
+                      label: '减少动画',
+                      enum: ['reduce', 'no-preference'],
+                      default: 'reduce',
+                      component: 'Select'
+                    }
+                  }
                 }
               }
             }
@@ -1609,106 +2132,6 @@ export default class SystemConfig extends ConfigBase {
       throw new Error(`未知的配置: ${name}`);
     }
 
-    // 为 group 配置创建特殊实例，支持数字键转换
-    if (name === 'group') {
-      const GroupConfig = class extends ConfigBase {
-        constructor(configMeta) {
-          super(configMeta);
-          // 设置转换函数
-          if (configMeta.transformRead) {
-            this.transformRead = configMeta.transformRead;
-          }
-          if (configMeta.transformWrite) {
-            this.transformWrite = configMeta.transformWrite;
-          }
-        }
-      };
-      return new GroupConfig(configMeta);
-    }
-
-    // 为 renderer 配置创建特殊实例，支持读取默认配置
-    if (name === 'renderer_puppeteer' || name === 'renderer_playwright') {
-      const RendererConfig = class extends ConfigBase {
-        async read(useCache = true) {
-          const cfg = global.cfg || { _port: parseInt(process.env.SERVER_PORT || process.env.PORT || 8086) };
-          const port = cfg?._port || cfg?.server?.server?.port || 8086;
-          const type = name === 'renderer_puppeteer' ? 'puppeteer' : 'playwright';
-          
-          // 读取默认配置
-          const defaultFile = path.join(process.cwd(), 'renderers', type, 'config_default.yaml');
-          let defaultConfig = {};
-          if (fsSync.existsSync(defaultFile)) {
-            try {
-              const content = await fs.readFile(defaultFile, 'utf8');
-              defaultConfig = yaml.parse(content);
-            } catch (error) {
-              BotUtil.makeLog('error', `读取默认配置失败 [${name}]: ${error.message}`, 'RendererConfig');
-            }
-          }
-          
-          // 读取服务器配置
-          const serverFile = path.join(process.cwd(), `data/server_bots/${port}/renderers/${type}/config.yaml`);
-          let serverConfig = {};
-          if (fsSync.existsSync(serverFile)) {
-            try {
-              const content = await fs.readFile(serverFile, 'utf8');
-              serverConfig = yaml.parse(content);
-            } catch (error) {
-              BotUtil.makeLog('error', `读取服务器配置失败 [${name}]: ${error.message}`, 'RendererConfig');
-            }
-          } else if (port) {
-            // 如果服务器配置文件不存在，创建它（从默认配置复制）
-            const serverDir = path.dirname(serverFile);
-            if (!fsSync.existsSync(serverDir)) {
-              await fs.mkdir(serverDir, { recursive: true });
-            }
-            try {
-              await fs.writeFile(serverFile, yaml.stringify(defaultConfig), 'utf8');
-            } catch (error) {
-              BotUtil.makeLog('error', `创建服务器配置失败 [${name}]: ${error.message}`, 'RendererConfig');
-            }
-          }
-          
-          // 合并配置（服务器配置覆盖默认配置）
-          return { ...defaultConfig, ...serverConfig };
-        }
-        
-        async write(data, options = {}) {
-          const cfg = global.cfg || { _port: parseInt(process.env.SERVER_PORT || process.env.PORT || 8086) };
-          const port = cfg?._port || cfg?.server?.server?.port || 8086;
-          const type = name === 'renderer_puppeteer' ? 'puppeteer' : 'playwright';
-          
-          if (!port) {
-            throw new Error('无法确定服务器端口，无法保存配置');
-          }
-          
-          const serverFile = path.join(process.cwd(), `data/server_bots/${port}/renderers/${type}/config.yaml`);
-          const serverDir = path.dirname(serverFile);
-          
-          if (!fsSync.existsSync(serverDir)) {
-            await fs.mkdir(serverDir, { recursive: true });
-          }
-          
-          const { backup = true } = options;
-          if (backup && fsSync.existsSync(serverFile)) {
-            await this.backup();
-          }
-          
-          const content = yaml.stringify(data, {
-            indent: 2,
-            lineWidth: 0,
-            minContentWidth: 0
-          });
-          
-          await fs.writeFile(serverFile, content, 'utf8');
-          BotUtil.makeLog('info', `配置已保存 [${name}]`, 'RendererConfig');
-          return true;
-        }
-      };
-      
-      return new RendererConfig(configMeta);
-    }
-
     return new ConfigBase(configMeta);
   }
 
@@ -1718,7 +2141,6 @@ export default class SystemConfig extends ConfigBase {
    * @returns {Promise<Object>}
    */
   async read(name) {
-    // 如果没有提供子配置名称，返回配置列表信息
     if (!name) {
       return {
         name: this.name,
@@ -1728,7 +2150,6 @@ export default class SystemConfig extends ConfigBase {
       };
     }
     
-    // 读取指定的子配置
     const instance = this.getConfigInstance(name);
     return await instance.read();
   }
@@ -1785,11 +2206,9 @@ export default class SystemConfig extends ConfigBase {
     };
 
     for (const [name, meta] of Object.entries(this.configFiles)) {
-      // 确保 schema 完整传递，包含所有字段定义和元数据
       structure.configs[name] = {
         ...meta,
-        schema: meta.schema || { fields: meta.fields || {} },
-        fields: meta.schema?.fields || meta.fields || {}
+        fields: (meta.schema && meta.schema.fields) || {}
       };
     }
 

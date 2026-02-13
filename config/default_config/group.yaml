@@ -9,6 +9,10 @@ default:
     - 葵葵   
   
   addPrivate: 1    #是否允许私聊添加  1-允许 0-禁止
+  addLimit: 0      # 添加权限 0-所有人 1-管理员 2-仅主人
+  addReply: false  # 添加后是否回复
+  addAt: false     # 添加回复是否@用户
+  addRecall: 0     # 添加回复撤回时间(秒)，0不撤回
 
   enable: []       #只启用功能，配置后只有该功能才响应
 

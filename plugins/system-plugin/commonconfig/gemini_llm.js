@@ -1,99 +1,98 @@
 import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
 
 /**
- * Google Gemini LLM 配置
+ * Gemini 官方 LLM 工厂配置管理（文本）
+ * 配置文件：data/server_bots/{port}/gemini_llm.yaml
+ *
+ * 注意：
+ * - Gemini 的 function calling 协议与 OpenAI 不同；
+ * - 本项目当前 Gemini LLMClient 默认不注入 MCP tools（建议 enableTools=false）。
  */
 export default class GeminiLLMConfig extends ConfigBase {
   constructor() {
     super({
       name: 'gemini_llm',
-      displayName: 'Gemini LLM配置',
-      description: 'Google Gemini Generative Language API配置',
+      displayName: 'Gemini LLM 工厂配置（官方）',
+      description: 'Google Generative Language API 配置（文本）',
       filePath: (cfg) => {
-        const port = cfg?._port || cfg?.server?.server?.port || 8086;
+        const port = cfg?._port ?? 8086;
         return port ? `data/server_bots/${port}/gemini_llm.yaml` : `config/default_config/gemini_llm.yaml`;
       },
       fileType: 'yaml',
       schema: {
         fields: {
-          enabled: {
-            type: 'boolean',
-            label: '启用',
-            default: true,
-            component: 'Switch'
-          },
           baseUrl: {
             type: 'string',
-            label: 'API地址',
-            default: 'https://generativelanguage.googleapis.com/v1beta',
+            label: 'API 基础地址',
+            description: 'Generative Language API 基础地址',
+            default: 'https://generativelanguage.googleapis.com',
             component: 'Input'
           },
           apiKey: {
             type: 'string',
-            label: 'API密钥',
-            description: 'Google Gemini API密钥',
+            label: 'API Key',
+            description: 'Google API Key（Generative Language）',
             default: '',
             component: 'InputPassword'
           },
-          model: {
+          path: {
             type: 'string',
-            label: '模型名称',
-            default: 'gemini-pro',
+            label: '接口路径（可选）',
+            description: '留空则使用 /v1beta/models/{model}:generateContent',
+            default: '',
             component: 'Input'
           },
-          chatModel: {
+          model: {
             type: 'string',
-            label: '聊天模型',
-            default: 'gemini-pro',
+            label: '模型（model）',
+            description: 'Gemini 模型名称，例如 gemini-1.5-flash',
+            default: 'gemini-1.5-flash',
             component: 'Input'
           },
           temperature: {
             type: 'number',
-            label: '温度参数',
+            label: '温度（generationConfig.temperature）',
             min: 0,
             max: 2,
-            step: 0.1,
-            default: 0.9,
-            component: 'InputNumber'
-          },
-          maxTokens: {
-            type: 'number',
-            label: '最大Token数',
-            min: 1,
-            default: 8192,
-            component: 'InputNumber'
-          },
-          max_tokens: {
-            type: 'number',
-            label: '最大Token数（兼容字段）',
-            min: 1,
-            default: 8192,
+            default: 0.7,
             component: 'InputNumber'
           },
           topP: {
             type: 'number',
-            label: 'Top P',
+            label: 'Top P（generationConfig.topP）',
             min: 0,
             max: 1,
-            step: 0.1,
-            default: 1,
+            default: 1.0,
             component: 'InputNumber'
           },
-          top_p: {
+          topK: {
             type: 'number',
-            label: 'Top P（兼容字段）',
+            label: 'Top K（generationConfig.topK）',
+            description: '可选，高级采样参数',
             min: 0,
-            max: 1,
-            step: 0.1,
-            default: 1,
+            default: 0,
+            component: 'InputNumber'
+          },
+          maxTokens: {
+            type: 'number',
+            label: '最大输出（generationConfig.maxOutputTokens）',
+            min: 1,
+            default: 2048,
             component: 'InputNumber'
           },
           timeout: {
             type: 'number',
-            label: '请求超时',
+            label: '超时时间 (ms)',
             min: 1000,
-            default: 60000,
+            default: 360000,
             component: 'InputNumber'
+          },
+          enableTools: {
+            type: 'boolean',
+            label: '启用工具调用（MCP）',
+            description: 'Gemini 协议不同，默认关闭；如需启用需实现 Gemini function calling 适配',
+            default: false,
+            component: 'Switch'
           },
           enableStream: {
             type: 'boolean',
@@ -101,15 +100,23 @@ export default class GeminiLLMConfig extends ConfigBase {
             default: true,
             component: 'Switch'
           },
-          enableTools: {
-            type: 'boolean',
-            label: '启用工具调用',
-            default: false,
-            component: 'Switch'
+          headers: {
+            type: 'object',
+            label: '额外请求头',
+            component: 'SubForm',
+            fields: {}
+          },
+          extraBody: {
+            type: 'object',
+            label: '额外请求体字段',
+            description: '原样合并到 payload 顶层（高级用法）',
+            component: 'SubForm',
+            fields: {}
           },
           proxy: {
             type: 'object',
             label: '代理配置',
+            description: '仅影响本机到 Gemini 的 HTTP 请求，不修改系统全局代理；支持 http/https/socks5 标准代理地址',
             component: 'SubForm',
             fields: {
               enabled: {
@@ -118,15 +125,10 @@ export default class GeminiLLMConfig extends ConfigBase {
                 default: false,
                 component: 'Switch'
               },
-              http: {
+              url: {
                 type: 'string',
-                label: 'HTTP代理',
-                default: '',
-                component: 'Input'
-              },
-              https: {
-                type: 'string',
-                label: 'HTTPS代理',
+                label: '代理地址',
+                description: '例如：http://127.0.0.1:7890 或 http://user:pass@host:port',
                 default: '',
                 component: 'Input'
               }
@@ -137,3 +139,4 @@ export default class GeminiLLMConfig extends ConfigBase {
     });
   }
 }
+

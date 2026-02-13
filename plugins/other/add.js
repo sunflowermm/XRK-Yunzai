@@ -805,7 +805,7 @@ export class add extends plugin {
       return false
     }
 
-    const groupCfg = cfg.getGroup(this.e.self_id, this.group_id)
+    const groupCfg = cfg.getGroup(this.group_id)
     
     if (groupCfg.addLimit == 2) {
       this.reply("暂无权限，只有主人才能操作")
@@ -835,7 +835,7 @@ export class add extends plugin {
   trimAlias(msg) {
     if (!msg) return msg
     
-    const groupCfg = cfg.getGroup(this.e.self_id, this.group_id)
+    const groupCfg = cfg.getGroup(this.group_id)
     let alias = groupCfg.botAlias
     if (!alias) return msg
     
@@ -1001,7 +1001,7 @@ export class add extends plugin {
     }
 
     logger.mark(`[发送消息]${this.e.logText}[${this.keyWord}]`)
-    const groupCfg = cfg.getGroup(this.e.self_id, this.group_id)
+    const groupCfg = cfg.getGroup(this.group_id)
     return this.reply(msgToSend, Boolean(groupCfg.addReply), {
       at: Boolean(groupCfg.addAt),
       recallMsg: groupCfg.addRecall
