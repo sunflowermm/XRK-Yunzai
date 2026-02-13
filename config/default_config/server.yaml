@@ -136,16 +136,27 @@ proxy:
     
     # 负载均衡示例（轮询多个后端服务器）
     #- domain: "lb.xrkk.cc"
-    # 多个目标服务器（将自动负载均衡）
-    # 注：基础版本只支持单个target，负载均衡需要额外实现
-    #  target: "http://localhost:3001"
+    #  # 多个目标服务器（支持负载均衡）
+    #  target:
+    #    - url: "http://localhost:3001"
+    #      weight: 3  # 权重：3
+    #      healthUrl: "http://localhost:3001/health"  # 自定义健康检查URL
+    #    - url: "http://localhost:3002"
+    #      weight: 1  # 权重：1
+    #      healthUrl: "http://localhost:3002/health"
+    #  # 负载均衡算法（可选）
+    #  # 支持：round-robin（轮询）、weighted（加权轮询）、least-connections（最少连接）、
+    #  #      ip-hash（IP哈希）、consistent-hash（一致性哈希）、least-response-time（最少响应时间）
+    #  loadBalance: "weighted"  # 默认：round-robin
       
-    # 健康检查配置（可选）
+    # 健康检查配置（可选，已在全局配置中设置）
     #  healthCheck:
     #    enabled: true
-    #    path: "/health"
+    #    path: "/health"  # 健康检查路径
     #    interval: 30000  # 检查间隔（毫秒）
     #    timeout: 5000    # 超时时间（毫秒）
+    #    maxFailures: 3   # 最大失败次数
+    #    cacheTime: 5000  # 结果缓存时间（毫秒）
 
 # ----------------------------------------
 #            HTTPS配置
@@ -344,19 +355,56 @@ logging:
 # ----------------------------------------
 #          HTTP重定向配置
 # ----------------------------------------
+# HTTP重定向规则配置
+# 支持多种重定向类型：301(永久), 302(临时), 307(临时保持方法), 308(永久保持方法)
 redirects: []
+  # 重定向规则示例（已注释，需要时取消注释并添加到redirects数组中）
+  # - from: "/old-path"
+  #   to: "/new-path"
+  #   status: 301  # 301永久重定向
+  #   preserveQuery: true  # 保留查询参数
+  #   preservePath: false  # 不保留路径变量
+  #
+  # - from: "/old/*"
+  #   to: "/new/$1"  # 使用$1引用通配符匹配的内容
+  #   status: 302  # 302临时重定向
+  #
+  # - from: "/legacy"
+  #   to: "https://example.com/new"  # 重定向到外部URL
+  #   status: 301
+  #
+  # - from: "/api/v1/*"
+  #   to: "/api/v2/$1"  # API版本升级重定向
+  #   status: 301
+  #   condition: "req.headers['user-agent'].includes('old-client')"  # 条件重定向
 
 # ----------------------------------------
 #          CDN配置
 # ----------------------------------------
+# CDN（内容分发网络）配置
+# 用于静态资源CDN回源、缓存控制、CDN头部处理
 cdn:
+  # 是否启用CDN功能
   enabled: false
+  
+  # CDN域名（用于生成CDN URL）
+  # 示例: "cdn.example.com"
+  domain: ""
+  
+  # 静态资源前缀（只有匹配此前缀的路径才会使用CDN）
   staticPrefix: "/static"
+  
+  # CDN是否使用HTTPS
   https: true
+  
+  # 缓存控制配置（秒）
   cacheControl:
-    static: 31536000
-    images: 604800
-    default: 3600
+    static: 31536000   # CSS/JS/字体等静态资源：1年
+    images: 604800     # 图片资源：7天
+    default: 3600      # 其他资源：1小时
+  
+  # CDN识别模式（自动检测主流CDN）
+  # 支持的CDN：Cloudflare、阿里云CDN、腾讯云CDN、AWS CloudFront、百度云CDN、七牛云、UCloud等
 
 # ----------------------------------------
 #          性能优化配置

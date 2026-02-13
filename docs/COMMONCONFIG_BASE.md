@@ -119,7 +119,7 @@ config/commonconfig/
 └── [自定义].js       # 自定义配置
 ```
 
-### 3. Core目录（兼容XRK-AGT结构）
+### 3. Core目录（兼容 XRK 结构）
 
 如果项目包含 `core/` 目录，可以从其中加载：
 

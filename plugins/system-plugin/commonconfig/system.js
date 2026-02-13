@@ -228,9 +228,9 @@ export default class SystemConfig extends ConfigBase {
                     target: {
                       type: 'string',
                       label: '目标服务器',
-                      description: '单个服务器URL，或数组形式配置多个服务器启用负载均衡',
+                      description: '单个服务器URL（字符串），或数组形式配置多个服务器启用负载均衡（JSON格式：["http://localhost:3001", "http://localhost:3002"]）',
                       component: 'Input',
-                      placeholder: 'http://localhost:3000'
+                      placeholder: 'http://localhost:3000 或 ["http://localhost:3001", {"url": "http://localhost:3002", "weight": 2}]'
                     },
                     loadBalance: {
                       type: 'string',
@@ -394,14 +394,6 @@ export default class SystemConfig extends ConfigBase {
                   label: '使用HTTPS',
                   default: true,
                   component: 'Switch'
-                },
-                type: {
-                  type: 'string',
-                  label: 'CDN类型',
-                  description: '用于优化CDN特定头部',
-                  enum: ['general', 'cloudflare', 'aliyun', 'tencent', 'aws', 'baidu', 'qiniu', 'ucloud'],
-                  default: 'general',
-                  component: 'Select'
                 },
                 cacheControl: {
                   type: 'object',

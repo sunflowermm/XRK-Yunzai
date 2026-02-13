@@ -225,24 +225,16 @@ async function handleChatCompletionsV3(req, res, Bot) {
   }
 
   const streamFlag = Boolean(pickFirst(body, ['stream']));
-  // OpenAI兼容：body.model 字段即为运营商 provider
-  const bodyModel = (pickFirst(body, ['model']) || '').toString().trim().toLowerCase();
+  const bodyModel = String(pickFirst(body, ['model']) || '').trim().toLowerCase();
   const provider = (bodyModel && LLMFactory.hasProvider(bodyModel)) 
     ? bodyModel 
     : LLMFactory.getDefaultProvider();
 
-  const llmConfig = {
-    provider,
-    ...(accessKey ? { apiKey: accessKey } : {})
-  };
-  
+  const llmConfig = { provider, ...(accessKey ? { apiKey: accessKey } : {}) };
   const base = LLMFactory.getProviderConfig(provider);
 
   if (streamFlag && base.enableStream === false) {
-    return res.status(400).json({ 
-      success: false, 
-      message: `提供商 ${provider} 的流式输出已禁用` 
-    });
+    return res.status(400).json({ success: false, message: `提供商 ${provider} 的流式输出已禁用` });
   }
 
   const client = LLMFactory.createClient(llmConfig);
@@ -477,6 +469,45 @@ async function handleModels(req, res, Bot) {
   });
 }
 
+/** GET /api/ai/stream：SSE 流式对话（统一使用工作流底层 callAIStream） */
+async function handleAiStream(req, res, Bot) {
+  if (!Bot.checkApiAuthorization(req)) {
+    return res.status(403).json({ success: false, message: 'Unauthorized' });
+  }
+  const prompt = String(req.query.prompt || '').trim();
+  const workflow = String(req.query.workflow || 'chat').trim();
+  const persona = String(req.query.persona || '').trim();
+
+  const stream = StreamLoader.getStream(workflow);
+  if (!stream?.buildChatContext) {
+    return res.status(400).json({ success: false, message: `工作流不存在或不支持对话: ${workflow}` });
+  }
+  if (typeof stream.callAIStream !== 'function') {
+    return res.status(400).json({ success: false, message: '工作流不支持流式输出' });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  if (res.flushHeaders) res.flushHeaders();
+
+  try {
+    const messages = await stream.buildChatContext(null, { text: prompt || '你好', persona });
+    if (!Array.isArray(messages) || messages.length === 0) {
+      res.write(`data: ${JSON.stringify({ error: '消息构建失败' })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      return res.end();
+    }
+    await stream.callAIStream(messages, {}, (delta) => {
+      if (delta) res.write(`data: ${JSON.stringify({ delta })}\n\n`);
+    });
+  } catch (err) {
+    res.write(`data: ${JSON.stringify({ error: err.message || '流式输出失败' })}\n\n`);
+  }
+  res.write('data: [DONE]\n\n');
+  res.end();
+}
+
 export default {
   name: 'ai-stream',
   dsc: 'AI 流式输出（SSE）',
@@ -496,6 +527,11 @@ export default {
       method: 'GET',
       path: '/api/ai/models',
       handler: handleModels
+    },
+    {
+      method: 'GET',
+      path: '/api/ai/stream',
+      handler: handleAiStream
     }
   ]
 };

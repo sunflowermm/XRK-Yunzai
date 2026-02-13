@@ -147,6 +147,50 @@ export default {
           });
         }
       }
+    },
+
+    {
+      method: 'GET',
+      path: '/api/plugins/stats',
+      handler: async (req, res, Bot) => {
+        if (!Bot.checkApiAuthorization(req)) {
+          return res.status(403).json({ success: false, message: 'Unauthorized' });
+        }
+
+        try {
+          const priorityPlugins = PluginsLoader.priority || [];
+          const extendedPlugins = PluginsLoader.extended || [];
+          const allPlugins = [...priorityPlugins, ...extendedPlugins];
+          const loadStats = PluginsLoader.pluginLoadStats || {};
+          let withRules = 0;
+          let withTasks = 0;
+
+          for (const p of allPlugins) {
+            try {
+              const plugin = new p.class();
+              if (plugin.rule && plugin.rule.length) withRules++;
+              if (plugin.task) withTasks++;
+            } catch (_) {}
+          }
+
+          res.json({
+            success: true,
+            stats: {
+              total: allPlugins.length,
+              withRules,
+              withTasks,
+              taskCount: (PluginsLoader.task || []).length,
+              totalLoadTime: loadStats.totalLoadTime || 0
+            }
+          });
+        } catch (error) {
+          res.status(500).json({
+            success: false,
+            message: '获取插件统计失败',
+            error: error.message
+          });
+        }
+      }
     }
   ]
 };

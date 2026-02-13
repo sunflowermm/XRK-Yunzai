@@ -793,7 +793,7 @@ class MenuManager {
         const selected = await this.showMainMenu();
         shouldExit = await this.handleMenuAction(selected);
       } catch (error) {
-        // 保持与 XRK-AGT 一致的行为：不在这里直接退出，由 SignalHandler 统一处理 Ctrl+C 等信号
+        // 保持与 XRK 一致的行为：不在这里直接退出，由 SignalHandler 统一处理 Ctrl+C 等信号
         if (error?.isTtyError) {
           console.error(chalk.red('无法在当前环境中渲染菜单'));
           console.error(chalk.yellow('提示: 请确保终端支持交互式输入'));
