@@ -9,12 +9,6 @@ const uploadDir = path.join(process.cwd(), 'data', 'uploads');
 const mediaDir = path.join(process.cwd(), 'data', 'media');
 const fileMap = new Map();
 
-for (const dir of [uploadDir, mediaDir]) {
-  if (!fsSync.existsSync(dir)) {
-    fsSync.mkdirSync(dir, { recursive: true });
-  }
-}
-
 /** 拼装 file_url 的 baseUrl，优先配置再请求头 */
 function getBaseUrl(req, Bot) {
   const u = Bot?.url ?? (typeof Bot?.getServerUrl === 'function' ? Bot.getServerUrl() : null);

@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import yaml from 'yaml';
+import { FileUtils } from '../../../../lib/utils/file-utils.js';
 
 /**
  * 判断是否为对象
@@ -257,8 +258,7 @@ export default {
             await fs.copyFile(normalizedPath, backupPath);
           }
 
-          const dir = path.dirname(normalizedPath);
-          await fs.mkdir(dir, { recursive: true });
+          await FileUtils.ensureDir(path.dirname(normalizedPath));
 
           let content;
           if (fileFormat === 'json') {

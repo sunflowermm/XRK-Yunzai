@@ -67,7 +67,6 @@ export default class ChatStream extends AIStream {
     await super.init();
     
     try {
-      await BotUtil.mkdir(EMOTIONS_DIR);
       await this.loadEmotionImages();
       this.registerAllFunctions();
       

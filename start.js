@@ -26,8 +26,27 @@ import inquirer from 'inquirer';
 import chalk from 'chalk';
 import cfg from './lib/config/config.js';
 
+/** 修复 Windows UTF-8 编码问题 */
+if (process.platform === 'win32') {
+  try {
+    process.stdout.setEncoding('utf8');
+    process.stderr.setEncoding('utf8');
+    spawnSync('chcp', ['65001'], { stdio: 'ignore', shell: false });
+  } catch {
+    // 忽略错误
+  }
+}
+
 /** 增加事件监听器上限以支持复杂的进程管理 */
 process.setMaxListeners(30);
+
+/** 若以 start.js 为入口，则先通过 app.js 做依赖检查再进入本脚本 */
+const entry = process.argv[1];
+if (entry && path.basename(entry) === 'start.js') {
+  const appPath = path.resolve(process.cwd(), 'app.js');
+  const result = spawnSync(process.argv[0], [appPath, ...process.argv.slice(2)], { stdio: 'inherit', cwd: process.cwd() });
+  process.exit(result.status !== null ? result.status : 1);
+}
 
 /** @type {SignalHandler|null} 全局信号处理器单例 */
 let globalSignalHandler = null;
@@ -67,23 +86,6 @@ const CONFIG = {
 };
 
 /**
- * 仅在文件不存在时复制文件
- * @param {string} source - 源文件路径
- * @param {string} target - 目标文件路径
- * @returns {Promise<boolean>} 是否执行了复制
- */
-async function copyFileIfMissing(source, target) {
-  try {
-    await fs.access(target);
-    return false;
-  } catch {
-    await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.copyFile(source, target);
-    return true;
-  }
-}
-
-/**
  * 仅在内容变化时写入文件
  * @param {string} filePath - 文件路径
  * @param {string|Buffer} content - 文件内容
@@ -99,7 +101,6 @@ async function writeFileIfChanged(filePath, content) {
     // 文件不存在，继续写入
   }
 
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, content);
   return true;
 }
@@ -122,14 +123,6 @@ class Logger {
     this.isWriting = false;
     /** @type {Array<string>} 日志消息队列 */
     this.queue = [];
-  }
-
-  /**
-   * 确保日志目录存在
-   * @returns {Promise<void>}
-   */
-  async ensureLogDir() {
-    await fs.mkdir(PATHS.LOGS, { recursive: true });
   }
 
   /**
@@ -201,28 +194,12 @@ class Logger {
 
 /**
  * 基础管理类
- * 提供所有管理器的公共功能
- * 
  * @abstract
  * @class BaseManager
  */
 class BaseManager {
-  /**
-   * @param {Logger} logger - 日志实例
-   */
   constructor(logger) {
-    /** @type {Logger} */
     this.logger = logger;
-  }
-
-  /**
-   * 确保所有必要目录存在
-   * @returns {Promise<void>}
-   */
-  async ensureDirectories() {
-    for (const dir of Object.values(PATHS)) {
-      await fs.mkdir(dir, { recursive: true }).catch(() => {});
-    }
   }
 }
 
@@ -358,7 +335,6 @@ class PM2Manager extends BaseManager {
       }
     };
     
-    await fs.mkdir(PATHS.PM2_CONFIG, { recursive: true });
     const configPath = path.join(PATHS.PM2_CONFIG, `pm2_server_${port}.json`);
     const configContent = JSON.stringify({ apps: [pm2Config] }, null, 2);
     
@@ -1143,10 +1119,6 @@ async function main() {
   const serverManager = new ServerManager(logger, pm2Manager);
   const menuManager = new MenuManager(serverManager, pm2Manager);
   
-  /** 初始化目录结构 */
-  await serverManager.ensureDirectories();
-  await logger.ensureLogDir();
-  
   /** 检查命令行参数 */
   const envPort = process.env.XRK_SERVER_PORT;
   const commandArg = process.argv[2];
@@ -1182,7 +1154,6 @@ export default main;
 /** 启动应用程序 */
 main().catch(async (error) => {
   const logger = new Logger();
-  await logger.ensureLogDir();
   await logger.error(`启动失败: ${error.message}\n${error.stack}`);
   
   if (globalSignalHandler) {

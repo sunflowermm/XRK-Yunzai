@@ -16,31 +16,17 @@
  */
 
 import fs from 'fs/promises';
-import path from 'path';
 import Bot from './lib/bot.js';
 import chalk from 'chalk';
+import { BASE_DIRS } from './lib/base-dirs.js';
 
-// 默认调试端口（可通过命令行参数或环境变量覆盖）
 const DEFAULT_DEBUG_PORT = 11451;
 
-/**
- * 确保必要目录存在
- */
 async function ensureDirectories() {
-  const dirs = [
-    './logs',
-    './data',
-    './data/server_bots',
-    './config',
-    './config/default_config'
-  ];
-  
-  for (const dir of dirs) {
-    try {
-      await fs.mkdir(dir, { recursive: true });
-    } catch (error) {
-      console.warn(chalk.yellow(`[WARN] 无法创建目录 ${dir}: ${error.message}`));
-    }
+  for (const dir of BASE_DIRS) {
+    await fs.mkdir(dir, { recursive: true }).catch(err =>
+      console.warn(chalk.yellow(`[WARN] 无法创建目录 ${dir}: ${err.message}`))
+    );
   }
 }
 

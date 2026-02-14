@@ -10,13 +10,6 @@ import BotUtil from "../../../lib/util.js";
 const tempDir = path.join(process.cwd(), "www", "stdin");
 const mediaDir = path.join(process.cwd(), "www", "media");
 
-// 确保目录存在
-for (const dir of [tempDir, mediaDir]) {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-}
-
 // 定期清理临时文件
 setInterval(() => {
   try {

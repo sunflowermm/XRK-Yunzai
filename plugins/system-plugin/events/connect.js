@@ -103,7 +103,6 @@ export default class connectEvent extends EventListener {
   }
 
   async generateHTML(prefix, content) {
-    await fs.mkdir(this.dataDir, { recursive: true }).catch(() => {})
     const htmlPath = path.join(this.dataDir, `${prefix}_${Date.now()}.html`)
     await fs.writeFile(htmlPath, content, 'utf-8')
     return htmlPath
