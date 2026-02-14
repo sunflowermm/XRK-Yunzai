@@ -1,5 +1,3 @@
-import PluginsLoader from '../../../lib/plugins/loader.js';
-
 export class DailySignIn extends plugin {
     constructor() {
         super({
@@ -24,7 +22,7 @@ export class DailySignIn extends plugin {
         const messages = ['#你是谁' ];
         for (const msg of messages) {
             const fakeMsgEvent = this.createMessageEvent(msg);
-            await PluginsLoader.deal(fakeMsgEvent); // 处理模拟消息
+            await Bot.PluginsLoader.deal(fakeMsgEvent);
         }
     }
 

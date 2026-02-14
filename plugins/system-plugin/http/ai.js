@@ -1,4 +1,3 @@
-import StreamLoader from '../../../lib/aistream/loader.js';
 import cfg from '../../../lib/config/config.js';
 import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
 import BotUtil from '../../../lib/util.js';
@@ -453,7 +452,7 @@ async function handleModels(req, res, Bot) {
   });
 
   // 获取所有工作流
-  const allStreams = StreamLoader.getAllStreams ? Array.from(StreamLoader.getAllStreams().values()) : [];
+  const allStreams = Bot.StreamLoader?.getAllStreams?.() ?? [];
   const workflows = allStreams.map(stream => ({
     key: stream.name,
     label: stream.description || stream.name,
@@ -486,7 +485,7 @@ async function handleAiStream(req, res, Bot) {
   const workflow = (req.query.workflow || 'chat').toString().trim();
   const persona = (req.query.persona || '').toString().trim();
 
-  const stream = StreamLoader.getStream(workflow);
+  const stream = Bot.StreamLoader.getStream(workflow);
   if (!stream) {
     return res.status(400).json({ success: false, message: `工作流不存在: ${workflow}` });
   }

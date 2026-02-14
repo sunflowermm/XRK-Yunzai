@@ -34,8 +34,11 @@ export default class SystemConfig extends ConfigBase {
         schema: {
           fields: {
             debug: { type: 'boolean', label: '调试输出', description: '是否输出调试信息（如错误堆栈）', default: false, component: 'Switch' },
-            log_level: { type: 'string', label: '日志等级', enum: ['trace', 'debug', 'info', 'warn', 'fatal', 'mark', 'error', 'off'], default: 'info', component: 'Select' },
+            log_level: { type: 'string', label: '日志等级', description: '全局最低输出级别', enum: ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'mark', 'success', 'tip'], default: 'info', component: 'Select' },
             log_align: { type: 'string', label: '日志头内容', default: 'XRKYZ', component: 'Input' },
+            log_modules: { type: 'object', label: '按模块日志等级', description: '模块名→等级，如 DeviceAPI: debug、PluginsLoader: trace；未列出模块使用 log_level', default: {} },
+            log_max_days: { type: 'number', label: '主日志保留天数', min: 1, default: 3, component: 'InputNumber' },
+            log_trace_days: { type: 'number', label: 'trace 日志保留天数', min: 1, default: 1, component: 'InputNumber' },
             log_color: { type: 'string', label: '日志头颜色', enum: ['default', 'scheme1', 'scheme2', 'scheme3', 'scheme4', 'scheme5', 'scheme6', 'scheme7'], default: 'default', component: 'Select' },
             log_id_length: { type: 'number', label: '日志ID长度', min: 1, max: 64, default: 20, component: 'InputNumber' },
             log_id_filler: { type: 'string', label: 'ID美化字符', enum: ['.', '·', '─', '•', '═', '»', '→'], default: '.', component: 'Select' },
@@ -2120,69 +2123,41 @@ export default class SystemConfig extends ConfigBase {
    */
   getConfigInstance(name) {
     const configMeta = this.configFiles[name];
-    if (!configMeta) {
-      throw new Error(`未知的配置: ${name}`);
-    }
-
+    if (!configMeta) throw new Error(`未知的配置: ${name}`);
     return new ConfigBase(configMeta);
+  }
+
+  /** 委托到子配置实例执行方法，避免重复 getConfigInstance + 调用 */
+  _invoke(name, method, ...args) {
+    return this.getConfigInstance(name)[method](...args);
   }
 
   /**
    * 读取指定配置文件
-   * @param {string} [name] - 子配置名称（可选，如果不提供则返回配置列表）
+   * @param {string} [name] - 子配置名称（可选，不提供则返回配置列表）
    * @returns {Promise<Object>}
    */
   async read(name) {
     if (!name) {
-      return {
-        name: this.name,
-        displayName: this.displayName,
-        description: this.description,
-        configs: this.getConfigList()
-      };
+      return { name: this.name, displayName: this.displayName, description: this.description, configs: this.getConfigList() };
     }
-    
-    const instance = this.getConfigInstance(name);
-    return await instance.read();
+    return this._invoke(name, 'read');
   }
 
-  /**
-   * 写入指定配置文件
-   * @param {string} name - 子配置名称
-   * @param {Object} data - 配置数据
-   * @param {Object} options - 写入选项
-   * @returns {Promise<boolean>}
-   */
+  /** 写入指定配置文件 */
   async write(name, data, options = {}) {
-    if (!name) {
-      throw new Error('SystemConfig 写入需要指定子配置名称');
-    }
-    const instance = this.getConfigInstance(name);
-    return await instance.write(data, options);
+    if (!name) throw new Error('SystemConfig 写入需要指定子配置名称');
+    return this._invoke(name, 'write', data, options);
   }
 
-  /**
-   * 获取指定配置的值
-   * @param {string} name - 配置名称
-   * @param {string} keyPath - 键路径
-   * @returns {Promise<any>}
-   */
+  /** 获取指定配置的值 */
   async get(name, keyPath) {
-    const instance = this.getConfigInstance(name);
-    return await instance.get(keyPath);
+    return this._invoke(name, 'get', keyPath);
   }
 
-  /**
-   * 设置指定配置的值
-   * @param {string} name - 配置名称
-   * @param {string} keyPath - 键路径
-   * @param {any} value - 新值
-   * @param {Object} options - 写入选项
-   * @returns {Promise<boolean>}
-   */
+  /** 设置指定配置的值 */
   async set(name, keyPath, value, options = {}) {
-    const instance = this.getConfigInstance(name);
-    return await instance.set(keyPath, value, options);
+    return this._invoke(name, 'set', keyPath, value, options);
   }
 
   /**

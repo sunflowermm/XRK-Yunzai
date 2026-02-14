@@ -9,7 +9,6 @@ import BotUtil from "../../../lib/util.js";
 
 const tempDir = path.join(process.cwd(), "www", "stdin");
 const mediaDir = path.join(process.cwd(), "www", "media");
-const pluginsLoader = (await import("../../../lib/plugins/loader.js")).default;
 
 // 确保目录存在
 for (const dir of [tempDir, mediaDir]) {
@@ -258,33 +257,22 @@ export class StdinHandler {
   }
 
   async handleEvent(event) {
-    logger.debug(`处理事件: message = ${JSON.stringify(event.message)}, raw_message = ${event.raw_message}`);
-    
-    // 结果收集器
     const results = [];
     const originalReply = event.reply;
 
     event.reply = async (...args) => {
-      let msg = args[0];
+      const msg = args[0];
       let processedMsg;
-      
       try {
         if (Array.isArray(msg)) {
           processedMsg = await this.processMessageContent(msg);
-        } else if (typeof msg === 'object' && msg.type) {
+        } else if (typeof msg === 'object' && msg?.type) {
           processedMsg = await this.processMessageContent([msg]);
         } else {
-          processedMsg = [{ type: 'text', text: String(msg) }];
+          processedMsg = [{ type: 'text', text: String(msg ?? '') }];
         }
-        
-        const result = await originalReply.apply(event, [processedMsg]);
-        
-        // 收集结果
-        results.push({
-          ...result,
-          content: processedMsg
-        });
-        
+        const result = await originalReply.call(this, processedMsg);
+        results.push({ ...result, content: processedMsg });
         return result;
       } catch (error) {
         logger.error(`reply包装错误: ${error.message}`);
@@ -292,8 +280,7 @@ export class StdinHandler {
       }
     };
 
-    // 处理插件
-    await pluginsLoader.deal(event);
+    await Bot.PluginsLoader.deal(event);
 
     // 触发stdin事件
     Bot.em('stdin.command', {
@@ -526,7 +513,7 @@ export class StdinHandler {
                   typeof input === 'string' && input ? [{ type: "text", text: input }] : [];
     let raw_message = Array.isArray(input) ? 
                       input.map(m => m.type === 'text' ? m.text : `[${m.type}]`).join('') : 
-                      typeof input === 'string' ? input : '';
+                      (typeof input === 'string' ? input : '').trim();
 
     const event = {
       adapter,
@@ -543,6 +530,7 @@ export class StdinHandler {
       user_id: userId,
       message,
       raw_message,
+      isStdin: adapter === 'stdin',
       isMaster: userInfo.isMaster !== undefined ? userInfo.isMaster : true,
       toString: () => raw_message,
       sender: { 
@@ -578,7 +566,6 @@ export class StdinHandler {
       event.message_type = "group";
     }
 
-    logger.debug(`创建事件: message = ${JSON.stringify(message)}, raw_message = ${raw_message}`);
     return event;
   }
 

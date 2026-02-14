@@ -1,11 +1,8 @@
 /**
  * MCP HTTP API：统一通过 MCP 暴露工具列表与 JSON-RPC 调用
- * 所有工具仅通过 MCP 注册，此处只做 HTTP 透传
  */
-import StreamLoader from '../../../lib/aistream/loader.js';
-import BotUtil from '../../../lib/util.js';
 
-const getMCPServer = () => StreamLoader.mcpServer;
+const getMCPServer = () => Bot.StreamLoader?.mcpServer;
 
 function requireMCP(res) {
   const mcpServer = getMCPServer();

@@ -3,55 +3,52 @@ import cfg from "../../../lib/config/config.js"
 import Renderer from "../../../lib/renderer/loader.js"
 import fs from 'fs/promises'
 import path from 'path'
-import loader from '../../../lib/plugins/loader.js'
+
+const RESTART_KEY = 'Yz:restart'
 
 export default class connectEvent extends EventListener {
   constructor() {
     super({ event: "connect" })
-    this.key = 'Yz:restart'
     this.dataDir = path.join(process.cwd(), 'data')
     this.renderer = Renderer.getRenderer()
   }
 
   async execute(e) {
     if (!Bot.uin.includes(e.self_id)) Bot.uin.push(e.self_id)
-    
     const currentUin = e?.self_id || Bot.uin[0]
     if (!currentUin) return logger.debug('无法获取机器人QQ号')
 
     const restart = await this.getRestartInfo(currentUin)
-    if (restart) await this.handleRestart(currentUin, restart)
+    if (restart) await this.handleRestart(currentUin, restart, e)
     await this.handleNormalStart(e)
-    
   }
 
   async getRestartInfo(uin) {
     try {
-      const data = await redis.get(`${this.key}:${uin}`)
+      const data = await redis.get(`${RESTART_KEY}:${uin}`)
       return data ? JSON.parse(data) : null
-    } catch (error) {
-      logger.error(`获取重启信息失败：${error}`)
+    } catch {
       return null
     }
   }
 
   async handleNormalStart(e) {
     if (!cfg.bot.online_msg_exp) return
-    
+    if (e.adapter === 'device') return
     const key = `Yz:connect888Msg:${e.self_id}`
     if (await redis.get(key)) return
-    
     redis.set(key, "1", { EX: cfg.bot.online_msg_exp * 60 })
     await this.sendWelcomeMessage()
   }
 
-  async handleRestart(currentUin, restart) {
-    const time = ((new Date().getTime() - (restart.time || new Date().getTime())) / 1000).toFixed(4)
-    const target = restart.isGroup ? Bot[currentUin].pickGroup(restart.id) : Bot[currentUin].pickUser(restart.id)
-    
+  async handleRestart(currentUin, restart, e) {
+    const time = ((Date.now() - (restart.time || Date.now())) / 1000).toFixed(1)
+    const target = (e.adapter === 'device' && typeof e.sendReply === 'function')
+      ? { sendMsg: (content) => Promise.resolve(e.sendReply(content)) }
+      : (restart.isGroup ? Bot[currentUin].pickGroup(restart.id) : Bot[currentUin].pickUser(restart.id))
     await target.sendMsg(`重启成功，耗时 ${time} 秒`)
     await this.sendPluginLoadReport(target)
-    await redis.del(`${this.key}:${currentUin}`)
+    await redis.del(`${RESTART_KEY}:${currentUin}`)
   }
 
   /**
@@ -59,6 +56,7 @@ export default class connectEvent extends EventListener {
    */
   async takeScreenshot(htmlPath, name, options = {}) {
     try {
+      if (!this.renderer) return false
       const img = await this.renderer.screenshot(name, {
         tplFile: htmlPath,
         saveId: name,
@@ -89,17 +87,15 @@ export default class connectEvent extends EventListener {
 
   async sendPluginLoadReport(target) {
     try {
-      const stats = loader.getPluginStats()
-      if (!stats?.plugins?.length) return logger.debug('没有插件加载统计信息')
-      
+      const stats = Bot.PluginsLoader?.getPluginStats?.()
+      if (!stats?.plugins?.length) return
+
       const htmlPath = await this.generateHTML('plugin_load', this.getPluginLoadHTML(stats))
       const img = await this.takeScreenshot(htmlPath, 'plugin_load_report', {
         width: 800,
         deviceScaleFactor: 1.5
       })
-      if (img) {
-        await target.sendMsg([segment.image(img)])
-      }
+      if (img) await target.sendMsg([segment.image(img)])
       this.cleanupFile(htmlPath)
     } catch (error) {
       logger.error(`发送插件加载报告失败: ${error.message}`)

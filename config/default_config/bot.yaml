@@ -1,8 +1,15 @@
 # 是否输出调试信息（如错误堆栈）
 debug: false
-# 日志等级: trace, debug, info, warn, fatal, mark, error, off
-# mark 时只显示执行命令，不显示聊天记录
+# 全局日志等级: trace | debug | info | warn | error | fatal | mark | success | tip
+# trace 最细，debug 排错，info 常规，warn/error/fatal 异常
 log_level: info
+
+# 按模块覆盖日志等级，未列出的模块使用 log_level
+# 示例: DeviceAPI: debug   PluginsLoader: trace   PuppeteerRenderer: info
+log_modules: {}
+# 主日志保留天数；trace 日志保留天数（可选，默认 1）
+log_max_days: 3
+log_trace_days: 1
 
 # 日志头内容自定义，例如: "MYBOT" 将显示 [MYBOT]
 log_align: "XRKYZ"

@@ -221,7 +221,8 @@ export default class PuppeteerRenderer extends Renderer {
   }
 
   /**
-   * Generate screenshot with optimized resource management
+   * 截图。data：url | tplFile+saveId；width/height；fullPage；delayBeforeScreenshot；waitUntil；
+   * imgType/quality/omitBackground/path；imageWaitTimeout；multiPage/multiPageHeight；pageGotoParams；clip {x,y,width,height}。
    */
   async screenshot(name, data = {}) {
     while (this.shoting.length >= this.maxConcurrent) {
@@ -230,12 +231,16 @@ export default class PuppeteerRenderer extends Renderer {
 
     if (!await this.browserInit()) return false;
 
+    const useUrl = data.url && /^https?:\/\//i.test(String(data.url));
     const pageHeight = data.multiPageHeight ?? 4000;
-    const savePath = this.dealTpl(name, data);
-    if (!savePath) return false;
+    let savePath = null;
+    if (!useUrl) {
+      savePath = this.dealTpl(name, data);
+      if (!savePath) return false;
+    }
 
-    const filePath = path.join(_path, lodash.trim(savePath, "."));
-    if (!fs.existsSync(filePath)) {
+    const filePath = useUrl ? null : path.join(_path, lodash.trim(savePath, "."));
+    if (!useUrl && !fs.existsSync(filePath)) {
       BotUtil.makeLog("error", `HTML file does not exist: ${filePath}`, "PuppeteerRenderer");
       return false;
     }
@@ -259,113 +264,87 @@ export default class PuppeteerRenderer extends Renderer {
         }
       });
 
+      const viewportWidth = data.width ?? 1280;
+      const viewportHeight = data.height ?? 720;
+      const deviceScaleFactor = data.deviceScaleFactor ?? 1;
       await page.setViewport({
-        width: 1280,
-        height: 720,
-        deviceScaleFactor: 1,
+        width: viewportWidth,
+        height: viewportHeight,
+        deviceScaleFactor,
       });
 
       const pageGotoParams = lodash.extend(
-        { timeout: this.puppeteerTimeout, waitUntil: "domcontentloaded" },
+        { timeout: this.puppeteerTimeout, waitUntil: data.waitUntil || "domcontentloaded" },
         data.pageGotoParams || {}
       );
 
-      const fileUrl = `file://${filePath}`;
-      BotUtil.makeLog("debug", `[${name}] Loading file: ${fileUrl}`, "PuppeteerRenderer");
-      await page.goto(fileUrl, pageGotoParams);
+      const loadUrl = useUrl ? data.url : `file://${filePath}`;
+      BotUtil.makeLog("debug", `[${name}] Loading: ${useUrl ? data.url : loadUrl}`, "PuppeteerRenderer");
+      await page.goto(loadUrl, pageGotoParams);
 
-      await page.evaluate(() => new Promise(resolve => {
-        const timeout = setTimeout(resolve, 800);
+      const imageWait = data.imageWaitTimeout ?? 800;
+      await page.evaluate((ms) => new Promise(resolve => {
+        const timeout = setTimeout(resolve, ms);
         const images = document.querySelectorAll("img");
-        
-        if (images.length === 0) {
-          clearTimeout(timeout);
-          return resolve();
-        }
-        
+        if (images.length === 0) { clearTimeout(timeout); return resolve(); }
         let loaded = 0;
-        const checkComplete = () => {
-          loaded++;
-          if (loaded === images.length) {
-            clearTimeout(timeout);
-            resolve();
-          }
-        };
-        
-        images.forEach(img => {
-          if (img.complete) checkComplete();
-          else {
-            img.onload = checkComplete;
-            img.onerror = checkComplete;
-          }
-        });
-      }));
+        const done = () => { loaded++; if (loaded === images.length) { clearTimeout(timeout); resolve(); } };
+        images.forEach(img => img.complete ? done() : (img.onload = img.onerror = done));
+      }), imageWait);
 
-      const body = (await page.$("#container")) || (await page.$("body"));
-      if (!body) throw new Error("Content element not found");
-
-      const boundingBox = await body.boundingBox();
-
-      const screenshotOptions = {
+      const fullPage = data.fullPage === true || (useUrl && data.fullPage !== false);
+      const screenshotOpts = {
         type: data.imgType ?? "jpeg",
         omitBackground: data.omitBackground ?? false,
         quality: data.quality ?? 85,
         path: data.path ?? "",
       };
+      if (data.imgType === "png") delete screenshotOpts.quality;
 
-      if (data.imgType === "png") delete screenshotOptions.quality;
+      const delayMs = fullPage ? (data.delayBeforeScreenshot ?? (useUrl ? 1500 : 0)) : 0;
+      if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
 
-      let num = 1;
-      if (data.multiPage) {
-        screenshotOptions.type = "jpeg";
-        num = Math.ceil(boundingBox.height / pageHeight) || 1;
-      }
-
-      if (!data.multiPage) {
-        const buff = await body.screenshot(screenshotOptions);
+      if (fullPage) {
+        const buff = await page.screenshot({ ...screenshotOpts, fullPage: true });
         const buffer = Buffer.isBuffer(buff) ? buff : Buffer.from(buff);
         this.renderNum++;
-        const kb = (buffer.length / 1024).toFixed(2) + "KB";
-        BotUtil.makeLog("info", `[${name}][${this.renderNum}] ${kb} ${Date.now() - start}ms`, "PuppeteerRenderer");
+        BotUtil.makeLog("info", `[${name}][${this.renderNum}] fullPage ${(buffer.length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PuppeteerRenderer");
         ret.push(buffer);
+      } else if (data.clip && typeof data.clip === 'object' && ['x', 'y', 'width', 'height'].every(k => Number.isFinite(data.clip[k]))) {
+        const buff = await page.screenshot({ ...screenshotOpts, clip: data.clip });
+        ret.push(Buffer.isBuffer(buff) ? buff : Buffer.from(buff));
+        this.renderNum++;
+        BotUtil.makeLog("info", `[${name}][${this.renderNum}] clip ${Date.now() - start}ms`, "PuppeteerRenderer");
       } else {
-        if (num > 1) {
-          await page.setViewport({
-            width: Math.ceil(boundingBox.width),
-            height: Math.min(pageHeight + 100, 2000),
-          });
-        }
+        const body = (await page.$("#container")) || (await page.$("body"));
+        if (!body) throw new Error("Content element not found");
+        const boundingBox = await body.boundingBox();
+        let num = data.multiPage ? Math.ceil(boundingBox.height / pageHeight) || 1 : 1;
+        if (data.multiPage) screenshotOpts.type = "jpeg";
 
-        for (let i = 1; i <= num; i++) {
-          if (i !== 1 && i === num) {
-            const remainingHeight = Math.min(parseInt(boundingBox.height) - pageHeight * (num - 1), 2000);
-            await page.setViewport({
-              width: Math.ceil(boundingBox.width),
-              height: remainingHeight > 0 ? remainingHeight : 100,
-            });
-          }
-
-          if (i !== 1) {
-            await page.evaluate(scrollY => window.scrollTo(0, scrollY), pageHeight * (i - 1));
-            await new Promise(resolve => setTimeout(resolve, 100));
-          }
-
-          const buff = num === 1 
-            ? await body.screenshot(screenshotOptions) 
-            : await page.screenshot(screenshotOptions);
+        if (num === 1) {
+          const buff = await body.screenshot(screenshotOpts);
           const buffer = Buffer.isBuffer(buff) ? buff : Buffer.from(buff);
           this.renderNum++;
-          const kb = (buffer.length / 1024).toFixed(2) + "KB";
-          BotUtil.makeLog("debug", `[${name}][${i}/${num}] ${kb}`, "PuppeteerRenderer");
+          BotUtil.makeLog("info", `[${name}][${this.renderNum}] ${(buffer.length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PuppeteerRenderer");
           ret.push(buffer);
-
-          if (i < num && num > 2) {
-            await new Promise(resolve => setTimeout(resolve, 100));
+        } else {
+          if (num > 1) await page.setViewport({ width: Math.ceil(boundingBox.width), height: Math.min(pageHeight + 100, 2000) });
+          for (let i = 1; i <= num; i++) {
+            if (i !== 1 && i === num) {
+              const h = Math.min(parseInt(boundingBox.height) - pageHeight * (num - 1), 2000);
+              await page.setViewport({ width: Math.ceil(boundingBox.width), height: h > 0 ? h : 100 });
+            }
+            if (i !== 1) {
+              await page.evaluate((y) => window.scrollTo(0, y), pageHeight * (i - 1));
+              await new Promise(r => setTimeout(r, 100));
+            }
+            const buff = i === 1 ? await body.screenshot(screenshotOpts) : await page.screenshot(screenshotOpts);
+            ret.push(Buffer.isBuffer(buff) ? buff : Buffer.from(buff));
+            this.renderNum++;
+            if (i < num && num > 2) await new Promise(r => setTimeout(r, 100));
           }
-        }
-
-        if (num > 1) {
-          BotUtil.makeLog("info", `[${name}] Completed in ${Date.now() - start}ms`, "PuppeteerRenderer");
+          BotUtil.makeLog("info", `[${name}] multiPage ${num} ${Date.now() - start}ms`, "PuppeteerRenderer");
         }
       }
     } catch (error) {

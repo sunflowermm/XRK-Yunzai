@@ -1626,8 +1626,7 @@ ${embeddingHint}
   }
 
   async execute(e, messages, config) {
-    let StreamLoader = null;
-    
+    const StreamLoader = Bot.StreamLoader;
     try {
       // 构建消息上下文
       if (!Array.isArray(messages)) {
@@ -1637,20 +1636,8 @@ ${embeddingHint}
       const query = Array.isArray(messages) ? this.extractQueryFromMessages(messages) : messages;
       messages = await this.buildEnhancedContext(e, query, messages);
       
-      // 在调用 AI 之前，挂载当前事件，供 MCP 工具在本轮对话中获取上下文（群/私聊信息）
-      try {
-        StreamLoader = (await import('../../../lib/aistream/loader.js')).default;
-        if (StreamLoader) {
-          StreamLoader.currentEvent = e || null;
-          BotUtil.makeLog(
-            'debug',
-            `[ChatStream.execute] 设置当前事件: isGroup=${e?.isGroup}, message_type=${e?.message_type}, group_id=${e?.group_id}, user_id=${e?.user_id}`,
-            'ChatStream'
-          );
-        }
-      } catch {
-        StreamLoader = null;
-      }
+      const StreamLoader = Bot.StreamLoader;
+      if (StreamLoader) StreamLoader.currentEvent = e || null;
       
       // 打印给 LLM 的消息概要，便于调试 Prompt 结构（只截取前几百字符，避免刷屏）
       try {
@@ -1697,10 +1684,7 @@ ${embeddingHint}
       );
       return null;
     } finally {
-      // 清理当前事件，避免影响其他工作流/请求
-      if (StreamLoader && StreamLoader.currentEvent === e) {
-        StreamLoader.currentEvent = null;
-      }
+      if (StreamLoader?.currentEvent === e) StreamLoader.currentEvent = null;
     }
   }
 

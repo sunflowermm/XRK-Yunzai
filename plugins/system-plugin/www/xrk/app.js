@@ -4821,7 +4821,12 @@ class App {
       const data = await res.json();
       if (!data.success) throw new Error(data.message ?? '接口返回失败');
       if (!this._configState) return;
-      this._configState.list = data.configs ?? [];
+      const configs = data.configs ?? [];
+      this._configState.list = configs.sort((a, b) => {
+        if (a.name === 'system') return -1;
+        if (b.name === 'system') return 1;
+        return (a.displayName || a.name).localeCompare(b.displayName || b.name, 'zh-CN');
+      });
       this.renderConfigList();
     } catch (e) {
       if (list) list.innerHTML = `<div class="empty-state"><p>加载失败: ${e.message}</p></div>`;
@@ -7205,10 +7210,9 @@ class App {
         try {
           const data = JSON.parse(e.data);
           this._lastWsMessageAt = Date.now();
-          
           this.handleWsMessage(data);
-        } catch (e) {
-          console.warn('[WebSocket] 消息解析失败:', e);
+        } catch (err) {
+          console.warn('[Device WS] 消息解析失败:', err);
         }
       };
       
@@ -7243,12 +7247,11 @@ class App {
     const payloadText = (text || '').trim();
     if (!payloadText) return;
 
-    // 确保WebSocket连接
     this.ensureDeviceWs();
     const ws = this._deviceWs;
-    
-    // 如果连接未就绪，尝试等待一下
+
     if (ws?.readyState !== WebSocket.OPEN) {
+      console.warn('[Device WS] 连接未就绪，state=', ws?.readyState, '(1=OPEN 0=CONNECTING 2=CLOSING 3=CLOSED)');
       if (ws?.readyState === WebSocket.CONNECTING) {
         // 正在连接中，等待连接完成
         const checkConnection = setInterval(() => {
@@ -7277,10 +7280,7 @@ class App {
 
     const deviceId = ws.device_id || this.getWebUserId();
     const userId = this.getWebUserId();
-    
-    // 设备通道的工作流一律使用 'device'
-    // （真正对接 OneBot e 事件的是后端的 chat 工作流，不是当前 Web 设备通道）
-    const workflow = 'device';
+    const workflow = (meta.workflow || 'device').toString().trim();
 
     const msg = {
       type: 'message',
@@ -7290,8 +7290,6 @@ class App {
       user_id: userId,
       text: payloadText,
       isMaster: true,
-      // 可选：OneBot-like segments，用于携带图片/视频/音频等多模态输入
-      // 若不传，则后端会使用 text 自动构造 [{type:'text',text}]
       message: Array.isArray(meta.message) ? meta.message : undefined,
       meta: {
         persona: this.getCurrentPersona(),
@@ -7331,9 +7329,7 @@ class App {
   }
 
   handleWsMessage(data) {
-    // TTS音频消息不去重，因为每个音频块都是唯一的，必须全部处理
     const isTTSAudio = data.type === 'command' && data.command?.command === 'play_tts_audio';
-    
     if (!isTTSAudio) {
       // 非TTS消息去重：使用event_id或timestamp+type作为唯一标识
       const messageId = data.event_id || `${data.type}_${data.timestamp || Date.now()}_${JSON.stringify(data).slice(0, 50)}`;
@@ -7495,11 +7491,9 @@ class App {
         this._lastWsMessageAt = Date.now();
         break;
       case 'typing':
-        // 显示正在输入状态
-        if (data.typing) {
-          this.updateChatStatus('AI 正在输入...');
-        } else {
-          this.updateChatStatus();
+        if (data.typing) this.updateChatStatus('AI 正在输入...');
+        else {
+          this.clearChatStreamState();
         }
         break;
       case 'command':

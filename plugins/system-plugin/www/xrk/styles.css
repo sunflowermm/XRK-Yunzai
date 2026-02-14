@@ -1492,6 +1492,11 @@ select.form-input {
   max-width: 100%;
 }
 
+/* 助手侧截图/图片不撑破气泡，最大 520px */
+.chat-message.assistant .chat-image-container {
+  max-width: min(100%, 520px);
+}
+
 /* 用户侧图片：容器靠右对齐，视觉更符合“我发的在右侧” */
 .chat-message.user .chat-image-container {
   display: block;
@@ -1975,27 +1980,21 @@ select.form-input {
 }
 
 .chat-record {
-  /* 独立聊天记录卡片：拉满一行，避免被左右压缩 */
-  width: 100%;
-  max-width: 100% !important; /* 覆盖 chat-message 的 max-width: 80% */
-  margin: 8px 0; /* 与上下普通对话气泡拉开一点距离 */
-
+  max-width: min(80%, 880px) !important;
+  margin: 8px 0;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   overflow: hidden;
   box-shadow: var(--shadow-sm);
   word-wrap: break-word;
-
-  /* 内部采用列布局，方便内容区域固定高度滚动 */
   display: flex;
   flex-direction: column;
 }
 
-/* 聊天记录卡片需要打破 .chat-message.assistant / .user 的 align-self 设置 */
 .chat-message.chat-record {
-  align-self: stretch !important;
-  max-width: 100% !important;
+  align-self: flex-start !important;
+  max-width: min(80%, 880px) !important;
 }
 
 .chat-record-header {

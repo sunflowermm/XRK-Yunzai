@@ -270,7 +270,8 @@ export default class PlaywrightRenderer extends Renderer {
   }
 
   /**
-   * Generate screenshot with optimized resource management
+   * 截图。data：url | tplFile+saveId；width/height；fullPage；delayBeforeScreenshot；waitUntil；
+   * imgType/quality/omitBackground/path；imageWaitTimeout；multiPage/multiPageHeight；pageGotoParams；clip {x,y,width,height}。
    */
   async screenshot(name, data = {}) {
     while (this.shoting.length >= this.maxConcurrent) {
@@ -279,12 +280,16 @@ export default class PlaywrightRenderer extends Renderer {
 
     if (!await this.browserInit()) return false;
 
+    const useUrl = data.url && /^https?:\/\//i.test(String(data.url));
     const pageHeight = data.multiPageHeight ?? 4000;
-    const savePath = this.dealTpl(name, data);
-    if (!savePath) return false;
+    let savePath = null;
+    if (!useUrl) {
+      savePath = this.dealTpl(name, data);
+      if (!savePath) return false;
+    }
 
-    const filePath = path.join(_path, savePath);
-    if (!fs.existsSync(filePath)) {
+    const filePath = useUrl ? null : path.join(_path, savePath);
+    if (!useUrl && !fs.existsSync(filePath)) {
       BotUtil.makeLog("error", `HTML file does not exist: ${filePath}`, "PlaywrightRenderer");
       return false;
     }
@@ -309,113 +314,81 @@ export default class PlaywrightRenderer extends Renderer {
         }
       });
 
+      const viewportWidth = data.width ?? 1280;
+      const viewportHeight = data.height ?? 720;
+      await page.setViewportSize({ width: viewportWidth, height: viewportHeight });
+
       const pageGotoParams = lodash.extend(
-        { timeout: this.playwrightTimeout, waitUntil: "domcontentloaded" },
+        { timeout: this.playwrightTimeout, waitUntil: data.waitUntil || "domcontentloaded" },
         data.pageGotoParams || {}
       );
 
-      await page.goto(`file://${filePath}`, pageGotoParams);
+      const loadUrl = useUrl ? data.url : `file://${filePath}`;
+      BotUtil.makeLog("debug", `[${name}] Loading: ${useUrl ? data.url : loadUrl}`, "PlaywrightRenderer");
+      await page.goto(loadUrl, pageGotoParams);
 
-      await page.evaluate(() => new Promise(resolve => {
-        const timeout = setTimeout(resolve, 800);
+      const imageWait = data.imageWaitTimeout ?? 800;
+      await page.evaluate((ms) => new Promise(resolve => {
+        const timeout = setTimeout(resolve, ms);
         const images = Array.from(document.querySelectorAll("img"));
-        
-        if (images.length === 0) {
-          clearTimeout(timeout);
-          return resolve();
-        }
-        
+        if (images.length === 0) { clearTimeout(timeout); return resolve(); }
         let loaded = 0;
-        const checkComplete = () => {
-          loaded++;
-          if (loaded === images.length) {
-            clearTimeout(timeout);
-            resolve();
-          }
-        };
-        
-        images.forEach(img => {
-          if (img.complete) checkComplete();
-          else {
-            img.onload = checkComplete;
-            img.onerror = checkComplete;
-          }
-        });
-      }));
+        const done = () => { loaded++; if (loaded === images.length) { clearTimeout(timeout); resolve(); } };
+        images.forEach(img => img.complete ? done() : (img.onload = img.onerror = done));
+      }), imageWait);
 
-      const body = (await page.locator("#container").first()) || (await page.locator("body"));
-      if (!body) throw new Error("Content element not found");
-
-      const boundingBox = await body.boundingBox();
-
-      const screenshotOptions = {
+      const fullPage = data.fullPage === true || (useUrl && data.fullPage !== false);
+      const screenshotOpts = {
         type: data.imgType ?? "jpeg",
-        fullPage: !data.multiPage,
         omitBackground: data.omitBackground ?? false,
         quality: data.quality ?? 85,
         path: data.path ?? "",
       };
+      if (data.imgType === "png") delete screenshotOpts.quality;
 
-      if (data.imgType === "png") delete screenshotOptions.quality;
+      const delayMs = fullPage ? (data.delayBeforeScreenshot ?? (useUrl ? 1500 : 0)) : 0;
+      if (delayMs > 0) await page.waitForTimeout(delayMs);
 
-      let num = 1;
-      if (data.multiPage) {
-        screenshotOptions.type = "jpeg";
-        screenshotOptions.fullPage = false;
-        num = Math.ceil(boundingBox.height / pageHeight) || 1;
-      }
-
-      if (!data.multiPage) {
-        const buff = await body.screenshot(screenshotOptions);
+      if (fullPage) {
+        const buff = await page.screenshot({ ...screenshotOpts, fullPage: true });
         this.renderNum++;
-        const kb = (buff.length / 1024).toFixed(2) + "KB";
-        BotUtil.makeLog("info", `[${name}][${this.renderNum}] ${kb} ${Date.now() - start}ms`, "PlaywrightRenderer");
+        BotUtil.makeLog("info", `[${name}][${this.renderNum}] fullPage ${(buff.length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PlaywrightRenderer");
+        ret.push(buff);
+      } else if (data.clip && typeof data.clip === 'object' && ['x', 'y', 'width', 'height'].every(k => Number.isFinite(data.clip[k]))) {
+        const buff = await page.screenshot({ ...screenshotOpts, clip: data.clip });
+        this.renderNum++;
+        BotUtil.makeLog("info", `[${name}][${this.renderNum}] clip ${(buff.length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PlaywrightRenderer");
         ret.push(buff);
       } else {
-        if (num > 1) {
-          await page.setViewportSize({
-            width: Math.ceil(boundingBox.width),
-            height: Math.min(pageHeight + 100, 2000),
-          });
-        }
+        const body = (await page.locator("#container").first()) || (await page.locator("body"));
+        if (!body) throw new Error("Content element not found");
+        const boundingBox = await body.boundingBox();
+        let num = data.multiPage ? Math.ceil(boundingBox.height / pageHeight) || 1 : 1;
+        if (data.multiPage) screenshotOpts.type = "jpeg";
 
-        for (let i = 1; i <= num; i++) {
-          if (i !== 1 && i === num) {
-            const remainingHeight = Math.min(parseInt(boundingBox.height) - pageHeight * (num - 1), 2000);
-            await page.setViewportSize({
-              width: Math.ceil(boundingBox.width),
-              height: remainingHeight > 0 ? remainingHeight : 100,
-            });
-          }
-
-          if (i !== 1) {
-            await page.evaluate(scrollY => window.scrollTo(0, scrollY), pageHeight * (i - 1));
-            await page.waitForTimeout(100);
-          }
-
-          const clip = (i === num && num > 1) ? {
-            x: boundingBox.x,
-            y: 0,
-            width: boundingBox.width,
-            height: Math.min(boundingBox.height - pageHeight * (i - 1), pageHeight),
-          } : null;
-
-          const buff = clip 
-            ? await page.screenshot({ ...screenshotOptions, clip }) 
-            : await body.screenshot(screenshotOptions);
-            
+        if (num === 1) {
+          const buff = await body.screenshot(screenshotOpts);
           this.renderNum++;
-          const kb = (buff.length / 1024).toFixed(2) + "KB";
-          BotUtil.makeLog("debug", `[${name}][${i}/${num}] ${kb}`, "PlaywrightRenderer");
+          BotUtil.makeLog("info", `[${name}][${this.renderNum}] ${(buff.length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PlaywrightRenderer");
           ret.push(buff);
-
-          if (i < num && num > 2) {
-            await page.waitForTimeout(100);
+        } else {
+          if (num > 1) await page.setViewportSize({ width: Math.ceil(boundingBox.width), height: Math.min(pageHeight + 100, 2000) });
+          for (let i = 1; i <= num; i++) {
+            if (i !== 1 && i === num) {
+              const h = Math.min(parseInt(boundingBox.height) - pageHeight * (num - 1), 2000);
+              await page.setViewportSize({ width: Math.ceil(boundingBox.width), height: h > 0 ? h : 100 });
+            }
+            if (i !== 1) {
+              await page.evaluate((y) => window.scrollTo(0, y), pageHeight * (i - 1));
+              await page.waitForTimeout(100);
+            }
+            const clip = (i === num && num > 1) ? { x: boundingBox.x, y: 0, width: boundingBox.width, height: Math.min(boundingBox.height - pageHeight * (i - 1), pageHeight) } : null;
+            const buff = clip ? await page.screenshot({ ...screenshotOpts, clip }) : await body.screenshot(screenshotOpts);
+            ret.push(buff);
+            this.renderNum++;
+            if (i < num && num > 2) await page.waitForTimeout(100);
           }
-        }
-
-        if (num > 1) {
-          BotUtil.makeLog("info", `[${name}] Completed in ${Date.now() - start}ms`, "PlaywrightRenderer");
+          BotUtil.makeLog("info", `[${name}] multiPage ${num} ${Date.now() - start}ms`, "PlaywrightRenderer");
         }
       }
     } catch (error) {
