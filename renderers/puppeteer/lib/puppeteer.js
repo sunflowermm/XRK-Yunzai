@@ -1,10 +1,9 @@
 import Renderer from "../../../lib/renderer/Renderer.js";
 import os from "node:os";
-import lodash from "lodash";
 import puppeteer from "puppeteer";
-import cfg from "../../../lib/config/config.js";
 import fs from "node:fs";
 import path from "node:path";
+import cfg from "../../../lib/config/config.js";
 import BotUtil from "../../../lib/util.js";
 
 const _path = process.cwd();
@@ -38,26 +37,10 @@ export default class PuppeteerRenderer extends Renderer {
     this.config = {
       headless: config.headless ?? rendererCfg.headless ?? "new",
       args: config.args ?? rendererCfg.args ?? [
-        '--disable-gpu',
         '--no-sandbox',
-        '--disable-dev-shm-usage',
         '--disable-setuid-sandbox',
-        '--disable-web-security',
-        '--allow-file-access-from-files',
-        '--disable-infobars',
-        '--disable-notifications',
-        '--window-size=1920,1080',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-extensions',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        '--js-flags=--max-old-space-size=512',
-        '--disable-accelerated-2d-canvas',
-        '--disable-accelerated-jpeg-decoding',
-        '--disable-accelerated-mjpeg-decode',
-        '--disable-accelerated-video-decode',
-        '--disable-software-rasterizer',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
       ],
       executablePath: config.chromiumPath ?? rendererCfg.chromiumPath,
       wsEndpoint: config.puppeteerWS ?? rendererCfg.wsEndpoint,
@@ -97,11 +80,7 @@ export default class PuppeteerRenderer extends Renderer {
     if (this.browser) return this.browser;
 
     if (this.lock) {
-      let waitTime = 0;
-      while (this.lock && waitTime < 30000) {
-        await new Promise(r => setTimeout(r, 100));
-        waitTime += 100;
-      }
+      await new Promise(r => setTimeout(r, 500));
       if (this.browser) return this.browser;
       if (this.lock) return false;
     }
@@ -234,12 +213,17 @@ export default class PuppeteerRenderer extends Renderer {
     const useUrl = data.url && /^https?:\/\//i.test(String(data.url));
     const pageHeight = data.multiPageHeight ?? 4000;
     let savePath = null;
+    let directFilePath = null;
     if (!useUrl) {
-      savePath = this.dealTpl(name, data);
-      if (!savePath) return false;
+      const tpl = data.tplFile;
+      if (typeof tpl === "string" && path.isAbsolute(tpl) && fs.existsSync(tpl)) {
+        directFilePath = path.resolve(tpl);
+      } else {
+        savePath = this.dealTpl(name, data);
+        if (!savePath) return false;
+      }
     }
-
-    const filePath = useUrl ? null : path.join(_path, lodash.trim(savePath, "."));
+    const filePath = useUrl ? null : (directFilePath || path.join(_path, String(savePath).replace(/^\.\/?/, "")));
     if (!useUrl && !fs.existsSync(filePath)) {
       BotUtil.makeLog("error", `HTML file does not exist: ${filePath}`, "PuppeteerRenderer");
       return false;
@@ -273,12 +257,12 @@ export default class PuppeteerRenderer extends Renderer {
         deviceScaleFactor,
       });
 
-      const pageGotoParams = lodash.extend(
+      const pageGotoParams = Object.assign(
         { timeout: this.puppeteerTimeout, waitUntil: data.waitUntil || "domcontentloaded" },
         data.pageGotoParams || {}
       );
 
-      const loadUrl = useUrl ? data.url : `file://${filePath}`;
+      const loadUrl = useUrl ? data.url : `file:///${filePath.replace(/\\/g, "/")}`;
       BotUtil.makeLog("debug", `[${name}] Loading: ${useUrl ? data.url : loadUrl}`, "PuppeteerRenderer");
       await page.goto(loadUrl, pageGotoParams);
 

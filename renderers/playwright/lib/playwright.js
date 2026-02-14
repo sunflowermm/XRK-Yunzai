@@ -1,10 +1,9 @@
 import Renderer from "../../../lib/renderer/Renderer.js";
 import os from "node:os";
-import lodash from "lodash";
 import playwright from "playwright";
-import cfg from "../../../lib/config/config.js";
 import fs from "node:fs";
 import path from "node:path";
+import cfg from "../../../lib/config/config.js";
 import BotUtil from "../../../lib/util.js";
 
 const _path = process.cwd();
@@ -43,33 +42,10 @@ export default class PlaywrightRenderer extends Renderer {
     this.config = {
       headless: config.headless ?? rendererCfg.headless ?? true,
       args: config.args ?? rendererCfg.args ?? [
-        "--disable-gpu",
-        "--disable-software-rasterizer",
-        "--disable-dev-shm-usage",
         "--no-sandbox",
         "--disable-setuid-sandbox",
-        "--disable-extensions",
-        "--disable-background-networking",
-        "--disable-background-timer-throttling",
-        "--disable-backgrounding-occluded-windows",
-        "--disable-breakpad",
-        "--disable-component-extensions-with-background-pages",
-        "--disable-features=TranslateUI,BlinkGenPropertyTrees",
-        "--disable-ipc-flooding-protection",
-        "--disable-renderer-backgrounding",
-        "--force-color-profile=srgb",
-        "--metrics-recording-only",
-        "--mute-audio",
-        "--no-first-run",
-        "--enable-automation",
-        "--password-store=basic",
-        "--use-mock-keychain",
-        "--disable-blink-features=AutomationControlled",
-        "--js-flags=--max-old-space-size=512",
-        "--disable-accelerated-2d-canvas",
-        "--disable-accelerated-jpeg-decoding",
-        "--disable-accelerated-mjpeg-decode",
-        "--disable-accelerated-video-decode",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
       ],
       channel: config.channel ?? rendererCfg.channel,
       executablePath: config.chromiumPath ?? rendererCfg.chromiumPath,
@@ -165,11 +141,7 @@ export default class PlaywrightRenderer extends Renderer {
     }
 
     if (this.lock) {
-      let waitTime = 0;
-      while (this.lock && waitTime < 30000) {
-        await new Promise(r => setTimeout(r, 100));
-        waitTime += 100;
-      }
+      await new Promise(r => setTimeout(r, 500));
       if (this.browser) return this.browser;
       if (this.lock) return false;
     }
@@ -283,12 +255,17 @@ export default class PlaywrightRenderer extends Renderer {
     const useUrl = data.url && /^https?:\/\//i.test(String(data.url));
     const pageHeight = data.multiPageHeight ?? 4000;
     let savePath = null;
+    let directFilePath = null;
     if (!useUrl) {
-      savePath = this.dealTpl(name, data);
-      if (!savePath) return false;
+      const tpl = data.tplFile;
+      if (typeof tpl === "string" && path.isAbsolute(tpl) && fs.existsSync(tpl)) {
+        directFilePath = path.resolve(tpl);
+      } else {
+        savePath = this.dealTpl(name, data);
+        if (!savePath) return false;
+      }
     }
-
-    const filePath = useUrl ? null : path.join(_path, savePath);
+    const filePath = useUrl ? null : (directFilePath || path.join(_path, String(savePath).replace(/^\.\/?/, "")));
     if (!useUrl && !fs.existsSync(filePath)) {
       BotUtil.makeLog("error", `HTML file does not exist: ${filePath}`, "PlaywrightRenderer");
       return false;
@@ -318,12 +295,12 @@ export default class PlaywrightRenderer extends Renderer {
       const viewportHeight = data.height ?? 720;
       await page.setViewportSize({ width: viewportWidth, height: viewportHeight });
 
-      const pageGotoParams = lodash.extend(
+      const pageGotoParams = Object.assign(
         { timeout: this.playwrightTimeout, waitUntil: data.waitUntil || "domcontentloaded" },
         data.pageGotoParams || {}
       );
 
-      const loadUrl = useUrl ? data.url : `file://${filePath}`;
+      const loadUrl = useUrl ? data.url : `file:///${filePath.replace(/\\/g, "/")}`;
       BotUtil.makeLog("debug", `[${name}] Loading: ${useUrl ? data.url : loadUrl}`, "PlaywrightRenderer");
       await page.goto(loadUrl, pageGotoParams);
 
