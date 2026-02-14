@@ -561,12 +561,14 @@ export default {
         try {
           const { name } = req.params;
           const { path: childPath } = req.query || {};
-          const config = global.ConfigManager.get(name);
+          const config = global.ConfigManager?.get?.(name);
 
+          // 为了避免前端频繁 404，这里对不存在的配置/子配置返回空结构而不是 404
           if (!config) {
-            return res.status(404).json({
-              success: false,
-              message: `配置 ${name} 不存在`
+            return res.json({
+              success: true,
+              flat: [],
+              message: `配置 ${name} 不存在，已返回空结构`
             });
           }
 
@@ -583,15 +585,17 @@ export default {
               } else if (childConfig.fields) {
                 schema = { fields: childConfig.fields };
               } else {
-                return res.status(404).json({
-                  success: false,
-                  message: `子配置 ${childPath} 的 schema 不存在`
+                return res.json({
+                  success: true,
+                  flat: [],
+                  message: `子配置 ${childPath} 的 schema 不存在，已返回空结构`
                 });
               }
             } else {
-              return res.status(404).json({
-                success: false,
-                message: `子配置 ${childPath} 不存在`
+              return res.json({
+                success: true,
+                flat: [],
+                message: `子配置 ${childPath} 不存在，已返回空结构`
               });
             }
           } else {
@@ -602,9 +606,10 @@ export default {
             } else if (structure.fields) {
               schema = { fields: structure.fields };
             } else {
-              return res.status(404).json({
-                success: false,
-                message: `配置 ${name} 的 schema 不存在`
+              return res.json({
+                success: true,
+                flat: [],
+                message: `配置 ${name} 的 schema 不存在，已返回空结构`
               });
             }
           }

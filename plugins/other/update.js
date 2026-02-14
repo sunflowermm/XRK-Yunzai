@@ -38,7 +38,7 @@ export class update extends plugin {
     
     /** XRK相关插件配置 */
     this.xrkPlugins = [
-      { name: 'XRK', requiredFiles: ['apps', 'package.json'] },
+      { name: 'XRK-plugin', requiredFiles: ['apps', 'package.json'] },
       { name: 'XRK-Core', requiredFiles: ['index.js'] }
     ]
     

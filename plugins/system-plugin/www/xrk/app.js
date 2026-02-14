@@ -7278,6 +7278,10 @@ class App {
     const deviceId = ws.device_id || this.getWebUserId();
     const userId = this.getWebUserId();
     
+    // 设备通道的工作流一律使用 'device'
+    // （真正对接 OneBot e 事件的是后端的 chat 工作流，不是当前 Web 设备通道）
+    const workflow = 'device';
+
     const msg = {
       type: 'message',
       device_id: deviceId,
@@ -7291,7 +7295,7 @@ class App {
       message: Array.isArray(meta.message) ? meta.message : undefined,
       meta: {
         persona: this.getCurrentPersona(),
-        workflow: this._chatSettings.workflow || 'device',
+        workflow,
         source: meta.source || 'manual',
         ...meta.meta
       }
