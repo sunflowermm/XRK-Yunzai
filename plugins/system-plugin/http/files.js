@@ -4,15 +4,40 @@ import fsSync from 'fs';
 import { ulid } from 'ulid';
 import crypto from 'crypto';
 
-const uploadDir = path.join(process.cwd(), 'www/uploads/');
-const mediaDir = path.join(process.cwd(), 'www/media/');
+// 与 lib/bot.js 静态路由一致：/media、/uploads 指向 data 目录，持久化链接可刷新后访问
+const uploadDir = path.join(process.cwd(), 'data', 'uploads');
+const mediaDir = path.join(process.cwd(), 'data', 'media');
 const fileMap = new Map();
 
-// 确保目录存在
 for (const dir of [uploadDir, mediaDir]) {
   if (!fsSync.existsSync(dir)) {
     fsSync.mkdirSync(dir, { recursive: true });
   }
+}
+
+/** 拼装 file_url 的 baseUrl，优先配置再请求头 */
+function getBaseUrl(req, Bot) {
+  const u = Bot?.url ?? (typeof Bot?.getServerUrl === 'function' ? Bot.getServerUrl() : null);
+  if (u && String(u).startsWith('http')) return String(u).replace(/\/$/, '');
+  if (req?.get) {
+    const host = req.get('host') || req.get('x-forwarded-host');
+    const protocol = req.get('x-forwarded-proto') || req.protocol || 'http';
+    if (host) return `${protocol}://${host}`.replace(/\/$/, '');
+  }
+  return '';
+}
+
+/** 统一 404 响应 */
+function notFound(res, message = '文件不存在') {
+  return res.status(404).json({ success: false, message, code: 404 });
+}
+
+/** 统一拼装持久化 URL，避免重复逻辑 */
+function buildFileUrls(baseUrl, pathPrefix, fileId, filename, isMedia) {
+  const url = baseUrl ? `${baseUrl}/${pathPrefix}/${filename}` : `/${pathPrefix}/${filename}`;
+  const download_url = baseUrl ? `${baseUrl}/api/file/download/${fileId}` : `/api/file/download/${fileId}`;
+  const preview_url = isMedia ? (baseUrl ? `${baseUrl}/api/file/preview/${fileId}` : `/api/file/preview/${fileId}`) : null;
+  return { url, download_url, preview_url };
 }
 
 /**
@@ -138,6 +163,7 @@ export default {
             });
           }
 
+          const baseUrl = getBaseUrl(req, Bot);
           const uploadedFiles = [];
 
           for (const file of files) {
@@ -152,17 +178,16 @@ export default {
             await fs.writeFile(targetPath, file.buffer);
             
             const hash = crypto.createHash('md5').update(file.buffer).digest('hex');
-            
+            const pathPrefix = isMedia ? 'media' : 'uploads';
+            const urls = buildFileUrls(baseUrl, pathPrefix, fileId, filename, isMedia);
             const fileInfo = {
               id: fileId,
               name: file.originalname,
               path: targetPath,
-              url: `${Bot.url}/${isMedia ? 'media' : 'uploads'}/${filename}`,
-              download_url: `${Bot.url}/api/file/download/${fileId}`,
-              preview_url: isMedia ? `${Bot.url}/api/file/preview/${fileId}` : null,
+              ...urls,
               size: file.size,
               mime: file.mimetype,
-              hash: hash,
+              hash,
               is_media: isMedia,
               upload_time: Date.now()
             };
@@ -241,11 +266,7 @@ export default {
             logger.error(`查找文件失败: ${err.message}`);
           }
           
-          return res.status(404).json({ 
-            success: false, 
-            message: '文件不存在',
-            code: 404
-          });
+          return notFound(res);
         }
 
         try {
@@ -253,11 +274,7 @@ export default {
           res.sendFile(fileInfo.path);
         } catch {
           fileMap.delete(id);
-          res.status(404).json({ 
-            success: false, 
-            message: '文件不存在',
-            code: 404
-          });
+          return notFound(res);
         }
       }
     },
@@ -269,24 +286,14 @@ export default {
         const { id } = req.params;
         const fileInfo = fileMap.get(id);
 
-        if (!fileInfo) {
-          return res.status(404).json({ 
-            success: false, 
-            message: '文件不存在',
-            code: 404
-          });
-        }
+        if (!fileInfo) return notFound(res);
 
         try {
           await fs.access(fileInfo.path);
           res.download(fileInfo.path, fileInfo.name);
         } catch {
           fileMap.delete(id);
-          res.status(404).json({ 
-            success: false, 
-            message: '文件不存在',
-            code: 404
-          });
+          return notFound(res);
         }
       }
     },
@@ -298,28 +305,16 @@ export default {
         const { id } = req.params;
         const fileInfo = fileMap.get(id);
 
-        if (!fileInfo || !fileInfo.is_media) {
-          return res.status(404).json({ 
-            success: false, 
-            message: '预览不可用',
-            code: 404
-          });
-        }
+        if (!fileInfo || !fileInfo.is_media) return notFound(res, '预览不可用');
 
         try {
           await fs.access(fileInfo.path);
-          
           res.setHeader('Content-Type', fileInfo.mime);
           res.setHeader('Cache-Control', 'public, max-age=3600');
-          
           res.sendFile(fileInfo.path);
         } catch {
           fileMap.delete(id);
-          res.status(404).json({ 
-            success: false, 
-            message: '文件不存在',
-            code: 404
-          });
+          return notFound(res);
         }
       }
     },
@@ -427,16 +422,16 @@ export default {
           const targetPath = path.join(targetDir, finalFilename);
           
           await fs.writeFile(targetPath, buffer);
-          
+          const baseUrl = getBaseUrl(req, Bot);
+          const pathPrefix = isMedia ? 'media' : 'uploads';
+          const urls = buildFileUrls(baseUrl, pathPrefix, fileId, finalFilename, isMedia);
           const fileInfo = {
             id: fileId,
             name: filename,
             path: targetPath,
-            url: `${Bot.url}/${isMedia ? 'media' : 'uploads'}/${finalFilename}`,
-            download_url: `${Bot.url}/api/file/download/${fileId}`,
-            preview_url: isMedia ? `${Bot.url}/api/file/preview/${fileId}` : null,
+            ...urls,
             size: buffer.length,
-            mime: mime,
+            mime,
             is_media: isMedia,
             upload_time: Date.now()
           };

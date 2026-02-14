@@ -8,9 +8,7 @@
 
 </div>
 
-> ⚙️ `lib/commonconfig/commonconfig.js` 提供了 XRK-Yunzai 所有配置文件的统一基类（`ConfigBase`），用于在「配置文件 → API → 前端 UI」之间打通一套类型、安全与校验链路。
-
-`lib/commonconfig/commonconfig.js` 提供了 XRK-Yunzai 所有配置文件的统一基类（`ConfigBase`）。本指南总结该基类的能力、扩展方式以及与前后端交互时需要遵循的约定，帮助插件或系统作者快速构建一致、可靠的配置体验。
+> ⚙️ `lib/commonconfig/commonconfig.js` 提供配置统一基类 `ConfigBase`，在「配置文件 → API → 前端 UI」间打通类型、校验与读写约定。本指南总结能力、扩展方式及前后端约定。
 
 ---
 
@@ -82,67 +80,14 @@
 - **在 schema 中描述嵌套对象**：多级 `fields` 不仅可以驱动表单嵌套，还能让 `cleanConfigData` 递归工作，避免后续手动 `typeof` 判断。
 - **使用默认值表达“空状态”**：例如布尔和数组字段，通过 `default` 即可告知后端/前端，在缺省场景应该返回什么，减少冗余 if-else。
 
-通过以上约定，`ConfigBase` 成为连接配置文件、API、前端 UI 的中心枢纽。无论配置类型如何演进，只要遵循 schema 的约束即可获得一致的类型、验证和编辑体验。
+遵循 schema 约束即可获得一致的类型、校验与编辑体验。
 
-## 配置文件存放路径
+## 配置文件存放与加载
 
-配置文件可以存放在以下目录（按优先级从高到低）：
+| 优先级 | 目录 | key 格式 |
+|--------|------|----------|
+| 高 | `plugins/<插件名>/commonconfig/*.js` | `插件名_文件名` |
+| 中 | `config/commonconfig/*.js` | `文件名` |
+| 低 | `core/<模块>/commonconfig/*.js` | `模块名_文件名` |
 
-### 1. 插件专用目录（推荐）
-
-每个插件可以在自己的目录下创建 `commonconfig/` 子目录来存放专属的配置：
-
-```
-plugins/
-├── myplugin/
-│   └── commonconfig/
-│       ├── config1.js      # 插件专属配置
-│       └── config2.js
-└── anotherplugin/
-    └── commonconfig/
-        └── config.js
-```
-
-**优点：**
-- 插件代码集中管理，便于维护
-- 插件可以独立分发，不依赖 `config/commonconfig/` 目录
-- 支持插件级别的热重载
-
-### 2. 默认配置目录
-
-传统的配置存放位置，适用于全局配置：
-
-```
-config/commonconfig/
-├── server.js          # 服务器配置
-├── bot.js            # Bot配置
-└── [自定义].js       # 自定义配置
-```
-
-### 3. Core目录（兼容 XRK 结构）
-
-如果项目包含 `core/` 目录，可以从其中加载：
-
-```
-core/
-├── module1/
-│   └── commonconfig/
-│       └── config.js
-└── module2/
-    └── commonconfig/
-        └── config.js
-```
-
-### 加载优先级
-
-1. **插件目录** (`plugins/*/commonconfig/`) - 优先级最高
-2. **默认目录** (`config/commonconfig/`) - 中等优先级
-3. **Core目录** (`core/*/commonconfig/`) - 优先级最低
-
-如果多个位置存在同名配置文件，系统会按照上述优先级选择，路径更具体的会覆盖路径更简单的。
-
-**注意:** 
-- 配置文件必须导出 `default`，可以是类或对象
-- 插件目录下的配置 key 格式为：`插件名_文件名`（例如：`myplugin_config1`）
-- Core目录下的配置 key 格式为：`模块名_文件名`（例如：`module1_config`）
-- 默认目录下的配置 key 格式为：`文件名`（例如：`server`）
+同名按上表优先级覆盖。须导出 `default`（类或对象）。

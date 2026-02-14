@@ -24,7 +24,7 @@
 | 4️⃣ | [cfg 对象](#4-cfg-对象-libconfigconfigjs) | ⚙️ 配置管理系统 |
 | 5️⃣ | [segment 对象](#5-segment-对象) | 📝 消息段构造器 |
 | 6️⃣ | [redis 客户端](#6-redis-客户端-libconfigredisjs) | 🔴 Redis 缓存服务 |
-| 7️⃣ | [BotUtil 工具集](#7-botutil-工具集-libcommonutiljs) | 🛠️ 工具函数集合 |
+| 7️⃣ | [BotUtil 工具集](#7-botutil-工具集-libutiljs) | 🛠️ 工具函数集合 |
 
 ---
 
@@ -61,37 +61,7 @@
 | **联系人工具** | `pickFriend()`, `pickGroup()`, `pickMember()`, `sendFriendMsg()`, `sendGroupMsg()`, `makeForwardMsg()` | 跨账号分发消息、构造合并转发、批量通知主人 |
 | **诊断工具** | `makeError()`, `_setupRequestLogging()`, `_statusHandler()`, `_healthHandler()` | 统一格式错误处理、请求日志、健康检查 |
 
-### 1.4 关键方法说明
-
-#### prepareEvent(data)
-- **作用**: 准备事件对象，注入 Bot 实例和联系人对象
-- **流程**:
-  1. 检查 `data.self_id` 对应的 Bot 实例是否存在
-  2. 注入 `data.bot` 属性（Bot 子实例）
-  3. 如果存在 `user_id`，注入 `data.friend`（好友对象）
-  4. 如果存在 `group_id`，注入 `data.group`（群对象）
-  5. 如果同时存在 `group_id` 和 `user_id`，注入 `data.member`（群成员对象）
-  6. 注入适配器信息（`adapter_id`、`adapter_name`）
-  7. 调用 `_extendEventMethods()` 扩展方法
-
-#### _extendEventMethods(data)
-- **作用**: 为事件对象的联系人对象注入通用方法
-- **注入的方法**:
-  - `sendFile(file, name)`: 发送文件
-  - `makeForwardMsg(nodes)`: 构造转发消息
-  - `sendForwardMsg(nodes)`: 发送转发消息
-  - `getInfo()`: 获取联系人信息
-- **回复方法**: 如果不存在 `data.reply`，自动设置 `data.reply` 为群或好友的 `sendMsg` 方法
-
-#### em(name, data)
-- **作用**: 触发事件，支持事件名层级传播
-- **流程**:
-  1. 调用 `prepareEvent(data)` 准备事件对象
-  2. 触发完整事件名（如 `message.group.normal`）
-  3. 逐级触发父级事件（如 `message.group`、`message`）
-  4. 插件系统监听这些事件并处理
-
-> **详细 API**: 完整的 Bot 对象方法说明请查阅 [`docs/reference/BOT.md`](./reference/BOT.md)
+关键方法：`prepareEvent(data)` 注入 bot/friend/group/member 与适配器信息并调用 `_extendEventMethods`；`_extendEventMethods(data)` 为联系人注入 sendFile、makeForwardMsg、sendForwardMsg、getInfo 及 data.reply；`em(name, data)` 先 prepareEvent 再按层级触发事件（如 message.group.normal → message.group → message）。**完整 API**：[BOT.md](./reference/BOT.md)
 
 ---
 
@@ -247,150 +217,14 @@ PluginsLoader.setupReply(e)  // 设置回复方法
 
 ### 2.9 事件对象示例
 
-```javascript
-// 群消息事件
-{
-  self_id: '123456',
-  user_id: '789012',
-  group_id: '345678',
-  message_id: '987654321',
-  time: 1698765432,
-  post_type: 'message',
-  message_type: 'group',
-  sub_type: 'normal',
-  message: [
-    { type: 'text', data: { text: '你好' } },
-    { type: 'at', data: { qq: '123456' } }
-  ],
-  msg: '你好',
-  atBot: true,
-  atList: ['123456'],
-  isGroup: true,
-  isPrivate: false,
-  isMaster: false,
-  bot: BotInstance,
-  group: GroupInstance,
-  member: MemberInstance,
-  sender: { user_id: '789012', nickname: '用户', card: '用户' },
-  group_name: '测试群',
-  logText: '[测试群(345678)][用户(789012)]',
-  reply: Function,
-  getReply: Function,
-  recall: Function
-}
-```
+群消息事件包含 self_id、user_id、group_id、message、msg、atBot、bot、group、member、sender、group_name、logText、reply 等，完整字段以运行时为准。
 
 
 ---
 
 <h2 align="center">3. logger 对象 (`lib/config/log.js`)</h2>
 
-### 3.1 在技术栈中的作用
-
-`logger` 是全局日志系统，在整个技术栈中扮演以下角色：
-
-1. **统一日志接口**: 所有模块使用相同的日志接口，保证日志格式一致
-2. **性能监控**: 通过 `time()` 和 `timeEnd()` 方法监控代码执行时间
-3. **调试支持**: trace 级别日志记录详细的执行流程，便于调试
-4. **错误追踪**: error 级别日志记录异常堆栈，便于问题定位
-5. **日志管理**: 自动轮转、压缩、清理过期日志文件
-
-### 3.2 技术特性
-
-- **基于 Pino**: 使用高性能的 Pino 日志库
-- **多级别日志**: 支持 trace/debug/info/warn/error/fatal 六个级别
-- **文件轮转**: 按天轮转日志文件，自动压缩旧文件
-- **自动清理**: 定时清理过期日志（默认主日志保留3天，trace日志保留1天）
-- **颜色支持**: 丰富的颜色和格式化工具，提升可读性
-- **性能优化**: 异步写入日志，不阻塞主线程
-
-全局注入的日志系统，基于 Pino 高性能日志库，提供丰富的日志方法和格式化工具。
-
-### 基础日志方法
-
-| 方法 | 用法 | 说明 |
-|------|------|------|
-| `logger.trace/debug/info/warn/error/fatal/mark(...args)` | 输出不同级别的日志 | 支持多参数，自动格式化对象 |
-| `logger.success/tip/done(...args)` | 输出特殊类型日志 | 成功、提示、完成日志 |
-| `logger.warning(...args)` | `warn` 的别名 | 兼容性方法 |
-
-### 颜色工具
-
-| 方法 | 用法 | 说明 |
-|------|------|------|
-| `logger.red/green/yellow/blue/magenta/cyan/gray/white(text)` | 返回带颜色的字符串 | 仅返回字符串，不输出 |
-| `logger.chalk` | 直接访问 chalk 库 | 可使用所有 chalk 方法 |
-| `logger.xrkyzGradient(text)` | XRK-Yunzai 主题渐变色 | 项目主题色 |
-| `logger.rainbow(text)` | 彩虹渐变色 | 七色渐变 |
-| `logger.gradient(text, colors?)` | 自定义渐变色 | 可指定颜色数组 |
-
-### 计时器方法
-
-| 方法 | 用法 | 说明 |
-|------|------|------|
-| `logger.time(label?)` | 开始计时器 | 默认标签 'default' |
-| `logger.timeEnd(label?)` | 结束计时器并输出耗时 | 自动格式化时间 |
-
-### 格式化方法
-
-| 方法 | 用法 | 说明 |
-|------|------|------|
-| `logger.title(text, color?)` | 输出标题（带边框） | 默认黄色 |
-| `logger.subtitle(text, color?)` | 输出子标题 | 默认青色 |
-| `logger.line(char?, length?, color?)` | 输出分隔线 | 默认灰色，长度35 |
-| `logger.gradientLine(char?, length?)` | 输出渐变色分隔线 | 默认长度50 |
-| `logger.box(text, color?)` | 输出方框文本 | 默认蓝色 |
-
-### 数据展示方法
-
-| 方法 | 用法 | 说明 |
-|------|------|------|
-| `logger.json(obj, title?)` | 格式化输出 JSON | 自动缩进 |
-| `logger.table(data, title?)` | 以表格形式输出 | 使用 console.table |
-| `logger.list(items, title?)` | 输出列表 | 自动编号 |
-| `logger.progress(current, total, length?)` | 输出进度条 | 默认长度30 |
-
-### 状态方法
-
-| 方法 | 用法 | 说明 |
-|------|------|------|
-| `logger.status(message, status, statusColor?)` | 输出状态日志 | 支持多种状态图标 |
-| `logger.important(text)` | 输出重要日志 | 黄色加粗 |
-| `logger.highlight(text)` | 输出高亮日志 | 黄色背景 |
-| `logger.fail(text)` | 输出失败日志 | 红色 |
-| `logger.system(text)` | 输出系统日志 | 灰色 |
-| `logger.tag(text, tag, tagColor?)` | 输出带标签的日志 | 默认蓝色标签 |
-
-### 系统方法
-
-| 方法 | 用法 | 说明 |
-|------|------|------|
-| `logger.platform()` | 获取平台信息 | 返回系统信息对象 |
-| `logger.cleanLogs(days?, includeTrace?)` | 手动清理过期日志 | 返回删除的文件数 |
-| `logger.getTraceLogs(lines?)` | 获取 trace 日志内容 | 返回日志行数组 |
-| `logger.shutdown()` | 关闭日志系统 | 清理资源 |
-
-### 配置
-
-通过 `config/default_config/bot.yaml` 配置：
-
-```yaml
-bot:
-  log_level: 'info'        # trace/debug/info/warn/error/fatal
-  log_align: 'XRKYZ'        # 日志头部对齐文本
-  log_color: 'default'       # 颜色方案: default/scheme1-7
-  log_max_days: 3           # 主日志保留天数
-  log_trace_days: 1          # Trace 日志保留天数
-```
-
-### 日志文件
-
-- **主日志**: `logs/app.yyyy-MM-dd.log` - debug 及以上级别
-- **Trace 日志**: `logs/trace.yyyy-MM-dd.log` - 所有级别
-
-日志文件自动按天轮转，过期文件每天凌晨 3 点自动清理。
-
-> **详细文档**: 完整的 logger API 说明请查阅 [`docs/reference/LOGGER.md`](./reference/LOGGER.md)
+**作用**：统一日志接口、性能计时（time/timeEnd）、多级别（trace～fatal）、自动轮转与清理。基于 Pino，支持颜色/渐变、格式化（title/box/json/table/list/progress）、状态方法（status/important/fail 等）及 platform/cleanLogs/getTraceLogs/shutdown。配置见 `bot.yaml`（log_level、log_align、log_color、log_max_days、log_trace_days）；主日志 `logs/app.*`，Trace `logs/trace.*`。**完整 API**：[LOGGER.md](./reference/LOGGER.md)
 
 `BotUtil.makeLog(level, text, scope)` 会调用 `logger`，并附带时间戳、scope 名称。
 
@@ -537,13 +371,13 @@ Redis 连接参数来自 `cfg.redis`，包括：
 | `closeRedis()` | 优雅关闭连接（`Bot.closeServer()` 会调用） |
 | `getRedisClient()` | 获取当前实例（主要用于测试或扩展） |
 
-> **详细 API**: 完整的 Redis 客户端说明请查阅 [`docs/reference/CONFIG_AND_REDIS.md`](./reference/CONFIG_AND_REDIS.md#2-redis-客户端-libconfigredisjs)
+> **详细 API**: 完整的 Redis 客户端说明请查阅 [`docs/reference/CONFIG_AND_REDIS.md`](./reference/CONFIG_AND_REDIS.md#2-redis-libconfigredisjs)
 
 > **注意**: 当 Redis 不可用时，Memory System、Embedding 会自动降级，但建议保持在线以启用全部能力。
 
 ---
 
-<h2 align="center">7. BotUtil 工具集 (`lib/common/util.js`)</h2>
+<h2 align="center">7. BotUtil 工具集 (`lib/util.js`)</h2>
 
 ### 7.1 在技术栈中的作用
 

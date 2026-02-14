@@ -27,7 +27,11 @@ function initLazyLoad(selector = 'img[data-src]') {
   images.forEach(img => imageObserver.observe(img));
 }
 
+const CHAT_HISTORY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 持久化缓存仅保留一周
+
 class App {
+  static CHAT_MODE = Object.freeze({ EVENT: 'event', AI: 'ai', VOICE: 'voice' });
+
   constructor() {
     this.serverUrl = window.location.origin;
     this.currentPage = 'home';
@@ -44,11 +48,11 @@ class App {
       _lastTimestamp: null,
       _lastUpdate: null
     };
-    this._eventChatHistory = this._loadChatHistory('event');
-    this._aiChatHistory = this._loadChatHistory('ai');
-    this._voiceChatHistory = this._loadChatHistory('voice');
+    this._eventChatHistory = this._loadChatHistory(App.CHAT_MODE.EVENT);
+    this._aiChatHistory = this._loadChatHistory(App.CHAT_MODE.AI);
+    this._voiceChatHistory = this._loadChatHistory(App.CHAT_MODE.VOICE);
     this._isRestoringHistory = false;
-    this._chatMessagesCache = { event: null, ai: null, voice: null };
+    this._chatMessagesCache = { ai: null }; // 仅 AI 模式缓存 HTML，Event/Voice 从 history 恢复
     this._chatStreamState = { running: false, source: null };
     this._deviceWs = null;
     this._wsConnecting = false;
@@ -88,7 +92,7 @@ class App {
     this._configState = null;
     this._schemaCache = {};
     this._llmOptions = { profiles: [], defaultProfile: '' };
-    this._chatMode = localStorage.getItem('chatMode') || 'event';
+    this._chatMode = localStorage.getItem('chatMode') || App.CHAT_MODE.EVENT;
     const savedWorkflows = localStorage.getItem('chatWorkflows');
     this._chatSettings = {
       workflows: savedWorkflows ? JSON.parse(savedWorkflows) : [],
@@ -1803,20 +1807,20 @@ class App {
   // ========== 聊天 ==========
   async renderChat() {
     const content = document.getElementById('content');
-    const isAIMode = this._chatMode === 'ai';
-    const isVoiceMode = this._chatMode === 'voice';
+    const isAIMode = this._isAIMode();
+    const isVoiceMode = this._isVoiceMode();
     const aiSettings = isAIMode ? await this._renderAISettings() : '';
     content.innerHTML = `
       <div class="chat-container ${isVoiceMode ? 'voice-mode' : ''}">
         <div class="chat-sidebar">
           <div class="chat-mode-selector">
-            <button class="chat-mode-btn ${this._chatMode === 'event' ? 'active' : ''}" data-mode="event">
+            <button class="chat-mode-btn ${this._isEventMode() ? 'active' : ''}" data-mode="event">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
               </svg>
               <span>Event</span>
             </button>
-            <button class="chat-mode-btn ${this._chatMode === 'voice' ? 'active' : ''}" data-mode="voice">
+            <button class="chat-mode-btn ${this._isVoiceMode() ? 'active' : ''}" data-mode="voice">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
                 <path d="M19 10v2a7 7 0 01-14 0v-2"/>
@@ -1825,7 +1829,7 @@ class App {
               </svg>
               <span>Voice</span>
             </button>
-            <button class="chat-mode-btn ${this._chatMode === 'ai' ? 'active' : ''}" data-mode="ai">
+            <button class="chat-mode-btn ${this._isAIMode() ? 'active' : ''}" data-mode="ai">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="10"/>
                 <path d="M12 6v6l4 2"/>
@@ -1852,7 +1856,7 @@ class App {
         <div class="chat-header">
           <div class="chat-header-title">
             <span class="emotion-display" id="emotionIcon">😊</span>
-              <span>${isAIMode ? 'AI 对话' : 'Event 对话'}</span>
+              <span>${this._getChatModeConfig().title}</span>
           </div>
           <div class="chat-header-actions">
             <button class="btn btn-sm btn-secondary" id="clearChatBtn">清空</button>
@@ -1894,7 +1898,7 @@ class App {
               <line x1="8" y1="23" x2="16" y2="23"/>
             </svg>
           </button>
-          <button class="image-upload-btn" id="imageUploadBtn" title="${isAIMode ? '上传图片' : '上传文件'}">
+          <button class="image-upload-btn" id="imageUploadBtn" title="${this._getChatModeConfig().imageOnly ? '上传图片' : '上传文件'}">
             ${isAIMode ? `
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
@@ -1908,7 +1912,7 @@ class App {
             </svg>
             `}
           </button>
-            <input type="file" class="chat-image-input" id="chatImageInput" accept="${isAIMode ? 'image/*' : '*'}" multiple style="display: none;">
+            <input type="file" class="chat-image-input" id="chatImageInput" accept="${this._getChatModeConfig().accept}" multiple style="display: none;">
           <input type="text" class="chat-input" id="chatInput" placeholder="输入消息...">
           <button class="chat-send-btn" id="chatSendBtn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1937,9 +1941,9 @@ class App {
   }
 
   async _switchChatMode(mode, oldMode = null) {
-    const isAIMode = mode === 'ai';
-    const isVoiceMode = mode === 'voice';
-    const wasVoiceMode = oldMode === 'voice' || document.querySelector('.voice-chat-center') !== null;
+    const isAIMode = mode === App.CHAT_MODE.AI;
+    const isVoiceMode = mode === App.CHAT_MODE.VOICE;
+    const wasVoiceMode = oldMode === App.CHAT_MODE.VOICE;
     
     if (isVoiceMode || wasVoiceMode) {
       await this.renderChat();
@@ -1962,13 +1966,11 @@ class App {
     });
     
     if (headerTitle) {
-      headerTitle.textContent = isAIMode ? 'AI 对话' : 'Event 对话';
+      headerTitle.textContent = this._getChatModeConfig().title;
     }
-    
     if (imageInput) {
-      imageInput.setAttribute('accept', isAIMode ? 'image/*' : 'image/*,video/*,audio/*');
+      imageInput.setAttribute('accept', this._getChatModeConfig().accept);
     }
-    
     if (isAIMode) {
       const aiSettings = await this._renderAISettings();
       if (sidebar && !sidebar.querySelector('.ai-settings-panel')) {
@@ -1989,7 +1991,7 @@ class App {
     // 统一绑定事件（_bindChatEvents 内部已处理解绑和重复绑定）
     this._bindChatEvents();
     
-    const cached = this._chatMessagesCache[mode];
+    const cached = mode === App.CHAT_MODE.AI ? this._chatMessagesCache.ai : null;
     if (cached?.html) {
       box.style.overflow = 'hidden';
       box.innerHTML = cached.html;
@@ -1997,41 +1999,12 @@ class App {
       box.scrollTop = cached.scrollTop || box.scrollHeight;
       return;
     }
-    
-    const history = mode === 'ai' ? this._aiChatHistory : this._eventChatHistory;
-    if (!Array.isArray(history) || history.length === 0) {
-      box.innerHTML = '';
-      return;
-    }
-    
-    box.style.overflow = 'hidden';
+
     box.innerHTML = '';
-    this._isRestoringHistory = true;
-    
-    const sortedHistory = [...history].sort((a, b) => (a.ts || 0) - (b.ts || 0));
-    sortedHistory.forEach(m => {
-      try {
-        if (m.type === 'chat-record' || (m.type === 'record' && m.messages)) {
-          this.appendChatRecord(m.messages ?? [], m.title ?? '', m.description ?? '', false);
-        } else if (m.segments && Array.isArray(m.segments)) {
-          this.appendSegments(m.segments, false, m.role || 'assistant');
-        } else if (m.type === 'image' && m.url) {
-          this.appendSegments([{ type: 'image', url: m.url }], false, m.role || 'assistant');
-        } else if (m.role && m.text) {
-          this.appendChat(m.role, m.text, { persist: false, mcpTools: m.mcpTools, messageId: m.id });
-        }
-      } catch (e) {}
-    });
-    
-    this._isRestoringHistory = false;
-    box.style.overflow = '';
-    box.scrollTop = box.scrollHeight;
-    
-    this._chatMessagesCache[mode] = {
-      scrollTop: box.scrollTop,
-      scrollHeight: box.scrollHeight,
-      html: box.innerHTML
-    };
+    this.restoreChatHistory();
+    if (mode === App.CHAT_MODE.AI) {
+      this._chatMessagesCache.ai = { scrollTop: box.scrollTop, scrollHeight: box.scrollHeight, html: box.innerHTML };
+    }
   }
 
   async _renderAISettings() {
@@ -2099,14 +2072,8 @@ class App {
    */
   _unbindChatEvents() {
     for (const [element, handlers] of this._chatEventHandlers.entries()) {
-      if (element && handlers) {
-        handlers.forEach(({ event, handler }) => {
-          try {
-            element.removeEventListener(event, handler);
-          } catch (e) {
-            // 忽略解绑错误
-          }
-        });
+      if (element && Array.isArray(handlers)) {
+        handlers.forEach(({ event, handler }) => element.removeEventListener(event, handler));
       }
     }
     this._chatEventHandlers.clear();
@@ -2126,9 +2093,7 @@ class App {
     const clearBtn = document.getElementById('clearChatBtn');
     const imageUploadBtn = document.getElementById('imageUploadBtn');
     const imageInput = document.getElementById('chatImageInput');
-    if (imageInput) {
-      imageInput.setAttribute('accept', this._chatMode === 'ai' ? 'image/*' : 'image/*,video/*,audio/*');
-    }
+    if (imageInput) imageInput.setAttribute('accept', this._getChatModeConfig().accept);
     
     // 辅助函数：安全地绑定事件并记录
     const safeBind = (element, event, handler) => {
@@ -2151,14 +2116,9 @@ class App {
         
         const oldMode = this._chatMode;
         const box = document.getElementById('chatMessages');
-        if (box) {
-          this._chatMessagesCache[oldMode] = {
-            scrollTop: box.scrollTop,
-            scrollHeight: box.scrollHeight,
-            html: box.innerHTML
-          };
+        if (box && oldMode === App.CHAT_MODE.AI) {
+          this._chatMessagesCache.ai = { scrollTop: box.scrollTop, scrollHeight: box.scrollHeight, html: box.innerHTML };
         }
-        
         this._chatMode = mode;
         localStorage.setItem('chatMode', mode);
         await this._switchChatMode(mode, oldMode);
@@ -2167,7 +2127,7 @@ class App {
     }
 
     // AI 模式特定设置
-    if (this._chatMode === 'ai') {
+    if (this._isAIMode()) {
       const providerSelect = document.getElementById('aiProviderSelect');
       const personaInput = document.getElementById('aiPersonaInput');
 
@@ -2260,7 +2220,7 @@ class App {
     }
     
     // 语音模式特定事件
-    if (this._chatMode === 'voice') {
+    if (this._isVoiceMode()) {
       const voiceClearBtn = document.getElementById('voiceClearBtn');
       if (voiceClearBtn) {
         safeBind(voiceClearBtn, 'click', () => this.clearChat());
@@ -2320,7 +2280,7 @@ class App {
         },
         onFiles: (files) => {
           if (!files || files.length === 0) return;
-          const isAIMode = this._chatMode === 'ai';
+          const isAIMode = this._isAIMode();
           const filteredFiles = isAIMode 
             ? files.filter(f => f?.type?.startsWith('image/'))
             : files;
@@ -2377,106 +2337,147 @@ class App {
     });
   }
 
-  _getCurrentChatHistory() {
-    if (this._chatMode === 'ai') return this._aiChatHistory;
-    if (this._chatMode === 'voice') return this._voiceChatHistory;
+  _getHistoryForMode(mode) {
+    if (mode === App.CHAT_MODE.AI) return this._aiChatHistory;
+    if (mode === App.CHAT_MODE.VOICE) return this._voiceChatHistory;
     return this._eventChatHistory;
   }
 
+  _getCurrentChatHistory() {
+    return this._getHistoryForMode(this._chatMode);
+  }
+
+  _getHistoryStorageKey(mode) {
+    const m = mode ?? this._chatMode;
+    return m === App.CHAT_MODE.AI ? 'aiChatHistory' : m === App.CHAT_MODE.VOICE ? 'voiceChatHistory' : 'eventChatHistory';
+  }
+
+  _isAIMode() { return this._chatMode === App.CHAT_MODE.AI; }
+  _isVoiceMode() { return this._chatMode === App.CHAT_MODE.VOICE; }
+  _isEventMode() { return this._chatMode === App.CHAT_MODE.EVENT; }
+
+  _getChatModeConfig() {
+    if (this._isAIMode()) return { accept: 'image/*', placeholderIdle: '输入消息...', placeholderBusy: 'AI 正在处理...', title: 'AI 对话', imageOnly: true };
+    if (this._isVoiceMode()) return { accept: 'image/*,video/*,audio/*', placeholderIdle: '输入消息或发送语音...', placeholderBusy: '正在处理...', title: '语音', imageOnly: false };
+    return { accept: 'image/*,video/*,audio/*', placeholderIdle: '输入消息或发送语音...', placeholderBusy: '正在处理...', title: 'Event 对话', imageOnly: false };
+  }
+
+  /** 过滤掉 blob: URL，只保留可持久化的媒体地址（刷新后仍有效） */
+  _sanitizeSegments(segments) {
+    if (!Array.isArray(segments)) return [];
+    return segments.filter(s => {
+      if (!s || typeof s !== 'object') return false;
+      if (s.type === 'text' || s.type === 'at' || s.type === 'reply' || s.type === 'tools') return true;
+      const url = s.url || s.file || s.data?.file;
+      return !url || (typeof url === 'string' && !url.startsWith('blob:'));
+    });
+  }
+
   _loadChatHistory(mode) {
+    const key = this._getHistoryStorageKey(mode);
+    let parsed;
     try {
-      const key = mode === 'ai' ? 'aiChatHistory' : mode === 'voice' ? 'voiceChatHistory' : 'eventChatHistory';
-      const cached = localStorage.getItem(key);
-      return cached ? JSON.parse(cached) : [];
+      const raw = localStorage.getItem(key);
+      if (!raw) return [];
+      parsed = JSON.parse(raw);
     } catch (e) {
-      console.warn(`[${mode}聊天历史] 加载失败:`, e);
+      console.warn(`[${mode}聊天历史] 解析失败:`, e);
       return [];
     }
+    const data = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.data) ? parsed.data : []);
+    if (parsed?.savedAt && Date.now() - parsed.savedAt > CHAT_HISTORY_MAX_AGE_MS) {
+      localStorage.removeItem(key);
+      return [];
+    }
+    return data
+      .filter(m => m != null && (m.role || m.segments || m.type === 'chat-record' || (m.type === 'record' && m.messages)))
+      .map(m => {
+        if (m.segments && Array.isArray(m.segments)) {
+          const sanitized = this._sanitizeSegments(m.segments);
+          return sanitized.length ? { ...m, segments: sanitized } : (m.role && m.text ? m : null);
+        }
+        if (m.type === 'image' && m.url && String(m.url).startsWith('blob:')) return null;
+        return m;
+      })
+      .filter(Boolean);
   }
 
   _saveChatHistory() {
+    const MAX_HISTORY = 200;
+    const history = this._getCurrentChatHistory();
+    let data = history.slice(-MAX_HISTORY).map(m => {
+        if (!m || !m.segments) return m;
+        const sanitized = this._sanitizeSegments(m.segments);
+        if (sanitized.length === 0 && !m.text) return null;
+        return { ...m, segments: sanitized };
+    }).filter(Boolean);
     try {
-      const MAX_HISTORY = 200;
-      const history = this._getCurrentChatHistory();
-      const historyToSave = Array.isArray(history) 
-        ? history.slice(-MAX_HISTORY) 
-        : [];
-      const key = this._chatMode === 'ai' ? 'aiChatHistory' : this._chatMode === 'voice' ? 'voiceChatHistory' : 'eventChatHistory';
-      localStorage.setItem(key, JSON.stringify(historyToSave));
-      
-      const box = document.getElementById('chatMessages');
-      if (box) {
-        this._chatMessagesCache[this._chatMode] = {
-          scrollTop: box.scrollTop,
-          scrollHeight: box.scrollHeight,
-          html: box.innerHTML
-        };
-      }
+      localStorage.setItem(this._getHistoryStorageKey(), JSON.stringify({ savedAt: Date.now(), data }));
     } catch (e) {
       console.warn('[聊天历史] 保存失败:', e);
+      return;
+    }
+    const box = document.getElementById('chatMessages');
+    if (box && this._isAIMode()) {
+      this._chatMessagesCache.ai = { scrollTop: box.scrollTop, scrollHeight: box.scrollHeight, html: box.innerHTML };
+    }
+  }
+
+  /** 共用：将历史消息渲染到 chatMessages 容器（与 XRK-AGT 一致，单一恢复路径） */
+  _renderHistoryIntoBox(box, history) {
+    if (!box) return;
+    if (!Array.isArray(history) || history.length === 0) {
+      box.innerHTML = '';
+      return;
+    }
+    const originalOverflow = box.style.overflow;
+    box.style.overflow = 'hidden';
+    box.innerHTML = '';
+    this._isRestoringHistory = true;
+    try {
+      const sorted = [...history].sort((a, b) => (a.ts || 0) - (b.ts || 0));
+      for (const m of sorted) {
+        try {
+          this._renderHistoryMessage(m);
+        } catch (err) {
+          console.warn('[restore] 单条消息渲染失败:', m?.id ?? m, err);
+        }
+      }
+    } finally {
+      this._isRestoringHistory = false;
+      box.style.overflow = originalOverflow;
+    }
+  }
+
+  /** 渲染单条历史消息（供 restore 复用，恢复时只渲染非 blob 的媒体） */
+  _renderHistoryMessage(m) {
+    if (m.type === 'chat-record' || (m.type === 'record' && m.messages)) {
+      this.appendChatRecord(m.messages ?? [], m.title ?? '', m.description ?? '', false);
+    } else if (m.segments && Array.isArray(m.segments)) {
+      const segments = this._sanitizeSegments(m.segments);
+      if (segments.length) this.appendSegments(segments, false, m.role || 'assistant');
+    } else if (m.type === 'image' && m.url && !String(m.url).startsWith('blob:')) {
+      this.appendSegments([{ type: 'image', url: m.url }], false, m.role || 'assistant');
+    } else if (m.role && m.text) {
+      this.appendChat(m.role, m.text, { persist: false, mcpTools: m.mcpTools, messageId: m.id });
     }
   }
 
   restoreChatHistory() {
     const box = document.getElementById('chatMessages');
-    if (!box) return;
-    
-    if (this._isRestoringHistory) return;
-    
-    const currentHistory = this._getCurrentChatHistory();
-    // 没有历史：直接清空并返回
-    if (!Array.isArray(currentHistory) || currentHistory.length === 0) {
-      box.innerHTML = '';
-      return;
-    }
-
-    // 已经有内容但不是在恢复流程中：清空后重新渲染
-    box.innerHTML = '';
-
-    this._isRestoringHistory = true;
-    
-    try {
-      const originalOverflow = box.style.overflow;
-      box.style.overflow = 'hidden';
-      
-      const sortedHistory = [...currentHistory].sort((a, b) => (a.ts || 0) - (b.ts || 0));
-      sortedHistory.forEach(m => {
-        try {
-          if (m.type === 'chat-record' || (m.type === 'record' && m.messages)) {
-            this.appendChatRecord(m.messages ?? [], m.title ?? '', m.description ?? '', false);
-          } else if (m.segments && Array.isArray(m.segments)) {
-            this.appendSegments(m.segments, false, m.role || 'assistant');
-          } else if (m.type === 'image' && m.url) {
-            this.appendSegments([{ type: 'image', url: m.url }], false, m.role || 'assistant');
-          } else if (m.role && m.text) {
-            this.appendChat(m.role, m.text, { persist: false, mcpTools: m.mcpTools, messageId: m.id });
-          }
-        } catch (e) {
-          // 忽略恢复失败的历史项
-        }
-      });
-      
-      box.style.overflow = originalOverflow;
-      // 恢复历史后强制滚动到底部（含一次补滚，避免仅到 70%）
-      this.scrollToBottom(false);
-    } finally {
-      this._isRestoringHistory = false;
-    }
+    if (!box || this._isRestoringHistory) return;
+    this._renderHistoryIntoBox(box, this._getCurrentChatHistory());
+    requestAnimationFrame(() => this.scrollToBottom(false));
   }
 
   _applyMessageEnter(div, animate = true) {
     if (!div || this._isRestoringHistory) return;
-    if (!animate) {
-        div.classList.add('message-enter-active');
-    } else {
-      requestAnimationFrame(() => {
-      div.classList.add('message-enter-active');
-      });
-    }
+    const apply = () => div.classList.add('message-enter-active');
+    if (animate) requestAnimationFrame(apply); else apply();
   }
 
   appendChat(role, text, options = {}) {
-    const isVoiceMode = this._chatMode === 'voice';
+    const isVoiceMode = this._isVoiceMode();
     const { persist = true, mcpTools = null, messageId = null, source = null } = options;
     
     const msgId = messageId || `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -2591,7 +2592,7 @@ class App {
       actionsContainer.appendChild(deleteBtn);
       
       // 只在AI模式显示重新生成按钮
-      if (this._chatMode === 'ai') {
+      if (this._isAIMode()) {
         const regenBtn = document.createElement('button');
         regenBtn.className = 'chat-action-btn chat-regen-btn';
         regenBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 003.51 15M3.51 9a9 9 0 0016.98 6"/></svg><span>重新生成</span>';
@@ -3053,9 +3054,14 @@ class App {
     this._applyMessageEnter(div, persist);
     
     if (persist) {
+      const origin = (typeof window !== 'undefined' && window.location && window.location.origin) ? window.location.origin : '';
       const normalizedSegments = segments.map(s => {
         if (typeof s === 'string') return { type: 'text', text: s };
-        return s;
+        const seg = { ...s };
+        if (seg.url && typeof seg.url === 'string' && seg.url.startsWith('/') && !seg.url.startsWith('//') && origin) {
+          seg.url = origin + seg.url;
+        }
+        return seg;
       });
       this._getCurrentChatHistory().push({ 
         role: role === 'user' ? 'user' : 'assistant', 
@@ -3246,13 +3252,15 @@ class App {
 
   clearChat() {
     this._revokeAllObjectUrls();
+    this.clearImagePreview();
+    this.clearChatStreamState();
     const history = this._getCurrentChatHistory();
     history.length = 0;
     this._saveChatHistory();
     const box = document.getElementById('chatMessages');
     if (box) box.innerHTML = '';
-    this._chatMessagesCache[this._chatMode] = null;
-    if (this._chatMode === 'voice') {
+    if (this._isAIMode()) this._chatMessagesCache.ai = null;
+    if (this._isVoiceMode()) {
       this.updateVoiceEmotion('😊');
       this.updateVoiceStatus('点击麦克风开始对话');
     }
@@ -3267,7 +3275,7 @@ class App {
     const previewContainer = document.getElementById('chatImagePreview');
     if (!previewContainer) return;
     
-    const isAIMode = this._chatMode === 'ai';
+    const isAIMode = this._isAIMode();
     this._selectedImages = this._selectedImages ?? [];
     
     for (let i = 0; i < files.length; i++) {
@@ -3377,7 +3385,7 @@ class App {
       return;
     }
     
-    const isAIMode = this._chatMode === 'ai';
+    const isAIMode = this._isAIMode();
     previewContainer.style.display = 'flex';
     previewContainer.innerHTML = this._selectedImages.map((item) => {
       const isImage = item.file.type.startsWith('image/');
@@ -3455,7 +3463,7 @@ class App {
     
     input.value = '';
     
-    if (this._chatMode === 'ai') {
+    if (this._isAIMode()) {
       await this.sendAIMessage(text, images);
     } else {
       await this.sendEventMessage(text, images);
@@ -3528,10 +3536,12 @@ class App {
             const segmentType = file.type.startsWith('image/') ? 'image' :
                               file.type.startsWith('video/') ? 'video' :
                               file.type.startsWith('audio/') ? 'record' : 'file';
-            this._getCurrentChatHistory().push({ 
-              role: 'user', 
-              segments: [{ type: segmentType, url: u, name: file.name }], 
-              ts: Date.now() + i 
+            const msgId = `msg_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 9)}`;
+            this._getCurrentChatHistory().push({
+              role: 'user',
+              segments: [{ type: segmentType, url: u, name: file.name }],
+              ts: Date.now() + i,
+              id: msgId
             });
           }
           this._saveChatHistory();
@@ -4512,7 +4522,7 @@ class App {
   async _uploadImagesCore(files) {
     if (!files || files.length === 0) return [];
     const apiKey = localStorage.getItem('apiKey') || '';
-    const isAIMode = this._chatMode === 'ai';
+    const isAIMode = this._isAIMode();
 
     const uploadFd = new FormData();
     for (const item of files) {
@@ -4540,21 +4550,21 @@ class App {
     }
 
     const uploadData = await uploadResp.json().catch(() => null);
-    const urls = [];
-    if (uploadData?.data?.file_url) urls.push(uploadData.data.file_url);
+    const raw = [];
+    if (uploadData?.data?.file_url) raw.push(uploadData.data.file_url);
     if (Array.isArray(uploadData?.data?.files)) {
-      uploadData.data.files.forEach(f => f?.file_url && urls.push(f.file_url));
+      uploadData.data.files.forEach(f => f?.file_url && raw.push(f.file_url));
     }
-    if (uploadData?.file_url) urls.push(uploadData.file_url);
+    if (uploadData?.file_url) raw.push(uploadData.file_url);
     if (Array.isArray(uploadData?.files)) {
-      uploadData.files.forEach(f => f?.file_url && urls.push(f.file_url));
+      uploadData.files.forEach(f => f?.file_url && raw.push(f.file_url));
     }
-
-    if (urls.length === 0) {
+    if (raw.length === 0) {
       throw new Error(isAIMode ? '图片上传成功但未返回可用的 file_url' : '文件上传成功但未返回可用的 file_url');
     }
-
-    return urls;
+    // 归一化为绝对 URL，与 XRK-AGT 一致，保证刷新后持久化链接仍可访问
+    const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : this.serverUrl || '';
+    return raw.map(u => (u && typeof u === 'string' && u.startsWith('/') && !u.startsWith('//') && origin) ? (origin + u) : u);
   }
 
   async sendChatMessageWithImages(text, files) {
@@ -4657,16 +4667,12 @@ class App {
   setChatInteractionState(streaming) {
     const input = document.getElementById('chatInput');
     const sendBtn = document.getElementById('chatSendBtn');
-    
+    const cfg = this._getChatModeConfig();
     if (input) {
       input.disabled = streaming;
-      input.placeholder = streaming 
-        ? (this._chatMode === 'ai' ? 'AI 正在处理...' : '正在处理...')
-        : (this._chatMode === 'ai' ? '输入消息...' : '输入消息或发送语音...');
+      input.placeholder = streaming ? cfg.placeholderBusy : cfg.placeholderIdle;
     }
-    if (sendBtn) {
-      sendBtn.disabled = streaming;
-    }
+    if (sendBtn) sendBtn.disabled = streaming;
   }
   
   /**
@@ -7361,7 +7367,7 @@ class App {
         {
           const text = data.text || '';
           console.log(`[ASR前端] 中间结果: "${text}" session_id=${data.session_id || ''}`);
-          if (this._chatMode === 'voice') {
+          if (this._isVoiceMode()) {
             this.updateVoiceStatus(`识别中: ${text}`);
           } else {
             this.renderASRStreaming(text, false);
@@ -7371,7 +7377,7 @@ class App {
       case 'asr_final': {
         const finalText = (data.text || '').trim();
         console.log(`[ASR前端] 最终结果: "${finalText}" session_id=${data.session_id || ''}`);
-        if (this._chatMode === 'voice') {
+        if (this._isVoiceMode()) {
           if (finalText && !this._chatStreamState.running) {
             this.updateVoiceStatus('AI 思考中...');
             this.sendVoiceMessage(finalText).catch(e => {

@@ -64,24 +64,7 @@ rule: [
 | `event` | `string` | 否 | 插件的 `event` | 事件类型，覆盖插件的默认事件类型。支持：`'message'`、`'notice'`、`'request'`、`'device'` 等 |
 | `describe` | `string` | 否 | - | 规则描述，用于文档和调试。不会影响功能，仅用于说明规则用途 |
 
-**Rule 匹配执行流程：**
-
-1. **事件类型检查**：如果指定了 `event`，检查当前事件类型是否匹配
-2. **正则匹配**：如果指定了 `reg`，检查消息内容是否匹配正则表达式
-3. **权限检查**：如果指定了 `permission`，检查用户权限是否满足要求
-4. **日志记录**：如果 `log !== false`，记录匹配日志
-5. **函数执行**：调用 `fnc` 指定的处理函数
-6. **返回值处理**：
-   - 返回 `false`：表示未处理，继续匹配下一个规则
-   - 返回其他值：表示已处理，停止匹配后续规则
-   - 抛出异常：记录错误日志，继续匹配下一个规则
-
-**Rule 匹配逻辑：**
-
-1. 首先检查事件类型（`event` 字段）
-2. 然后检查正则表达式（`reg` 字段）
-3. 最后检查权限（`permission` 字段）
-4. 全部通过后，调用对应的处理函数（`fnc` 字段）
+**匹配顺序**：事件类型（`event`）→ 正则（`reg`）→ 权限（`permission`）→ 执行 `fnc`。返回 `false` 继续下一条规则，其他值或异常则结束/记录错误。
 
 ## 插件特性
 
@@ -140,205 +123,22 @@ rule: [
 
 ## 核心方法
 
-### 工作流相关方法
-
-#### getStream(name)
-
-获取工作流实例。
-
-```javascript
-const chatStream = this.getStream('chat');
-```
-
-**参数:**
-- `name` (string): 工作流名称
-
-**返回:** `AIStream|null` 工作流实例
-
-#### getAllStreams()
-
-获取所有已加载的工作流。
-
-```javascript
-const streams = this.getAllStreams();
-// 返回 Map<string, AIStream>
-```
-
-**返回:** `Map` 所有工作流实例
-
-#### getWorkflowManager()
-
-获取全局工作流管理器（单例模式）。
-
-```javascript
-const manager = this.getWorkflowManager();
-```
-
-**返回:** `WorkflowManager` 工作流管理器实例
-
-#### callWorkflow(name, params, context)
-
-调用单个工作流。
-
-```javascript
-const result = await this.callWorkflow('chat', {
-  question: '你好'
-}, { e: this.e });
-```
-
-**参数:**
-- `name` (string): 工作流名称
-- `params` (object): 参数对象
-- `context` (object): 上下文（可选，会自动使用this.e）
-
-**返回:** `Promise<Object>` 结果对象
-
-#### callWorkflows(workflows, sharedParams, context)
-
-同时调用多个工作流（并行执行）。
-
-```javascript
-const results = await this.callWorkflows([
-  'chat',
-  { name: 'file', params: { question: '创建test.txt' } }
-], {}, { e: this.e });
-```
-
-**参数:**
-- `workflows` (Array): 工作流列表，可以是字符串或配置对象
-- `sharedParams` (object): 共享参数
-- `context` (object): 上下文（可选，会自动使用this.e）
-
-**返回:** `Promise<Array>` 结果数组
-
-#### callWorkflowsSequential(workflows, sharedParams, context)
-
-顺序调用多个工作流（串行执行）。
-
-```javascript
-const results = await this.callWorkflowsSequential(['file', 'chat'], {}, { e: this.e });
-```
-
-**参数:** 同 `callWorkflows`
-
-**返回:** `Promise<Array>` 结果数组
-
-#### executeWorkflow(streamName, question, config)
-
-直接执行工作流（简化调用）。
-
-```javascript
-const result = await this.executeWorkflow('chat', '你好', { temperature: 0.7 });
-```
-
-**参数:**
-- `streamName` (string): 工作流名称
-- `question` (string|object): 问题
-- `config` (object): 配置（可选）
-
-**返回:** `Promise<string>` 结果文本
-
-### 消息回复方法
-
-#### reply(msg, quote, data)
-
-回复消息。
-
-```javascript
-this.reply('回复内容', true, { at: true });
-```
-
-**参数:**
-- `msg` (string): 消息内容
-- `quote` (boolean): 是否引用原消息（默认false）
-- `data` (object): 额外数据（如at、recall等）
-
-**返回:** `boolean` 是否成功
-
-### 上下文管理方法
-
-#### setContext(type, isGroup, time, timeout)
-
-设置上下文（用于多轮对话）。
-
-```javascript
-this.setContext('waiting_input', false, 120, '操作超时已取消');
-```
-
-**参数:**
-- `type` (string): 上下文类型
-- `isGroup` (boolean): 是否群聊（默认false）
-- `time` (number): 超时时间（秒，默认120）
-- `timeout` (string): 超时提示（默认"操作超时已取消"）
-
-**返回:** `Object` 上下文对象
-
-#### getContext(type, isGroup)
-
-获取上下文。
-
-```javascript
-const context = this.getContext('waiting_input', false);
-```
-
-**参数:**
-- `type` (string): 上下文类型（可选，不传则返回所有）
-- `isGroup` (boolean): 是否群聊（默认false）
-
-**返回:** `Object|null` 上下文对象
-
-#### finish(type, isGroup)
-
-结束上下文。
-
-```javascript
-this.finish('waiting_input', false);
-```
-
-**参数:**
-- `type` (string): 上下文类型
-- `isGroup` (boolean): 是否群聊（默认false）
-
-#### awaitContext(...args)
-
-等待上下文（Promise方式）。
-
-```javascript
-const context = await this.awaitContext('resolveContext', false, 120);
-```
-
-**参数:** 同 `setContext`
-
-**返回:** `Promise<Object>` 上下文对象
-
-#### resolveContext(context)
-
-解析上下文（配合awaitContext使用）。
-
-```javascript
-this.resolveContext(this.e);
-```
-
-**参数:**
-- `context` (object): 上下文对象
-
-### 其他方法
-
-#### markNeedReparse()
-
-标记需要重新解析消息。
-
-```javascript
-this.markNeedReparse();
-```
-
-#### renderImg(plugin, tpl, data, cfg)
-
-渲染图片（兼容性方法）。
-
-```javascript
-const img = await this.renderImg('my-plugin', './template.html', { data: 'value' });
-```
+完整签名与用法见 [reference/PLUGINS.md](./reference/PLUGINS.md)。摘要如下：
+
+| 分类 | 方法 | 说明 |
+|------|------|------|
+| 工作流 | `getStream(name)` | 获取工作流实例 |
+| | `getAllStreams()` | 返回 `Map<name, AIStream>` |
+| | `callWorkflow(name, params, context)` | 调用单个工作流 |
+| | `callWorkflows(workflows, sharedParams, context)` | 并行多工作流 |
+| | `callWorkflowsSequential(...)` | 串行多工作流 |
+| | `executeWorkflow(streamName, question, config)` | 简化执行，返回文本 |
+| 回复 | `reply(msg, quote?, data?)` | 回复消息，支持引用、at、recall |
+| 上下文 | `setContext(type, isGroup?, time?, timeout?)` | 设置多轮上下文 |
+| | `getContext(type?, isGroup?)` / `finish(type, isGroup?)` | 获取/结束上下文 |
+| | `awaitContext(...)` / `resolveContext(context)` | Promise 等待与解析 |
+
+其他：`markNeedReparse()` 标记重解析；`renderImg(plugin, tpl, data, cfg)` 渲染图片。详见 [PLUGINS.md](./reference/PLUGINS.md)。
 
 ## 完整示例
 
@@ -364,65 +164,13 @@ export default class MyPlugin extends plugin {
 }
 ```
 
-### 示例2: 使用工作流
+### 示例2: 工作流
 
-```javascript
-export default class AIPlugin extends plugin {
-  constructor() {
-    super({
-      name: 'ai-plugin',
-      dsc: 'AI对话插件',
-      event: 'message',
-      priority: 5000,
-      rule: [{ reg: '^#AI (.+)$', fnc: 'aiChat' }]
-    });
-  }
+`async aiChat(e) { const q = e.msg.replace(/^#AI\s+/, ''); const r = await this.callWorkflow('chat', { question: q }, { e }); return this.reply(r?.content || r); }`
 
-  async aiChat(e) {
-    const question = e.msg.replace(/^#AI\s+/, '');
-    // 方式1: 直接执行工作流
-    const result = await this.executeWorkflow('chat', question);
-    // 方式2: 调用工作流管理器
-    const result2 = await this.callWorkflow('chat', { question }, { e });
-    return this.reply(result || result2.content);
-  }
-}
-```
+### 示例3: 多工作流
 
-### 示例3: 多工作流组合
-
-```javascript
-export default class MultiWorkflowPlugin extends plugin {
-  constructor() {
-    super({
-      name: 'multi-workflow',
-      dsc: '多工作流组合插件',
-      event: 'message',
-      priority: 5000,
-      rule: [
-        {
-          reg: '^#组合 (.+)$',
-          fnc: 'multiWorkflow'
-        }
-      ]
-    });
-  }
-
-  async multiWorkflow(e) {
-    const question = e.msg.replace(/^#组合\s+/, '');
-    
-    // 并行调用多个工作流
-    const results = await this.callWorkflows([
-      'chat',
-      { name: 'file', params: { question: '创建test.txt' } }
-    ], {}, { e, question });
-    
-    // 合并结果
-    const combined = results.map(r => r.content || r).join('\n');
-    return this.reply(combined);
-  }
-}
-```
+并行：`await this.callWorkflows(['chat', { name: 'file', params: { question: '...' } }], {}, { e });`，将返回数组合并后 `reply` 即可。
 
 ### 示例4: 上下文管理
 

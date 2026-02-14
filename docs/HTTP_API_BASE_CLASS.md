@@ -177,69 +177,14 @@ routes: [
 
 ## 核心方法
 
-### init(app, bot)
-
-初始化方法（自动调用）。
-
-```javascript
-async init(app, bot) {
-  // app: Express应用实例
-  // bot: Bot实例
-}
-```
-
-### registerRoutes(app, bot)
-
-注册路由（自动调用）。
-
-```javascript
-registerRoutes(app, bot) {
-  // 自动注册所有routes中的路由
-}
-```
-
-### registerWebSocketHandlers(bot)
-
-注册WebSocket处理器（自动调用）。
-
-```javascript
-registerWebSocketHandlers(bot) {
-  // 自动注册所有ws中的处理器
-}
-```
-
-### getInfo()
-
-获取API信息。
-
-```javascript
-const info = api.getInfo();
-// 返回: { name, dsc, priority, routes, enable, createTime }
-```
-
-### start()
-
-启用API。
-
-```javascript
-api.start();
-```
-
-### stop()
-
-停用API。
-
-```javascript
-api.stop();
-```
-
-### reload(app, bot)
-
-重载API。
-
-```javascript
-await api.reload(app, bot);
-```
+| 方法 | 说明 |
+|------|------|
+| `init(app, bot)` | 初始化（自动调用）：注册中间件、路由、WS |
+| `registerRoutes(app, bot)` | 注册 `routes` 中所有路由 |
+| `registerWebSocketHandlers(bot)` | 将 `ws` 中路径挂到 `bot.wsf` |
+| `getInfo()` | 返回 `{ name, dsc, priority, routes, enable, createTime }` |
+| `start()` / `stop()` | 启用/停用 API |
+| `reload(app, bot)` | 依次调用 stop → init → start |
 
 ## 完整示例
 
@@ -277,91 +222,38 @@ export default {
 };
 ```
 
-### 示例2: 带中间件的API
+### 示例2: 带中间件
 
 ```javascript
-// 假设已导入: import BotUtil from '../../lib/common/util.js';
-
 export default {
   name: 'auth-api',
-  dsc: '认证API',
-  priority: 100,
-  middleware: [
-    // 全局中间件：记录请求
-    (req, res, next) => {
-      BotUtil.makeLog('debug', `[${req.method}] ${req.path}`, 'AuthAPI');
+  middleware: [(req, res, next) => next()],
+  routes: [{
+    method: 'GET',
+    path: '/api/user',
+    middleware: [(req, res, next) => {
+      if (!req.headers.authorization) return res.status(401).json({ error: '未授权' });
       next();
-    }
-  ],
-  routes: [
-    {
-      method: 'GET',
-      path: '/api/user',
-      middleware: [
-        // 路由级中间件：检查认证
-        (req, res, next) => {
-          const token = req.headers.authorization;
-          if (!token) {
-            return res.status(401).json({ error: '未授权' });
-          }
-          next();
-        }
-      ],
-      handler: async (req, res, Bot) => {
-        res.json({ 
-          user: 'test',
-          role: 'admin'
-        });
-      }
-    }
-  ]
+    }],
+    handler: async (req, res, Bot) => res.json({ user: 'test', role: 'admin' })
+  }]
 };
 ```
 
-### 示例3: WebSocket API
+### 示例3: WebSocket
 
 ```javascript
-// 假设已导入: import BotUtil from '../../lib/common/util.js';
-
 export default {
   name: 'ws-api',
-  dsc: 'WebSocket API',
-  priority: 100,
   ws: {
-    '/api/ws': (conn, req, bot, socket, head) => {
-      BotUtil.makeLog('info', 'WebSocket连接建立', 'MyAPI');
-      
-      conn.on('message', (msg) => {
-        try {
-          const data = JSON.parse(msg);
-          BotUtil.makeLog('debug', `收到消息: ${JSON.stringify(data)}`, 'MyAPI');
-          
-          // 回复消息
-          conn.send(JSON.stringify({
-            type: 'response',
-            data: '收到: ' + data.message
-          }));
-        } catch (error) {
-          conn.send(JSON.stringify({
-            type: 'error',
-            message: error.message
-          }));
-        }
-      });
-      
-      conn.on('close', () => {
-        BotUtil.makeLog('info', 'WebSocket连接关闭', 'MyAPI');
-      });
-      
-      conn.on('error', (error) => {
-        BotUtil.makeLog('error', 'WebSocket错误', 'MyAPI', error);
-      });
+    'my-ws': (conn, req, bot) => {
+      conn.on('message', (msg) => conn.send(JSON.stringify({ echo: msg })));
     }
   }
 };
 ```
 
-### 示例4: 继承HttpApi类
+### 示例4: 继承类
 
 ```javascript
 // 假设已导入: import HttpApi from '../../lib/http/http.js';
@@ -382,55 +274,15 @@ export default class MyApi extends HttpApi {
 }
 ```
 
-### 示例5: 使用工作流
+### 示例5: 调用工作流
 
-```javascript
-// 假设已导入: import StreamLoader from '../../lib/aistream/loader.js';
+在 handler 中：`const stream = Bot.StreamLoader.getStream('chat'); const result = await stream.execute(null, req.body?.question);` 详见 [工作流基类](./WORKFLOW_BASE_CLASS.md)。
 
-export default {
-  name: 'ai-api',
-  dsc: 'AI API',
-  priority: 100,
-  routes: [{
-    method: 'POST',
-    path: '/api/ai/chat',
-    handler: async (req, res, Bot) => {
-      const { question } = req.body;
-      if (!question) {
-        return res.status(400).json({ error: '缺少question参数' });
-      }
-      try {
-        const stream = StreamLoader.getStream('chat');
-        const result = await stream.execute(null, question);
-        res.json({ success: true, result });
-      } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-      }
-    }
-  }]
-};
-```
-
-> **注意**: API 文件推荐存放在插件目录的 `http/` 子目录（如 `plugins/myplugin/http/api.js`），
-> 其路径规则与工作流类似：将 `stream/` 替换为 `http/`。
+> API 文件放在 `plugins/<插件名>/http/*.js`，由 ApiLoader 自动加载。
 
 ## 错误处理
 
-API基类会自动捕获错误并返回500错误：
-
-```javascript
-// 自动处理
-try {
-  // 处理逻辑
-} catch (error) {
-  // 自动返回500错误
-  // {
-  //   success: false,
-  //   message: '服务器内部错误',
-  //   error: process.env.NODE_ENV === 'development' ? error.message : undefined
-  // }
-}
-```
+路由 handler 内未捕获的异常会由基类统一捕获并返回 500 JSON（含 `success: false`、`message`，开发环境下含 `error` 详情）。
 
 ## 请求对象扩展
 

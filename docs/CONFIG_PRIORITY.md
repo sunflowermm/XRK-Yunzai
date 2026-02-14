@@ -20,13 +20,9 @@ const API_CONFIG = {
 const chatStream = StreamLoader.getStream('chat');
 const result = await chatStream.execute(e, question, API_CONFIG);
 ```
+传入 `execute` 的 config 覆盖其余所有来源。
 
-**说明：**
-- 传入的 `API_CONFIG` 会覆盖所有其他配置
-- 包括 `chatModel`、`temperature`、`max_tokens` 等所有参数
-- 这是**最高优先级**的配置方式
-
-### 2. 构造函数中的config（次高优先级）
+### 2. 构造函数中的 config（次高）
 
 ```javascript
 export default class MyWorkflow extends AIStream {
@@ -42,11 +38,7 @@ export default class MyWorkflow extends AIStream {
 }
 ```
 
-**说明：**
-- 构造函数中的 `config` 会覆盖 `aistream` 配置和默认值
-- 但会被 `execute` 传入的参数覆盖
-
-### 3. aistream配置/LLM提供商配置（中等优先级）
+### 3. aistream / LLM 提供商配置（中）
 
 配置来源包括：
 - `cfg.aistream`：AI工作流通用配置（`config/default_config/aistream.yaml`）

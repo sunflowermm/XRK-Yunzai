@@ -34,32 +34,7 @@
 - **推理调优**: 支持多轮推理和响应润色
 - **参数优先级**: execute传入 > 构造函数 > aistream配置/LLM提供商配置 > 默认值
 
-### 使用方法
-
-```javascript
-// 假设已导入: import AIStream from '../../lib/aistream/aistream.js';
-
-export default class MyWorkflow extends AIStream {
-  constructor() {
-    super({
-      name: 'myworkflow',
-      description: '我的工作流',
-      version: '1.0.0'
-    });
-  }
-
-  buildSystemPrompt(context) {
-    return '系统提示';
-  }
-
-  async buildChatContext(e, question) {
-    return [
-      { role: 'system', content: this.buildSystemPrompt({ e, question }) },
-      { role: 'user', content: question }
-    ];
-  }
-}
-```
+**使用**：继承 `AIStream`，在构造函数中 `super({ name, description, version?, ... })`，实现 `buildSystemPrompt(context)` 与 `buildChatContext(e, question)`。工作流放 `plugins/<插件根>/stream/*.js`。
 
 ### 详细文档
 
@@ -79,50 +54,7 @@ export default class MyWorkflow extends AIStream {
 - **上下文管理**: 支持状态管理和超时控制
 - **消息回复**: 简化的消息回复接口
 
-### 工作流相关方法
-
-```javascript
-// 获取工作流实例
-const stream = this.getStream('chat');
-
-// 调用单个工作流
-const result = await this.callWorkflow('chat', { question: '你好' });
-
-// 同时调用多个工作流（并行）
-const results = await this.callWorkflows([
-  'chat',
-  { name: 'file', params: { question: '创建test.txt' } }
-], {}, { e: this.e });
-
-// 顺序调用多个工作流（串行）
-const results = await this.callWorkflowsSequential(['file', 'chat']);
-
-// 直接执行工作流（简化）
-const result = await this.executeWorkflow('chat', '你好');
-```
-
-### 完整示例
-
-```javascript
-// 假设已导入: import plugin from '../../lib/plugins/plugin.js';
-
-export default class MyPlugin extends plugin {
-  constructor() {
-    super({
-      name: 'my-plugin',
-      dsc: '我的插件',
-      event: 'message',
-      priority: 5000,
-      rule: [{ reg: '^#测试$', fnc: 'test' }]
-    });
-  }
-
-  async test(e) {
-    const result = await this.callWorkflow('chat', { question: e.msg }, { e });
-    return this.reply(result);
-  }
-}
-```
+**工作流方法**：`getStream(name)`、`callWorkflow(name, params, context)`、`callWorkflows(workflows, sharedParams, context)`（并行）、`callWorkflowsSequential(...)`（串行）、`executeWorkflow(streamName, question, config)`。完整示例见 [PLUGINS.md](./reference/PLUGINS.md)、[PLUGIN_BASE_CLASS.md](./PLUGIN_BASE_CLASS.md)。
 
 ---
 
@@ -138,41 +70,7 @@ export default class MyPlugin extends plugin {
 - **WebSocket支持**: 可以注册WebSocket处理器
 - **中间件支持**: 支持自定义中间件
 
-### 使用方法
-
-```javascript
-// 方式1: 使用对象导出（推荐）
-export default {
-  name: 'my-api',
-  dsc: '我的API',
-  priority: 100,
-  routes: [{
-    method: 'GET',
-    path: '/api/test',
-    handler: async (req, res, Bot) => {
-      res.json({ success: true });
-    }
-  }],
-  init: async (app, Bot) => {
-    // 初始化逻辑
-  }
-};
-
-// 方式2: 继承HttpApi类
-// 假设已导入: import HttpApi from '../../lib/http/http.js';
-
-export default class MyApi extends HttpApi {
-  constructor() {
-    super({ name: 'my-api', routes: [/* ... */] });
-  }
-}
-```
-
-### 路径
-
-- **API文件**: `plugins/<插件根>/http/`
-- **基类文件**: `lib/http/http.js`
-- **加载器**: `lib/http/loader.js`
+**使用**: 对象导出 `{ name, dsc, routes, ws?, middleware? }` 或继承 `HttpApi`，文件放 `plugins/<插件根>/http/`。详见 [HTTP_API_BASE_CLASS.md](./HTTP_API_BASE_CLASS.md)。
 
 ---
 
@@ -187,27 +85,7 @@ export default class MyApi extends HttpApi {
 - **事件监听**: 监听指定的事件
 - **插件集成**: 自动触发插件处理
 
-### 使用方法
-
-```javascript
-// 假设已导入: import EventListener from '../../lib/listener/listener.js';
-
-export default class MyListener extends EventListener {
-  constructor() {
-    super({ prefix: 'my', event: 'message', once: false });
-  }
-
-  async execute(e) {
-    this.plugins.deal(e);
-  }
-}
-```
-
-### 路径
-
-- **监听器文件**: `plugins/<插件根>/events/`
-- **基类文件**: `lib/listener/listener.js`
-- **加载器**: `lib/listener/loader.js`
+**使用**: 继承 `EventListener`，实现 `execute(e)`，文件放 `plugins/<插件根>/events/`。
 
 ---
 
@@ -223,27 +101,7 @@ export default class MyListener extends EventListener {
 - **文件监听**: 自动监听模板文件变化
 - **多渲染器支持**: 支持puppeteer和playwright
 
-### 使用方法
-
-```javascript
-// 假设已导入: import Renderer from '../../lib/renderer/Renderer.js';
-
-export default class MyRenderer extends Renderer {
-  constructor() {
-    super({ id: 'my-renderer', type: 'image', render: 'render' });
-  }
-
-  async render(tpl, data) {
-    return await this.dealTpl('my-template', { tplFile: tpl, data });
-  }
-}
-```
-
-### 路径
-
-- **渲染器文件**: `renderers/`
-- **基类文件**: `lib/renderer/Renderer.js`
-- **加载器**: `lib/renderer/loader.js`
+**使用**: 继承 `Renderer`，实现 `render(tpl, data)`，渲染器放 `renderers/`。
 
 ---
 
@@ -261,21 +119,7 @@ export default class MyRenderer extends Renderer {
 - **配置管理**: 配置加载和热重载
 - **反向代理**: 支持多域名反向代理
 
-### 主要方法
-
-```javascript
-// 启动服务器
-await Bot.run({ port: 2537 });
-
-// 发送好友消息
-await Bot.sendFriendMsg(bot_id, user_id, message);
-
-// 发送群消息
-await Bot.sendGroupMsg(bot_id, group_id, message);
-
-// 发送主人消息
-await Bot.sendMasterMsg(message);
-```
+**常用**：`Bot.run({ port })`、`Bot.sendFriendMsg`/`sendGroupMsg`/`sendMasterMsg`。完整 API 见 [BOT.md](./reference/BOT.md)。
 
 ### 路径
 

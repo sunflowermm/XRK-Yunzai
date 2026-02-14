@@ -132,15 +132,17 @@ XRK-Yunzai/
 │   ├── http/              # API 基类 + loader
 │   ├── listener/          # 事件监听 loader
 │   ├── renderer/          # 渲染器 loader
-│   ├── common/            # BotUtil, common helpers
+│   ├── util.js            # BotUtil 工具
+│   ├── commonconfig/      # 公共配置基类与加载
 │   └── config/            # cfg, redis, log
 │
 ├── plugins/
-│   ├── adapter/           # 协议接入 (OneBotv11, ComWeChat…)
-│   ├── api/               # REST/WS/SSE
-│   ├── stream/            # AI 工作流 (chat/device/…)
-│   ├── events/            # 消息/系统事件
-│   ├── system/ other/ …   # 系统工具类插件
+│   └── <插件名>/
+│       ├── adapter/       # 协议接入 (OneBotv11 等)
+│       ├── http/          # REST/WS/SSE
+│       ├── stream/        # AI 工作流 (chat/device/…)
+│       ├── events/        # 消息/系统事件
+│       └── …
 │
 ├── config/
 │   ├── default_config/*.yaml   # 默认模板
@@ -173,9 +175,7 @@ XRK-Yunzai/
 | 工厂模式 | [`docs/FACTORY.md`](./docs/FACTORY.md) | LLM工厂模式、提供商注册、客户端创建、配置管理。 |
 | 用户使用指南 | [`USER_GUIDE.md`](./USER_GUIDE.md) | Web界面访问、API接口使用、curl示例、WebSocket通信。 |
 
-> 基类的开发策略、调用顺序与示例在导航页集中展示，可从 README 直接跳转到子文档。
-
-所有 reference 文件均针对源码中每个函数提供签名、参数类型、返回值与示例，不再遗漏。
+> 基类与 API 的详细说明、示例见上表链接。
 
 ---
 
@@ -184,7 +184,7 @@ XRK-Yunzai/
 主要配置位于 `config/default_config/*.yaml`，首次运行自动复制到 `data/server_bots/<port>/`。
 
 - `aistream.yaml`：AI 工作流通用配置。
-- LLM提供商配置：通过 CommonConfig 系统管理（如 `config/commonconfig/openai_llm.js`）。
+- LLM 提供商配置：通过 CommonConfig 系统管理（插件内 `commonconfig/*.js`，如 `plugins/system-plugin/commonconfig/openai_llm.js`）。
 - `server.yaml`：HTTP/HTTPS、CORS、安全策略、静态目录。
 - `redis.yaml`：Redis 连接信息与数据库序号。
 - `device.yaml` / `group.yaml` / `notice.yaml`：设备、群、通知策略。
@@ -224,8 +224,6 @@ export default class WorkflowDemo extends plugin {
 <details>
 <summary>独立 REST API</summary>
 
-**方式1：插件目录（推荐）**
-
 ```js
 // plugins/myplugin/http/ping.js
 export default {
@@ -246,7 +244,7 @@ export default {
 <details>
 <summary>自定义工作流</summary>
 
-**方式1：插件目录（推荐）**
+工作流仅从插件目录加载：`plugins/<插件名>/stream/*.js`。
 
 ```js
 // plugins/myplugin/stream/file-builder.js
@@ -254,45 +252,9 @@ import AIStream from '../../../lib/aistream/aistream.js';
 
 export default class FileBuilder extends AIStream {
   constructor() {
-    super({
-      name: 'file-builder',
-      description: '根据提示生成文本，落地为文件',
-      config: { temperature: 0.6 }
-    });
+    super({ name: 'file-builder', description: '根据提示生成文本，落地为文件', config: { temperature: 0.6 } });
   }
-
-  buildSystemPrompt() {
-    return '你是文件生成器，只输出可写入文件的纯文本。';
-  }
-
-  async buildChatContext(e, question) {
-    return [
-      { role: 'system', content: this.buildSystemPrompt({ e, question }) },
-      { role: 'user', content: question?.text || String(question) }
-    ];
-  }
-}
-```
-
-**方式2：全局工作流目录**
-
-```js
-// plugins/stream/file-builder.js
-import AIStream from '../../lib/aistream/aistream.js';
-
-export default class FileBuilder extends AIStream {
-  constructor() {
-    super({
-      name: 'file-builder',
-      description: '根据提示生成文本，落地为文件',
-      config: { temperature: 0.6 }
-    });
-  }
-
-  buildSystemPrompt() {
-    return '你是文件生成器，只输出可写入文件的纯文本。';
-  }
-
+  buildSystemPrompt() { return '你是文件生成器，只输出可写入文件的纯文本。'; }
   async buildChatContext(e, question) {
     return [
       { role: 'system', content: this.buildSystemPrompt({ e, question }) },
