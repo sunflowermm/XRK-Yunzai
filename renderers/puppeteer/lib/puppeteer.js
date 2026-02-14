@@ -236,7 +236,6 @@ export default class PuppeteerRenderer extends Renderer {
 
     try {
       page = await this.browser.newPage();
-      if (!page) throw new Error("Failed to create page");
 
       await page.setRequestInterception(true);
       page.on('request', (request) => {
@@ -301,7 +300,6 @@ export default class PuppeteerRenderer extends Renderer {
         BotUtil.makeLog("info", `[${name}][${this.renderNum}] clip ${Date.now() - start}ms`, "PuppeteerRenderer");
       } else {
         const body = (await page.$("#container")) || (await page.$("body"));
-        if (!body) throw new Error("Content element not found");
         const boundingBox = await body.boundingBox();
         let num = data.multiPage ? Math.ceil(boundingBox.height / pageHeight) || 1 : 1;
         if (data.multiPage) screenshotOpts.type = "jpeg";
@@ -313,9 +311,9 @@ export default class PuppeteerRenderer extends Renderer {
           BotUtil.makeLog("info", `[${name}][${this.renderNum}] ${(buffer.length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PuppeteerRenderer");
           ret.push(buffer);
         } else {
-          if (num > 1) await page.setViewport({ width: Math.ceil(boundingBox.width), height: Math.min(pageHeight + 100, 2000) });
+          await page.setViewport({ width: Math.ceil(boundingBox.width), height: Math.min(pageHeight + 100, 2000) });
           for (let i = 1; i <= num; i++) {
-            if (i !== 1 && i === num) {
+            if (i === num && num > 1) {
               const h = Math.min(parseInt(boundingBox.height) - pageHeight * (num - 1), 2000);
               await page.setViewport({ width: Math.ceil(boundingBox.width), height: h > 0 ? h : 100 });
             }
@@ -422,10 +420,6 @@ export default class PuppeteerRenderer extends Renderer {
     if (this.browserMacKey) {
       await redis.del(this.browserMacKey).catch(() => {});
     }
-
-    if (!global._rendererCleanupLogged) {
-      BotUtil.makeLog("info", "Renderer resources cleaned up", "Renderer");
-      global._rendererCleanupLogged = true;
-    }
+    BotUtil.makeLog("info", "Renderer resources cleaned up", "Renderer");
   }
 }

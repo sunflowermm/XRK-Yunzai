@@ -119,7 +119,7 @@ export default class connectEvent extends EventListener {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>XRK-MultiBot</title>
+  <title>XRK-Yunzai</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
   <style>
@@ -314,7 +314,7 @@ export default class connectEvent extends EventListener {
       <div class="logo">
         <div class="logo-text">XRK</div>
       </div>
-      <h1 class="title">XRK-MultiBot</h1>
+      <h1 class="title">XRK-Yunzai</h1>
       <div class="version">Version ${cfg.package.version}</div>
     </div>
     

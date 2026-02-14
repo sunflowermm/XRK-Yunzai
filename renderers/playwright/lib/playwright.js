@@ -280,7 +280,6 @@ export default class PlaywrightRenderer extends Renderer {
     try {
       context = await this.browser.newContext(this.contextOptions);
       page = await context.newPage();
-      if (!page) throw new Error("Failed to create page");
 
       await page.route('**/*', (route) => {
         const resourceType = route.request().resourceType();
@@ -338,7 +337,6 @@ export default class PlaywrightRenderer extends Renderer {
         ret.push(buff);
       } else {
         const body = (await page.locator("#container").first()) || (await page.locator("body"));
-        if (!body) throw new Error("Content element not found");
         const boundingBox = await body.boundingBox();
         let num = data.multiPage ? Math.ceil(boundingBox.height / pageHeight) || 1 : 1;
         if (data.multiPage) screenshotOpts.type = "jpeg";
@@ -349,9 +347,9 @@ export default class PlaywrightRenderer extends Renderer {
           BotUtil.makeLog("info", `[${name}][${this.renderNum}] ${(buff.length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PlaywrightRenderer");
           ret.push(buff);
         } else {
-          if (num > 1) await page.setViewportSize({ width: Math.ceil(boundingBox.width), height: Math.min(pageHeight + 100, 2000) });
+          await page.setViewportSize({ width: Math.ceil(boundingBox.width), height: Math.min(pageHeight + 100, 2000) });
           for (let i = 1; i <= num; i++) {
-            if (i !== 1 && i === num) {
+            if (i === num && num > 1) {
               const h = Math.min(parseInt(boundingBox.height) - pageHeight * (num - 1), 2000);
               await page.setViewportSize({ width: Math.ceil(boundingBox.width), height: h > 0 ? h : 100 });
             }
@@ -372,20 +370,8 @@ export default class PlaywrightRenderer extends Renderer {
       BotUtil.makeLog("error", `[${name}] Screenshot failed: ${error.message}`, "PlaywrightRenderer");
       ret = [];
     } finally {
-      if (page) {
-        try {
-          await page.close({ runBeforeUnload: false });
-        } catch {
-          // 页面关闭失败，忽略错误
-        }
-      }
-      if (context) {
-        try {
-          await context.close();
-        } catch {
-          // 上下文关闭失败，忽略错误
-        }
-      }
+      if (page) await page.close({ runBeforeUnload: false }).catch(() => {});
+      if (context) await context.close().catch(() => {});
       this.shoting = this.shoting.filter(item => item !== name);
     }
 
@@ -466,10 +452,6 @@ export default class PlaywrightRenderer extends Renderer {
     if (this.browserMacKey) {
       await redis.del(this.browserMacKey).catch(() => {});
     }
-
-    if (!global._rendererCleanupLogged) {
-      BotUtil.makeLog("info", "Renderer resources cleaned up", "Renderer");
-      global._rendererCleanupLogged = true;
-    }
+    BotUtil.makeLog("info", "Renderer resources cleaned up", "Renderer");
   }
 }

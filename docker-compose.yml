@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: xrk-multibot
+    container_name: xrk-yunzai
     restart: unless-stopped
     environment:
       - NODE_ENV=production

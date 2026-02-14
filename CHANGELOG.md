@@ -24,13 +24,37 @@
 * 增加了部分日志文件，以方便查看日志以调试和规范化记录
 
 # 3.0.5
-* 初步实现了守护进程完全挂载，服务器启动后可以通过http随时重启或关机（icqq和其他启动方式都有
+* 初步实现了守护进程完全挂载，服务器启动后可以通过http随时重启或关机（icqq和其他启动方式都有）
 * 借用了时雨崽适配器的全部底层，很多的实现也得益于时雨崽，时雨崽就是艺术品
-* commond.js分开rj为rmj和roj，以方便开发，roj就是读取对象数组等数值，rmj用于运行JavaScript代码
-* 多数文件重构，以方便后续开发，修复了e.gerReply()冲突的问题，对日志记录进行优化
-* 进入稳定版，后续将慢慢更新，锅巴也已经适配
-* 更新了Onebot的更多接口
+* commond.js 拆分为 rmj 和 roj，以方便开发：roj 读取对象数组等数值，rmj 用于运行 JavaScript 代码
+* 多数文件重构，以方便后续开发，修复了 e.gerReply() 冲突问题，对日志记录进行优化
+* 进入稳定版，后续将慢慢更新，锅巴也已适配
+* 更新了 Onebot 的更多接口
 
+# 3.1.0
+* 渲染器加载器重构：全局挂载 `RendererLoader`，插件可直接使用 `global.RendererLoader.getRenderer()` 截图，减少重复 import
+* 渲染器配置支持 `config_default.yaml` 回退，精简 loader 依赖（移除 ObjectUtils、冗余 fs），统一从 renderers/ 与 plugins/*/renderer/ 加载
+* Puppeteer / Playwright 渲染器去除 lodash，改用原生 Object.assign 与字符串处理，简化浏览器锁等待逻辑
+* 本地 HTML 截图时，若 `tplFile` 为绝对路径则直接按该路径加载，保证同目录 CSS、图片等相对资源正确解析
+* 新增 `lib/renderer/README.md`，补充渲染器用法说明（getRenderer、screenshot 参数、tplFile 行为）
+
+# 3.1.1
+* 修复部分插件在 Windows 下路径解析异常，统一使用 path 与 file:// 协议处理本地 HTML
+* 默认渲染器启动参数精简为常用四项（no-sandbox、disable-setuid-sandbox、disable-dev-shm-usage、disable-gpu），降低无头浏览器启动失败率
+* 渲染器相关日志统一带 `[RendererLoader]` / 渲染器名，便于排查
+* 文档与注释整理，便于二次开发与插件接入
+
+# 3.1.2
+* 向日葵插件（XRK-plugin）截图统一走项目渲染器，移除对根目录 components 的依赖，插件内 takeScreenshot 优先使用 `global.RendererLoader`
+* 多 Bot 实例下渲染器配置支持按 `data/server_bots/<uin>/renderers/` 独立配置 puppeteer / playwright
+* 修复帮助、网页截图、查天气等应用因渲染器路径或资源加载导致的载入失败或截图无样式问题
+
+# 3.1.3（当前版本）
+* 渲染器与插件层进一步收口：删冗余代码、无意义保护逻辑与多余 import，提高对象引用（RendererLoader、getRenderer）复用
+* 更新日志与版本号梳理，3.1.x 为当前维护主线
+* 依赖与配置说明见 README，渲染器接入详见 `lib/renderer/README.md`
+
+---
 
 * Yunzai-Bot && XRK-Yunzai && TRSS-Yunzai && Miao-Yunzai && 其他
-* 此项目是基于Miao-Yunzai的二次开发，感谢Miao-Yunzai的开发者们。
+* 此项目基于 Miao-Yunzai 二次开发，感谢 Miao-Yunzai 的开发者们。

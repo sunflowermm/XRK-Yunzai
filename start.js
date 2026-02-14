@@ -251,7 +251,7 @@ class PM2Manager extends BaseManager {
    * @returns {string} 标准化的进程名称
    */
   getProcessName(port) {
-    return `XRK-MultiBot-Server-${port}`;
+    return `XRK-Yunzai-Server-${port}`;
   }
 
   /**
