@@ -1,54 +1,18 @@
 import fs from 'fs/promises';
 import path from 'path';
 import yaml from 'yaml';
-import { FileUtils } from '../../../../lib/utils/file-utils.js';
+import BotUtil from '../../../lib/util.js';
 
-/**
- * 判断是否为对象
- */
-function isObject(item) {
-  return item && typeof item === 'object' && !Array.isArray(item);
-}
-
-/**
- * 深度合并对象
- */
-function deepMerge(target, source) {
-  const output = { ...target };
-  
-  if (isObject(target) && isObject(source)) {
-    Object.keys(source).forEach(key => {
-      if (isObject(source[key])) {
-        if (!(key in target)) {
-          output[key] = source[key];
-        } else {
-          output[key] = deepMerge(target[key], source[key]);
-        }
-      } else {
-        output[key] = source[key];
-      }
-    });
-  }
-  
-  return output;
-}
-
-/**
- * 更新嵌套对象的值
- */
-function updateNestedValue(obj, path, value) {
-  const keys = path.split('.');
+/** 按点号路径更新嵌套对象的值 */
+function updateNestedValue(obj, pathStr, value) {
+  const keys = pathStr.split('.');
   const result = { ...obj };
   let current = result;
-  
   for (let i = 0; i < keys.length - 1; i++) {
     const key = keys[i];
-    if (!current[key] || typeof current[key] !== 'object') {
-      current[key] = {};
-    }
+    if (!current[key] || typeof current[key] !== 'object') current[key] = {};
     current = current[key];
   }
-  
   current[keys[keys.length - 1]] = value;
   return result;
 }
@@ -83,26 +47,12 @@ export default {
           
           const normalizedPath = path.normalize(filePath);
           if (normalizedPath.includes('..')) {
-            return res.status(403).json({ 
-              success: false, 
-              message: '非法路径访问' 
-            });
-          }
-          
-          try {
-            await fs.access(normalizedPath);
-          } catch {
-            return res.status(404).json({ 
-              success: false, 
-              message: '文件不存在' 
-            });
+            return res.status(403).json({ success: false, message: '非法路径访问' });
           }
 
           const content = await fs.readFile(normalizedPath, encoding);
           const ext = path.extname(normalizedPath).toLowerCase();
-          
-          let data;
-          let fileType;
+          let data, fileType;
           if (ext === '.json') {
             data = JSON.parse(content);
             fileType = 'json';
@@ -118,36 +68,21 @@ export default {
               fileType = 'text';
             }
           }
-          
           const stats = await fs.stat(normalizedPath);
-          
-          res.json({ 
-            success: true, 
+          res.json({
+            success: true,
             data,
-            metadata: {
-              path: normalizedPath,
-              type: fileType,
-              size: stats.size,
-              modified: stats.mtime,
-              created: stats.birthtime
-            }
+            metadata: { path: normalizedPath, type: fileType, size: stats.size, modified: stats.mtime, created: stats.birthtime }
           });
         } catch (error) {
           logger.error('[Data Editor API] 文件读取失败', error);
-          
-          if (error instanceof SyntaxError || error.name === 'YAMLParseError') {
-            return res.status(400).json({ 
-              success: false, 
-              message: '文件格式错误',
-              error: error.message 
-            });
+          if (error.code === 'ENOENT') {
+            return res.status(404).json({ success: false, message: '文件不存在' });
           }
-          
-          res.status(500).json({ 
-            success: false, 
-            message: '文件读取失败',
-            error: error.message 
-          });
+          if (error instanceof SyntaxError || error.name === 'YAMLParseError') {
+            return res.status(400).json({ success: false, message: '文件格式错误', error: error.message });
+          }
+          res.status(500).json({ success: false, message: '文件读取失败', error: error.message });
         }
       }
     },
@@ -224,11 +159,9 @@ export default {
 
             switch (operation) {
               case 'merge':
-                if (isObject(existingData) && isObject(data)) {
-                  finalData = deepMerge(existingData, data);
-                } else {
-                  finalData = data;
-                }
+                finalData = BotUtil.isObject(existingData) && BotUtil.isObject(data)
+                  ? BotUtil.deepMerge({ ...existingData }, data)
+                  : data;
                 break;
                 
               case 'append':
@@ -243,11 +176,9 @@ export default {
                 break;
                 
               case 'update':
-                if (req.body.path && isObject(existingData)) {
-                  finalData = updateNestedValue(existingData, req.body.path, data);
-                } else {
-                  finalData = data;
-                }
+                finalData = req.body.path && BotUtil.isObject(existingData)
+                  ? updateNestedValue(existingData, req.body.path, data)
+                  : data;
                 break;
             }
           }
@@ -258,7 +189,7 @@ export default {
             await fs.copyFile(normalizedPath, backupPath);
           }
 
-          await FileUtils.ensureDir(path.dirname(normalizedPath));
+          await BotUtil.mkdir(path.dirname(normalizedPath));
 
           let content;
           if (fileFormat === 'json') {
