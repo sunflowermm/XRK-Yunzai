@@ -1325,7 +1325,7 @@ export default class ChatStream extends AIStream {
     
     let embeddingHint = '';
     if (this.embeddingConfig?.enabled) {
-      embeddingHint = '\n💡 系统会自动检索相关历史对话（通过子服务端向量服务）\n';
+      embeddingHint = '\n💡 系统会自动检索相关历史对话\n';
     }
 
     const botName = e.bot?.nickname || e.bot?.info?.nickname || e.bot?.name || 'Bot';

@@ -91,7 +91,7 @@ class App {
     this._ttsLastReportedActiveSources = -1;
     this._configState = null;
     this._schemaCache = {};
-    this._llmOptions = { profiles: [], defaultProfile: '' };
+    this._llmOptions = { profiles: [], workflows: [] };
     this._chatMode = localStorage.getItem('chatMode') || App.CHAT_MODE.EVENT;
     const savedWorkflows = localStorage.getItem('chatWorkflows');
     this._chatSettings = {
@@ -414,7 +414,6 @@ class App {
       const data = json.data ?? json;
       this._llmOptions = {
         enabled: data.enabled !== false,
-        defaultProfile: data.defaultProfile ?? '',
         profiles: data.profiles ?? [],
         workflows: data.workflows ?? []
       };
@@ -2025,8 +2024,10 @@ class App {
         <div class="ai-settings-section">
           <label class="ai-settings-label">运营商</label>
           <select id="aiProviderSelect" class="ai-settings-select">
-            <option value="">默认</option>
-            ${providers.map(p => `<option value="${p.value}" ${this._chatSettings.provider === p.value ? 'selected' : ''}>${p.label}</option>`).join('')}
+            ${(function() {
+              const effective = this._chatSettings.provider || this._llmOptions?.profiles?.[0]?.key || '';
+              return providers.map(p => `<option value="${p.value}" ${p.value === effective ? 'selected' : ''}>${p.label}</option>`).join('');
+            }).call(this)}
           </select>
         </div>
         <div class="ai-settings-section">
@@ -3659,7 +3660,7 @@ class App {
       }
 
       const apiKey = localStorage.getItem('apiKey') || BotUtil.apiKey || '';
-      const provider = this._chatSettings.provider || '';
+      const provider = this._chatSettings.provider || this._llmOptions?.profiles?.[0]?.key || '';
       const persona = this._chatSettings.persona || '';
 
       // 构造消息列表：历史 + 本次用户输入（可选人设）
@@ -3682,7 +3683,7 @@ class App {
         finalMessages.unshift({ role: 'system', content: mermaidRules });
       }
 
-      // 如果用户选择了provider，使用用户选择的；否则不传model，让后端使用aistream.yaml配置的默认Provider
+      // 使用当前选择的运营商（未选时用列表第一个）
       const requestBody = {
         messages: finalMessages,
         stream: true,
@@ -3768,7 +3769,7 @@ class App {
       });
 
       const apiKey = localStorage.getItem('apiKey') || BotUtil.apiKey || '';
-      const provider = this._chatSettings.provider || this._llmOptions?.defaultProfile || '';
+      const provider = this._chatSettings.provider || this._llmOptions?.profiles?.[0]?.key || '';
 
       const requestBody = {
         messages,

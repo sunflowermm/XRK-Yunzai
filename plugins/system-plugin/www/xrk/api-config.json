@@ -292,7 +292,7 @@
           "method": "POST",
           "path": "/api/v3/chat/completions",
           "title": "OpenAI 兼容接口",
-          "description": "OpenAI Chat Completions 兼容接口（用于子服务端调用）",
+          "description": "OpenAI Chat Completions 兼容接口",
           "bodyParams": [
             {
               "name": "apiKey",

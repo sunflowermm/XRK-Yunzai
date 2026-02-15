@@ -1217,13 +1217,6 @@ export default class SystemConfig extends ConfigBase {
               default: 'plugins/stream',
               component: 'Input'
             },
-            defaultProvider: {
-              type: 'string',
-              label: '默认 LLM 运营商',
-              description: '留空则使用第一个启用的',
-              default: '',
-              component: 'Input'
-            },
             global: {
               type: 'object',
               label: '全局设置',
@@ -1498,37 +1491,7 @@ export default class SystemConfig extends ConfigBase {
                   }
                 }
               }
-            },
-            subserver: {
-              type: 'object',
-              label: 'Python子服务端配置',
-              description: 'Python子服务端地址配置，提供向量化、数据处理等服务',
-              component: 'SubForm',
-              fields: {
-                host: {
-                  type: 'string',
-                  label: '服务地址',
-                  component: 'Input',
-                  default: '127.0.0.1',
-                  placeholder: '127.0.0.1'
-                },
-                port: {
-                  type: 'number',
-                  label: '服务端口',
-                  component: 'InputNumber',
-                  default: 8000,
-                  min: 1024,
-                  max: 65535
-                },
-                timeout: {
-                  type: 'number',
-                  label: '请求超时（毫秒）',
-                  component: 'InputNumber',
-                  default: 30000,
-                  min: 1000
-                }
-              }
-            },
+            }
           }
         }
       },

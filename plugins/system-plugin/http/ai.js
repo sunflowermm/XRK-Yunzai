@@ -400,11 +400,10 @@ async function handleChatCompletionsV3(req, res, Bot) {
 
 async function handleModels(req, res, Bot) {
   const providers = LLMFactory.listProviders();
-  const defaultProvider = LLMFactory.getDefaultProvider();
   const format = (req.query.format || '').toLowerCase();
 
   if (format === 'openai' || req.path === '/api/v3/models') {
-    const list = providers.length ? providers : (defaultProvider ? [defaultProvider] : []);
+    const list = providers.length ? providers : [];
     const now = Math.floor(Date.now() / 1000);
     return res.json({
       object: 'list',
@@ -459,8 +458,6 @@ async function handleModels(req, res, Bot) {
     success: true,
     data: {
       enabled: aistreamConfig.enabled !== false,
-      defaultProfile: defaultProvider,
-      defaultWorkflow: workflows[0] && workflows[0].key || null,
       persona: aistreamConfig.persona || '',
       profiles,
       workflows

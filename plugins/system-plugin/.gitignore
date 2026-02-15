@@ -19,6 +19,7 @@ stream/*
 !stream/memory.js
 !stream/database.js
 !stream/tools.js
+!stream/desktop.js
 
 # http/
 http/*
