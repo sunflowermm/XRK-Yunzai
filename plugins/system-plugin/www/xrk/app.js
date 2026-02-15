@@ -2373,6 +2373,21 @@ class App {
     });
   }
 
+  /** 从 segment 安全取文本，避免 [object Object] */
+  _segmentText(seg) {
+    if (seg == null) return '';
+    if (typeof seg === 'string') return seg.trim();
+    if (typeof seg !== 'object') return String(seg);
+    const t = seg.text ?? seg.data?.text ?? seg.content;
+    return t != null ? String(t).trim() : '';
+  }
+
+  /** 从 segment 安全取媒体 URL，仅字符串且非 [object Object] 才使用 */
+  _segmentMediaUrl(seg) {
+    const u = seg?.url ?? seg?.file ?? seg?.data?.file;
+    return (typeof u === 'string' && u && !u.includes('object')) ? u : '';
+  }
+
   _loadChatHistory(mode) {
     const key = this._getHistoryStorageKey(mode);
     let parsed;
@@ -2770,28 +2785,23 @@ class App {
     
     segments.forEach(seg => {
       if (typeof seg === 'string') {
-        // 纯文本
         textParts.push(seg);
         allText.push(seg);
-      } else if (seg.type === 'text') {
-        // 文本段：device.js 已标准化为 seg.text
-        const text = seg.text ?? '';
-        if (text.trim()) {
+      } else if (seg?.type === 'text') {
+        const text = this._segmentText(seg);
+        if (text) {
           textParts.push(text);
           allText.push(text);
         }
-      } else if (seg.type === 'image') {
-        // 图片段：先渲染之前的文本，再渲染图片
+      } else if (seg?.type === 'image') {
         if (textParts.length > 0) {
           const textDiv = document.createElement('div');
-          // 统一“MD 显示协议”
           textDiv.className = 'chat-text chat-markdown';
           textDiv.innerHTML = this.renderMarkdown(textParts.join(''));
           div.appendChild(textDiv);
           textParts.length = 0;
         }
-        
-        const url = seg.url;
+        const url = this._segmentMediaUrl(seg);
         if (url) {
           const imgContainer = document.createElement('div');
           imgContainer.className = 'chat-image-container';
@@ -2815,8 +2825,7 @@ class App {
           imgContainer.appendChild(img);
           div.appendChild(imgContainer);
         }
-      } else if (seg.type === 'video') {
-        // 视频段：先渲染之前的文本，再渲染视频
+      } else if (seg?.type === 'video') {
         if (textParts.length > 0) {
           const textDiv = document.createElement('div');
           textDiv.className = 'chat-text chat-markdown';
@@ -2824,8 +2833,7 @@ class App {
           div.appendChild(textDiv);
           textParts.length = 0;
         }
-        
-        const url = seg.url;
+        const url = this._segmentMediaUrl(seg);
         if (url) {
           const videoContainer = document.createElement('div');
           videoContainer.className = 'chat-video-container';
@@ -2842,7 +2850,7 @@ class App {
           videoContainer.appendChild(video);
           div.appendChild(videoContainer);
         }
-      } else if (seg.type === 'record') {
+      } else if (seg?.type === 'record') {
         if (textParts.length > 0) {
           const textDiv = document.createElement('div');
           textDiv.className = 'chat-text chat-markdown';
@@ -2850,8 +2858,7 @@ class App {
           div.appendChild(textDiv);
           textParts.length = 0;
         }
-        
-        const url = seg.url || seg.file || seg.data?.file;
+        const url = this._segmentMediaUrl(seg);
         if (url) {
           const audioContainer = document.createElement('div');
           audioContainer.className = 'chat-audio-container';
@@ -7353,85 +7360,50 @@ class App {
         break;
       }
       case 'reply': {
-        // 处理 segments：device.js 已标准化格式
         const segments = Array.isArray(data.segments) ? data.segments : [];
-        if (segments.length === 0 && data.text) {
-          segments.push({ type: 'text', text: data.text });
-        }
-        
+        if (segments.length === 0 && data.text) segments.push({ type: 'text', text: String(data.text) });
         this.clearChatStreamState();
-        
-        // 有 title/description 时显示为聊天记录，否则按顺序渲染 segments
+
         if (data.title || data.description) {
           const messages = segments
-            .filter(seg => typeof seg === 'string' || seg.type === 'text' || seg.type === 'raw')
-            .map(seg => typeof seg === 'string' ? seg : (seg.text || seg.data?.text || ''))
-            .filter(text => text.trim());
-          
-          if (messages.length > 0) {
-            this.appendChatRecord(messages, data.title || '', data.description || '', true);
-          }
-          
-          // 媒体文件单独显示（图片/视频/音频）
-          segments.filter(s => ['image', 'video', 'record'].includes(s.type) && s.url).forEach(seg => {
-            if (seg.type === 'image') {
-              this.appendImageMessage(seg.url, true);
-            } else {
-              this.appendSegments([seg], true);
-            }
-          });
+            .filter(seg => typeof seg === 'string' || seg?.type === 'text' || seg?.type === 'raw')
+            .map(seg => this._segmentText(seg))
+            .filter(text => text.length > 0);
+          if (messages.length > 0) this.appendChatRecord(messages, String(data.title || ''), String(data.description || ''), true);
+
+          segments
+            .filter(s => s && ['image', 'video', 'record'].includes(s.type) && this._segmentMediaUrl(s))
+            .forEach(seg => {
+              const url = this._segmentMediaUrl(seg);
+              if (seg.type === 'image') this.appendImageMessage(url, true);
+              else this.appendSegments([{ ...seg, url }], true);
+            });
         } else {
           this.appendSegments(segments, true, 'assistant');
         }
         break;
       }
       case 'forward': {
-        // 处理转发消息（聊天记录）
         this.clearChatStreamState();
-        
-        if (data.messages && Array.isArray(data.messages) && data.messages.length > 0) {
-          // 提取消息内容：支持node格式和普通格式
-          const messages = data.messages.map((msg) => {
-            // node格式：从content数组中提取文本
-            if (msg.type === 'node' && msg.data) {
-              if (msg.data.content && Array.isArray(msg.data.content)) {
-                const texts = msg.data.content
-                  .filter(c => c && c.type === 'text' && c.data && c.data.text)
-                  .map(c => c.data.text)
-                  .filter(text => text && text.trim());
-                if (texts.length > 0) {
-                  return texts.join('\n');
-                }
-                const firstContent = msg.data.content[0];
-                if (firstContent && firstContent.data && firstContent.data.text) {
-                  return firstContent.data.text;
-                }
-              }
-              // 降级处理
-              if (typeof msg.data.content === 'string') {
-                return msg.data.content;
-              }
-              if (msg.data.message) {
-                return typeof msg.data.message === 'string' ? msg.data.message : String(msg.data.message);
-              }
-              return '';
+        const rawList = data.messages ?? data.data;
+        if (Array.isArray(rawList) && rawList.length > 0) {
+          const messages = rawList.map((msg) => {
+            const node = msg?.data ?? msg;
+            const content = node?.message ?? node?.content ?? msg?.message ?? msg?.content;
+            if (typeof content === 'string') return content.trim();
+            if (Array.isArray(content)) {
+              const texts = content
+                .filter(c => c?.type === 'text' && (c?.text ?? c?.data?.text))
+                .map(c => String(c?.text ?? c?.data?.text ?? '').trim())
+                .filter(Boolean);
+              if (texts.length) return texts.join('\n');
             }
-            // 普通格式：直接提取文本
-            if (typeof msg === 'string') {
-              return msg;
+            if (content && typeof content === 'object' && (content.text != null || content.data?.text != null)) {
+              return String(content.text ?? content.data?.text ?? '').trim();
             }
-            if (msg.message) {
-              return typeof msg.message === 'string' ? msg.message : String(msg.message);
-            }
-            if (msg.content) {
-              return typeof msg.content === 'string' ? msg.content : String(msg.content);
-            }
-            return String(msg);
-          }).filter(text => text && text.trim());
-          
-          if (messages.length > 0) {
-            this.appendChatRecord(messages, data.title || '', data.description || '', true);
-          }
+            return '';
+          }).filter(Boolean);
+          if (messages.length > 0) this.appendChatRecord(messages, String(data.title || ''), String(data.description || ''), true);
         }
         break;
       }

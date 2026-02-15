@@ -1,7 +1,3 @@
-import { createRequire } from 'module';
-
-const require = createRequire(import.meta.url);
-
 /**
  * 重启与关机插件
  * 提供机器人的重启、关机和开机功能
@@ -23,7 +19,6 @@ export class Restart extends plugin {
     if (e) this.e = e;
     this.key = 'Yz:restart';
     this.shutdownKey = 'Yz:shutdown';
-    this.isServerMode = process.argv.includes('server');
   }
 
   /**
@@ -36,23 +31,21 @@ export class Restart extends plugin {
 
     await this.e.reply('开始执行重启，请稍等...');
     
-    // 保存重启信息，使用高精度时间戳
+    const adapter = this.e?.adapter ?? (this.e?.post_type === 'device' ? 'device' : '');
     const data = JSON.stringify({
       uin: currentUin,
       isGroup: !!this.e.isGroup,
       id: this.e.isGroup ? this.e.group_id : this.e.user_id,
-      time: Date.now(), // 使用毫秒级时间戳
+      time: Date.now(),
       user_id: this.e.user_id,
+      adapter,
       sender: {
         card: this.e.sender?.card || this.e.sender?.nickname,
         nickname: this.e.sender?.nickname
       }
     });
 
-    // 根据currentUin保存重启信息
-    const saveKey = currentUin ? `${this.key}:${currentUin}` : this.key;
-    
-    // 设置5分钟过期时间，防止重启失败后残留数据
+    const saveKey = `${this.key}:${currentUin}`;
     await redis.set(saveKey, data, { EX: 300 });
     
     logger.mark(`[重启] 保存重启信息到 ${saveKey}`);

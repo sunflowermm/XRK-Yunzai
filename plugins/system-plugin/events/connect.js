@@ -1,12 +1,17 @@
 import EventListener from "../../../lib/listener/listener.js"
 import cfg from "../../../lib/config/config.js"
 import Renderer from "../../../lib/renderer/loader.js"
+import { toBuffer } from "../../../lib/renderer/screenshot-utils.js"
 import fs from 'fs/promises'
 import path from 'path'
 
 const RESTART_KEY = 'Yz:restart'
 
 export default class connectEvent extends EventListener {
+  static eventSubscribe = {
+    connect: async function (e) { await new this().execute(e) }
+  }
+
   constructor() {
     super({ event: "connect" })
     this.dataDir = path.join(process.cwd(), 'data')
@@ -16,17 +21,20 @@ export default class connectEvent extends EventListener {
   async execute(e) {
     if (!Bot.uin.includes(e.self_id)) Bot.uin.push(e.self_id)
     const currentUin = e?.self_id || Bot.uin[0]
-    if (!currentUin) return logger.debug('无法获取机器人QQ号')
+    if (!currentUin) return
 
     const restart = await this.getRestartInfo(currentUin)
-    if (restart) await this.handleRestart(currentUin, restart, e)
+    if (restart && (!restart.adapter || restart.adapter === e.adapter)) {
+      await this.handleRestart(currentUin, restart, e)
+    }
     await this.handleNormalStart(e)
   }
 
   async getRestartInfo(uin) {
+    const data = await redis.get(`${RESTART_KEY}:${uin}`)
+    if (!data) return null
     try {
-      const data = await redis.get(`${RESTART_KEY}:${uin}`)
-      return data ? JSON.parse(data) : null
+      return JSON.parse(data)
     } catch {
       return null
     }
@@ -42,7 +50,7 @@ export default class connectEvent extends EventListener {
   }
 
   async handleRestart(currentUin, restart, e) {
-    const time = ((Date.now() - (restart.time || Date.now())) / 1000).toFixed(1)
+    const time = ((Date.now() - restart.time) / 1000).toFixed(1)
     const target = (e.adapter === 'device' && typeof e.sendReply === 'function')
       ? { sendMsg: (content) => Promise.resolve(e.sendReply(content)) }
       : (restart.isGroup ? Bot[currentUin].pickGroup(restart.id) : Bot[currentUin].pickUser(restart.id))
@@ -51,55 +59,37 @@ export default class connectEvent extends EventListener {
     await redis.del(`${RESTART_KEY}:${currentUin}`)
   }
 
-  /**
-   * 使用 renderer 截图 HTML 文件
-   */
+  /** 使用 renderer 截图，返回 Buffer 或路径字符串 */
   async takeScreenshot(htmlPath, name, options = {}) {
+    if (!this.renderer) return false
     try {
-      if (!this.renderer) return false
-      const img = await this.renderer.screenshot(name, {
-        tplFile: htmlPath,
-        saveId: name,
-        ...options
-      })
-      return img || false
-    } catch (error) {
-      logger.error(`截图失败: ${error.message}`)
+      const raw = await this.renderer.screenshot(name, { tplFile: htmlPath, saveId: name, ...options })
+      if (!raw) return false
+      if (Buffer.isBuffer(raw)) return raw
+      const buf = toBuffer(raw)
+      if (buf) return buf
+      if (typeof raw === 'string') return raw
+      return false
+    } catch (err) {
+      logger.error(`[connect] 截图失败: ${err.message}`)
       return false
     }
   }
 
   async sendWelcomeMessage() {
-    try {
-      const htmlPath = await this.generateHTML('welcome', this.getWelcomeHTML())
-      const img = await this.takeScreenshot(htmlPath, 'welcome_message', {
-        width: 520,
-        deviceScaleFactor: 3
-      })
-      if (img) {
-        Bot.sendMasterMsg([segment.image(img)])
-      }
-      this.cleanupFile(htmlPath)
-    } catch (error) {
-      logger.error(`发送欢迎消息失败: ${error.message}`)
-    }
+    const htmlPath = await this.generateHTML('welcome', this.getWelcomeHTML())
+    const img = await this.takeScreenshot(htmlPath, 'welcome_message', { width: 520, deviceScaleFactor: 3 })
+    if (img) Bot.sendMasterMsg([segment.image(img)])
+    this.cleanupFile(htmlPath)
   }
 
   async sendPluginLoadReport(target) {
-    try {
-      const stats = Bot.PluginsLoader?.getPluginStats?.()
-      if (!stats?.plugins?.length) return
-
-      const htmlPath = await this.generateHTML('plugin_load', this.getPluginLoadHTML(stats))
-      const img = await this.takeScreenshot(htmlPath, 'plugin_load_report', {
-        width: 800,
-        deviceScaleFactor: 1.5
-      })
-      if (img) await target.sendMsg([segment.image(img)])
-      this.cleanupFile(htmlPath)
-    } catch (error) {
-      logger.error(`发送插件加载报告失败: ${error.message}`)
-    }
+    const stats = Bot.PluginsLoader?.getPluginStats?.()
+    if (!stats?.plugins?.length) return
+    const htmlPath = await this.generateHTML('plugin_load', this.getPluginLoadHTML(stats))
+    const img = await this.takeScreenshot(htmlPath, 'plugin_load_report', { width: 800, deviceScaleFactor: 1.5 })
+    if (img) await target.sendMsg([segment.image(img)])
+    this.cleanupFile(htmlPath)
   }
 
   async generateHTML(prefix, content) {

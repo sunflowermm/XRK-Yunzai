@@ -16,8 +16,9 @@ const mediaDir = path.join(process.cwd(), 'data', 'media');
  */
 function getBaseUrl(Bot, fallback = '') {
   const u = Bot?.url ?? (typeof Bot?.getServerUrl === 'function' ? Bot.getServerUrl() : null);
-  const base = (u && String(u).startsWith('http')) ? String(u).replace(/\/$/, '') : '';
-  return base || (fallback && String(fallback).startsWith('http') ? String(fallback).replace(/\/$/, '') : '');
+  if (u && String(u).startsWith('http')) return String(u).replace(/\/$/, '');
+  if (fallback && String(fallback).startsWith('http')) return String(fallback).replace(/\/$/, '');
+  return '';
 }
 
 /**
@@ -25,7 +26,7 @@ function getBaseUrl(Bot, fallback = '') {
  * 优先 Origin，否则用 Host + 协议拼装，支持反向代理 X-Forwarded-* 头
  */
 function getBaseUrlFromRequest(req) {
-  if (!req || !req.headers) return '';
+  if (!req?.headers) return '';
   const origin = req.headers.origin || req.headers.Origin;
   if (origin && /^https?:\/\//i.test(origin)) return origin.replace(/\/$/, '');
   const host = req.headers.host || req.headers['x-forwarded-host'];
@@ -39,15 +40,49 @@ const deviceConnections = new Map();
 
 function send(conn, obj) {
   try {
-    if (conn && typeof conn.send === 'function') conn.send(JSON.stringify(obj));
+    if (conn?.send) conn.send(JSON.stringify(obj));
   } catch (e) {
     BotUtil.makeLog('warn', `[Device API] 发送失败: ${e.message}`, 'DeviceAPI');
   }
 }
 
+/** 从单条消息中提取纯文本（支持 string、segment 数组、{ message }、{ content }） */
+function extractTextFromMessage(msg) {
+  if (msg == null) return '';
+  if (typeof msg === 'string') return msg.trim();
+  if (Array.isArray(msg)) {
+    return msg.map(m => (m?.type === 'text' && m?.text != null ? m.text : (m?.data?.text ?? ''))).filter(Boolean).join('\n');
+  }
+  const raw = msg.message ?? msg.content ?? msg.text ?? msg.data?.content;
+  if (typeof raw === 'string') return raw.trim();
+  if (Array.isArray(raw)) return raw.map(m => (m?.type === 'text' && m?.text != null ? m.text : (m?.data?.text ?? ''))).filter(Boolean).join('\n');
+  if (raw?.text != null) return String(raw.text).trim();
+  return '';
+}
+
+/**
+ * 将 forward/node 转为 { title, description, segments }，供 Web 端以聊天记录形式展示
+ * 兼容：{ type:'node', data: [...] }、{ type:'forward', messages: [...] }；首条作为 title，其余为 segments
+ */
+function forwardToSegments(content) {
+  if (!content || typeof content !== 'object') return null;
+  const data = content.data ?? content.messages;
+  if (!Array.isArray(data) || !data.length) return null;
+  const texts = [];
+  for (const item of data) {
+    const node = item?.data ?? item;
+    const text = extractTextFromMessage(node?.message ?? node?.content ?? item?.message ?? item);
+    if (text) texts.push(text);
+  }
+  if (texts.length === 0) return null;
+  const title = content.title ?? content.description ?? texts[0] ?? '聊天记录';
+  const segments = texts.map(t => ({ type: 'text', text: t }));
+  return { title, description: '', segments };
+}
+
 /**
  * 标准化回复内容为 segments
- * 兼容：字符串、数组、{ segments }、{ title, description, segments }；
+ * 兼容：字符串、数组、{ segments }、{ title, description, segments }、forward/node；
  * image/video/record/file 支持 url / file / data（Buffer 或类 Buffer）
  */
 function normalizeReplySegments(input) {
@@ -55,20 +90,27 @@ function normalizeReplySegments(input) {
   if (Array.isArray(input)) {
     return input.map(seg => {
       if (typeof seg === 'string') return { type: 'text', text: seg };
+      if (!seg || typeof seg !== 'object') return { type: 'text', text: '' };
       const isMedia = seg.type && ['image', 'video', 'record', 'file'].includes(seg.type);
       const url = seg.url || (isMedia && (seg.file ?? seg.data));
-      return { type: seg.type || 'text', text: seg.text || '', url, name: seg.name };
-    }).filter(seg => seg.type !== 'text' || seg.text);
+      const text = seg.text != null ? String(seg.text) : (seg.data?.text != null ? String(seg.data.text) : '');
+      return { type: seg.type || 'text', text, url, name: seg.name };
+    }).filter(seg => seg.type !== 'text' || (seg.text != null && String(seg.text).trim()));
   }
   if (typeof input === 'object' && Array.isArray(input.segments)) return normalizeReplySegments(input.segments);
   if (typeof input === 'object' && input.type && ['text', 'image', 'video', 'record', 'file'].includes(input.type)) {
     const url = input.url || input.file || input.data;
-    return [url ? { type: input.type, url, name: input.name } : { type: 'text', text: input.text || '' }];
+    return [url ? { type: input.type, url, name: input.name } : { type: 'text', text: input.text != null ? String(input.text) : '' }];
   }
-  return [{ type: 'text', text: String(input) }];
+  if (typeof input === 'object' && (input.type === 'node' || input.type === 'forward' || Array.isArray(input.data) || Array.isArray(input.messages))) {
+    const converted = forwardToSegments(input);
+    if (converted) return converted.segments;
+  }
+  if (typeof input === 'string') return [{ type: 'text', text: input }];
+  return [{ type: 'text', text: '' }];
 }
 
-/** 解析 reply 入参：若为 { title, description, segments } 则返回该对象（segments 已标准化）；否则返回 { segments } */
+/** 解析 reply 入参：若为 { title, description, segments } 或 forward/node 则返回统一结构；否则返回 { segments } */
 function parseReplyPayload(content) {
   if (content && typeof content === 'object' && Array.isArray(content.segments)) {
     return {
@@ -76,6 +118,10 @@ function parseReplyPayload(content) {
       description: content.description ?? '',
       segments: normalizeReplySegments(content.segments)
     };
+  }
+  if (content && typeof content === 'object' && (content.type === 'node' || content.type === 'forward' || Array.isArray(content.data) || Array.isArray(content.messages))) {
+    const converted = forwardToSegments(content);
+    if (converted) return converted;
   }
   return { title: '', description: '', segments: normalizeReplySegments(content) };
 }
@@ -92,10 +138,34 @@ function extFromMime(mime) {
 }
 
 /**
- * 将本地路径/ Buffer / data URL 转为 Web 可访问的持久化 URL（写入 data/media）
- * @param {Array} segments - 标准化后的 segments
- * @param {Object} Bot - Bot 实例
- * @param {string} [baseUrlOverride] - 优先使用的 baseUrl（如设备注册时从请求头解析的 origin），保证 Web 端图片能加载
+ * 将任意截图/媒体来源统一为 Buffer 或路径字符串（与 lib/renderer/screenshot-utils 逻辑一致，避免「无法解析媒体来源」）
+ */
+function normalizeMediaSource(url) {
+  if (url == null) return null;
+  if (Buffer.isBuffer(url)) return url;
+  if (typeof url === 'string') return url;
+  if (typeof url !== 'object') return null;
+  if (url.buffer != null && Buffer.isBuffer(url.buffer)) return url.buffer;
+  if (url.buffer instanceof ArrayBuffer) return Buffer.from(url.buffer);
+  if (ArrayBuffer.isView(url) || url instanceof ArrayBuffer) return Buffer.from(url);
+  if (url.type === 'Buffer' && Array.isArray(url.data)) return Buffer.from(url.data);
+  if (url.data != null) {
+    const d = url.data;
+    if (Buffer.isBuffer(d)) return d;
+    if (Array.isArray(d)) return Buffer.from(d);
+    if (d instanceof ArrayBuffer || ArrayBuffer.isView(d)) return Buffer.from(d);
+  }
+  const pathStr = url.path ?? url.file;
+  if (typeof pathStr === 'string' && pathStr) return pathStr;
+  for (const v of Object.values(url)) {
+    if (Buffer.isBuffer(v)) return v;
+    if (v?.buffer != null && Buffer.isBuffer(v.buffer)) return Buffer.from(v.buffer);
+  }
+  return null;
+}
+
+/**
+ * 将本地路径/ Buffer / 对象媒体 转为 Web 可访问的持久化 URL（写入 data/media）
  */
 async function segmentsToWebUrls(segments, Bot, baseUrlOverride) {
   const baseUrl = baseUrlOverride || getBaseUrl(Bot);
@@ -107,43 +177,45 @@ async function segmentsToWebUrls(segments, Bot, baseUrlOverride) {
   }
   for (const seg of segments) {
     const s = { ...seg };
-    const url = s.url;
-    const isMedia = url && ['image', 'video', 'record', 'file'].includes(s.type);
-    const isAlreadyWeb = url && /^https?:\/\//i.test(String(url));
+    const raw = s.url;
+    const isMedia = raw != null && ['image', 'video', 'record', 'file'].includes(s.type);
+    const isAlreadyWeb = typeof raw === 'string' && /^https?:\/\//i.test(raw);
     if (isMedia && !isAlreadyWeb) {
+      const url = normalizeMediaSource(raw);
+      if (url == null) {
+        BotUtil.makeLog('warn', `[Device] 无法解析媒体来源，已跳过`, 'DeviceAPI');
+        continue;
+      }
       try {
         let buf;
         let mime = s.type === 'image' ? 'image/png' : s.type === 'video' ? 'video/mp4' : s.type === 'record' ? 'audio/mpeg' : 'application/octet-stream';
-        if (Buffer.isBuffer(url) || (url && typeof url === 'object' && typeof url.length === 'number')) {
-          buf = Buffer.isBuffer(url) ? url : Buffer.from(url);
-          const sig = buf.slice(0, 12);
-          if (s.type === 'image' && buf.length >= 2) {
+        if (Buffer.isBuffer(url)) {
+          buf = url;
+          if (buf.length >= 2 && s.type === 'image') {
+            const sig = buf.slice(0, 12);
             if (sig[0] === 0xff && sig[1] === 0xd8) mime = 'image/jpeg';
             else if (sig[0] === 0x89 && sig[1] === 0x50) mime = 'image/png';
             else if (sig[0] === 0x52 && sig[2] === 0x49) mime = 'image/webp';
           }
         } else {
-          buf = await fs.readFile(String(url));
-          if (s.type === 'image') mime = mimeFromPath(String(url));
+          buf = await fs.readFile(url);
+          if (s.type === 'image') mime = mimeFromPath(url);
         }
         const filename = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}${extFromMime(mime)}`;
-        const targetPath = path.join(mediaDir, filename);
-        await fs.writeFile(targetPath, buf);
+        await fs.writeFile(path.join(mediaDir, filename), buf);
         s.url = baseUrl ? `${baseUrl}/media/${filename}` : `/media/${filename}`;
-        BotUtil.makeLog('debug', `[Device] 媒体落盘: type=${s.type} path=${filename}`, 'DeviceAPI');
       } catch (e) {
-        BotUtil.makeLog('warn', `[Device] 无法转媒体: ${e.message} urlType=${typeof url}`, 'DeviceAPI');
+        BotUtil.makeLog('warn', `[Device] 无法转媒体: ${e.message}`, 'DeviceAPI');
+        continue;
       }
-    } else if (isMedia && url && /^data:/i.test(String(url))) {
-      const dataUrl = String(url);
-      const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+    } else if (isMedia && typeof raw === 'string' && /^data:/i.test(raw)) {
+      const match = raw.match(/^data:([^;]+);base64,(.+)$/);
       if (match) {
         try {
           const mime = match[1];
           const buf = Buffer.from(match[2], 'base64');
           const filename = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}${extFromMime(mime)}`;
-          const targetPath = path.join(mediaDir, filename);
-          await fs.writeFile(targetPath, buf);
+          await fs.writeFile(path.join(mediaDir, filename), buf);
           s.url = baseUrl ? `${baseUrl}/media/${filename}` : `/media/${filename}`;
         } catch (e) {
           BotUtil.makeLog('warn', `[Device] data URL 落盘失败: ${e.message}`, 'DeviceAPI');
@@ -162,8 +234,11 @@ async function segmentsToWebUrls(segments, Bot, baseUrlOverride) {
 async function buildReplyPayload(content, deviceId, Bot) {
   const { title, description, segments } = parseReplyPayload(content);
   const device = deviceStore.get(deviceId);
-  const baseUrl = (device && device.baseUrl) ? device.baseUrl : getBaseUrl(Bot);
-  const webSegments = await segmentsToWebUrls(segments, Bot, baseUrl);
+  const baseUrl = device?.baseUrl || getBaseUrl(Bot);
+  let webSegments = await segmentsToWebUrls(segments, Bot, baseUrl);
+  const isMedia = t => ['image', 'video', 'record', 'file'].includes(t);
+  webSegments = webSegments.filter(s => s.type !== 'text' || (s.text != null && String(s.text).trim()));
+  webSegments = webSegments.filter(s => !isMedia(s.type) || (typeof s.url === 'string' && s.url));
   const textOut = webSegments.map(s => (s.type === 'text' ? s.text : '')).filter(Boolean).join('\n');
   const payload = {
     type: 'reply',
@@ -171,7 +246,7 @@ async function buildReplyPayload(content, deviceId, Bot) {
     timestamp: Date.now(),
     message_id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
     text: textOut,
-    segments: webSegments.length ? webSegments : [{ type: 'text', text: textOut }]
+    segments: webSegments.length ? webSegments : [{ type: 'text', text: textOut || '' }]
   };
   if (title) payload.title = title;
   if (description) payload.description = description;
@@ -306,12 +381,10 @@ export default {
             deviceStore.set(id, device);
             if (Bot?.bots) Bot.bots[id] = { device_type: 'web', online: true, nickname: name, info: { device_name: name } };
             send(conn, { type: 'register_response', success: true, device: { device_id: id, device_type: device.device_type, device_name: device.device_name } });
-            if (typeof Bot?.em === 'function') {
-              Bot.em('connect.device', { self_id: id, adapter: 'device', device_id: id, sendReply: async (content) => {
-                const payload = await buildReplyPayload(content, id, Bot);
-                send(conn, payload);
-              } });
-            }
+            Bot.em('connect.device', { self_id: id, adapter: 'device', device_id: id, sendReply: async (content) => {
+              const payload = await buildReplyPayload(content, id, Bot);
+              send(conn, payload);
+            } });
             return;
           }
 
