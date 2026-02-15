@@ -2519,7 +2519,7 @@ class App {
     div.appendChild(contentDiv);
     
     if (mcpTools && Array.isArray(mcpTools) && mcpTools.length > 0) {
-      this._addMCPToolsInfo(div, mcpTools);
+      this._addToolBlocks(div, mcpTools);
     }
     
     // Voice 模式也需要基础操作（复制/撤回），体验保持一致
@@ -2622,81 +2622,38 @@ class App {
     }
   }
   
-  _addMCPToolsInfo(msgElement, mcpTools) {
-    if (!msgElement || !Array.isArray(mcpTools) || mcpTools.length === 0) return;
-    
-    if (msgElement.querySelector('.chat-mcp-tools')) {
-      return;
-    }
-    
-    const mcpContainer = document.createElement('div');
-    mcpContainer.className = 'chat-mcp-tools';
-    
-    const header = document.createElement('div');
-    header.className = 'chat-mcp-header';
-    header.innerHTML = `<span class="chat-mcp-icon">🔧</span><span class="chat-mcp-title">使用了 ${mcpTools.length} 个 MCP 工具</span><button class="chat-mcp-toggle">展开</button>`;
-    
-    const content = document.createElement('div');
-    content.className = 'chat-mcp-content';
-    content.style.display = 'none';
-    
-    mcpTools.forEach((tool, index) => {
-      const toolItem = document.createElement('div');
-      toolItem.className = 'chat-mcp-tool-item';
-      
-      const toolName = tool.name || tool.function?.name || `工具 ${index + 1}`;
-      const toolArgs = tool.arguments || tool.function?.arguments || {};
-      const toolResult = tool.result || tool.content || '';
-      
-      let argsText = '';
-      try {
-        argsText = typeof toolArgs === 'string' ? toolArgs : JSON.stringify(toolArgs, null, 2);
-      } catch {
-        argsText = String(toolArgs);
-      }
-      
+  /** 每个工具一张卡片，标题为工具名，可展开/收起参数与结果 */
+  _addToolBlocks(msgElement, tools) {
+    if (!msgElement || !Array.isArray(tools) || tools.length === 0) return;
+    tools.forEach((tool) => {
+      const name = tool.name || tool.function?.name || '工具';
+      const args = tool.arguments ?? tool.function?.arguments ?? {};
+      const result = tool.result ?? tool.content ?? '';
+      const argsText = typeof args === 'string' ? args : (() => { try { return JSON.stringify(args, null, 2); } catch { return String(args); } })();
       let resultText = '';
       try {
-        if (typeof toolResult === 'string') {
-          try {
-            const parsed = JSON.parse(toolResult);
-            resultText = JSON.stringify(parsed, null, 2);
-          } catch {
-            resultText = toolResult;
-          }
-        } else {
-          resultText = JSON.stringify(toolResult, null, 2);
-        }
+        resultText = typeof result === 'string' ? (() => { try { return JSON.stringify(JSON.parse(result), null, 2); } catch { return result; } })() : JSON.stringify(result, null, 2);
       } catch {
-        resultText = String(toolResult);
+        resultText = String(result);
       }
-      
-      toolItem.innerHTML = `
-        <div class="chat-mcp-tool-name">${this.escapeHtml(toolName)}</div>
-        <div class="chat-mcp-tool-section">
-          <div class="chat-mcp-tool-label">参数:</div>
-          <pre class="chat-mcp-tool-code">${this.escapeHtml(argsText)}</pre>
-        </div>
-        <div class="chat-mcp-tool-section">
-          <div class="chat-mcp-tool-label">结果:</div>
-          <pre class="chat-mcp-tool-code">${this.escapeHtml(resultText)}</pre>
-        </div>
-      `;
-      
-      content.appendChild(toolItem);
+      const block = document.createElement('div');
+      block.className = 'chat-tool-block';
+      const header = document.createElement('div');
+      header.className = 'chat-tool-block-header';
+      header.innerHTML = `<span class="chat-tool-block-icon">🔧</span><span class="chat-tool-block-title">${this.escapeHtml(name)}</span><span class="chat-tool-block-toggle">展开</span>`;
+      const content = document.createElement('div');
+      content.className = 'chat-tool-block-content';
+      content.hidden = true;
+      content.innerHTML = `<div class="chat-tool-block-item-body"><div class="chat-tool-block-item-section"><span class="chat-tool-block-label">参数</span><pre class="chat-tool-block-code">${this.escapeHtml(argsText)}</pre></div><div class="chat-tool-block-item-section"><span class="chat-tool-block-label">结果</span><pre class="chat-tool-block-code">${this.escapeHtml(resultText)}</pre></div></div>`;
+      header.addEventListener('click', () => {
+        const open = content.hidden;
+        content.hidden = !open;
+        header.querySelector('.chat-tool-block-toggle').textContent = open ? '收起' : '展开';
+      });
+      block.appendChild(header);
+      block.appendChild(content);
+      msgElement.appendChild(block);
     });
-    
-    const toggleBtn = header.querySelector('.chat-mcp-toggle');
-    toggleBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const isExpanded = content.style.display !== 'none';
-      content.style.display = isExpanded ? 'none' : 'block';
-      toggleBtn.textContent = isExpanded ? '展开' : '收起';
-    });
-    
-    mcpContainer.appendChild(header);
-    mcpContainer.appendChild(content);
-    msgElement.appendChild(mcpContainer);
   }
   
   
@@ -2761,17 +2718,17 @@ class App {
    * @param {Array} segments - 消息段数组
    * @param {boolean} persist - 是否持久化到历史记录
    * @param {string} role - 'user' | 'assistant'
-   * @param {string} [messageId] - 可选，与 history 一致以便删除时能同步移除
+   * @param {string|{ messageId?: string, mcpTools?: Array }} [messageIdOrOptions] - 可选 messageId，或 { messageId, mcpTools } 以在段落后追加工具卡片
    * @returns {HTMLElement|null} 创建的消息容器
    */
-  appendSegments(segments, persist = true, role = 'assistant', messageId = null) {
+  appendSegments(segments, persist = true, role = 'assistant', messageIdOrOptions = null) {
     if (!segments || segments.length === 0) return null;
-    
+    const opts = typeof messageIdOrOptions === 'object' && messageIdOrOptions !== null ? messageIdOrOptions : null;
+    const messageId = opts ? (opts.messageId || `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`) : (messageIdOrOptions || `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
     const box = document.getElementById('chatMessages');
     if (!box) return null;
-    
     const div = document.createElement('div');
-    const msgId = messageId || `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const msgId = messageId;
     div.id = msgId;
     div.className = `chat-message ${role === 'user' ? 'user' : 'assistant'}${this._isRestoringHistory ? '' : ' message-enter'}`;
     div.dataset.messageId = msgId;
@@ -2877,13 +2834,24 @@ class App {
           div.appendChild(audioContainer);
         }
       } else if (seg.type === 'at') {
-        // @ 提及：显示为特殊样式，添加到文本中
         const qq = seg.qq ?? seg.user_id ?? '';
         const name = seg.name ?? '';
         const atText = name ? `@${name}` : (qq ? `@${qq}` : '@未知用户');
         const atHtml = `<span class="chat-at" data-qq="${this.escapeHtml(String(qq))}" data-name="${this.escapeHtml(name)}">${this.escapeHtml(atText)}</span>`;
         textParts.push(atHtml);
         allText.push(atText);
+      } else if (seg.type === 'tools' && Array.isArray(seg.tools) && seg.tools.length > 0) {
+        if (textParts.length > 0) {
+          const textDiv = document.createElement('div');
+          textDiv.className = 'chat-text chat-markdown';
+          textDiv.innerHTML = this.renderMarkdown(textParts.join(''));
+          div.appendChild(textDiv);
+          textParts.length = 0;
+        }
+        const wrap = document.createElement('div');
+        wrap.className = 'chat-segment chat-segment-tools';
+        this._addToolBlocks(wrap, seg.tools);
+        div.appendChild(wrap);
       } else if (seg.type === 'reply') {
         // 回复：显示为引用样式
         if (textParts.length > 0) {
@@ -3000,49 +2968,33 @@ class App {
         div.appendChild(customDiv);
       }
     });
-    
-    // 渲染剩余的文本
     if (textParts.length > 0) {
       const textDiv = document.createElement('div');
       textDiv.className = 'chat-text';
       textDiv.innerHTML = this.renderMarkdown(textParts.join(''));
       div.appendChild(textDiv);
     }
-    
-    if (div.children.length === 0) return null;
-    
-    // 统一添加消息操作按钮（复制/删除/重新生成）
+    if (div.children.length === 0 && !(opts?.mcpTools?.length)) return null;
+    if (opts?.mcpTools?.length) this._addToolBlocks(div, opts.mcpTools);
     const fullText = allText.join('').trim();
     this._addMessageActions(div, role, fullText, msgId);
-    
     box.appendChild(div);
     this._renderMermaidIn(div);
-    
-    if (!this._isRestoringHistory) {
-    this.scrollToBottom();
-    }
-    
+    if (!this._isRestoringHistory) this.scrollToBottom();
     this._applyMessageEnter(div, persist);
-    
     if (persist) {
       const origin = (typeof window !== 'undefined' && window.location && window.location.origin) ? window.location.origin : '';
       const normalizedSegments = segments.map(s => {
         if (typeof s === 'string') return { type: 'text', text: s };
         const seg = { ...s };
-        if (seg.url && typeof seg.url === 'string' && seg.url.startsWith('/') && !seg.url.startsWith('//') && origin) {
-          seg.url = origin + seg.url;
-        }
+        if (seg.url && typeof seg.url === 'string' && seg.url.startsWith('/') && !seg.url.startsWith('//') && origin) seg.url = origin + seg.url;
         return seg;
       });
-      this._getCurrentChatHistory().push({ 
-        role: role === 'user' ? 'user' : 'assistant', 
-        segments: normalizedSegments,
-        ts: Date.now(),
-        id: msgId
-      });
+      const historyItem = { role: role === 'user' ? 'user' : 'assistant', segments: normalizedSegments, ts: Date.now(), id: msgId };
+      if (opts?.mcpTools?.length) historyItem.mcpTools = opts.mcpTools;
+      this._getCurrentChatHistory().push(historyItem);
       this._saveChatHistory();
     }
-    
     return div;
   }
 
@@ -3528,46 +3480,97 @@ class App {
   }
   
   /**
-   * 更新流式消息的Markdown内容（统一AI和Voice模式的渲染逻辑）
+   * 更新流式消息：支持 segments（文本与工具按顺序穿插）或 (fullText, mcpTools)。
    * @param {HTMLElement} assistantMsg - 消息元素
-   * @param {string} fullText - 完整文本
-   * @param {Array} mcpTools - MCP工具列表（可选）
+   * @param {Array|string} segmentsOrFullText - 若为带 type 的数组则按段渲染，否则为完整文本
+   * @param {Array} [mcpToolsOptional] - 仅当第二参为字符串时，在文末追加的工具列表
    */
-  _updateStreamingMarkdown(assistantMsg, fullText, mcpTools = []) {
-    const contentDiv = document.createElement('div');
-    contentDiv.className = 'chat-content chat-markdown';
-    contentDiv.innerHTML = this.renderMarkdown(fullText);
-    const existingContent = assistantMsg.querySelector('.chat-content');
-    if (existingContent) {
-      existingContent.replaceWith(contentDiv);
-    } else {
-      assistantMsg.innerHTML = '';
-      assistantMsg.appendChild(contentDiv);
-    }
-    if (mcpTools.length > 0) {
-      this._addMCPToolsInfo(assistantMsg, mcpTools);
-    }
+  _updateStreamingMarkdown(assistantMsg, segmentsOrFullText, mcpToolsOptional = []) {
+    const segments = Array.isArray(segmentsOrFullText) && segmentsOrFullText.length > 0 && segmentsOrFullText[0]?.type
+      ? segmentsOrFullText
+      : [{ type: 'text', text: segmentsOrFullText || '' }, ...(mcpToolsOptional?.length ? [{ type: 'tools', tools: mcpToolsOptional }] : [])];
+    assistantMsg.innerHTML = '';
+    segments.forEach((seg) => {
+      if (seg.type === 'text') {
+        if ((seg.text || '').trim()) {
+          const wrap = document.createElement('div');
+          wrap.className = 'chat-segment chat-segment-text';
+          const content = document.createElement('div');
+          content.className = 'chat-content chat-markdown';
+          content.innerHTML = this.renderMarkdown(seg.text);
+          wrap.appendChild(content);
+          assistantMsg.appendChild(wrap);
+        }
+      } else if (seg.type === 'tools' && seg.tools?.length) {
+        const wrap = document.createElement('div');
+        wrap.className = 'chat-segment chat-segment-tools';
+        this._addToolBlocks(wrap, seg.tools);
+        assistantMsg.appendChild(wrap);
+      }
+    });
     this.scrollToBottom(true);
   }
 
   /**
-   * 兼容读取响应体流（支持 getReader 不可用环境，如部分 polyfill）
-   * @param {Response} response - fetch Response
-   * @returns {AsyncGenerator<string>} 解码后的文本块
+   * 解析 v3 SSE 流，产出 segments 以在调用位置穿插展示工具卡片。
+   * @returns {Promise<{ fullText: string, currentText: string, segments: Array, mcpTools: Array, error: Error|null }>}
    */
-  async *_readResponseStream(response) {
-    if (response.body && typeof response.body.getReader === 'function') {
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder('utf-8');
+  async _parseV3Stream(response, callbacks = {}) {
+    const state = { fullText: '', currentText: '', segments: [], mcpTools: [], error: null };
+    const { onDelta, onError } = callbacks;
+    if (!response.ok || !response.body) {
+      state.error = new Error(`HTTP ${response.status}: ${await response.text().catch(() => '')}`);
+      if (onError) onError(state.error);
+      return state;
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        yield decoder.decode(value, { stream: true });
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.trim() || !line.startsWith('data: ')) continue;
+          const data = line.slice(6).trim();
+          if (data === '[DONE]') {
+            state.segments.push({ type: 'text', text: state.currentText });
+            return state;
+          }
+          let json;
+          try {
+            json = JSON.parse(data);
+          } catch {
+            continue;
+          }
+          if (json.error) {
+            state.error = new Error(json.error.message || 'AI 请求失败');
+            if (onError) onError(state.error);
+            return state;
+          }
+          if (json.mcp_tools && Array.isArray(json.mcp_tools) && json.mcp_tools.length > 0) {
+            state.segments.push({ type: 'text', text: state.currentText });
+            state.currentText = '';
+            state.segments.push({ type: 'tools', tools: json.mcp_tools });
+            state.mcpTools = state.mcpTools.concat(json.mcp_tools);
+            if (onDelta) onDelta('', state);
+          }
+          const delta = json.choices?.[0]?.delta?.content || '';
+          if (delta) {
+            state.fullText += delta;
+            state.currentText += delta;
+            if (onDelta) onDelta(delta, state);
+          }
+        }
       }
-    } else {
-      const text = await response.text();
-      if (text) yield text;
+      state.segments.push({ type: 'text', text: state.currentText });
+    } finally {
+      reader.releaseLock?.();
     }
+    return state;
   }
 
   /**
@@ -3724,65 +3727,28 @@ class App {
         throw new Error(`HTTP ${response.status}: ${response.statusText}${errorText ? ` - ${errorText}` : ''}`);
       }
 
-      let buffer = '';
       let assistantMsg = null;
-      let fullText = '';
-      let hasError = false;
-      let streamEnded = false;
-      let mcpTools = [];
-
-      for await (const rawChunk of this._readResponseStream(response)) {
-        buffer += rawChunk;
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (!line.trim() || !line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') {
-            streamEnded = true;
-            break;
-          }
-          let json;
-          try {
-            json = JSON.parse(data);
-          } catch (e) {
-            continue;
-          }
-          if (json.error) {
-            hasError = true;
-            this.showToast(`AI 请求失败: ${json.error.message || 'AI 请求失败'}`, 'error');
-            streamEnded = true;
-            break;
-          }
+      const state = await this._parseV3Stream(response, {
+        onDelta: (_d, s) => {
           if (!assistantMsg) assistantMsg = this._createStreamingMessage();
-          if (json.mcp_tools && Array.isArray(json.mcp_tools) && json.mcp_tools.length > 0) {
-            mcpTools = json.mcp_tools;
-            this._addMCPToolsInfo(assistantMsg, mcpTools);
-          }
-          const delta = json.choices?.[0]?.delta?.content || '';
-          if (delta) {
-            fullText += delta;
-            this._updateStreamingMarkdown(assistantMsg, fullText, mcpTools);
-          }
-          if (json.choices?.[0]?.finish_reason) {
-            streamEnded = true;
-            break;
-          }
-        }
-        if (streamEnded) break;
-      }
+          this._updateStreamingMarkdown(assistantMsg, [...(s.segments || []), { type: 'text', text: s.currentText ?? s.fullText ?? '' }]);
+        },
+        onError: (err) => this.showToast(`AI 请求失败: ${err.message}`, 'error')
+      });
 
-      if (!hasError && assistantMsg) {
+      this.clearChatStreamState();
+      this.clearImagePreview();
+      if (!state.error && assistantMsg) {
         assistantMsg.classList.remove('streaming');
-        this._updateStreamingMarkdown(assistantMsg, fullText, mcpTools);
-        this._addMessageActions(assistantMsg, 'assistant', fullText, assistantMsg.dataset.messageId);
-        this._getCurrentChatHistory().push({ role: 'assistant', text: fullText, ts: Date.now(), id: assistantMsg.dataset.messageId, mcpTools: mcpTools.length > 0 ? mcpTools : undefined });
+        this._updateStreamingMarkdown(assistantMsg, (state.segments && state.segments.length) ? state.segments : state.fullText, (state.segments && state.segments.length) ? undefined : state.mcpTools);
+        this._addMessageActions(assistantMsg, 'assistant', state.fullText, assistantMsg.dataset.messageId);
+        const historyItem = { role: 'assistant', text: state.fullText, ts: Date.now(), id: assistantMsg.dataset.messageId };
+        if (state.segments && state.segments.length > 0) historyItem.segments = state.segments;
+        else if (state.mcpTools?.length) historyItem.mcpTools = state.mcpTools;
+        this._getCurrentChatHistory().push(historyItem);
         this._saveChatHistory();
         this._renderMermaidIn(assistantMsg);
       }
-      
-      this.clearChatStreamState();
-      this.clearImagePreview();
     } catch (error) {
       this.showToast(`AI 请求失败: ${error.message}`, 'error');
       this.clearChatStreamState();
@@ -3833,110 +3799,63 @@ class App {
         throw new Error(`HTTP ${response.status}: ${response.statusText}${errorText ? ` - ${errorText}` : ''}`);
       }
 
-      let buffer = '';
-      let assistantMsg = null;
-      let fullText = '';
-      let hasError = false;
-      let streamEnded = false;
       this._ttsSentTextLength = 0;
-
-      for await (const rawChunk of this._readResponseStream(response)) {
-        buffer += rawChunk;
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (!line.trim() || !line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') {
-            streamEnded = true;
-            break;
-          }
-          let json;
-          try {
-            json = JSON.parse(data);
-          } catch (e) {
-            continue;
-          }
-          if (json.error) {
-            hasError = true;
-            this.showToast(`AI 请求失败: ${json.error.message || 'AI 请求失败'}`, 'error');
-            streamEnded = true;
-            break;
-          }
-          const delta = json.choices?.[0]?.delta?.content || '';
-          if (delta) {
-            fullText += delta;
-            if (!assistantMsg) assistantMsg = this._createStreamingMessage('voice-message');
-            this._updateStreamingMarkdown(assistantMsg, fullText);
-            this.updateVoiceEmotion('💬');
-            const currentText = fullText.trim();
-            const unsentText = currentText.slice(this._ttsSentTextLength);
-            const unsentForTTS = this._stripMarkdownForTTS(unsentText);
-            const unsentLength = unsentForTTS.length;
-            const hasSentenceEnd = /[。！？.!?]/.test(unsentForTTS);
-            const hasNewline = /\n/.test(unsentForTTS);
-            const queueLen = (this._ttsAudioQueue && this._ttsAudioQueue.length) || 0;
-            const backpressure = queueLen >= 12;
-            const charThreshold = backpressure ? 50 : 35;
-            const shouldSend = (unsentLength >= charThreshold) ||
-              (hasSentenceEnd && unsentLength >= 8) ||
-              (hasNewline && unsentLength >= 6);
-            if (shouldSend && currentText.length > this._ttsSentTextLength) {
-              let textToSend = unsentForTTS;
-              if (hasSentenceEnd && !hasNewline) {
-                const sentenceEndIndex = unsentForTTS.search(/[。！？.!?]/);
-                if (sentenceEndIndex >= 0) textToSend = unsentForTTS.slice(0, sentenceEndIndex + 1);
-              } else if (hasNewline) {
-                const newlineIndex = unsentForTTS.indexOf('\n');
-                if (newlineIndex >= 0) textToSend = unsentForTTS.slice(0, newlineIndex + 1);
-              }
-              const cleanText = this._stripMarkdownForTTS(textToSend.trim());
-              if (cleanText) {
-                this._sendTTSChunk(cleanText).catch(() => {});
-                this._ttsSentTextLength = currentText.length;
-              }
+      let assistantMsg = null;
+      const state = await this._parseV3Stream(response, {
+        onDelta: (_d, s) => {
+          if (!assistantMsg) assistantMsg = this._createStreamingMessage('voice-message');
+          this._updateStreamingMarkdown(assistantMsg, (s.segments && s.segments.length) ? [...s.segments, { type: 'text', text: s.currentText ?? s.fullText ?? '' }] : (s.fullText || ''), (s.segments && s.segments.length) ? undefined : s.mcpTools);
+          this.updateVoiceEmotion('💬');
+          const currentText = (s.fullText || '').trim();
+          const unsentText = currentText.slice(this._ttsSentTextLength);
+          const unsentForTTS = this._stripMarkdownForTTS(unsentText);
+          const unsentLength = unsentForTTS.length;
+          const hasSentenceEnd = /[。！？.!?]/.test(unsentForTTS);
+          const hasNewline = /\n/.test(unsentForTTS);
+          const queueLen = (this._ttsAudioQueue && this._ttsAudioQueue.length) || 0;
+          const backpressure = queueLen >= 12;
+          const charThreshold = backpressure ? 50 : 35;
+          const shouldSend = (unsentLength >= charThreshold) || (hasSentenceEnd && unsentLength >= 8) || (hasNewline && unsentLength >= 6);
+          if (shouldSend && currentText.length > this._ttsSentTextLength) {
+            let textToSend = unsentForTTS;
+            if (hasSentenceEnd && !hasNewline) {
+              const idx = unsentForTTS.search(/[。！？.!?]/);
+              if (idx >= 0) textToSend = unsentForTTS.slice(0, idx + 1);
+            } else if (hasNewline) {
+              const idx = unsentForTTS.indexOf('\n');
+              if (idx >= 0) textToSend = unsentForTTS.slice(0, idx + 1);
+            }
+            const cleanText = this._stripMarkdownForTTS(textToSend.trim());
+            if (cleanText) {
+              this._sendTTSChunk(cleanText).catch(() => {});
+              this._ttsSentTextLength = currentText.length;
             }
           }
-          if (json.choices?.[0]?.finish_reason) {
-            streamEnded = true;
-            break;
-          }
-        }
-        if (streamEnded) break;
-      }
+        },
+        onError: (err) => this.showToast(`AI 请求失败: ${err.message}`, 'error')
+      });
 
-        if (!hasError && assistantMsg && fullText) {
-          assistantMsg.classList.remove('streaming');
-          // 使用统一的Markdown渲染
-          this._updateStreamingMarkdown(assistantMsg, fullText);
-          
-          // 发送剩余的文本到TTS
-          const currentText = fullText.trim();
-          if (currentText.length > this._ttsSentTextLength) {
-            const remaining = currentText.slice(this._ttsSentTextLength);
-            const ttsRemaining = this._stripMarkdownForTTS(remaining);
-            if (ttsRemaining.trim()) {
-              this._sendTTSChunk(ttsRemaining.trim()).catch(() => {});
-            }
-            this._ttsSentTextLength = currentText.length;
-          }
-          
-          // 流式结束后渲染Mermaid，避免用户手动刷新
-          this._renderMermaidIn(assistantMsg);
-          
-          this.updateVoiceEmotion('😊');
-          this.updateVoiceStatus('对话完成');
-          
-          const messageId = assistantMsg.dataset.messageId;
-          this._getCurrentChatHistory().push({ role: 'assistant', text: fullText, ts: Date.now(), id: messageId });
-          this._saveChatHistory();
-          this.scrollToBottom();
-        }
-      
       this.clearChatStreamState();
-      setTimeout(() => {
-        this.updateVoiceStatus('点击麦克风开始对话');
-      }, 2000);
+      if (!state.error && assistantMsg) {
+        assistantMsg.classList.remove('streaming');
+        this._updateStreamingMarkdown(assistantMsg, (state.segments && state.segments.length) ? state.segments : state.fullText, (state.segments && state.segments.length) ? undefined : state.mcpTools);
+        const currentText = state.fullText.trim();
+        if (currentText.length > this._ttsSentTextLength) {
+          const remaining = currentText.slice(this._ttsSentTextLength);
+          const ttsRemaining = this._stripMarkdownForTTS(remaining);
+          if (ttsRemaining.trim()) this._sendTTSChunk(ttsRemaining.trim()).catch(() => {});
+        }
+        this._renderMermaidIn(assistantMsg);
+        this.updateVoiceEmotion('😊');
+        this.updateVoiceStatus('对话完成');
+        const historyItem = { role: 'assistant', text: state.fullText, ts: Date.now(), id: assistantMsg.dataset.messageId };
+        if (state.segments && state.segments.length > 0) historyItem.segments = state.segments;
+        else if (state.mcpTools?.length) historyItem.mcpTools = state.mcpTools;
+        this._getCurrentChatHistory().push(historyItem);
+        this._saveChatHistory();
+        this.scrollToBottom();
+      }
+      setTimeout(() => { this.updateVoiceStatus('点击麦克风开始对话'); }, 2000);
     } catch (error) {
       this.showToast(`AI 请求失败: ${error.message}`, 'error');
       this.updateVoiceEmotion('😢');
@@ -5203,12 +5122,7 @@ class App {
           }
           tree[groupKey].fields.push(field);
         } else {
-          // 非数组类型的 SubForm：如果有子字段则不在顶级显示（会在 subGroups 中显示）
-          // 检查是否有非模板路径的子字段（排除包含 [] 的模板路径）
-          const hasChildren = flatSchema.some(f => {
-            const childPath = f.path;
-            return childPath.startsWith(path + '.') && !childPath.includes('[]');
-          });
+          const hasChildren = flatSchema.some(f => f.path.startsWith(path + '.') && !f.path.includes('[]'));
           if (!hasChildren) {
             // 没有子字段，作为普通字段显示
             if (!tree[groupKey]) {
@@ -5350,9 +5264,14 @@ class App {
     return groups;
   }
 
+  _configPathHasChildren(path) {
+    return Array.isArray(this._configState.flatSchema) && this._configState.flatSchema.some(f => f.path !== path && f.path.startsWith(path + '.'));
+  }
+
   renderConfigField(field) {
     const meta = field.meta ?? {};
     const path = field.path;
+    if ((meta.component || '').toLowerCase() === 'subform' && !meta._noFields && this._configPathHasChildren(path)) return '';
     const value = this._configState.values[path];
     const dirty = this._configState.dirty[path];
     const inputId = `cfg-${path.replace(/[^a-zA-Z0-9]/g, '_')}`;
@@ -5370,6 +5289,11 @@ class App {
         ${this.renderConfigControl(field, value, inputId)}
       </div>
     `;
+  }
+
+  _renderJsonControl(inputId, dataset, disabled, value) {
+    const text = value != null ? this.escapeHtml(JSON.stringify(value, null, 2)) : '';
+    return `<textarea class="form-input config-json-input" rows="4" id="${inputId}" ${dataset} data-control="json" placeholder="JSON 数据" ${disabled}>${text}</textarea><p class="config-field-hint">以 JSON 形式编辑该字段</p>`;
   }
 
   renderConfigControl(field, value, inputId) {
@@ -5434,19 +5358,15 @@ class App {
       case 'inputpassword':
         return `<input type="password" class="form-input" id="${inputId}" ${dataset} value="${this.escapeHtml(value ?? '')}" placeholder="${placeholder}" ${disabled}>`;
       case 'subform': {
-        // SubForm 类型：如果没有子字段，使用 JSON 编辑器
-        // 注意：有子字段的 SubForm 会在 renderFieldTree 中展开显示，不会调用此函数
-        return `
-          <textarea class="form-input" rows="4" id="${inputId}" ${dataset} data-control="json" placeholder="JSON 数据" ${disabled}>${value ? this.escapeHtml(JSON.stringify(value, null, 2)) : ''}</textarea>
-          <p class="config-field-hint">以 JSON 形式编辑该字段</p>
-        `;
+        if (meta._noFields) {
+          const keysCount = value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value).length : 0;
+          return `<p class="config-field-hint config-field-no-edit">该配置项为键值对，无需在此编辑；如需修改请使用下方「JSON 模式」编辑整份配置。${keysCount > 0 ? `（当前约 ${keysCount} 个键）` : ''}</p>`;
+        }
+        return this._renderJsonControl(inputId, dataset, disabled, value);
       }
       case 'arrayform':
       case 'json':
-        return `
-          <textarea class="form-input" rows="4" id="${inputId}" ${dataset} data-control="json" placeholder="JSON 数据" ${disabled}>${value ? this.escapeHtml(JSON.stringify(value, null, 2)) : ''}</textarea>
-          <p class="config-field-hint">以 JSON 形式编辑该字段</p>
-        `;
+        return this._renderJsonControl(inputId, dataset, disabled, value);
       default:
         return `<input type="text" class="form-input" id="${inputId}" ${dataset} value="${this.escapeHtml(value ?? '')}" placeholder="${placeholder}" ${disabled}>`;
     }
@@ -7304,14 +7224,13 @@ class App {
         const segments = Array.isArray(data.segments) ? data.segments : [];
         if (segments.length === 0 && data.text) segments.push({ type: 'text', text: String(data.text) });
         this.clearChatStreamState();
-
+        const replyOptions = (data.mcp_tools && data.mcp_tools.length > 0) ? { mcpTools: data.mcp_tools } : null;
         if (data.title || data.description) {
           const messages = segments
             .filter(seg => typeof seg === 'string' || seg?.type === 'text' || seg?.type === 'raw')
             .map(seg => this._segmentText(seg))
             .filter(text => text.length > 0);
           if (messages.length > 0) this.appendChatRecord(messages, String(data.title || ''), String(data.description || ''), true);
-
           segments
             .filter(s => s && ['image', 'video', 'record'].includes(s.type) && this._segmentMediaUrl(s))
             .forEach(seg => {
@@ -7320,7 +7239,7 @@ class App {
               else this.appendSegments([{ ...seg, url }], true);
             });
         } else {
-          this.appendSegments(segments, true, 'assistant');
+          this.appendSegments(segments, true, 'assistant', replyOptions);
         }
         break;
       }

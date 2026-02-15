@@ -1,6 +1,8 @@
 import cfg from '../../../lib/config/config.js';
 import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
 import { transformMessagesWithVision } from '../../../lib/utils/llm/message-transform.js';
+import { MCPToolAdapter } from '../../../lib/utils/llm/mcp-tool-adapter.js';
+import BotUtil from '../../../lib/util.js';
 
 /**
  * 解析 multipart/form-data
@@ -80,7 +82,7 @@ async function parseMultipartData(req) {
 
 function pickFirst(obj, keys) {
   for (const k of keys) {
-    if (Object.prototype.hasOwnProperty.call(obj, k) && obj[k] != null) return obj[k];
+    if (obj != null && Object.hasOwn(obj, k) && obj[k] != null) return obj[k];
   }
   return undefined;
 }
@@ -123,11 +125,25 @@ function estimateTokens(text) {
   return Math.ceil((text || '').length / 4);
 }
 
+/**
+ * POST /api/v3/chat/completions
+ * OpenAI 兼容的对话补全接口：支持流式、多模态、MCP 工具。
+ *
+ * 请求体：messages（必填）、model（provider）、stream、apiKey、temperature、max_tokens 等；
+ * 可选 workflow: { workflows?, streams? } 传入 overrides.streams 以限定 MCP 工具作用域。
+ *
+ * 流式响应（stream=true）：
+ * - 每块 data: 为 JSON，含 choices[0].delta.content（文本增量）；
+ * - 当 LLM 执行 tool_calls 后，会追加一块含 mcp_tools 的 chunk（{ name, arguments, result }[]），
+ *   前端可据此在对话中展示工具卡片。
+ * - 结束块含 finish_reason: 'stop' 或 usage，最后一行 data: [DONE]。
+ */
 async function handleChatCompletionsV3(req, res, Bot) {
   const contentType = req.headers['content-type'] || '';
   const body = req.body || {};
   let messages = Array.isArray(body.messages) ? body.messages : null;
   const uploadedImages = [];
+  BotUtil.makeLog('debug', `[AI] POST /api/v3/chat/completions 收到请求`, 'HTTP');
 
   // 支持 multipart/form-data 格式（图片上传）
   if (contentType.includes('multipart/form-data')) {
@@ -208,8 +224,8 @@ async function handleChatCompletionsV3(req, res, Bot) {
     ? bodyModel
     : LLMFactory.getDefaultProvider();
   const base = LLMFactory.getProviderConfig(provider);
-  // 仅用提供商配置创建客户端，不拿请求里的 apiKey 覆盖（与 AGT 一致，避免前端/设备 key 覆盖 LLM key）
   const llmConfig = { provider, ...base };
+  BotUtil.makeLog('debug', `[AI] 运营商=${provider}, stream=${streamFlag}, messages=${messages?.length ?? 0}`, 'HTTP');
 
   if (streamFlag && base.enableStream === false) {
     return res.status(400).json({ 
@@ -219,8 +235,8 @@ async function handleChatCompletionsV3(req, res, Bot) {
   }
 
   const client = LLMFactory.createClient(llmConfig);
-  
-  // 转换消息（支持多模态）
+  BotUtil.makeLog('debug', `[AI] 客户端已创建: provider=${provider}`, 'HTTP');
+
   const transformedMessages = await transformMessagesWithVision(messages, llmConfig, { mode: 'openai' });
   
   // 构建 overrides（规范键名，与 openai-chat-utils/buildOpenAIChatCompletionsBody 一致）
@@ -246,18 +262,34 @@ async function handleChatCompletionsV3(req, res, Bot) {
   if (extraBody && typeof extraBody === 'object') overrides.extraBody = extraBody;
 
   const workflowConfig = pickFirst(body, ['workflow']);
-  const workflowStreams = workflowConfig && typeof workflowConfig === 'object'
-    ? (() => {
-        const list = [];
-        if (Array.isArray(workflowConfig.workflows)) list.push(...workflowConfig.workflows.filter(Boolean));
-        if (Array.isArray(workflowConfig.streams)) list.push(...workflowConfig.streams.filter(Boolean));
-        if (typeof workflowConfig.workflow === 'string' && workflowConfig.workflow.trim()) list.push(workflowConfig.workflow.trim());
-        return list.length ? [...new Set(list)] : null;
-      })()
-    : null;
+  let workflowStreams = null;
+  if (workflowConfig && typeof workflowConfig === 'object') {
+    const list = [
+      ...(Array.isArray(workflowConfig.workflows) ? workflowConfig.workflows.filter(Boolean) : []),
+      ...(Array.isArray(workflowConfig.streams) ? workflowConfig.streams.filter(Boolean) : []),
+      ...(typeof workflowConfig.workflow === 'string' && workflowConfig.workflow.trim() ? [workflowConfig.workflow.trim()] : [])
+    ];
+    workflowStreams = list.length ? [...new Set(list)] : null;
+  }
+  // 当传了 workflow.streams 时，自动合并第三方 MCP（如 12306-mcp）的 stream，使 web 对话可用其工具
+  if (workflowStreams?.length && Bot) {
+    const mcpServer = MCPToolAdapter.getMCPServer();
+    const workflowNames = new Set((Bot.StreamLoader?.getAllStreams?.() ?? []).map(s => s.name));
+    const allMcpStreams = mcpServer ? mcpServer.listStreams() : [];
+    const thirdParty = allMcpStreams.filter(name => !workflowNames.has(name));
+    if (thirdParty.length) {
+      workflowStreams = [...new Set([...workflowStreams, ...thirdParty])];
+      BotUtil.makeLog('debug', `[AI] MCP 工具已合并第三方: ${thirdParty.join(', ')}`, 'HTTP');
+    }
+  }
   if (workflowStreams?.length) overrides.streams = workflowStreams;
+  if (streamFlag) {
+    if (workflowStreams?.length) BotUtil.makeLog('debug', `[AI] MCP 工具作用域: ${workflowStreams.join(', ')}`, 'HTTP');
+    else BotUtil.makeLog('debug', `[AI] 未传 workflow.streams，将按全部工作流注入 MCP 工具（若提供商已开启）`, 'HTTP');
+  }
 
   if (!streamFlag) {
+    BotUtil.makeLog('debug', `[AI] 非流式调用 chat()`, 'HTTP');
     const text = await client.chat(transformedMessages, overrides);
     const promptText = extractMessageText(messages);
     const promptTokens = estimateTokens(promptText);
@@ -283,6 +315,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
     });
   }
 
+  BotUtil.makeLog('debug', `[AI] 流式输出开始`, 'HTTP');
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -342,6 +375,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
     })}\n\n`);
     res.write('data: [DONE]\n\n');
   } catch (error) {
+    BotUtil.makeLog('error', `[AI] 流式请求异常: ${error.message}`, 'HTTP');
     res.write(`data: ${JSON.stringify({
       id,
       object: 'chat.completion.chunk',

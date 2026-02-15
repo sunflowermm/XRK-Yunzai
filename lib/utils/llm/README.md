@@ -8,7 +8,7 @@
 |------|------|
 | **openai-chat-utils.js** | OpenAI 系请求体构建：`buildOpenAIChatCompletionsBody`、`applyOpenAITools`。配置仅使用规范字段：`model`、`maxTokens`、`topP`、`presencePenalty`、`frequencyPenalty`。 |
 | **sse-utils.js** | 通用 SSE 解析：`iterateSSE`、`consumeOpenAIChatStream`、`parseOpenAIChatContent`。支持 `application/json` 整段与 `data:` 行，上游错误 JSON 会抛错便于 HTTP 层返回。 |
-| **mcp-tool-adapter.js** | MCP 工具与 OpenAI tools 互转：`getMCPServer`、`convertMCPToolsToOpenAI`，供 `applyOpenAITools` 注入工具列表。 |
+| **mcp-tool-adapter.js** | MCP 与 OpenAI 互转：`convertMCPToolsToOpenAI`、`handleToolCalls`；流式时 `buildMcpToolsPayload`、`emitMcpToolsToStream` 构建并推送 mcp_tools 供 v3 接口与前端工具卡片。 |
 | **proxy-utils.js** | 代理：读取 `config.proxy.enabled`、`config.proxy.url`，构建 fetch 的 agent。 |
 | **message-transform.js** | 多模态消息转换：`transformMessagesWithVision`，统一为 OpenAI 风格 text + image_url（含 base64 data URL）。 |
 
