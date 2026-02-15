@@ -1,6 +1,7 @@
 import { createRequire } from 'module'
 import lodash from 'lodash'
 import fs from 'node:fs'
+import { FileUtils } from '../../lib/utils/file-utils.js'
 import { Restart } from './restart.js'
 import common from '../../lib/common/common.js'
 
@@ -132,14 +133,14 @@ export class update extends plugin {
     const pluginPath = `plugins/${plugin.name}`
     
     /** 检查目录是否存在 */
-    if (!fs.existsSync(pluginPath)) return false
+    if (!FileUtils.existsSync(pluginPath)) return false
     
     /** 检查是否为git仓库 */
-    if (!fs.existsSync(`${pluginPath}/.git`)) return false
+    if (!FileUtils.existsSync(`${pluginPath}/.git`)) return false
     
     /** 检查必需文件是否存在 */
     const isComplete = plugin.requiredFiles.every(file => 
-      fs.existsSync(`${pluginPath}/${file}`)
+      FileUtils.existsSync(`${pluginPath}/${file}`)
     )
     
     if (!isComplete) {
@@ -162,7 +163,7 @@ export class update extends plugin {
     }
 
     /** 验证插件git仓库是否存在 */
-    if (!fs.existsSync(`plugins/${plugin}/.git`)) return false
+    if (!FileUtils.existsSync(`plugins/${plugin}/.git`)) return false
 
     this.typeName = plugin
     return plugin

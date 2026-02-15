@@ -228,7 +228,7 @@ export default class PuppeteerRenderer extends Renderer {
       }
     }
     const filePath = useUrl ? null : (directFilePath || path.join(_path, String(savePath).replace(/^\.\/?/, "")));
-    if (!useUrl && !fs.existsSync(filePath)) {
+    if (!useUrl && (typeof filePath !== "string" || !fs.existsSync(filePath))) {
       BotUtil.makeLog("error", `HTML file does not exist: ${filePath}`, "PuppeteerRenderer");
       return false;
     }

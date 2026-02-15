@@ -351,7 +351,7 @@ export class StdinHandler {
         mimeType = (fileInfo.type && fileInfo.type.mime) || 'application/octet-stream';
         
         // 如果没有获取到buffer，尝试读取本地文件
-        if (!buffer && item.path && fs.existsSync(item.path)) {
+        if (!buffer && typeof item.path === "string" && item.path !== "" && fs.existsSync(item.path)) {
           buffer = await fs.promises.readFile(item.path);
           fileName = fileName || path.basename(item.path);
           fileExt = path.extname(fileName).slice(1) || fileExt;
