@@ -148,8 +148,6 @@ yunzai
 # XRK-Yunzai specific
 data/server_bots/*/
 !data/server_bots/.gitkeep
-data/importsJson/*.json
-!data/importsJson/.gitkeep
 config/pm2/*.json
 !config/pm2/.gitkeep
 *.log

@@ -3,10 +3,16 @@ import fs from 'fs/promises';
 import fsSync from 'fs';
 import { ulid } from 'ulid';
 import crypto from 'crypto';
+import { FileUtils } from '../../../lib/utils/file-utils.js';
 
-// 与 lib/bot.js 静态路由一致：/media、/uploads 指向 data 目录，持久化链接可刷新后访问
+// 与 lib/bot.js 静态路由一致：/media、/uploads 指向 data 目录
 const uploadDir = path.join(process.cwd(), 'data', 'uploads');
 const mediaDir = path.join(process.cwd(), 'data', 'media');
+const tempHtmlDir = path.join(process.cwd(), 'temp', 'html');
+const UPLOAD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const MEDIA_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const TEMP_HTML_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 const fileMap = new Map();
 
 /** 拼装 file_url 的 baseUrl，优先配置再请求头 */
@@ -468,20 +474,19 @@ export default {
   ],
 
   init(app, Bot) {
-    // 定期清理过期文件
     setInterval(async () => {
       const now = Date.now();
-      const maxAge = 24 * 60 * 60 * 1000; // 24小时
-      
       for (const [id, info] of fileMap) {
-        if (now - info.upload_time > maxAge) {
+        if (now - info.upload_time > UPLOAD_MAX_AGE_MS) {
           try {
             await fs.unlink(info.path);
             fileMap.delete(id);
-            logger.debug(`清理过期文件: ${info.name}`);
           } catch {}
         }
       }
-    }, 60 * 60 * 1000);
+      const mediaN = await FileUtils.cleanDirByMaxAge(mediaDir, MEDIA_MAX_AGE_MS);
+      const tempN = await FileUtils.cleanDirByMaxAge(tempHtmlDir, TEMP_HTML_MAX_AGE_MS, true);
+      if (mediaN + tempN > 0) logger.debug(`清理过期媒体/临时: data/media ${mediaN} 个, temp/html ${tempN} 个`);
+    }, CLEANUP_INTERVAL_MS);
   }
 };

@@ -5,7 +5,7 @@
  * @copyright 2025 XRK Studio
  * @license MIT
  *
- * 逻辑对齐 XRK-AGT：Node 版本校验、基础目录创建、根依赖与插件依赖检查安装、动态 imports，再加载 start.js。
+ * 逻辑对齐 XRK-AGT：Node 版本校验、基础目录创建、根依赖与插件依赖检查安装，再加载 start.js。
  */
 
 import fs from 'fs/promises';
@@ -155,39 +155,7 @@ class DependencyManager {
 }
 
 /**
- * 从 data/importsJson/*.json 合并 imports 并写回 package.json
- */
-async function loadDynamicImports(logger, packageJsonPath) {
-  const importsDir = path.join(process.cwd(), 'data', 'importsJson');
-  try {
-    await fs.access(importsDir);
-  } catch {
-    return;
-  }
-  const files = (await fs.readdir(importsDir)).filter(f => f.endsWith('.json'));
-  if (!files.length) return;
-  const merged = Object.assign(
-    {},
-    ...(await Promise.all(
-      files.map(async f => {
-        try {
-          const data = JSON.parse(await fs.readFile(path.join(importsDir, f), 'utf-8'));
-          return (data.imports && typeof data.imports === 'object') ? data.imports : {};
-        } catch {
-          return {};
-        }
-      })
-    ))
-  );
-  if (!Object.keys(merged).length) return;
-  const dm = new DependencyManager(logger);
-  const pkg = await dm.parsePackageJson(packageJsonPath);
-  pkg.imports = { ...(pkg.imports || {}), ...merged };
-  await fs.writeFile(packageJsonPath, JSON.stringify(pkg, null, 2));
-}
-
-/**
- * 引导器：环境校验 → 根依赖 → 插件依赖 → 动态 imports → 加载 start.js
+ * 引导器：环境校验 → 根依赖 → 插件依赖 → 加载 start.js
  */
 class Bootstrap {
   constructor() {
@@ -203,7 +171,6 @@ class Bootstrap {
       path.join(root, 'node_modules')
     );
     await this.dependencyManager.ensurePluginDependencies(root);
-    await loadDynamicImports(this.logger, path.join(root, 'package.json'));
   }
 
   async run() {

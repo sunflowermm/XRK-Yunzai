@@ -59,8 +59,6 @@ let globalSignalHandler = null;
 const PATHS = {
   LOGS: './logs',
   DATA: './data',
-  BOTS: './data/bots',
-  BACKUPS: './data/backups',
   CONFIG: './config',
   DEFAULT_CONFIG: './config/default_config',
   SERVER_BOTS: './data/server_bots',

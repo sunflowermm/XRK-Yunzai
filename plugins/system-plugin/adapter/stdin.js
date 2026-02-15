@@ -9,27 +9,35 @@ import BotUtil from "../../../lib/util.js";
 
 const tempDir = path.join(process.cwd(), "www", "stdin");
 const mediaDir = path.join(process.cwd(), "www", "media");
+const TEMP_MAX_AGE_MS = 3600000;  // 1 小时
+const TEMP_CLEANUP_INTERVAL_MS = 3600000;
 
-// 定期清理临时文件
-setInterval(() => {
+/** 清理 www/stdin、www/media 下超过时效的临时文件，返回删除数量 */
+function runTempCleanup() {
+  let cleaned = 0;
   try {
     const now = Date.now();
     for (const dir of [tempDir, mediaDir]) {
-      if (!fs.existsSync(dir)) continue;
+      if (typeof dir !== "string" || !fs.existsSync(dir)) continue;
       const files = fs.readdirSync(dir);
-      files.forEach(file => {
+      for (const file of files) {
         const filePath = path.join(dir, file);
-        const stats = fs.statSync(filePath);
-        if (now - stats.mtimeMs > 3600000) { // 1小时后清理
-          fs.unlinkSync(filePath);
-          logger.debug(`已清理临时文件: ${file}`);
-        }
-      });
+        try {
+          const stats = fs.statSync(filePath);
+          if (stats.mtimeMs && now - stats.mtimeMs > TEMP_MAX_AGE_MS) {
+            fs.unlinkSync(filePath);
+            cleaned++;
+          }
+        } catch (_) {}
+      }
     }
   } catch (error) {
     logger.error(`清理临时文件错误: ${error.message}`);
   }
-}, 3600000);
+  return cleaned;
+}
+
+setInterval(() => runTempCleanup(), TEMP_CLEANUP_INTERVAL_MS);
 
 export class StdinHandler {
   constructor() {
@@ -638,27 +646,8 @@ export class StdinHandler {
   }
 
   cleanupTempFiles() {
-    try {
-      const now = Date.now();
-      let cleaned = 0;
-
-      for (const dir of [tempDir, mediaDir]) {
-        if (!fs.existsSync(dir)) continue;
-        const files = fs.readdirSync(dir);
-        files.forEach(file => {
-          const filePath = path.join(dir, file);
-          const stats = fs.statSync(filePath);
-          if (now - stats.mtimeMs > 3600000) {
-            fs.unlinkSync(filePath);
-            cleaned++;
-          }
-        });
-      }
-
-      logger.info(`清理了 ${cleaned} 个临时文件`);
-    } catch (error) {
-      logger.error(`清理临时文件错误: ${error.message}`);
-    }
+    const cleaned = runTempCleanup();
+    if (cleaned > 0) logger.info(`清理了 ${cleaned} 个临时文件`);
   }
 
   load() {

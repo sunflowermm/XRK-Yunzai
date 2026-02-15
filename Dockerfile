@@ -57,10 +57,7 @@ COPY . .
 RUN mkdir -p \
     logs \
     data \
-    data/bots \
-    data/backups \
     data/server_bots \
-    data/importsJson \
     config \
     config/default_config \
     config/pm2 \
