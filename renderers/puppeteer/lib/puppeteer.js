@@ -9,7 +9,15 @@ import BotUtil from "../../../lib/util.js";
 const _path = process.cwd();
 
 function toBuffer(buff) {
-  return Buffer.isBuffer(buff) ? buff : Buffer.from(buff);
+  if (Buffer.isBuffer(buff)) return buff;
+  if (buff?.buffer != null && Buffer.isBuffer(buff.buffer)) return buff.buffer;
+  if (buff?.buffer instanceof ArrayBuffer) return Buffer.from(buff.buffer);
+  if (typeof ArrayBuffer !== "undefined" && (buff instanceof ArrayBuffer || ArrayBuffer.isView(buff))) return Buffer.from(buff);
+  try {
+    return Buffer.from(buff);
+  } catch {
+    return null;
+  }
 }
 
 function toFileUrl(filePath) {
@@ -96,9 +104,7 @@ export default class PuppeteerRenderer extends Renderer {
       if (this.browserMacKey) {
         try {
           browserWSEndpoint = await redis.get(this.browserMacKey);
-        } catch {
-          // Redis 获取失败，使用配置的 wsEndpoint
-        }
+        } catch {}
       }
       if (!browserWSEndpoint && this.config.wsEndpoint) {
         browserWSEndpoint = this.config.wsEndpoint;
@@ -284,22 +290,25 @@ export default class PuppeteerRenderer extends Renderer {
       if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
 
       if (fullPage) {
-        ret.push(toBuffer(await page.screenshot({ ...screenshotOpts, fullPage: true })));
+        const buf = toBuffer(await page.screenshot({ ...screenshotOpts, fullPage: true }));
+        if (buf) ret.push(buf);
         this.renderNum++;
-        BotUtil.makeLog("info", `[${name}][${this.renderNum}] fullPage ${(ret[0].length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PuppeteerRenderer");
+        if (ret[0]) BotUtil.makeLog("info", `[${name}][${this.renderNum}] fullPage ${(ret[0].length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PuppeteerRenderer");
       } else if (data.clip && typeof data.clip === "object" && ["x", "y", "width", "height"].every(k => Number.isFinite(data.clip[k]))) {
-        ret.push(toBuffer(await page.screenshot({ ...screenshotOpts, clip: data.clip })));
+        const buf = toBuffer(await page.screenshot({ ...screenshotOpts, clip: data.clip }));
+        if (buf) ret.push(buf);
         this.renderNum++;
-        BotUtil.makeLog("info", `[${name}][${this.renderNum}] clip ${Date.now() - start}ms`, "PuppeteerRenderer");
+        if (ret.length) BotUtil.makeLog("info", `[${name}][${this.renderNum}] clip ${Date.now() - start}ms`, "PuppeteerRenderer");
       } else {
         const body = (await page.$("#container")) || (await page.$("body"));
         const boundingBox = await body.boundingBox();
         let num = data.multiPage ? Math.ceil(boundingBox.height / pageHeight) || 1 : 1;
         if (data.multiPage) screenshotOpts.type = "jpeg";
         if (num === 1) {
-          ret.push(toBuffer(await body.screenshot(screenshotOpts)));
+          const buf = toBuffer(await body.screenshot(screenshotOpts));
+          if (buf) ret.push(buf);
           this.renderNum++;
-          BotUtil.makeLog("info", `[${name}][${this.renderNum}] ${(ret[0].length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PuppeteerRenderer");
+          if (ret[0]) BotUtil.makeLog("info", `[${name}][${this.renderNum}] ${(ret[0].length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PuppeteerRenderer");
         } else {
           await page.setViewport({ width: Math.ceil(boundingBox.width), height: Math.min(pageHeight + 100, 2000) });
           for (let i = 1; i <= num; i++) {
@@ -308,7 +317,8 @@ export default class PuppeteerRenderer extends Renderer {
               await page.evaluate((y) => window.scrollTo(0, y), pageHeight * (i - 1));
               await new Promise(r => setTimeout(r, 100));
             }
-            ret.push(toBuffer(i === 1 ? await body.screenshot(screenshotOpts) : await page.screenshot(screenshotOpts)));
+            const buf = toBuffer(i === 1 ? await body.screenshot(screenshotOpts) : await page.screenshot(screenshotOpts));
+            if (buf) ret.push(buf);
             this.renderNum++;
             if (i < num && num > 2) await new Promise(r => setTimeout(r, 100));
           }
@@ -348,12 +358,9 @@ export default class PuppeteerRenderer extends Renderer {
 
     try {
       const currentEndpoint = this.browser.wsEndpoint();
-      
-      const pages = await this.browser.pages();
-      for (const page of pages) {
-        await page.close().catch(() => {});
-      }
-      
+      try {
+        for (const page of await this.browser.pages()) await page.close().catch(() => {});
+      } catch (_) {}
       await this.browser.close().catch(err => 
         BotUtil.makeLog("error", `Failed to close browser: ${err.message}`, "PuppeteerRenderer")
       );
@@ -390,10 +397,9 @@ export default class PuppeteerRenderer extends Renderer {
     }
 
     if (this.browser) {
-      const pages = await this.browser.pages().catch(() => []);
-      for (const page of pages) {
-        await page.close().catch(() => {});
-      }
+      try {
+        for (const page of await this.browser.pages()) await page.close().catch(() => {});
+      } catch (_) {}
       await this.browser.close().catch(() => {});
       this.browser = null;
     }

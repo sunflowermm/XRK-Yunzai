@@ -9,7 +9,15 @@ import BotUtil from "../../../lib/util.js";
 const _path = process.cwd();
 
 function toBuffer(buff) {
-  return Buffer.isBuffer(buff) ? buff : Buffer.from(buff);
+  if (Buffer.isBuffer(buff)) return buff;
+  if (buff?.buffer != null && Buffer.isBuffer(buff.buffer)) return buff.buffer;
+  if (buff?.buffer instanceof ArrayBuffer) return Buffer.from(buff.buffer);
+  if (typeof ArrayBuffer !== "undefined" && (buff instanceof ArrayBuffer || ArrayBuffer.isView(buff))) return Buffer.from(buff);
+  try {
+    return Buffer.from(buff);
+  } catch {
+    return null;
+  }
 }
 
 function toFileUrl(filePath) {
@@ -88,59 +96,38 @@ export default class PlaywrightRenderer extends Renderer {
   }
 
   async connectToExisting(wsEndpoint, retries = 0) {
-    const delay = this.retryDelay * Math.pow(2, retries);
     try {
-      BotUtil.makeLog("info", `Connecting to existing ${this.browserType} instance (attempt ${retries + 1}/${this.maxRetries})`, "PlaywrightRenderer");
-      
       const browser = await playwright[this.browserType].connect(wsEndpoint, { timeout: 10000 });
       const context = await browser.newContext();
       const page = await context.newPage();
       await page.goto("about:blank", { timeout: 5000 });
       await page.close();
       await context.close();
-
-      BotUtil.makeLog("info", `Successfully connected to existing ${this.browserType} instance`, "PlaywrightRenderer");
       return browser;
     } catch (e) {
-      BotUtil.makeLog("warn", `Connection failed: ${e.message}`, "PlaywrightRenderer");
-      
       if (retries < this.maxRetries - 1) {
-        await new Promise(r => setTimeout(r, delay));
+        await new Promise(r => setTimeout(r, this.retryDelay * Math.pow(2, retries)));
         return this.connectToExisting(wsEndpoint, retries + 1);
       }
-      
-      if (this.browserMacKey) {
-        try {
-          await redis.del(this.browserMacKey);
-          BotUtil.makeLog("info", "Cleaned up invalid browser instance record", "PlaywrightRenderer");
-        } catch {
-          // Redis 删除失败，忽略错误
-        }
-      }
+      BotUtil.makeLog("warn", `Failed to connect to existing ${this.browserType}: ${e.message}`, "PlaywrightRenderer");
+      if (this.browserMacKey) await redis.del(this.browserMacKey).catch(() => {});
       return null;
     }
   }
 
-  /**
-   * Initialize browser instance with connection reuse and health monitoring
-   */
   async browserInit() {
     if (this.browser) {
       try {
         this.browser.contexts();
         return this.browser;
       } catch (e) {
-        BotUtil.makeLog("warn", `Existing browser instance invalid: ${e.message}`, "PlaywrightRenderer");
+        BotUtil.makeLog("warn", `Existing browser invalid: ${e.message}`, "PlaywrightRenderer");
         this.browser = null;
       }
     }
-
-    const browserInitWaitMax = this.config.browserInitWaitMax ?? 60000;
     if (this.lock) {
-      const deadline = Date.now() + browserInitWaitMax;
-      while (this.lock && !this.browser && Date.now() < deadline) {
-        await new Promise(r => setTimeout(r, 200));
-      }
+      const deadline = Date.now() + (this.config.browserInitWaitMax ?? 60000);
+      while (this.lock && !this.browser && Date.now() < deadline) await new Promise(r => setTimeout(r, 200));
       if (this.browser) return this.browser;
       if (this.lock) {
         BotUtil.makeLog("warn", "Browser init wait timeout, screenshot skipped", "PlaywrightRenderer");
@@ -161,9 +148,7 @@ export default class PlaywrightRenderer extends Renderer {
       if (this.browserMacKey) {
         try {
           wsEndpoint = await redis.get(this.browserMacKey);
-        } catch {
-          // Redis 获取失败，使用配置的 wsEndpoint
-        }
+        } catch {}
       }
       if (!wsEndpoint && this.config.wsEndpoint) {
         wsEndpoint = this.config.wsEndpoint;
@@ -184,7 +169,6 @@ export default class PlaywrightRenderer extends Renderer {
           if (endpoint && this.browserMacKey) {
             try {
               await redis.set(this.browserMacKey, endpoint, { EX: 60 * 60 * 24 * 30 });
-              BotUtil.makeLog("debug", "Browser instance saved to Redis", "PlaywrightRenderer");
             } catch (e) {
               BotUtil.makeLog("warn", `Failed to save browser instance: ${e.message}`, "PlaywrightRenderer");
             }
@@ -198,20 +182,10 @@ export default class PlaywrightRenderer extends Renderer {
       }
 
       this.browser.on("disconnected", async () => {
-        BotUtil.makeLog("warn", `${this.browserType} instance disconnected`, "PlaywrightRenderer");
+        BotUtil.makeLog("warn", `${this.browserType} disconnected, restarting...`, "PlaywrightRenderer");
         this.browser = null;
-        
-        if (this.browserMacKey) {
-          try {
-            await redis.del(this.browserMacKey);
-          } catch {
-            // Redis 删除失败，忽略错误
-          }
-        }
-        
-        if (!this.isClosing) {
-          await this.restart(true);
-        }
+        if (this.browserMacKey) await redis.del(this.browserMacKey).catch(() => {});
+        if (!this.isClosing) await this.restart(true);
       });
 
       this.startHealthCheck();
@@ -225,15 +199,10 @@ export default class PlaywrightRenderer extends Renderer {
     return this.browser;
   }
 
-  /**
-   * Start periodic health check for browser instance
-   */
   startHealthCheck() {
     if (this.healthCheckTimer) return;
-    
     this.healthCheckTimer = setInterval(async () => {
       if (!this.browser || this.shoting.length > 0 || this.shotingUser.length > 0 || this.isClosing) return;
-      
       try {
         this.browser.contexts();
       } catch (e) {
@@ -331,37 +300,41 @@ export default class PlaywrightRenderer extends Renderer {
       if (data.imgType === "png") delete screenshotOpts.quality;
 
       const delayMs = fullPage ? (data.delayBeforeScreenshot ?? (useUrl ? 1500 : 0)) : 0;
-      if (delayMs > 0) await page.waitForTimeout(delayMs);
+      if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
 
       if (fullPage) {
-        ret.push(toBuffer(await page.screenshot({ ...screenshotOpts, fullPage: true })));
+        const buf = toBuffer(await page.screenshot({ ...screenshotOpts, fullPage: true }));
+        if (buf) ret.push(buf);
         this.renderNum++;
-        BotUtil.makeLog("info", `[${name}][${this.renderNum}] fullPage ${(ret[0].length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PlaywrightRenderer");
+        if (ret[0]) BotUtil.makeLog("info", `[${name}][${this.renderNum}] fullPage ${(ret[0].length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PlaywrightRenderer");
       } else if (data.clip && typeof data.clip === "object" && ["x", "y", "width", "height"].every(k => Number.isFinite(data.clip[k]))) {
-        ret.push(toBuffer(await page.screenshot({ ...screenshotOpts, clip: data.clip })));
+        const buf = toBuffer(await page.screenshot({ ...screenshotOpts, clip: data.clip }));
+        if (buf) ret.push(buf);
         this.renderNum++;
-        BotUtil.makeLog("info", `[${name}][${this.renderNum}] clip ${Date.now() - start}ms`, "PlaywrightRenderer");
+        if (ret.length) BotUtil.makeLog("info", `[${name}][${this.renderNum}] clip ${Date.now() - start}ms`, "PlaywrightRenderer");
       } else {
         const body = (await page.locator("#container").first()) || (await page.locator("body"));
         const boundingBox = await body.boundingBox();
         let num = data.multiPage ? Math.ceil(boundingBox.height / pageHeight) || 1 : 1;
         if (data.multiPage) screenshotOpts.type = "jpeg";
         if (num === 1) {
-          ret.push(toBuffer(await body.screenshot(screenshotOpts)));
+          const buf = toBuffer(await body.screenshot(screenshotOpts));
+          if (buf) ret.push(buf);
           this.renderNum++;
-          BotUtil.makeLog("info", `[${name}][${this.renderNum}] ${(ret[0].length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PlaywrightRenderer");
+          if (ret[0]) BotUtil.makeLog("info", `[${name}][${this.renderNum}] ${(ret[0].length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PlaywrightRenderer");
         } else {
           await page.setViewportSize({ width: Math.ceil(boundingBox.width), height: Math.min(pageHeight + 100, 2000) });
           for (let i = 1; i <= num; i++) {
             if (i === num && num > 1) await page.setViewportSize({ width: Math.ceil(boundingBox.width), height: Math.min(parseInt(boundingBox.height) - pageHeight * (num - 1), 2000) || 100 });
             if (i !== 1) {
               await page.evaluate((y) => window.scrollTo(0, y), pageHeight * (i - 1));
-              await page.waitForTimeout(100);
+              await new Promise(r => setTimeout(r, 100));
             }
             const clip = (i === num && num > 1) ? { x: boundingBox.x, y: 0, width: boundingBox.width, height: Math.min(boundingBox.height - pageHeight * (i - 1), pageHeight) } : null;
-            ret.push(toBuffer(clip ? await page.screenshot({ ...screenshotOpts, clip }) : await body.screenshot(screenshotOpts)));
+            const buf = toBuffer(clip ? await page.screenshot({ ...screenshotOpts, clip }) : await body.screenshot(screenshotOpts));
+            if (buf) ret.push(buf);
             this.renderNum++;
-            if (i < num && num > 2) await page.waitForTimeout(100);
+            if (i < num && num > 2) await new Promise(r => setTimeout(r, 100));
           }
           BotUtil.makeLog("info", `[${name}] multiPage ${num} ${Date.now() - start}ms`, "PlaywrightRenderer");
         }
@@ -397,11 +370,10 @@ export default class PlaywrightRenderer extends Renderer {
     this.isClosing = true;
 
     try {
-      const contexts = this.browser.contexts();
-      for (const ctx of contexts) {
-        await ctx.close().catch(() => {});
-      }
-      await this.browser.close();
+      try {
+        for (const ctx of this.browser.contexts()) await ctx.close().catch(() => {});
+      } catch (_) {}
+      await this.browser.close().catch(() => {});
       this.browser = null;
 
       if (this.browserMacKey) {
@@ -429,17 +401,14 @@ export default class PlaywrightRenderer extends Renderer {
 
   async cleanup() {
     this.isClosing = true;
-
     if (this.healthCheckTimer) {
       clearInterval(this.healthCheckTimer);
       this.healthCheckTimer = null;
     }
-
     if (this.browser) {
-      const contexts = this.browser.contexts();
-      for (const ctx of contexts) {
-        await ctx.close().catch(() => {});
-      }
+      try {
+        for (const ctx of this.browser.contexts()) await ctx.close().catch(() => {});
+      } catch (_) {}
       await this.browser.close().catch(() => {});
       this.browser = null;
     }
