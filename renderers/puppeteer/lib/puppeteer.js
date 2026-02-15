@@ -8,10 +8,14 @@ import BotUtil from "../../../lib/util.js";
 
 const _path = process.cwd();
 
-/**
- * Puppeteer-based browser renderer for screenshot generation
- * Supports browser instance reuse, memory management, and health monitoring
- */
+function toBuffer(buff) {
+  return Buffer.isBuffer(buff) ? buff : Buffer.from(buff);
+}
+
+function toFileUrl(filePath) {
+  return `file:///${path.normalize(filePath).replace(/\\/g, "/").replace(/^\/+/, "")}`;
+}
+
 export default class PuppeteerRenderer extends Renderer {
   constructor(config = {}) {
     super({
@@ -23,6 +27,7 @@ export default class PuppeteerRenderer extends Renderer {
     this.browser = null;
     this.lock = false;
     this.shoting = [];
+    this.shotingUser = [];
     this.mac = "";
     this.browserMacKey = null;
 
@@ -53,36 +58,29 @@ export default class PuppeteerRenderer extends Renderer {
     process.on("SIGTERM", () => this.cleanup());
   }
 
-  /**
-   * Retrieve system MAC address for browser instance identification
-   */
   async getMac() {
-    let macAddr = "000000000000";
     try {
-      const network = os.networkInterfaces();
-      for (const key in network) {
-        for (const iface of network[key]) {
-          if (iface.mac && iface.mac !== "00:00:00:00:00:00") {
-            return iface.mac.replace(/:/g, "");
-          }
+      for (const ifaces of Object.values(os.networkInterfaces())) {
+        for (const iface of ifaces) {
+          if (iface.mac && iface.mac !== "00:00:00:00:00:00") return iface.mac.replace(/:/g, "");
         }
       }
     } catch (e) {
-      BotUtil.makeLog("error", `Failed to get MAC address: ${e.message}`, "PuppeteerRenderer");
+      BotUtil.makeLog("error", `getMac: ${e.message}`, "PuppeteerRenderer");
     }
-    return macAddr;
+    return "000000000000";
   }
 
-  /**
-   * Initialize browser instance with connection reuse
-   */
   async browserInit() {
     if (this.browser) return this.browser;
-
     if (this.lock) {
-      await new Promise(r => setTimeout(r, 500));
+      const deadline = Date.now() + (this.config.browserInitWaitMax ?? 60000);
+      while (this.lock && !this.browser && Date.now() < deadline) await new Promise(r => setTimeout(r, 200));
       if (this.browser) return this.browser;
-      if (this.lock) return false;
+      if (this.lock) {
+        BotUtil.makeLog("warn", "Browser init wait timeout, screenshot skipped", "PuppeteerRenderer");
+        return false;
+      }
     }
 
     this.lock = true;
@@ -115,16 +113,10 @@ export default class PuppeteerRenderer extends Renderer {
           });
 
           const pages = await this.browser.pages().catch(() => null);
-          if (pages) {
-            BotUtil.makeLog("info", "Successfully connected to existing Chromium instance", "PuppeteerRenderer");
-          } else {
-            BotUtil.makeLog("warn", "Connected Chromium instance unavailable, launching new instance", "PuppeteerRenderer");
+          if (!pages || !Array.isArray(pages)) {
             await this.browser.close().catch(() => {});
             this.browser = null;
-            
-            if (this.browserMacKey) {
-              await redis.del(this.browserMacKey).catch(() => {});
-            }
+            if (this.browserMacKey) await redis.del(this.browserMacKey).catch(() => {});
           }
         } catch (e) {
           BotUtil.makeLog("warn", `Failed to connect to existing Chromium: ${e.message}`, "PuppeteerRenderer");
@@ -181,14 +173,11 @@ export default class PuppeteerRenderer extends Renderer {
     return this.browser;
   }
 
-  /**
-   * Start periodic health check for browser instance
-   */
   startHealthCheck() {
     if (this.healthCheckTimer) return;
     
     this.healthCheckTimer = setInterval(async () => {
-      if (!this.browser || this.shoting.length > 0) return;
+      if (!this.browser || this.shoting.length > 0 || this.shotingUser.length > 0) return;
       
       try {
         await this.browser.pages();
@@ -199,16 +188,25 @@ export default class PuppeteerRenderer extends Renderer {
     }, 120000);
   }
 
-  /**
-   * 截图。data：url | tplFile+saveId；width/height；fullPage；delayBeforeScreenshot；waitUntil；
-   * imgType/quality/omitBackground/path；imageWaitTimeout；multiPage/multiPageHeight；pageGotoParams；clip {x,y,width,height}。
-   */
   async screenshot(name, data = {}) {
-    while (this.shoting.length >= this.maxConcurrent) {
-      await new Promise(r => setTimeout(r, 100));
+    const isUserTriggered = data.priority === true || data.userTriggered === true;
+    if (isUserTriggered) {
+      while (this.shotingUser.length >= 1) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      this.shotingUser.push(name);
+    } else {
+      while (this.shoting.length + this.shotingUser.length >= this.maxConcurrent) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      this.shoting.push(name);
     }
 
-    if (!await this.browserInit()) return false;
+    if (!await this.browserInit()) {
+      if (isUserTriggered) this.shotingUser = this.shotingUser.filter(i => i !== name);
+      else this.shoting = this.shoting.filter(i => i !== name);
+      return false;
+    }
 
     const useUrl = data.url && /^https?:\/\//i.test(String(data.url));
     const pageHeight = data.multiPageHeight ?? 4000;
@@ -231,7 +229,6 @@ export default class PuppeteerRenderer extends Renderer {
 
     let ret = [];
     let page = null;
-    this.shoting.push(name);
     const start = Date.now();
 
     try {
@@ -261,8 +258,7 @@ export default class PuppeteerRenderer extends Renderer {
         data.pageGotoParams || {}
       );
 
-      const loadUrl = useUrl ? data.url : `file:///${filePath.replace(/\\/g, "/")}`;
-      BotUtil.makeLog("debug", `[${name}] Loading: ${useUrl ? data.url : loadUrl}`, "PuppeteerRenderer");
+      const loadUrl = useUrl ? data.url : toFileUrl(filePath);
       await page.goto(loadUrl, pageGotoParams);
 
       const imageWait = data.imageWaitTimeout ?? 800;
@@ -288,14 +284,11 @@ export default class PuppeteerRenderer extends Renderer {
       if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
 
       if (fullPage) {
-        const buff = await page.screenshot({ ...screenshotOpts, fullPage: true });
-        const buffer = Buffer.isBuffer(buff) ? buff : Buffer.from(buff);
+        ret.push(toBuffer(await page.screenshot({ ...screenshotOpts, fullPage: true })));
         this.renderNum++;
-        BotUtil.makeLog("info", `[${name}][${this.renderNum}] fullPage ${(buffer.length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PuppeteerRenderer");
-        ret.push(buffer);
-      } else if (data.clip && typeof data.clip === 'object' && ['x', 'y', 'width', 'height'].every(k => Number.isFinite(data.clip[k]))) {
-        const buff = await page.screenshot({ ...screenshotOpts, clip: data.clip });
-        ret.push(Buffer.isBuffer(buff) ? buff : Buffer.from(buff));
+        BotUtil.makeLog("info", `[${name}][${this.renderNum}] fullPage ${(ret[0].length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PuppeteerRenderer");
+      } else if (data.clip && typeof data.clip === "object" && ["x", "y", "width", "height"].every(k => Number.isFinite(data.clip[k]))) {
+        ret.push(toBuffer(await page.screenshot({ ...screenshotOpts, clip: data.clip })));
         this.renderNum++;
         BotUtil.makeLog("info", `[${name}][${this.renderNum}] clip ${Date.now() - start}ms`, "PuppeteerRenderer");
       } else {
@@ -303,26 +296,19 @@ export default class PuppeteerRenderer extends Renderer {
         const boundingBox = await body.boundingBox();
         let num = data.multiPage ? Math.ceil(boundingBox.height / pageHeight) || 1 : 1;
         if (data.multiPage) screenshotOpts.type = "jpeg";
-
         if (num === 1) {
-          const buff = await body.screenshot(screenshotOpts);
-          const buffer = Buffer.isBuffer(buff) ? buff : Buffer.from(buff);
+          ret.push(toBuffer(await body.screenshot(screenshotOpts)));
           this.renderNum++;
-          BotUtil.makeLog("info", `[${name}][${this.renderNum}] ${(buffer.length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PuppeteerRenderer");
-          ret.push(buffer);
+          BotUtil.makeLog("info", `[${name}][${this.renderNum}] ${(ret[0].length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PuppeteerRenderer");
         } else {
           await page.setViewport({ width: Math.ceil(boundingBox.width), height: Math.min(pageHeight + 100, 2000) });
           for (let i = 1; i <= num; i++) {
-            if (i === num && num > 1) {
-              const h = Math.min(parseInt(boundingBox.height) - pageHeight * (num - 1), 2000);
-              await page.setViewport({ width: Math.ceil(boundingBox.width), height: h > 0 ? h : 100 });
-            }
+            if (i === num && num > 1) await page.setViewport({ width: Math.ceil(boundingBox.width), height: Math.min(parseInt(boundingBox.height) - pageHeight * (num - 1), 2000) || 100 });
             if (i !== 1) {
               await page.evaluate((y) => window.scrollTo(0, y), pageHeight * (i - 1));
               await new Promise(r => setTimeout(r, 100));
             }
-            const buff = i === 1 ? await body.screenshot(screenshotOpts) : await page.screenshot(screenshotOpts);
-            ret.push(Buffer.isBuffer(buff) ? buff : Buffer.from(buff));
+            ret.push(toBuffer(i === 1 ? await body.screenshot(screenshotOpts) : await page.screenshot(screenshotOpts)));
             this.renderNum++;
             if (i < num && num > 2) await new Promise(r => setTimeout(r, 100));
           }
@@ -337,10 +323,11 @@ export default class PuppeteerRenderer extends Renderer {
         page.removeAllListeners('request');
         await page.close().catch(() => {});
       }
-      this.shoting = this.shoting.filter(item => item !== name);
+      if (isUserTriggered) this.shotingUser = this.shotingUser.filter(i => i !== name);
+      else this.shoting = this.shoting.filter(i => i !== name);
     }
 
-    if (this.renderNum % this.restartNum === 0 && this.renderNum > 0 && this.shoting.length === 0) {
+    if (this.renderNum % this.restartNum === 0 && this.renderNum > 0 && this.shoting.length === 0 && this.shotingUser.length === 0) {
       BotUtil.makeLog("info", `Completed ${this.renderNum} screenshots, restarting browser...`, "PuppeteerRenderer");
       setTimeout(() => this.restart(), 2000);
     }
@@ -353,12 +340,9 @@ export default class PuppeteerRenderer extends Renderer {
     return data.multiPage ? ret : ret[0];
   }
 
-  /**
-   * Restart browser instance with cleanup
-   */
   async restart(force = false) {
     if (!this.browser || this.lock) return;
-    if (!force && (this.renderNum % this.restartNum !== 0 || this.shoting.length > 0)) return;
+    if (!force && (this.renderNum % this.restartNum !== 0 || this.shoting.length > 0 || this.shotingUser.length > 0)) return;
 
     BotUtil.makeLog("warn", `Puppeteer Chromium ${force ? "forced" : "scheduled"} restart...`, "PuppeteerRenderer");
 
@@ -399,9 +383,6 @@ export default class PuppeteerRenderer extends Renderer {
     return true;
   }
 
-  /**
-   * Clean up all resources on process exit
-   */
   async cleanup() {
     if (this.healthCheckTimer) {
       clearInterval(this.healthCheckTimer);
