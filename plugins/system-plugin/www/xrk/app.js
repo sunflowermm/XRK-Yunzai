@@ -2449,15 +2449,17 @@ class App {
     }
   }
 
-  /** 渲染单条历史消息（供 restore 复用，恢复时只渲染非 blob 的媒体） */
+  /** 渲染单条历史消息（供 restore 复用）；必须传入 m.id 以便删除时 DOM 与 history 一致 */
   _renderHistoryMessage(m) {
+    const id = m.id || m.recordId;
     if (m.type === 'chat-record' || (m.type === 'record' && m.messages)) {
-      this.appendChatRecord(m.messages ?? [], m.title ?? '', m.description ?? '', false);
+      const el = this.appendChatRecord(m.messages ?? [], m.title ?? '', m.description ?? '', false, id);
+      if (el && id) el.dataset.messageId = id;
     } else if (m.segments && Array.isArray(m.segments)) {
       const segments = this._sanitizeSegments(m.segments);
-      if (segments.length) this.appendSegments(segments, false, m.role || 'assistant');
+      if (segments.length) this.appendSegments(segments, false, m.role || 'assistant', id);
     } else if (m.type === 'image' && m.url && !String(m.url).startsWith('blob:')) {
-      this.appendSegments([{ type: 'image', url: m.url }], false, m.role || 'assistant');
+      this.appendSegments([{ type: 'image', url: m.url }], false, m.role || 'assistant', id);
     } else if (m.role && m.text) {
       this.appendChat(m.role, m.text, { persist: false, mcpTools: m.mcpTools, messageId: m.id });
     }
@@ -2689,57 +2691,21 @@ class App {
   
   _deleteMessage(messageId) {
     const box = document.getElementById('chatMessages');
-    if (!box) return;
-    
-    // 查找所有相关的消息元素（包括文字和图片）
-    const allMessages = box.querySelectorAll(`[data-message-id="${messageId}"]`);
-    if (allMessages.length === 0) return;
-    
-    const firstMsg = allMessages[0];
-    const role = firstMsg.dataset.role;
-    
-    // 用户消息：只能撤回自己的
-    if (role === 'user') {
-      // 删除所有相关的消息元素（文字和图片）
-      allMessages.forEach(msg => msg.remove());
-      
-      // 从历史记录中删除所有相关的消息
-      const history = this._getCurrentChatHistory();
-      let deleted = false;
-      for (let i = history.length - 1; i >= 0; i--) {
-        const m = history[i];
-        if (m.id === messageId) {
-          history.splice(i, 1);
-          deleted = true;
-        }
+    if (!box || !messageId) return;
+    const all = box.querySelectorAll(`[data-message-id="${messageId}"]`);
+    if (all.length === 0) return;
+    all.forEach(el => el.remove());
+    const history = this._getCurrentChatHistory();
+    let n = 0;
+    for (let i = history.length - 1; i >= 0; i--) {
+      const m = history[i];
+      if (m.id === messageId || m.recordId === messageId) {
+        history.splice(i, 1);
+        n++;
       }
-      
-      if (deleted) {
-        this._saveChatHistory();
-      }
-      
-      this.showToast('消息已撤回', 'success');
-    } else if (role === 'assistant') {
-      // AI消息：直接删除
-      allMessages.forEach(msg => msg.remove());
-      
-      // 从历史记录中删除
-      const history = this._getCurrentChatHistory();
-      let deleted = false;
-      for (let i = history.length - 1; i >= 0; i--) {
-        const m = history[i];
-        if (m.id === messageId) {
-          history.splice(i, 1);
-          deleted = true;
-        }
-      }
-      
-      if (deleted) {
-        this._saveChatHistory();
-      }
-      
-      this.showToast('消息已删除', 'success');
     }
+    if (n) this._saveChatHistory();
+    this.showToast(all[0].dataset.role === 'user' ? '消息已撤回' : '消息已删除', 'success');
   }
   
   _regenerateMessage(messageId) {
@@ -2783,19 +2749,21 @@ class App {
    * 按顺序渲染 segments（文本和图片混合）
    * @param {Array} segments - 消息段数组
    * @param {boolean} persist - 是否持久化到历史记录
+   * @param {string} role - 'user' | 'assistant'
+   * @param {string} [messageId] - 可选，与 history 一致以便删除时能同步移除
    * @returns {HTMLElement|null} 创建的消息容器
    */
-  appendSegments(segments, persist = true, role = 'assistant') {
-    if (!segments || segments.length === 0) return;
+  appendSegments(segments, persist = true, role = 'assistant', messageId = null) {
+    if (!segments || segments.length === 0) return null;
     
     const box = document.getElementById('chatMessages');
-    if (!box) return;
+    if (!box) return null;
     
     const div = document.createElement('div');
-    const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    div.id = messageId;
+    const msgId = messageId || `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    div.id = msgId;
     div.className = `chat-message ${role === 'user' ? 'user' : 'assistant'}${this._isRestoringHistory ? '' : ' message-enter'}`;
-    div.dataset.messageId = messageId;
+    div.dataset.messageId = msgId;
     
     const textParts = [];
     const allText = [];
@@ -3038,11 +3006,11 @@ class App {
       div.appendChild(textDiv);
     }
     
-    if (div.children.length === 0) return;
+    if (div.children.length === 0) return null;
     
     // 统一添加消息操作按钮（复制/删除/重新生成）
     const fullText = allText.join('').trim();
-    this._addMessageActions(div, role, fullText, messageId);
+    this._addMessageActions(div, role, fullText, msgId);
     
     box.appendChild(div);
     this._renderMermaidIn(div);
@@ -3067,7 +3035,7 @@ class App {
         role: role === 'user' ? 'user' : 'assistant', 
         segments: normalizedSegments,
         ts: Date.now(),
-        id: messageId
+        id: msgId
       });
       this._saveChatHistory();
     }
@@ -3125,20 +3093,20 @@ class App {
     }
   }
 
-  appendChatRecord(messages, title = '', description = '', persist = true) {
+  appendChatRecord(messages, title = '', description = '', persist = true, messageId = null) {
     const box = document.getElementById('chatMessages');
-    if (!box) return;
+    if (!box) return null;
 
     const messagesArray = Array.isArray(messages) ? messages : [messages];
-    if (messagesArray.length === 0) return;
+    if (messagesArray.length === 0) return null;
     
-    const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const recordId = `record_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const msgId = messageId || `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const recordId = messageId ? `record_${msgId}` : `record_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const div = document.createElement('div');
-    div.id = messageId;
+    div.id = msgId;
     div.className = `chat-message assistant chat-record${this._isRestoringHistory ? '' : ' message-enter'}`;
     div.dataset.recordId = recordId;
-    div.dataset.messageId = messageId;
+    div.dataset.messageId = msgId;
 
     let content = '';
     // 统一显示header（即使没有title也显示，保持格式一致）
@@ -3169,7 +3137,7 @@ class App {
 
     this._applyMessageEnter(div, persist);
 
-    // 保存到聊天历史（仅在需要持久化时）
+    // 保存到聊天历史（仅在需要持久化时）；id 与 DOM data-message-id 一致以便删除
     if (persist) {
       const recordData = {
         role: 'assistant',
@@ -3178,12 +3146,12 @@ class App {
         description: description ?? '',
         messages: messagesArray,
         ts: Date.now(),
-        recordId
+        recordId,
+        id: msgId
       };
       this._getCurrentChatHistory().push(recordData);
       this._saveChatHistory();
     }
-    
     return div;
   }
 
@@ -3617,13 +3585,8 @@ class App {
         try {
           const urls = await this._uploadImagesCore(images);
           if (Array.isArray(urls) && urls.length > 0) {
-            // 为每张图片创建消息，使用相同的 messageId
             urls.forEach((u) => {
-              const imgMsg = this.appendSegments([{ type: 'image', url: u }], false, 'user');
-              if (imgMsg) {
-                imgMsg.dataset.messageId = messageId;
-                imgMsg.dataset.role = 'user';
-              }
+              this.appendSegments([{ type: 'image', url: u }], false, 'user', messageId);
             });
             // 保存到历史记录，使用统一的 messageId
             const history = this._getCurrentChatHistory();
