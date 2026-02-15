@@ -9,9 +9,29 @@ import BotUtil from '../../../lib/util.js';
 
 const mediaDir = path.join(process.cwd(), 'data', 'media');
 
-function getBaseUrl(Bot) {
+/**
+ * 获取用于拼装媒体绝对 URL 的 baseUrl（Web 端图片等依赖绝对 URL 才能加载）
+ * @param {Object} Bot - Bot 实例
+ * @param {string} [fallback] - 当 Bot 未配置 URL 时的回退（如从 WebSocket 请求头解析的 origin）
+ */
+function getBaseUrl(Bot, fallback = '') {
   const u = Bot?.url ?? (typeof Bot?.getServerUrl === 'function' ? Bot.getServerUrl() : null);
-  return (u && String(u).startsWith('http')) ? String(u).replace(/\/$/, '') : '';
+  const base = (u && String(u).startsWith('http')) ? String(u).replace(/\/$/, '') : '';
+  return base || (fallback && String(fallback).startsWith('http') ? String(fallback).replace(/\/$/, '') : '');
+}
+
+/**
+ * 从 WebSocket/HTTP 请求中解析客户端可访问的 baseUrl（用于 device 回复中的媒体链接）
+ * 优先 Origin，否则用 Host + 协议拼装，支持反向代理 X-Forwarded-* 头
+ */
+function getBaseUrlFromRequest(req) {
+  if (!req || !req.headers) return '';
+  const origin = req.headers.origin || req.headers.Origin;
+  if (origin && /^https?:\/\//i.test(origin)) return origin.replace(/\/$/, '');
+  const host = req.headers.host || req.headers['x-forwarded-host'];
+  const proto = req.headers['x-forwarded-proto'] || (req.socket?.encrypted ? 'https' : 'http');
+  if (host) return `${proto}://${host}`.replace(/\/$/, '');
+  return '';
 }
 
 const deviceStore = new Map();
@@ -25,19 +45,24 @@ function send(conn, obj) {
   }
 }
 
-/** 标准化回复内容为 segments（兼容字符串、数组、{ segments }、{ title, description, segments }；image/video/file 支持 file 或 url） */
+/**
+ * 标准化回复内容为 segments
+ * 兼容：字符串、数组、{ segments }、{ title, description, segments }；
+ * image/video/record/file 支持 url / file / data（Buffer 或类 Buffer）
+ */
 function normalizeReplySegments(input) {
   if (input == null) return [];
   if (Array.isArray(input)) {
     return input.map(seg => {
       if (typeof seg === 'string') return { type: 'text', text: seg };
-      const url = seg.url || (['image', 'video', 'record', 'file'].includes(seg.type) && seg.file);
+      const isMedia = seg.type && ['image', 'video', 'record', 'file'].includes(seg.type);
+      const url = seg.url || (isMedia && (seg.file ?? seg.data));
       return { type: seg.type || 'text', text: seg.text || '', url, name: seg.name };
     }).filter(seg => seg.type !== 'text' || seg.text);
   }
   if (typeof input === 'object' && Array.isArray(input.segments)) return normalizeReplySegments(input.segments);
   if (typeof input === 'object' && input.type && ['text', 'image', 'video', 'record', 'file'].includes(input.type)) {
-    const url = input.url || input.file;
+    const url = input.url || input.file || input.data;
     return [url ? { type: input.type, url, name: input.name } : { type: 'text', text: input.text || '' }];
   }
   return [{ type: 'text', text: String(input) }];
@@ -66,10 +91,20 @@ function extFromMime(mime) {
   return map[mime] || '.bin';
 }
 
-/** 将本地路径/ Buffer 转为持久化 URL（写入 data/media，与 files 静态路由一致），刷新后图片仍可访问 */
-async function segmentsToWebUrls(segments, Bot) {
-  const baseUrl = getBaseUrl(Bot);
+/**
+ * 将本地路径/ Buffer / data URL 转为 Web 可访问的持久化 URL（写入 data/media）
+ * @param {Array} segments - 标准化后的 segments
+ * @param {Object} Bot - Bot 实例
+ * @param {string} [baseUrlOverride] - 优先使用的 baseUrl（如设备注册时从请求头解析的 origin），保证 Web 端图片能加载
+ */
+async function segmentsToWebUrls(segments, Bot, baseUrlOverride) {
+  const baseUrl = baseUrlOverride || getBaseUrl(Bot);
   const out = [];
+  try {
+    await fs.mkdir(mediaDir, { recursive: true });
+  } catch (e) {
+    BotUtil.makeLog('warn', `[Device] 创建 media 目录失败: ${e.message}`, 'DeviceAPI');
+  }
   for (const seg of segments) {
     const s = { ...seg };
     const url = s.url;
@@ -120,10 +155,15 @@ async function segmentsToWebUrls(segments, Bot) {
   return out;
 }
 
-/** 构建回复 payload（parseReplyPayload + segmentsToWebUrls + 统一字段），供 sendReply / reply 共用 */
+/**
+ * 构建回复 payload（parseReplyPayload + segmentsToWebUrls + 统一字段），供 sendReply / reply 共用
+ * baseUrl 优先用设备注册时从请求头解析的 origin，保证 Web 端媒体为绝对 URL 可加载
+ */
 async function buildReplyPayload(content, deviceId, Bot) {
   const { title, description, segments } = parseReplyPayload(content);
-  const webSegments = await segmentsToWebUrls(segments, Bot);
+  const device = deviceStore.get(deviceId);
+  const baseUrl = (device && device.baseUrl) ? device.baseUrl : getBaseUrl(Bot);
+  const webSegments = await segmentsToWebUrls(segments, Bot, baseUrl);
   const textOut = webSegments.map(s => (s.type === 'text' ? s.text : '')).filter(Boolean).join('\n');
   const payload = {
     type: 'reply',
@@ -255,7 +295,14 @@ export default {
             deviceId = id;
             deviceConnections.set(id, conn);
             conn.device_id = id;
-            const device = { device_id: id, device_type: String(data.device_type || 'unknown'), device_name: name, capabilities: Array.isArray(data.capabilities) ? data.capabilities : [], registeredAt: Date.now() };
+            const device = {
+              device_id: id,
+              device_type: String(data.device_type || 'unknown'),
+              device_name: name,
+              capabilities: Array.isArray(data.capabilities) ? data.capabilities : [],
+              registeredAt: Date.now(),
+              baseUrl: getBaseUrlFromRequest(req)
+            };
             deviceStore.set(id, device);
             if (Bot?.bots) Bot.bots[id] = { device_type: 'web', online: true, nickname: name, info: { device_name: name } };
             send(conn, { type: 'register_response', success: true, device: { device_id: id, device_type: device.device_type, device_name: device.device_name } });
