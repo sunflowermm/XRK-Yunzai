@@ -10,11 +10,11 @@
 
 适配器是连接外部协议（如 OneBot、QQ、微信等）与 Bot 核心系统的桥梁。所有适配器都通过 `Bot.adapter` 数组注册。
 
-**适配器存放路径**: `plugins/adapter/`
+**适配器存放路径**: `plugins/system-plugin/adapter/` 或各插件下 `plugins/<插件名>/adapter/`。
 
 ### 1.2 适配器注册
 
-在 `plugins/adapter/*.js` 中通过 `Bot.adapter.push(adapterInstance)` 注册。适配器需有 `id`、`name`、`path`（WebSocket 路径）、`echo`（请求-响应 Map）、`timeout` 及发送/拉取等实现方法。
+在适配器文件中通过 `Bot.adapter.push(adapterInstance)` 注册。适配器需有 `id`、`name`、`path`（WebSocket 路径）、`echo`（请求-响应 Map）、`timeout` 及发送/拉取等实现方法。
 
 ### 1.3 适配器与 Bot 的交互
 
@@ -38,27 +38,36 @@
 | `getGroupMemberList(data)` | 获取群成员列表 | `data`: 事件数据 | `Promise<Array>` |
 | `getGroupMemberInfo(data)` | 获取群成员信息 | `data`: 事件数据 | `Promise<Object>` |
 
-### 1.5 适配器事件处理流程
+### 1.5 事件链与事件对象规范
+
+**事件链**（消息类事件）：
+
+1. 适配器构造事件对象 `data`，调用 `Bot.em(eventName, data)`（Bot 内部会先执行 `prepareEvent(data)`）。
+2. `Bot.em` 按事件名逐级 `emit`（如 `message.group.normal` → `message.group` → `message`）。
+3. `plugins/system-plugin/events/message.js` 等监听器订阅 `message`，执行 `EventListener.execute(e)` → `PluginsLoader.deal(e)`。
+4. **device/stdin** 不经过 `Bot.em` 的 message 分支，直接调用 `PluginsLoader.deal(event)`。
+5. `deal(e)` 内：`initEvent(e)`（补全 self_id、bot、event_id）→ 若为 stdin/device 则 `normalizeSpecialEvent(e)`（补全 post_type、message、raw_message 等）→ `dealMsg(e)`（解析 message、设置 e.msg、e.group 占位等）→ `runPluginsAndHandle(e)`。
+
+**事件对象最低要求**（供 loader 与插件兼容）：
+
+| 来源 | 必设字段 | 说明 |
+|------|----------|------|
+| OneBot 消息 | post_type, message_type, sub_type, self_id, user_id, message, raw_message, sender | message 为段数组；loader 据此设 e.isGroup、e.msg、e.group（getter 或占位） |
+| device 消息 | post_type: 'device', event_type: 'message', self_id, user_id, message, raw_message, sender, reply | 可选 group_id、message_type、group_name 以兼容群上下文 |
+| stdin/api | post_type, message_type, sub_type, self_id, user_id, message 或 raw_message, sender, reply | normalizeSpecialEvent 会补全 message/raw_message |
+
+**说明**：`e.isGroup`、`e.isPrivate` 由 loader 在 `setupEventProps` 中根据 `message_type` 设置，适配器无需重复设置。群消息若缺少 `e.group`（如 getter 抛错或 device 无 bot），loader 会挂占位对象 `{ group_id, group_name }`，避免插件报「未获取到群对象」。
+
+### 1.6 适配器事件处理流程（概览）
 
 ```
-外部协议消息
-    ↓
-适配器接收
-    ↓
-解析消息格式
-    ↓
-构造事件对象 data
-    ↓
-Bot.prepareEvent(data)  ← 补全 bot/friend/group/member
-    ↓
-Bot.em(eventName, data)  ← 触发事件
-    ↓
-PluginsLoader.deal(e)   ← 插件处理
-    ↓
-插件执行
+外部协议消息 → 适配器解析 → 构造 data（见上表）
+    → Bot.em(name, data) 或 PluginsLoader.deal(data)（device/stdin）
+    → initEvent → normalizeSpecialEvent（若适用）→ dealMsg → runPluginsAndHandle
+    → 插件执行
 ```
 
-### 1.6 适配器示例
+### 1.7 适配器示例
 
 ```javascript
 // plugins/adapter/MyAdapter.js

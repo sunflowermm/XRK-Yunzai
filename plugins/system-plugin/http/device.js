@@ -406,6 +406,7 @@ export default {
             const user_id = data.user_id || data.userId || deviceId;
             const sender = data.sender || { nickname: data.nickname || 'Web', card: data.nickname || 'Web' };
             const meta = data.meta || {};
+            const raw_message = typeof text === 'string' && text ? text : (message.map(m => m.type === 'text' ? (m.text || '') : `[${m.type}]`).join('').trim() || '')
             const event = {
               post_type: 'device',
               adapter: 'device',
@@ -414,13 +415,16 @@ export default {
               device_type: deviceInfo.device_type || 'web',
               device_name: deviceInfo.device_name || 'Web',
               message,
+              raw_message,
               event_data: { message, text, sender, user_id, channel: data.channel || 'web-chat', meta, isMaster: data.isMaster === true },
               self_id: deviceId,
               user_id,
+              sender: { ...sender, user_id },
               isMaster: data.isMaster === true || (data.device_type === 'web' && user_id),
               time: now,
               event_id: eventId,
               message_id: eventId,
+              ...(data.group_id != null && { group_id: data.group_id, group_name: data.group_name || `群${data.group_id}`, message_type: 'group' }),
               reply: async (segmentsOrText) => {
                 const payload = await buildReplyPayload(segmentsOrText, deviceId, Bot);
                 send(conn, payload);

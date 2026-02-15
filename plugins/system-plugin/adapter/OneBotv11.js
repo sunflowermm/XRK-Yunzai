@@ -2005,10 +2005,7 @@ Bot.adapter.push(
       }
       data.raw_message = data.raw_message || ''
       data.msg = data.raw_message
-      
-      data.isGroup = data.message_type === 'group'
-      data.isPrivate = data.message_type === 'private'
-      
+
       data.sender = data.sender || {}
       data.sender.user_id = data.sender.user_id || data.user_id
       

@@ -86,22 +86,25 @@ graph TB
 
 ```mermaid
 flowchart TD
-    Start[用户消息] --> Adapter[适配器<br/>OneBot/Device/STDIN]
-    Adapter --> Em[Bot.em<br/>'message', rawData]
-    Em --> Prepare[Bot.prepareEvent<br/>注入 bot/friend/group/member]
-    Prepare --> Deal[PluginsLoader.deal<br/>处理事件]
-    Deal --> DealMsg[PluginsLoader.dealMsg<br/>解析消息、设置属性]
-    DealMsg --> SetupReply[PluginsLoader.setupReply<br/>设置回复方法]
-    SetupReply --> RunPlugins[PluginsLoader.runPlugins<br/>匹配并执行插件]
-    RunPlugins --> PluginFnc[plugin[rule.fnc]<br/>插件处理函数]
-    PluginFnc --> Reply[e.reply<br/>回复消息]
-    Reply --> Send[适配器发送消息]
+    Start[用户消息] --> Adapter[适配器 OneBot/Device/STDIN]
+    Adapter --> Em[Bot.em 或 deal]
+    Em --> Init[PluginsLoader.deal]
+    Init --> InitEvent[initEvent: self_id/bot/event_id]
+    InitEvent --> Norm[normalizeSpecialEvent: stdin/device 补 message/raw_message]
+    Norm --> DealMsg[dealMsg: parseMessage/setupEventProps/e.group 占位]
+    DealMsg --> SetupReply[setupReply]
+    SetupReply --> Run[runPluginsAndHandle]
+    Run --> PluginFnc[插件 rule.fnc]
+    PluginFnc --> Reply[e.reply]
+    Reply --> Send[适配器发送]
     
     style Start fill:#4a90e2,stroke:#2c5aa0,color:#fff
     style Adapter fill:#50c878,stroke:#2d8659,color:#fff
     style PluginFnc fill:#feca57,stroke:#d68910,color:#000
     style Send fill:#ff6b9d,stroke:#c44569,color:#fff
 ```
+
+OneBot 路径：适配器 `Bot.em('message.group.normal', data)` → Bot 内 `prepareEvent(data)` → `emit` 逐级触发 → `events/message.js` 监听 `message` 并执行 `PluginsLoader.deal(e)`。Device/Stdin 路径：直接调用 `PluginsLoader.deal(event)`，无 `Bot.em`。详见 [ADAPTER_AND_ROUTING.md](./reference/ADAPTER_AND_ROUTING.md)。
 
 ### 3.2 配置加载流程
 
