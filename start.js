@@ -491,12 +491,15 @@ class ServerManager extends BaseManager {
         env: cleanEnv,
         detached: false
       });
+      this.signalHandler.currentChild = child;
       child.on('exit', (code, signal) => {
+        this.signalHandler.currentChild = null;
         const ret = signal ? 1 : (code !== null && code !== undefined ? code : 0);
         if (signal) this.logger.warning(`子进程被信号 ${signal} 终止，将自动重启`).catch(() => {});
         resolve(ret);
       });
       child.on('error', (err) => {
+        this.signalHandler.currentChild = null;
         this.logger.error(`子进程启动失败: ${err.message}`).catch(() => {});
         resolve(1);
       });
@@ -588,16 +591,21 @@ class SignalHandler {
     this.lastSignalTime = 0;
     this.isSetup = false;
     this.inRestartLoop = false;
+    this.currentChild = null;
     this.handlers = {};
   }
 
   setup() {
     if (this.isSetup) return;
-    
     const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
     const createHandler = (signal) => async () => {
-      if (this.inRestartLoop) return;
       const currentTime = Date.now();
+      if (this.inRestartLoop) {
+        if (this.currentChild) {
+          this.currentChild.kill('SIGINT');
+        }
+        return;
+      }
       if (this.shouldExit(signal, currentTime)) {
         await this.logger.log(`检测到双击 ${signal} 信号，准备退出`);
         await this.cleanup();
@@ -607,12 +615,11 @@ class SignalHandler {
       this.lastSignalTime = currentTime;
       await this.logger.warning(`收到 ${signal} 信号，再次发送将退出程序`);
     };
-    
     signals.forEach(signal => {
       this.handlers[signal] = createHandler(signal);
       process.on(signal, this.handlers[signal]);
     });
-    if (process.platform === 'win32' && process.stdin.isTTY) {
+    if (process.stdin) {
       this._rl = readline.createInterface({ input: process.stdin, output: process.stdout });
       this._rl.on('SIGINT', () => process.emit('SIGINT'));
     }
@@ -630,11 +637,10 @@ class SignalHandler {
       delete this.handlers[signal];
     });
     this.isSetup = false;
-    await this.logger.log('信号处理器已清理');
   }
 
   shouldExit(signal, currentTime) {
-    return signal === this.lastSignal && 
+    return signal === this.lastSignal &&
            currentTime - this.lastSignalTime < CONFIG.SIGNAL_TIME_THRESHOLD;
   }
 }
