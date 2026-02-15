@@ -18,6 +18,16 @@ import { BASE_DIRS } from './lib/base-dirs.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// 确保进程带 --expose-gc，供 start.js 及系统优化使用；缺失则自举一次
+if (!process.execArgv.includes('--expose-gc')) {
+  const appPath = process.argv[1] || path.join(__dirname, 'app.js');
+  const result = spawnSync(process.argv[0], ['--expose-gc', ...process.execArgv, appPath, ...process.argv.slice(2)], {
+    stdio: 'inherit',
+    cwd: process.cwd()
+  });
+  process.exit(result.status ?? (result.signal ? 128 + 1 : 1));
+}
+
 /**
  * 引导阶段日志：写文件 + 控制台着色
  * @param {string} logFile - 日志文件路径

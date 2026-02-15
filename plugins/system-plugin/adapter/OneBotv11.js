@@ -1545,8 +1545,9 @@ Bot.adapter.push(
      * 创建成员对象
      */
     pickMember(data, group_id, user_id) {
-      if (group_id.includes("-")) {
-        const guild_id = group_id.split("-")
+      const gid = String(group_id ?? "")
+      if (gid.includes("-")) {
+        const guild_id = gid.split("-")
         const i = {
           ...data,
           guild_id: guild_id[0],
@@ -1554,18 +1555,19 @@ Bot.adapter.push(
           user_id,
         }
         return {
-          ...this.pickGroup(i, group_id),
+          ...this.pickGroup(i, gid),
           ...i,
           getInfo: this.getGuildMemberInfo.bind(this, i),
           getAvatarUrl: async () => (await this.getGuildMemberInfo(i)).avatar_url,
         }
       }
 
-      const memberInfo = (data.bot.gml.get(group_id) || new Map()).get(user_id) || {}
+      const gmlMap = data.bot.gml.get(gid) ?? data.bot.gml.get(group_id)
+      const memberInfo = (gmlMap || new Map()).get(user_id) || {}
       const i = {
         ...memberInfo,
         ...data,
-        group_id,
+        group_id: gid,
         user_id,
       }
 
@@ -1595,10 +1597,12 @@ Bot.adapter.push(
      * 创建群对象
      */
     pickGroup(data, group_id) {
-      if (group_id.includes("-")) {
-        const guild_id = group_id.split("-")
+      const gid = String(group_id ?? "")
+      const glGet = (id) => data.bot.gl.get(id)
+      if (gid.includes("-")) {
+        const guild_id = gid.split("-")
         const i = {
-          ...data.bot.gl.get(group_id),
+          ...(glGet(gid) ?? glGet(group_id)),
           ...data,
           guild_id: guild_id[0],
           channel_id: guild_id[1],
@@ -1621,9 +1625,9 @@ Bot.adapter.push(
       }
 
       const i = {
-        ...data.bot.gl.get(group_id),
+        ...(glGet(gid) ?? glGet(group_id)),
         ...data,
-        group_id,
+        group_id: gid,
       }
 
       return {
@@ -2060,14 +2064,14 @@ Bot.adapter.push(
         this.defineEventProperty(data, "friend", () => data.bot.pickFriend(data.user_id))
       }
 
-      if (data.group_id && !hasOwn("group")) {
-        this.defineEventProperty(data, "group", () => data.bot.pickGroup(data.group_id))
+      if (data.group_id != null && !hasOwn("group")) {
+        this.defineEventProperty(data, "group", () => this.pickGroup(data, data.group_id))
         const group = data.bot.gl.get(data.group_id)
         data.group_name = data.group_name || (group && group.group_name)
       }
 
-      if (data.group_id && data.user_id && !hasOwn("member")) {
-        this.defineEventProperty(data, "member", () => data.bot.pickMember(data.group_id, data.user_id))
+      if (data.group_id != null && data.user_id != null && !hasOwn("member")) {
+        this.defineEventProperty(data, "member", () => this.pickMember(data, data.group_id, data.user_id))
       }
 
       const memberMap = data.bot.gml.get(data.group_id)
