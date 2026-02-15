@@ -1,6 +1,5 @@
 import cfg from '../../../lib/config/config.js';
 import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
-import BotUtil from '../../../lib/util.js';
 import { transformMessagesWithVision } from '../../../lib/utils/llm/message-transform.js';
 
 /**
@@ -150,8 +149,8 @@ async function handleChatCompletionsV3(req, res, Bot) {
       if (fields.apiKey) body.apiKey = fields.apiKey;
       if (fields.api_key) body.api_key = fields.api_key;
       if (fields.temperature) body.temperature = fields.temperature;
-      if (fields.max_tokens) body.max_tokens = fields.max_tokens;
-      if (fields.maxTokens) body.maxTokens = fields.maxTokens;
+      const maxTok = fields.maxTokens ?? fields.max_tokens;
+      if (maxTok != null) body.maxTokens = maxTok;
       
       // 处理上传的图片（字段名可以是 'images' 或 'file'）
       if (files && files.length > 0) {
@@ -203,39 +202,14 @@ async function handleChatCompletionsV3(req, res, Bot) {
     }
   }
 
-  // 支持多种认证方式：body.apiKey、Authorization头部Bearer令牌
-  let accessKey = (pickFirst(body, ['apiKey', 'api_key']) || '').toString().trim();
-  if (!accessKey) {
-    const authHeader = (req.headers.authorization || '').toString().trim();
-    if (authHeader.startsWith('Bearer ')) {
-      accessKey = authHeader.substring(7).trim();
-    }
-  }
-  // 兼容 Web 控制台常见写法：X-API-Key
-  if (!accessKey) {
-    accessKey = (req.headers['x-api-key'] || '').toString().trim();
-  }
-  
-  // 验证 API Key
-  if (!Bot.checkApiAuthorization(req)) {
-    if (!accessKey || accessKey !== Bot.apiKey) {
-      return res.status(401).json({ success: false, message: 'apiKey 无效' });
-    }
-  }
-
   const streamFlag = Boolean(pickFirst(body, ['stream']));
-  // OpenAI兼容：body.model 字段即为运营商 provider
   const bodyModel = (pickFirst(body, ['model']) || '').toString().trim().toLowerCase();
-  const provider = (bodyModel && LLMFactory.hasProvider(bodyModel)) 
-    ? bodyModel 
+  const provider = (bodyModel && LLMFactory.hasProvider(bodyModel))
+    ? bodyModel
     : LLMFactory.getDefaultProvider();
-
-  const llmConfig = {
-    provider,
-    ...(accessKey ? { apiKey: accessKey } : {})
-  };
-  
   const base = LLMFactory.getProviderConfig(provider);
+  // 仅用提供商配置创建客户端，不拿请求里的 apiKey 覆盖（与 AGT 一致，避免前端/设备 key 覆盖 LLM key）
+  const llmConfig = { provider, ...base };
 
   if (streamFlag && base.enableStream === false) {
     return res.status(400).json({ 
@@ -249,59 +223,40 @@ async function handleChatCompletionsV3(req, res, Bot) {
   // 转换消息（支持多模态）
   const transformedMessages = await transformMessagesWithVision(messages, llmConfig, { mode: 'openai' });
   
-  // 构建OpenAI兼容的overrides配置
+  // 构建 overrides（规范键名，与 openai-chat-utils/buildOpenAIChatCompletionsBody 一致）
   const overrides = {};
-  const addNum = (key, val) => {
-    const num = toNum(val);
-    if (num !== undefined) {
-      overrides[key] = num;
-      const camelKey = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-      if (camelKey !== key) overrides[camelKey] = num;
-    }
-  };
-  const addBool = (key, val) => {
-    const bool = toBool(val);
-    if (bool !== undefined) {
-      overrides[key] = bool;
-      const camelKey = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-      if (camelKey !== key) overrides[camelKey] = bool;
-    }
-  };
-  const add = (key, val) => {
-    if (val !== undefined) {
-      overrides[key] = val;
-      const camelKey = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-      if (camelKey !== key) overrides[camelKey] = val;
-    }
-  };
-  
-  const { temperature, max_tokens, maxTokens, top_p, topP, presence_penalty, presencePenalty, 
-          frequency_penalty, frequencyPenalty, tool_choice, toolChoice, parallel_tool_calls, 
-          parallelToolCalls, tools, stop, response_format, responseFormat, stream_options, 
-          streamOptions, seed, user, n, logit_bias, logitBias, logprobs, top_logprobs, topLogprobs } = body;
-  
-  if (temperature !== undefined) addNum('temperature', temperature);
-  if (max_tokens !== undefined || maxTokens !== undefined) addNum('max_tokens', max_tokens ?? maxTokens);
-  if (top_p !== undefined || topP !== undefined) addNum('top_p', top_p ?? topP);
-  if (presence_penalty !== undefined || presencePenalty !== undefined) addNum('presence_penalty', presence_penalty ?? presencePenalty);
-  if (frequency_penalty !== undefined || frequencyPenalty !== undefined) addNum('frequency_penalty', frequency_penalty ?? frequencyPenalty);
-  if (tool_choice !== undefined || toolChoice !== undefined) add('tool_choice', tool_choice ?? toolChoice);
-  if (parallel_tool_calls !== undefined || parallelToolCalls !== undefined) addBool('parallel_tool_calls', parallel_tool_calls ?? parallelToolCalls);
-  if (tools !== undefined) add('tools', tools);
-  if (stop !== undefined) add('stop', stop);
-  if (response_format !== undefined || responseFormat !== undefined) add('response_format', response_format ?? responseFormat);
-  if (stream_options !== undefined || streamOptions !== undefined) add('stream_options', stream_options ?? streamOptions);
-  if (seed !== undefined) addNum('seed', seed);
-  if (user !== undefined) add('user', user);
-  if (n !== undefined) addNum('n', n);
-  if (logit_bias !== undefined || logitBias !== undefined) add('logit_bias', logit_bias ?? logitBias);
-  if (logprobs !== undefined) addBool('logprobs', logprobs);
-  if (top_logprobs !== undefined || topLogprobs !== undefined) addNum('top_logprobs', top_logprobs ?? topLogprobs);
-  
+  const t = toNum(body.temperature); if (t !== undefined) overrides.temperature = t;
+  const mt = toNum(body.maxTokens ?? body.max_tokens); if (mt !== undefined) overrides.maxTokens = mt;
+  const tp = toNum(body.topP ?? body.top_p); if (tp !== undefined) overrides.topP = tp;
+  const pp = toNum(body.presencePenalty ?? body.presence_penalty); if (pp !== undefined) overrides.presencePenalty = pp;
+  const fp = toNum(body.frequencyPenalty ?? body.frequency_penalty); if (fp !== undefined) overrides.frequencyPenalty = fp;
+  const tc = body.tool_choice ?? body.toolChoice; if (tc !== undefined) overrides.tool_choice = tc;
+  const ptc = toBool(body.parallel_tool_calls ?? body.parallelToolCalls); if (ptc !== undefined) overrides.parallel_tool_calls = ptc;
+  if (body.tools !== undefined) overrides.tools = body.tools;
+  if (body.stop !== undefined) overrides.stop = body.stop;
+  const rf = body.response_format ?? body.responseFormat; if (rf !== undefined) overrides.response_format = rf;
+  const so = body.stream_options ?? body.streamOptions; if (so !== undefined) overrides.stream_options = so;
+  const seedNum = toNum(body.seed); if (seedNum !== undefined) overrides.seed = seedNum;
+  if (body.user !== undefined) overrides.user = body.user;
+  const nNum = toNum(body.n); if (nNum !== undefined) overrides.n = nNum;
+  const lb = body.logit_bias ?? body.logitBias; if (lb !== undefined) overrides.logit_bias = lb;
+  const lp = toBool(body.logprobs); if (lp !== undefined) overrides.logprobs = lp;
+  const tlp = toNum(body.top_logprobs ?? body.topLogprobs); if (tlp !== undefined) overrides.top_logprobs = tlp;
   const extraBody = parseOptionalJson(body.extraBody);
   if (extraBody && typeof extraBody === 'object') overrides.extraBody = extraBody;
 
-  // OpenAI兼容：body.model 字段即为运营商 provider，返回时也返回 provider 作为 model
+  const workflowConfig = pickFirst(body, ['workflow']);
+  const workflowStreams = workflowConfig && typeof workflowConfig === 'object'
+    ? (() => {
+        const list = [];
+        if (Array.isArray(workflowConfig.workflows)) list.push(...workflowConfig.workflows.filter(Boolean));
+        if (Array.isArray(workflowConfig.streams)) list.push(...workflowConfig.streams.filter(Boolean));
+        if (typeof workflowConfig.workflow === 'string' && workflowConfig.workflow.trim()) list.push(workflowConfig.workflow.trim());
+        return list.length ? [...new Set(list)] : null;
+      })()
+    : null;
+  if (workflowStreams?.length) overrides.streams = workflowStreams;
+
   if (!streamFlag) {
     const text = await client.chat(transformedMessages, overrides);
     const promptText = extractMessageText(messages);
@@ -331,37 +286,40 @@ async function handleChatCompletionsV3(req, res, Bot) {
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   if (res.flushHeaders) res.flushHeaders();
 
   const now = Math.floor(Date.now() / 1000);
   const id = `chatcmpl_${Date.now()}`;
   const modelName = provider;
-  
+
   try {
     let totalContent = '';
     let isFirstChunk = true;
-    
-    await client.chatStream(transformedMessages, (delta) => {
-      if (delta) {
+
+    const streamCallback = (delta, metadata = {}) => {
+      if (delta && typeof delta === 'string') {
         totalContent += delta;
         const deltaObj = isFirstChunk ? { role: 'assistant', content: delta } : { content: delta };
-        
-        res.write(`data: ${JSON.stringify({
+        const chunkData = {
           id,
           object: 'chat.completion.chunk',
           created: now,
           model: modelName,
-          choices: [{
-            index: 0,
-            delta: deltaObj,
-            finish_reason: null
-          }]
-        })}\n\n`);
-        
+          choices: [{ index: 0, delta: deltaObj, finish_reason: null }]
+        };
+        if (metadata?.mcp_tools?.length) chunkData.mcp_tools = metadata.mcp_tools;
+        res.write(`data: ${JSON.stringify(chunkData)}\n\n`);
+        if (typeof res.flush === 'function') res.flush();
         isFirstChunk = false;
+      } else if (metadata?.mcp_tools?.length) {
+        res.write(`data: ${JSON.stringify({ id, object: 'chat.completion.chunk', created: now, model: modelName, mcp_tools: metadata.mcp_tools })}\n\n`);
+        if (typeof res.flush === 'function') res.flush();
       }
-    }, overrides);
-    
+    };
+
+    await client.chatStream(transformedMessages, streamCallback, overrides);
+
     const promptText = extractMessageText(messages);
     const promptTokens = estimateTokens(promptText);
     const completionTokens = estimateTokens(totalContent);
@@ -427,9 +385,9 @@ async function handleModels(req, res, Bot) {
 
   const profiles = providers.map((provider) => {
     const c = LLMFactory.getProviderConfig(provider) || {};
-    const model = c.model || c.chatModel || null;
-    const baseUrl = c.baseUrl || null;
-    const maxTokens = c.maxTokens ?? c.max_tokens ?? null;
+    const model = c.model ?? null;
+    const baseUrl = c.baseUrl ?? null;
+    const maxTokens = c.maxTokens ?? null;
     const temperature = c.temperature ?? null;
     const hasApiKey = Boolean((c.apiKey || '').toString().trim());
 
@@ -451,7 +409,7 @@ async function handleModels(req, res, Bot) {
     };
   });
 
-  // 获取所有工作流
+  // 工作流列表：使用 Bot 已注册的 StreamLoader，返回所有已加载工作流（控制台用于运营商与 MCP 工具工作流选择）
   const allStreams = Bot.StreamLoader?.getAllStreams?.() ?? [];
   const workflows = allStreams.map(stream => ({
     key: stream.name,
@@ -478,9 +436,6 @@ async function handleModels(req, res, Bot) {
 
 /** GET /api/ai/stream：SSE 流式对话（query: prompt, workflow, persona） */
 async function handleAiStream(req, res, Bot) {
-  if (!Bot.checkApiAuthorization(req)) {
-    return res.status(403).json({ success: false, message: 'Unauthorized' });
-  }
   const prompt = (req.query.prompt || '').toString().trim();
   const workflow = (req.query.workflow || 'chat').toString().trim();
   const persona = (req.query.persona || '').toString().trim();

@@ -1,43 +1,73 @@
-# 监控总开关
+# ========================================
+# 系统监控配置（monitor）
+# ========================================
+# 浏览器实例、内存、CPU 与优化策略。未启用则相关监控不运行。
+# 实际生效路径：data/server_bots/{port}/monitor.yaml
+# ----------------------------------------
+# 总开关与间隔
+# ----------------------------------------
+# enabled: 是否启用监控
 enabled: true
-  
-# 监控检查间隔（毫秒）
+# interval: 监控检查间隔（毫秒）
 interval: 120000
-  
+# ----------------------------------------
 # 浏览器进程监控
+# ----------------------------------------
 browser:
+  # enabled: 是否启用浏览器实例监控
   enabled: true
-  maxInstances: 5              # 最大浏览器实例数
-  memoryThreshold: 90          # 内存阈值（%）触发清理
-  reserveNewest: true          # 保留最新打开的实例
-    
-  # 系统内存监控
+  # maxInstances: 最大浏览器实例数
+  maxInstances: 5
+  # memoryThreshold: 内存占用超过该百分比（0～100）时触发处理
+  memoryThreshold: 90
+  # reserveNewest: 回收时是否保留最新实例
+  reserveNewest: true
+# ----------------------------------------
+# 系统与 Node 内存
+# ----------------------------------------
 memory:
+  # enabled: 是否启用内存监控
   enabled: true
-  systemThreshold: 85          # 系统内存阈值（%）
-  nodeThreshold: 85            # Node堆内存阈值（%）
-  autoOptimize: true           # 自动优化
-  gcInterval: 600000           # GC最小间隔（毫秒）
-  
-  # 内存泄漏检测
+  # systemThreshold: 系统内存占用超过该百分比时告警
+  systemThreshold: 85
+  # nodeThreshold: Node 进程内存占用超过该百分比时告警
+  nodeThreshold: 85
+  # autoOptimize: 是否自动触发优化（如 GC）
+  autoOptimize: true
+  # gcInterval: 建议 GC 间隔（毫秒）
+  gcInterval: 600000
   leakDetection:
-    enabled: true              # 启用泄漏检测
-    threshold: 0.1             # 10%增长视为潜在泄漏
-    checkInterval: 300000      # 检查间隔（毫秒，5分钟）
-    
-# CPU监控
+    # enabled: 是否启用内存泄漏检测
+    enabled: true
+    # threshold: 泄漏判定阈值（增长率等）
+    threshold: 0.1
+    # checkInterval: 检测间隔（毫秒）
+    checkInterval: 300000
+# ----------------------------------------
+# CPU 监控
+# ----------------------------------------
 cpu:
+  # enabled: 是否启用 CPU 监控
   enabled: true
-  threshold: 90                # CPU使用率阈值（%）
-  checkDuration: 30000         # CPU检查持续时间（毫秒）
-    
-# 优化策略
+  # threshold: CPU 使用率超过该百分比时告警
+  threshold: 90
+  # checkDuration: 持续超过该时长（毫秒）才触发
+  checkDuration: 30000
+# ----------------------------------------
+# 优化与重启
+# ----------------------------------------
 optimize:
-  aggressive: false            # 激进模式（更频繁清理）
-  autoRestart: false           # 严重时自动重启
-  restartThreshold: 95         # 重启阈值（%）
-    
-# 报告配置
+  # aggressive: 是否启用激进优化
+  aggressive: false
+  # autoRestart: 是否在达到条件时自动重启
+  autoRestart: false
+  # restartThreshold: 超过该使用率（0～100）时考虑重启
+  restartThreshold: 95
+# ----------------------------------------
+# 报告
+# ----------------------------------------
 report:
+  # enabled: 是否启用定期报告
   enabled: true
-  interval: 3600000            # 报告间隔（毫秒）
+  # interval: 报告间隔（毫秒）
+  interval: 3600000

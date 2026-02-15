@@ -23,7 +23,6 @@ export default class AzureOpenAILLMConfig extends ConfigBase {
           deployment: { type: 'string', label: '部署名', default: '', component: 'Input' },
           apiVersion: { type: 'string', label: 'api-version', default: '2024-02-15-preview', component: 'Input' },
           model: { type: 'string', label: '模型', default: 'gpt-4', component: 'Input' },
-          chatModel: { type: 'string', label: '聊天模型', default: 'gpt-4', component: 'Input' },
           temperature: { type: 'number', label: '温度', min: 0, max: 2, default: 0.7, component: 'InputNumber' },
           maxTokens: { type: 'number', label: '最大 Tokens', min: 1, default: 4000, component: 'InputNumber' },
           timeout: { type: 'number', label: '超时(ms)', min: 1000, default: 60000, component: 'InputNumber' },

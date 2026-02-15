@@ -51,9 +51,6 @@ export default {
       method: 'GET',
       path: '/api/plugins',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
         const { list } = getPluginListAndStats(Bot);
         res.json({ success: true, plugins: list });
       }
@@ -63,9 +60,6 @@ export default {
       method: 'POST',
       path: '/api/plugin/:key/reload',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
         try {
           const { key } = req.params;
           if (!key) {
@@ -85,9 +79,6 @@ export default {
       method: 'GET',
       path: '/api/plugins/tasks',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
         const taskList = Bot.PluginsLoader?.task ?? [];
         const tasks = taskList.map(t => ({
           name: t.name,
@@ -102,9 +93,6 @@ export default {
       method: 'GET',
       path: '/api/plugins/summary',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
         try {
           res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
           res.set('Pragma', 'no-cache');
@@ -130,9 +118,6 @@ export default {
       method: 'GET',
       path: '/api/plugins/stats',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
         try {
           const { totalPlugins, withRules, withTasks, taskCount, totalLoadTime } = getPluginListAndStats(Bot);
           res.json({

@@ -1,37 +1,38 @@
 # ========================================
-# Gemini LLM 配置
+# Google Gemini LLM 配置
 # ========================================
-# Google Generative Language API配置
-# 接口地址: https://generativelanguage.googleapis.com/v1beta
-# 
-# 配置说明:
-# - enabled: 是否启用此提供商
-# - baseUrl: API基础地址
-# - apiKey: Google Gemini API密钥（必填）
-# - model: 模型名称（如gemini-pro）
-# - chatModel: 聊天模型名称
-# - temperature: 温度参数（0-2）
-# - maxTokens: 最大Token数
-# - topP: 核采样参数（0-1）
-# - timeout: 请求超时时间（毫秒）
-# - enableStream: 是否启用流式输出
-# - enableTools: 是否启用工具调用
-# - proxy: 代理配置（可选）
-
+# Google Generative Language API（Gemini）
+# 工厂类：GeminiLLMClient
+# 文档：https://ai.google.dev/api
+# 配置文件实际路径：data/server_bots/{port}/gemini_llm.yaml
+# ----------------------------------------
+# 基础
+# ----------------------------------------
+# enabled: 是否启用该提供商
 enabled: true
+# baseUrl: API 基础地址
 baseUrl: "https://generativelanguage.googleapis.com/v1beta"
+# apiKey: Google API Key（必填）
 apiKey: ""
+# model: 模型名称
 model: "gemini-pro"
-chatModel: "gemini-pro"
+# temperature: 温度 0～2
 temperature: 0.9
+# maxTokens: 最大生成 token 数
 maxTokens: 8192
-max_tokens: 8192
+# topP: 核采样 0～1
 topP: 1
-top_p: 1
+# timeout: 单次请求超时（毫秒）
 timeout: 60000
+# enableStream: 是否允许流式输出
 enableStream: true
-enableTools: false
+# enableTools: 启用后注入 MCP 工具
+enableTools: true
+# ----------------------------------------
+# 代理（可选）
+# ----------------------------------------
 proxy:
+  # enabled: 是否启用代理
   enabled: false
-  http: ""
-  https: ""
+  # url: 代理地址
+  url: ""

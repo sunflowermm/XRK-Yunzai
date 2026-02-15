@@ -388,9 +388,6 @@ export default {
       method: 'GET',
       path: '/api/config',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
 
         res.json({
           success: true,
@@ -421,9 +418,6 @@ export default {
       method: 'GET',
       path: '/api/system/overview',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
 
         try {
           res.set('Cache-Control', 'no-store, no-cache, must-revalidate');

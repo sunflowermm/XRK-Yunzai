@@ -41,12 +41,6 @@ export default class GPTGodLLMConfig extends ConfigBase {
             default: 'gemini-exp-1114',
             component: 'Input'
           },
-          chatModel: {
-            type: 'string',
-            label: '聊天模型',
-            default: 'gemini-exp-1114',
-            component: 'Input'
-          },
           temperature: {
             type: 'number',
             label: '温度参数',
@@ -64,26 +58,10 @@ export default class GPTGodLLMConfig extends ConfigBase {
             default: 6000,
             component: 'InputNumber'
           },
-          max_tokens: {
-            type: 'number',
-            label: '最大Token数（兼容字段）',
-            min: 1,
-            default: 6000,
-            component: 'InputNumber'
-          },
           topP: {
             type: 'number',
             label: 'Top P',
             description: '核采样参数',
-            min: 0,
-            max: 1,
-            step: 0.1,
-            default: 0.9,
-            component: 'InputNumber'
-          },
-          top_p: {
-            type: 'number',
-            label: 'Top P（兼容字段）',
             min: 0,
             max: 1,
             step: 0.1,
@@ -99,27 +77,9 @@ export default class GPTGodLLMConfig extends ConfigBase {
             default: 0.6,
             component: 'InputNumber'
           },
-          presence_penalty: {
-            type: 'number',
-            label: '存在惩罚（兼容字段）',
-            min: -2,
-            max: 2,
-            step: 0.1,
-            default: 0.6,
-            component: 'InputNumber'
-          },
           frequencyPenalty: {
             type: 'number',
             label: '频率惩罚',
-            min: -2,
-            max: 2,
-            step: 0.1,
-            default: 0.6,
-            component: 'InputNumber'
-          },
-          frequency_penalty: {
-            type: 'number',
-            label: '频率惩罚（兼容字段）',
             min: -2,
             max: 2,
             step: 0.1,

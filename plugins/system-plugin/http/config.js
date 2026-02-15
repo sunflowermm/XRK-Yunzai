@@ -1,9 +1,13 @@
 /**
  * 配置管理API
- * 提供统一的配置文件读写接口
+ * 使用 Bot.ConfigManager（与 global.ConfigManager 一致）提供配置读写
  */
 import BotUtil from '../../../lib/util.js';
 import { cleanConfigData, flattenStructure, flattenData, unflattenData } from '../../../lib/commonconfig/config-utils.js';
+
+function getConfigManager(Bot) {
+  return Bot?.ConfigManager ?? global.ConfigManager;
+}
 
 export default {
   name: 'config-manager',
@@ -15,12 +19,10 @@ export default {
       method: 'GET',
       path: '/api/config/list',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
-
         try {
-          const configList = global.ConfigManager.getList();
+          const cm = getConfigManager(Bot);
+          if (!cm) return res.status(503).json({ success: false, message: '配置管理器未就绪' });
+          const configList = cm.getList();
           
           res.json({
             success: true,
@@ -41,13 +43,11 @@ export default {
       method: 'GET',
       path: '/api/config/:name/structure',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
-
         try {
           const { name } = req.params;
-          const config = global.ConfigManager.get(name);
+          const cm = getConfigManager(Bot);
+          if (!cm) return res.status(503).json({ success: false, message: '配置管理器未就绪' });
+          const config = cm.get(name);
 
           if (!config) {
             return res.status(404).json({
@@ -76,10 +76,6 @@ export default {
       method: 'GET',
       path: '/api/config/:name/read',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
-
         let configName = null;
         try {
           configName = req.params && req.params.name;
@@ -92,7 +88,7 @@ export default {
             });
           }
 
-          const config = global.ConfigManager.get(configName);
+          const config = getConfigManager(Bot).get(configName);
 
           if (!config) {
             return res.status(404).json({
@@ -158,10 +154,6 @@ export default {
       method: 'POST',
       path: '/api/config/:name/write',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
-
         let configName = null;
         try {
           configName = req.params && req.params.name;
@@ -176,7 +168,7 @@ export default {
             });
           }
 
-          const config = global.ConfigManager.get(configName);
+          const config = getConfigManager(Bot).get(configName);
 
           if (!config) {
             BotUtil.makeLog('error', `配置不存在: ${configName}`, 'ConfigAPI');
@@ -243,15 +235,11 @@ export default {
       method: 'POST',
       path: '/api/config/:name/merge',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
-
         try {
           const { name } = req.params;
           const { data, deep = true, backup = true, validate = true } = req.body;
 
-          const config = global.ConfigManager.get(name);
+          const config = getConfigManager(Bot).get(name);
 
           if (!config) {
             return res.status(404).json({
@@ -280,10 +268,6 @@ export default {
       method: 'DELETE',
       path: '/api/config/:name/delete',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
-
         try {
           const { name } = req.params;
           const { path: keyPath, backup = true } = req.body;
@@ -295,7 +279,7 @@ export default {
             });
           }
 
-          const config = global.ConfigManager.get(name);
+          const config = getConfigManager(Bot).get(name);
 
           if (!config) {
             return res.status(404).json({
@@ -324,10 +308,6 @@ export default {
       method: 'POST',
       path: '/api/config/:name/array/append',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
-
         try {
           const { name } = req.params;
           const { path: keyPath, value, backup = true, validate = true } = req.body;
@@ -339,7 +319,7 @@ export default {
             });
           }
 
-          const config = global.ConfigManager.get(name);
+          const config = getConfigManager(Bot).get(name);
 
           if (!config) {
             return res.status(404).json({
@@ -368,10 +348,6 @@ export default {
       method: 'POST',
       path: '/api/config/:name/array/remove',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
-
         try {
           const { name } = req.params;
           const { path: keyPath, index, backup = true, validate = true } = req.body;
@@ -390,7 +366,7 @@ export default {
             });
           }
 
-          const config = global.ConfigManager.get(name);
+          const config = getConfigManager(Bot).get(name);
 
           if (!config) {
             return res.status(404).json({
@@ -419,15 +395,11 @@ export default {
       method: 'POST',
       path: '/api/config/:name/validate',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
-
         try {
           const { name } = req.params;
           const { data } = req.body;
 
-          const config = global.ConfigManager.get(name);
+          const config = getConfigManager(Bot).get(name);
 
           if (!config) {
             return res.status(404).json({
@@ -456,13 +428,9 @@ export default {
       method: 'POST',
       path: '/api/config/:name/backup',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
-
         try {
           const { name } = req.params;
-          const config = global.ConfigManager.get(name);
+          const config = getConfigManager(Bot).get(name);
 
           if (!config) {
             return res.status(404).json({
@@ -492,15 +460,11 @@ export default {
       method: 'POST',
       path: '/api/config/:name/reset',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
-
         try {
           const { name } = req.params;
           const { backup = true } = req.body;
 
-          const config = global.ConfigManager.get(name);
+          const config = getConfigManager(Bot).get(name);
 
           if (!config) {
             return res.status(404).json({
@@ -529,12 +493,8 @@ export default {
       method: 'POST',
       path: '/api/config/clear-cache',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
-
         try {
-          global.ConfigManager.clearAllCache();
+          getConfigManager(Bot).clearAllCache();
 
           res.json({
             success: true,
@@ -554,78 +514,39 @@ export default {
       method: 'GET',
       path: '/api/config/:name/flat-structure',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
+        const { name } = req.params;
+        const { path: childPath } = req.query || {};
+        const cm = getConfigManager(Bot);
+        if (!cm) return res.status(503).json({ success: false, message: '配置管理器未就绪' });
+
+        const config = cm.get(name);
+        if (!config) {
+          return res.json({ success: true, flat: [], message: `配置 ${name} 不存在，已返回空结构` });
         }
 
         try {
-          const { name } = req.params;
-          const { path: childPath } = req.query || {};
-          const config = global.ConfigManager?.get?.(name);
-
-          // 为了避免前端频繁 404，这里对不存在的配置/子配置返回空结构而不是 404
-          if (!config) {
-            return res.json({
-              success: true,
-              flat: [],
-              message: `配置 ${name} 不存在，已返回空结构`
-            });
-          }
-
           let schema = null;
-          
-          // 处理 system 配置的子配置
           if (name === 'system' && childPath) {
             const structure = config.getStructure();
-            const childConfig = structure.configs && structure.configs[childPath];
+            const childConfig = structure?.configs?.[childPath];
             if (childConfig) {
-              // 优先使用 schema，如果没有则从 fields 构建
-              if (childConfig.schema && childConfig.schema.fields) {
-                schema = childConfig.schema;
-              } else if (childConfig.fields) {
-                schema = { fields: childConfig.fields };
-              } else {
-                return res.json({
-                  success: true,
-                  flat: [],
-                  message: `子配置 ${childPath} 的 schema 不存在，已返回空结构`
-                });
-              }
-            } else {
-              return res.json({
-                success: true,
-                flat: [],
-                message: `子配置 ${childPath} 不存在，已返回空结构`
-              });
+              schema = (childConfig.schema?.fields && childConfig.schema) || (childConfig.fields && { fields: childConfig.fields }) || null;
+            }
+            if (!schema) {
+              return res.json({ success: true, flat: [], message: `子配置 ${childPath} 不存在或无 schema` });
             }
           } else {
-            // 普通配置直接使用 schema
             const structure = config.getStructure();
-            if (structure.schema && structure.schema.fields) {
-              schema = structure.schema;
-            } else if (structure.fields) {
-              schema = { fields: structure.fields };
-            } else {
-              return res.json({
-                success: true,
-                flat: [],
-                message: `配置 ${name} 的 schema 不存在，已返回空结构`
-              });
+            schema = (structure?.schema?.fields && structure.schema) || (structure?.fields && { fields: structure.fields }) || null;
+            if (!schema) {
+              return res.json({ success: true, flat: [], message: `配置 ${name} 的 schema 不存在` });
             }
           }
-
           const flat = flattenStructure(schema);
-
-          res.json({
-            success: true,
-            flat
-          });
+          return res.json({ success: true, flat });
         } catch (error) {
-          res.status(500).json({
-            success: false,
-            message: '获取扁平化结构失败',
-            error: error.message
-          });
+          BotUtil.makeLog('warn', `[config] flat-structure ${name} 异常: ${error.message}`, 'ConfigAPI');
+          return res.json({ success: true, flat: [], message: error.message || '获取结构异常，已返回空' });
         }
       }
     },
@@ -634,49 +555,31 @@ export default {
       method: 'GET',
       path: '/api/config/:name/flat',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
+        const { name } = req.params;
+        const { path: childPath } = req.query || {};
+        const cm = getConfigManager(Bot);
+        if (!cm) return res.status(503).json({ success: false, message: '配置管理器未就绪' });
+
+        const config = cm.get(name);
+        if (!config) {
+          return res.status(404).json({ success: false, message: `配置 ${name} 不存在` });
         }
 
         try {
-          const { name } = req.params;
-          const { path: childPath } = req.query || {};
-          const config = global.ConfigManager.get(name);
-
-          if (!config) {
-            return res.status(404).json({
-              success: false,
-              message: `配置 ${name} 不存在`
-            });
-          }
-
-          // 处理 system 配置的子配置
           let data;
-          if (name === 'system' && childPath) {
-            if (typeof config.read === 'function') {
-              data = await config.read(childPath);
-            } else {
-              return res.status(400).json({
-                success: false,
-                message: 'SystemConfig 需要指定子配置路径'
-              });
+          if (name === 'system') {
+            if (!childPath) {
+              return res.status(400).json({ success: false, message: 'SystemConfig 需要指定子配置路径' });
             }
+            data = typeof config.read === 'function' ? await config.read(childPath) : {};
           } else {
             data = await config.read();
           }
-
-          const flat = flattenData(data);
-
-          res.json({
-            success: true,
-            flat
-          });
+          const flat = flattenData(data ?? {});
+          return res.json({ success: true, flat });
         } catch (error) {
-          res.status(500).json({
-            success: false,
-            message: '获取扁平化数据失败',
-            error: error.message
-          });
+          BotUtil.makeLog('warn', `[config] flat ${name} 异常: ${error.message}`, 'ConfigAPI');
+          return res.json({ success: true, flat: {}, message: error.message || '读取失败，已返回空数据' });
         }
       }
     },
@@ -685,10 +588,6 @@ export default {
       method: 'POST',
       path: '/api/config/:name/batch-set',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
-
         try {
           const { name } = req.params;
           const { flat, path: childPath, backup = true, validate = true } = req.body;
@@ -700,7 +599,7 @@ export default {
             });
           }
 
-          const config = global.ConfigManager.get(name);
+          const config = getConfigManager(Bot).get(name);
 
           if (!config) {
             return res.status(404).json({

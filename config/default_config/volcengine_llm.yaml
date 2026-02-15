@@ -1,37 +1,41 @@
 # ========================================
-# 火山引擎 LLM 配置
+# 火山引擎豆包 LLM 配置
 # ========================================
-# 火山引擎豆包大模型配置
-# 接口地址: https://ark.cn-beijing.volces.com/api/v3
-# 
-# 配置说明:
-# - enabled: 是否启用此提供商
-# - baseUrl: API基础地址
-# - apiKey: 火山引擎API密钥（必填）
-# - model: 模型端点名称（ep-开头）
-# - chatModel: 聊天模型端点名称
-# - temperature: 温度参数（0-2）
-# - maxTokens: 最大Token数
-# - topP: 核采样参数（0-1）
-# - timeout: 请求超时时间（毫秒）
-# - enableStream: 是否启用流式输出
-# - enableTools: 是否启用工具调用
-# - proxy: 代理配置（可选）
-
+# 火山引擎方舟大模型，兼容 OpenAI Chat Completions
+# 工厂类：VolcengineLLMClient
+# 文档：https://www.volcengine.com/docs/82379
+# 配置文件实际路径：data/server_bots/{port}/volcengine_llm.yaml
+# ----------------------------------------
+# 基础
+# ----------------------------------------
+# enabled: 是否启用该提供商
 enabled: true
+# baseUrl: 需包含 /api/v3，如 https://ark.cn-beijing.volces.com/api/v3
 baseUrl: "https://ark.cn-beijing.volces.com/api/v3"
+# apiKey: 火山引擎 API Key（方舟控制台获取）
 apiKey: ""
+# ----------------------------------------
+# 模型与生成参数
+# ----------------------------------------
+# model: 推理接入点 ID，控制台创建后为 ep-xxxxx
 model: "ep-20241220101210-xxxxx"
-chatModel: "ep-20241220101210-xxxxx"
+# temperature: 温度 0～2
 temperature: 0.8
+# maxTokens: 最大生成 token 数
 maxTokens: 4000
-max_tokens: 4000
+# topP: 核采样 0～1
 topP: 0.9
-top_p: 0.9
+# timeout: 单次请求超时（毫秒）
 timeout: 60000
+# enableStream: 是否允许流式输出
 enableStream: true
-enableTools: false
+# enableTools: 启用后注入 MCP 工具
+enableTools: true
+# ----------------------------------------
+# 代理（可选）
+# ----------------------------------------
 proxy:
+  # enabled: 是否启用代理
   enabled: false
-  http: ""
-  https: ""
+  # url: 代理地址
+  url: ""

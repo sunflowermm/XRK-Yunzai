@@ -31,9 +31,6 @@ export default {
       method: 'GET',
       path: '/api/data/read',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
 
         try {
           const { filePath, encoding = 'utf8' } = req.query;
@@ -91,9 +88,6 @@ export default {
       method: 'POST',
       path: '/api/data/write',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
 
         try {
           const { 

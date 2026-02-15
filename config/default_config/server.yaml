@@ -2,41 +2,38 @@
 #            基础配置
 # ----------------------------------------
 server:
-  # 服务器名称（将显示在日志中）
+  # name: 服务器名称（将显示在日志中）
   name: "XRK Server"
-  
-  # 监听地址
-  # - 0.0.0.0: 监听所有网络接口（允许外部访问）
-  # - 127.0.0.1: 仅监听本地（仅本机可访问）
+  # host: 监听地址；0.0.0.0=所有网卡，127.0.0.1=仅本机
   host: "0.0.0.0"
-  
-  # 外部访问URL（可选）
-  # 用于生成完整的访问链接，留空则自动检测
-  # 示例: https://bot.example.com
+  # url: 外部访问 URL（可选），留空则自动检测；示例 https://bot.example.com
   url: ""
 
 # ----------------------------------------
 #          反向代理配置
 # ----------------------------------------
 proxy:
-  # 是否启用反向代理功能
+  # enabled: 是否启用反向代理功能
   enabled: false
-  
-  # HTTP监听端口（作为反向代理时建议使用80）
+  # httpPort: HTTP 监听端口（反向代理时建议 80）
   httpPort: 80
-  
-  # HTTPS监听端口（作为反向代理时建议使用443）
+  # httpsPort: HTTPS 监听端口（反向代理时建议 443）
   httpsPort: 443
   
   # 健康检查配置（用于负载均衡和故障转移）
   healthCheck:
+    # enabled: 是否启用健康检查
     enabled: false
+    # interval: 检查间隔（毫秒）
     interval: 30000
+    # maxFailures: 最大连续失败次数
     maxFailures: 3
+    # timeout: 单次检查超时（毫秒）
     timeout: 5000
+    # cacheTime: 结果缓存时间（毫秒）
     cacheTime: 5000
   
-  # 域名配置列表
+  # domains: 域名配置列表，每项可含 domain、ssl、target、rewritePath 等
   domains: []
     # 主域名配置示例（已注释，需要时取消注释并添加到domains数组中）
     # - domain: "xrkk.cc"
@@ -162,126 +159,112 @@ proxy:
 #            HTTPS配置
 # ----------------------------------------
 https:
-  # 是否启用HTTPS服务（全局默认证书）
-  # 注意：现在每个域名可以有自己的证书
+  # enabled: 是否启用 HTTPS（全局默认证书）；各域名可单独配置证书
   enabled: false
-  
-  # 默认SSL证书配置（当域名没有配置专用证书时使用）
+  # certificate: 默认 SSL 证书（域名未配置专用证书时使用）
   certificate:
-    # 私钥文件路径（可选）
+    # key: 私钥文件路径
     key: ""
-    
-    # 证书文件路径（可选）
+    # cert: 证书文件路径
     cert: ""
-    
-    # CA证书链文件路径（可选）
+    # ca: CA 证书链文件路径（可选）
     ca: ""
-  
-  # TLS配置
+  # tls: TLS 协议配置
   tls:
-    # 最低TLS版本（建议不低于TLSv1.2）
+    # minVersion: 最低 TLS 版本，建议不低于 TLSv1.2
     minVersion: "TLSv1.2"
-    
-    # 是否启用HTTP/2协议（提升性能）
+    # http2: 是否启用 HTTP/2
     http2: true
-  
-  # HSTS（HTTP严格传输安全）配置
-  # 警告：启用后所有HTTP请求将强制重定向到HTTPS
+  # hsts: HTTP 严格传输安全；启用后 HTTP 将强制跳转 HTTPS
   hsts:
+    # enabled: 是否启用 HSTS
     enabled: false
-    # 有效期（秒），31536000 = 1年
+    # maxAge: 有效期（秒），31536000 = 1 年
     maxAge: 31536000
-    # 是否包含子域名
+    # includeSubDomains: 是否包含子域名
     includeSubDomains: true
-    # 是否允许预加载（需要提交到浏览器预加载列表）
+    # preload: 是否允许预加载
     preload: false
 
 # ----------------------------------------
 #            静态文件服务
 # ----------------------------------------
 static:
-  # 默认首页文件列表
+  # index: 默认首页文件名列表，按顺序尝试
   index:
     - "index.html"
     - "index.htm"
     - "default.html"
-  
-  # 是否允许自动添加扩展名
+  # extensions: 是否允许自动添加扩展名
   extensions: false
   
   # 缓存时间设置
   cache:
-    static: 86400     # CSS/JS文件
-    images: 604800    # 图片文件
+    # static: CSS/JS 等静态资源缓存时间（秒）
+    static: 86400
+    # images: 图片资源缓存时间（秒）
+    images: 604800
+  # cacheTime: 默认缓存时长，如 "1d"
   cacheTime: "1d"
 
 # ----------------------------------------
 #            安全配置
 # ----------------------------------------
 security:
-  # Helmet安全头配置
-  # 自动添加安全相关的HTTP头部
+  # Helmet安全头配置（自动添加安全相关的 HTTP 头部）
   helmet:
+    # enabled: 是否启用 Helmet
     enabled: true
-  
-  # HSTS配置（需要HTTPS启用）
+  # HSTS 配置（需要 HTTPS 启用）
   hsts:
+    # enabled: 是否启用 HSTS
     enabled: false
+    # maxAge: 有效期（秒），31536000 = 1 年
     maxAge: 31536000
+    # includeSubDomains: 是否包含子域名
     includeSubDomains: true
+    # preload: 是否允许预加载
     preload: false
   
-  # 隐藏文件/目录模式
-  # 匹配这些模式的文件将返回404
+  # hiddenFiles: 匹配这些模式的文件或目录将返回 404（正则或片段）
   hiddenFiles:
-    - "^\\..*"        # 所有点开头的文件
-    - "node_modules"  # Node.js依赖目录
-    - "\\.git"        # Git版本控制目录
-    - "\\.env"        # 环境变量文件
-    - "config/"       # 配置目录
-    - "private/"      # 私有目录
+    - "^\\..*"
+    - "node_modules"
+    - "\\.git"
+    - "\\.env"
+    - "config/"
+    - "private/"
 
 # ----------------------------------------
 #         跨域资源共享（CORS）
 # ----------------------------------------
 cors:
-  # 是否启用CORS
+  # enabled: 是否启用 CORS
   enabled: true
-  
-  # 允许的来源
-  # - "*": 允许所有来源（不安全）
-  # - 具体域名列表: ["https://example.com", "https://xrkk.cc"]
+  # origins: 允许的来源，* 表示全部（不安全）
   origins: ["*"]
-  
-  # 允许的HTTP方法
+  # methods: 允许的 HTTP 方法
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-  
-  # 允许的请求头
+  # headers: 允许的请求头
   headers: ["Content-Type", "Authorization", "X-API-Key"]
-  
-  # 是否允许携带凭证（cookies等）
+  # credentials: 是否允许携带凭证（cookies 等）
   credentials: false
-  
-  # 预检请求缓存时间（秒）
+  # maxAge: 预检请求缓存时间（秒）
   maxAge: 86400
 
 # ----------------------------------------
 #            认证配置
 # ----------------------------------------
 auth:
-  # API密钥配置
+  # apiKey: API 密钥认证配置
   apiKey:
-    # 是否启用API密钥认证
+    # enabled: 是否启用 API 密钥认证
     enabled: true
-    
-    # 密钥存储文件路径
+    # file: 密钥存储文件路径
     file: "config/server_config/api_key.json"
-    
-    # 密钥长度（字符数）
+    # length: 密钥长度（字符数）
     length: 64
-  
-  # 无需认证的路径（白名单）
-  # 这些路径可以直接访问
+  # whitelist: 无需认证的路径列表，可直接访问
   whitelist:
     - "/"              # 根目录
     - "/favicon.ico"   # 网站图标
@@ -291,62 +274,70 @@ auth:
     - "/xrk"           # 葵崽的API接口测试页面
     - "/media/*"       # 媒体文件目录
     - "/uploads/*"     # 上传文件目录
+    - "/device"        # 控制台 WebSocket 设备连接
     # 注意：静态文件默认允许访问
 
 # ----------------------------------------
 #            速率限制
 # ----------------------------------------
 rateLimit:
-  # 是否启用速率限制（防止恶意请求）
+  # enabled: 是否启用速率限制（防止恶意请求）
   enabled: true
   
   # 全局限制（所有请求）
   global:
-    windowMs: 900000  # 时间窗口：15分钟
-    max: 1000         # 最大请求数
+    # windowMs: 时间窗口（毫秒），900000 = 15 分钟
+    windowMs: 900000
+    # max: 窗口内最大请求数
+    max: 1000
+    # message: 触发限制时的提示文案
     message: "请求过于频繁，请稍后再试"
-  
-  # API接口限制（更严格）
+  # API 接口限制（更严格）
   api:
-    windowMs: 60000   # 时间窗口：1分钟
-    max: 60           # 最大请求数
+    # windowMs: 时间窗口（毫秒），60000 = 1 分钟
+    windowMs: 60000
+    # max: 窗口内最大请求数
+    max: 60
+    # message: 触发限制时的提示文案
     message: "API请求过于频繁"
 
 # ----------------------------------------
 #            请求限制
 # ----------------------------------------
 limits:
-  # 各种请求体大小限制
-  urlencoded: "10mb"  # URL编码数据
-  json: "10mb"        # JSON数据
-  raw: "50mb"         # 原始数据
-  text: "10mb"        # 文本数据
-  fileSize: "100mb"   # 文件上传
+  # urlencoded: URL 编码请求体大小限制
+  urlencoded: "10mb"
+  # json: JSON 请求体大小限制
+  json: "10mb"
+  # raw: 原始请求体大小限制
+  raw: "50mb"
+  # text: 文本请求体大小限制
+  text: "10mb"
+  # fileSize: 单文件上传大小限制
+  fileSize: "100mb"
 
 # ----------------------------------------
 #            压缩配置
 # ----------------------------------------
 compression:
-  # 是否启用响应压缩（减少带宽使用）
+  # enabled: 是否启用响应压缩
   enabled: true
-  
-  # 压缩级别（0-9）
-  # 0: 无压缩（最快）
-  # 9: 最大压缩（最慢）
-  # 推荐：6（平衡）
+  # level: 压缩级别 0～9，0 最快 9 最小体积，推荐 6
   level: 6
-  
-  # 最小压缩大小（字节）
-  # 小于此大小的响应不会被压缩
+  # threshold: 最小压缩大小（字节），小于此值不压缩
   threshold: 1024
 
 # ----------------------------------------
 #            日志配置
 # ----------------------------------------
 logging:
+  # requests: 是否记录请求日志
   requests: true
+  # errors: 是否记录错误日志
   errors: true
+  # debug: 是否输出调试日志
   debug: false
+  # quiet: 不记录日志的路径列表
   quiet:
     - "/health"
     - "/favicon.ico"
@@ -355,8 +346,8 @@ logging:
 # ----------------------------------------
 #          HTTP重定向配置
 # ----------------------------------------
-# HTTP重定向规则配置
-# 支持多种重定向类型：301(永久), 302(临时), 307(临时保持方法), 308(永久保持方法)
+# HTTP 重定向规则配置；支持 301/302/307/308
+# redirects: 重定向规则列表，每项含 from、to、status 等
 redirects: []
   # 重定向规则示例（已注释，需要时取消注释并添加到redirects数组中）
   # - from: "/old-path"
@@ -384,24 +375,23 @@ redirects: []
 # CDN（内容分发网络）配置
 # 用于静态资源CDN回源、缓存控制、CDN头部处理
 cdn:
-  # 是否启用CDN功能
+  # enabled: 是否启用 CDN 功能
   enabled: false
-  
-  # CDN域名（用于生成CDN URL）
-  # 示例: "cdn.example.com"
+  # domain: CDN 域名，用于生成 CDN URL
   domain: ""
-  
-  # 静态资源前缀（只有匹配此前缀的路径才会使用CDN）
+  # staticPrefix: 仅匹配此前缀的路径使用 CDN
   staticPrefix: "/static"
-  
-  # CDN是否使用HTTPS
+  # https: CDN 是否使用 HTTPS
   https: true
   
   # 缓存控制配置（秒）
   cacheControl:
-    static: 31536000   # CSS/JS/字体等静态资源：1年
-    images: 604800     # 图片资源：7天
-    default: 3600      # 其他资源：1小时
+    # static: CSS/JS/字体等静态资源缓存时间（秒）
+    static: 31536000
+    # images: 图片资源缓存时间（秒）
+    images: 604800
+    # default: 其他资源默认缓存时间（秒）
+    default: 3600
   
   # CDN识别模式（自动检测主流CDN）
   # 支持的CDN：Cloudflare、阿里云CDN、腾讯云CDN、AWS CloudFront、百度云CDN、七牛云、UCloud等
@@ -410,27 +400,36 @@ cdn:
 #          性能优化配置
 # ----------------------------------------
 performance:
+  # keepAlive: TCP Keep-Alive 配置
   keepAlive:
+    # enabled: 是否启用 Keep-Alive
     enabled: true
+    # initialDelay: 初始延迟（毫秒）
     initialDelay: 1000
+    # timeout: 超时时间（毫秒）
     timeout: 120000
+  # http2Push: HTTP/2 服务端推送配置
   http2Push:
+    # enabled: 是否启用关键资源推送
     enabled: false
+    # criticalAssets: 需要推送的关键资源路径列表
     criticalAssets:
       - "/static/css/main.css"
       - "/static/js/main.js"
+  # connectionPool: 连接池配置
   connectionPool:
+    # maxSockets: 每个主机最大 socket 数
     maxSockets: 50
+    # maxFreeSockets: 最大空闲 socket 数
     maxFreeSockets: 10
+    # timeout: 空闲超时（毫秒）
     timeout: 30000
 
 # ----------------------------------------
 #            其他配置
 # ----------------------------------------
 misc:
-  # 是否自动检测公网IP
-  # 用于显示外网访问地址
+  # detectPublicIP: 是否自动检测公网 IP（用于显示外网访问地址）
   detectPublicIP: true
-  
-  # 404时的默认重定向路径
+  # defaultRoute: 404 时的默认重定向路径
   defaultRoute: "/"

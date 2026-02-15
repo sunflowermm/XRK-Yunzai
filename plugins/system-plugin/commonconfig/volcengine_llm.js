@@ -40,11 +40,11 @@ export default class VolcengineLLMConfig extends ConfigBase {
             default: 'cn-beijing',
             component: 'Input'
           },
-          chatModel: {
+          model: {
             type: 'string',
-            label: '聊天模型',
-            description: '火山引擎聊天模型名称',
-            default: 'doubao-pro-4k',
+            label: '模型（推理接入点 ID）',
+            description: '方舟控制台创建的推理接入点，如 ep-xxxxx',
+            default: 'ep-20241220101210-xxxxx',
             component: 'Input'
           },
           temperature: {

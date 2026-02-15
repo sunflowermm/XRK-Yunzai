@@ -40,11 +40,11 @@ export default class XiaomiMiMoLLMConfig extends ConfigBase {
             default: '',
             component: 'InputPassword'
           },
-          chatModel: {
+          model: {
             type: 'string',
-            label: '聊天模型',
-            description: '用于文本对话的模型名称，例如 mimo-v2-flash',
-            default: 'mimo-v2-flash',
+            label: '模型',
+            description: '用于文本对话的模型名称，例如 mimo-1.5、mimo-v2-flash',
+            default: 'mimo-1.5',
             component: 'Input'
           },
           temperature: {

@@ -1,42 +1,67 @@
 # ========================================
-# OpenAI 兼容 LLM 配置
+# OpenAI 兼容 LLM 配置（第三方）
 # ========================================
-# 任意 OpenAI-like Chat Completions配置
-# 支持自定义baseUrl、path、认证方式等
-# 
-# 配置说明:
-# - enabled: 是否启用此提供商
-# - baseUrl: API基础地址（自定义）
-# - path: API路径（默认/chat/completions）
-# - apiKey: API密钥（必填）
-# - authMode: 认证模式（bearer/header/query）
-# - authHeader: 认证头名称（默认Authorization）
-# - headers: 自定义请求头（对象）
-# - model: 模型名称
-# - chatModel: 聊天模型名称
-# - temperature: 温度参数（0-2）
-# - maxTokens: 最大Token数
-# - timeout: 请求超时时间（毫秒）
-# - enableStream: 是否启用流式输出
-# - enableTools: 是否启用工具调用
-# - proxy: 代理配置（可选）
-
+# 适用于任意 OpenAI Chat Completions 协议兼容服务（如 iflow、自建中转等）
+# 工厂类：OpenAICompatibleLLMClient
+# 配置文件实际路径：data/server_bots/{port}/openai_compat_llm.yaml
+# ----------------------------------------
+# 基础开关与地址
+# ----------------------------------------
+# enabled: 是否启用该提供商（false 则不会出现在模型列表）
 enabled: true
+# baseUrl: API 基础地址，必填。示例：https://api.example.com/v1、https://apis.iflow.cn/v1
 baseUrl: "https://api.example.com/v1"
+# path: Chat Completions 路径，与 baseUrl 拼接为完整请求地址
 path: "/chat/completions"
+# ----------------------------------------
+# 认证
+# ----------------------------------------
+# apiKey: 第三方 API 密钥，必填
 apiKey: ""
+# authMode: 认证方式。bearer=Authorization: Bearer {apiKey}；api-key=头 api-key；header=使用 authHeaderName 自定义头
 authMode: "bearer"
-authHeader: "Authorization"
+# authHeaderName: 仅当 authMode=header 时生效，例如 X-Api-Key
+authHeaderName: ""
+# headers: 额外请求头（键值对），会与认证头一起发送
 headers: {}
+# ----------------------------------------
+# 模型与生成参数
+# ----------------------------------------
+# model: 下游 model 字段，可为空（部分接口不校验）
 model: "gpt-3.5-turbo"
-chatModel: "gpt-3.5-turbo"
+# temperature: 温度 0～2，越高越随机
 temperature: 0.7
+# maxTokens: 最大生成 token 数
 maxTokens: 4000
-max_tokens: 4000
+# topP: 核采样 0～1
+topP: 1.0
+# presencePenalty: 存在惩罚 -2～2
+presencePenalty: 0
+# frequencyPenalty: 频率惩罚 -2～2
+frequencyPenalty: 0
+# ----------------------------------------
+# 超时与能力
+# ----------------------------------------
+# timeout: 单次请求超时（毫秒）
 timeout: 60000
+# enableStream: 是否允许流式输出（/api/v3/chat/completions?stream=true）
 enableStream: true
-enableTools: false
+# enableTools: 是否注入本体 MCP 工具（StreamLoader 注册到 global.mcpServer）
+enableTools: true
+# toolChoice: 工具选择策略，如 auto、none 或 { type: "function", function: { name: "xxx" } }
+toolChoice: "auto"
+# parallelToolCalls: 是否允许并行工具调用
+parallelToolCalls: true
+# maxToolRounds: 单轮对话内最大工具调用轮数
+maxToolRounds: 5
+# ----------------------------------------
+# 代理（可选）
+# ----------------------------------------
+# proxy: 仅影响本机请求该第三方 API 的 HTTP 出口，不修改系统全局代理
 proxy:
+  # enabled: 是否启用代理
   enabled: false
-  http: ""
-  https: ""
+  # url: 代理地址，如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080
+  url: ""
+# extraBody: 额外请求体字段（对象），会原样合并到请求 body 顶层；可选，如 {} 可取消注释使用
+# extraBody: {}

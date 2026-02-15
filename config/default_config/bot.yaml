@@ -1,73 +1,73 @@
-# 是否输出调试信息（如错误堆栈）
+# ========================================
+# 机器人基础配置（bot）
+# ========================================
+# 日志、Chromium、Puppeteer、文件与上线等。
+# 实际生效路径：data/server_bots/{port}/bot.yaml（若存在则覆盖此处默认值）
+# ----------------------------------------
+# 调试与日志
+# ----------------------------------------
+# debug: 是否输出调试信息（如错误堆栈）
 debug: false
-# 全局日志等级: trace | debug | info | warn | error | fatal | mark | success | tip
-# trace 最细，debug 排错，info 常规，warn/error/fatal 异常
+# log_level: 全局日志等级。trace | debug | info | warn | error | fatal | mark | success | tip
 log_level: info
-
-# 按模块覆盖日志等级，未列出的模块使用 log_level
-# 示例: DeviceAPI: debug   PluginsLoader: trace   PuppeteerRenderer: info
+# log_modules: 按模块覆盖日志等级，未列出的模块使用 log_level
 log_modules: {}
-# 主日志保留天数；trace 日志保留天数（可选，默认 1）
+# log_max_days: 主日志保留天数
 log_max_days: 3
+# log_trace_days: trace 日志保留天数
 log_trace_days: 1
-
-# 日志头内容自定义，例如: "MYBOT" 将显示 [MYBOT]
+# log_align: 日志头前缀，如 "XRKYZ"
 log_align: "XRKYZ"
-
-# 日志头颜色方案，可选: 'default', 'scheme1', 'scheme2', 'scheme3', 'scheme4'
-# default: ['#3494E6', '#3498db', '#00b4d8', '#0077b6', '#023e8a'], // 默认蓝系
-# scheme1: ['#FF0000', '#FF7F00', '#FFFF00', '#00FF00', '#0000FF'],  // 红橙黄绿蓝
-# scheme2: ['#FF69B4', '#FF1493', '#C71585', '#DB7093', '#FFC0CB'],  // 粉色系
-# scheme3: ['#00CED1', '#20B2AA', '#48D1CC', '#008B8B', '#5F9EA0'],  // 蓝绿色系
-# scheme4: ['#8A2BE2', '#9370DB', '#7B68EE', '#6A5ACD', '#483D8B'],  // 紫色系
-# scheme5: ['#36D1DC', '#5B86E5', '#4776E6', '#8E54E9', '#6A82FB'],  // 天空渐变
-# scheme6: ['#FF512F', '#F09819', '#FF8008', '#FD746C', '#FE9A8B'],  // 火焰渐变
-# scheme7: ['#11998e', '#38ef7d', '#56ab2f', '#a8e063', '#76b852'],  // 绿野渐变
-log_color: 'default'
-
-# 日志ID长度（默认16个字符）
+# log_color: 日志头颜色方案。default | scheme1～scheme7
+log_color: "default"
+# log_id_length: 日志 ID 长度（字符数）
 log_id_length: 20
-
-# ID显示时的美化字符（用于填充空白）
-log_id_filler: '.'  # 可选: '·', '─', '•', '═', '»', '→'
-
-# 群聊和频道中过滤自己的消息
-ignore_self: true
-
-# chromium 其他路径
-chromium_path: ""
-
-# puppeteer 接口地址
-puppeteer_ws: ""
-
-# puppeteer 截图超时时间
-puppeteer_timeout: 0
-
-# 自动把 / 换成 #
-'/→#': true
-
-# 日志对象检查
+# log_id_filler: ID 空白填充字符
+log_id_filler: "."
+# log_object: 日志对象展开选项（depth/colors/maxArrayLength 等）
 log_object:
+  # depth: 对象递归展开深度
   depth: 10
+  # colors: 是否彩色输出
   colors: true
+  # showHidden: 是否显示隐藏属性
   showHidden: true
+  # showProxy: 是否展开 Proxy 对象
   showProxy: true
+  # getters: 是否执行 getter
   getters: true
+  # breakLength: 单行最大长度，超出换行
   breakLength: 100
+  # maxArrayLength: 数组最多展示元素数
   maxArrayLength: 100
+  # maxStringLength: 字符串最多展示字符数
   maxStringLength: 1000
-
-# 监听文件变化
+# ----------------------------------------
+# 行为与过滤
+# ----------------------------------------
+# ignore_self: 群聊/频道中是否过滤自己发的消息
+ignore_self: true
+# '/→#': 是否自动把 / 换成 #
+'/→#': true
+# file_watch: 是否监听文件变化（热重载等）
 file_watch: true
-
-# 上线推送通知的冷却时间
+# ----------------------------------------
+# Chromium / Puppeteer
+# ----------------------------------------
+# chromium_path: 自定义 Chromium 可执行路径，空则使用包内
+chromium_path: ""
+# puppeteer_ws: Puppeteer 连接地址
+puppeteer_ws: ""
+# puppeteer_timeout: 截图超时（毫秒），0 为不限制
+puppeteer_timeout: 0
+# ----------------------------------------
+# 上线与文件
+# ----------------------------------------
+# online_msg_exp: 上线推送通知冷却时间（秒）
 online_msg_exp: 86400
-
-# 文件 URL 有效时间（分钟）
+# file_to_url_time: 文件 URL 有效时间（分钟）
 file_to_url_time: 60
-
-# 文件 URL 访问次数限制
+# file_to_url_times: 文件 URL 访问次数限制
 file_to_url_times: 5
-
-# 缓存群成员列表
+# cache_group_member: 是否缓存群成员列表
 cache_group_member: true

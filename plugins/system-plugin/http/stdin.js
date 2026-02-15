@@ -51,13 +51,6 @@ export default {
       method: 'POST',
       path: '/api/stdin/command',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ 
-            success: false, 
-            code: 403,
-            message: 'Unauthorized' 
-          });
-        }
 
         const stdinHandler = global.stdinHandler;
         
@@ -98,13 +91,6 @@ export default {
       method: 'POST',
       path: '/api/stdin/event',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ 
-            success: false, 
-            code: 403,
-            message: 'Unauthorized' 
-          });
-        }
 
         const stdinHandler = global.stdinHandler;
         

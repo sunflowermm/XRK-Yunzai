@@ -1,38 +1,40 @@
 # ========================================
 # Azure OpenAI LLM 配置
 # ========================================
-# Azure OpenAI部署配置
-# 接口地址: https://{resource}.openai.azure.com
-# 
-# 配置说明:
-# - enabled: 是否启用此提供商
-# - baseUrl: API基础地址（需替换{resource}为实际资源名）
-# - apiKey: Azure OpenAI API密钥（必填）
-# - deployment: 部署名称（必填）
-# - apiVersion: API版本
-# - model: 模型名称
-# - chatModel: 聊天模型名称
-# - temperature: 温度参数（0-2）
-# - maxTokens: 最大Token数
-# - timeout: 请求超时时间（毫秒）
-# - enableStream: 是否启用流式输出
-# - enableTools: 是否启用工具调用
-# - proxy: 代理配置（可选）
-
+# Azure OpenAI 服务，按部署名调用
+# 工厂类：AzureOpenAILLMClient
+# 路径形式：/openai/deployments/{deployment}/chat/completions?api-version=xxx
+# 配置文件实际路径：data/server_bots/{port}/azure_openai_llm.yaml
+# ----------------------------------------
+# 基础
+# ----------------------------------------
+# enabled: 是否启用该提供商
 enabled: true
+# baseUrl: 如 https://{resource}.openai.azure.com
 baseUrl: "https://{resource}.openai.azure.com"
+# apiKey: Azure 门户中该资源的密钥
 apiKey: ""
+# deployment: 部署名称（必填），与 path 中的 deployment 对应
 deployment: ""
+# apiVersion: 接口版本，如 2024-02-15-preview
 apiVersion: "2024-02-15-preview"
+# model: 模型名称（与 deployment 对应）
 model: "gpt-4"
-chatModel: "gpt-4"
+# temperature: 温度 0～2
 temperature: 0.7
+# maxTokens: 最大生成 token 数
 maxTokens: 4000
-max_tokens: 4000
+# timeout: 单次请求超时（毫秒）
 timeout: 60000
+# enableStream: 是否允许流式输出
 enableStream: true
+# enableTools: 启用后注入 MCP 工具
 enableTools: true
+# ----------------------------------------
+# 代理（可选）
+# ----------------------------------------
 proxy:
+  # enabled: 是否启用代理
   enabled: false
-  http: ""
-  https: ""
+  # url: 代理地址
+  url: ""

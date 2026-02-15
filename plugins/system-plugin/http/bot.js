@@ -69,9 +69,6 @@ export default {
       method: 'POST',
       path: '/api/message/send',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
 
         const { bot_id, type, target_id, message } = req.body;
 
@@ -152,9 +149,6 @@ export default {
       method: 'POST',
       path: '/api/bot/:uin/control',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
 
         const { uin } = req.params;
         const { action } = req.body;

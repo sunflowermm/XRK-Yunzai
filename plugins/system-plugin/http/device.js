@@ -263,9 +263,6 @@ export default {
       method: 'POST',
       path: '/api/device/register',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
         const { device_id, device_type, device_name, capabilities } = req.body || {};
         if (!device_id || !device_type) {
           return res.status(400).json({ success: false, message: '缺少 device_id 或 device_type' });
@@ -287,9 +284,6 @@ export default {
       method: 'GET',
       path: '/api/devices',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
         const list = Array.from(deviceStore.values());
         res.json({ success: true, devices: list, count: list.length });
       }
@@ -298,9 +292,6 @@ export default {
       method: 'GET',
       path: '/api/device/:deviceId',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
         const device = deviceStore.get(req.params.deviceId);
         if (!device) return res.status(404).json({ success: false, message: '设备不存在' });
         res.json({ success: true, device });
@@ -310,9 +301,6 @@ export default {
       method: 'POST',
       path: '/api/device/:deviceId/ai',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ success: false, message: 'Unauthorized' });
-        }
         const deviceId = req.params.deviceId;
         const { text, workflow = 'device' } = req.body || {};
         const stream = Bot.StreamLoader.getStream(workflow);

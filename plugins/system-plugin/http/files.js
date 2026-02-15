@@ -132,13 +132,6 @@ export default {
       method: 'POST',
       path: '/api/file/upload',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ 
-            success: false, 
-            message: 'Unauthorized',
-            code: 403
-          });
-        }
 
         try {
           const contentType = req.headers['content-type'] || '';
@@ -323,13 +316,6 @@ export default {
       method: 'DELETE',
       path: '/api/file/:id',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ 
-            success: false, 
-            message: 'Unauthorized',
-            code: 403
-          });
-        }
 
         const { id } = req.params;
         const fileInfo = fileMap.get(id);
@@ -356,13 +342,6 @@ export default {
       method: 'GET',
       path: '/api/files',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ 
-            success: false, 
-            message: 'Unauthorized',
-            code: 403
-          });
-        }
 
         const files = Array.from(fileMap.values()).map(f => ({
           id: f.id,
@@ -387,13 +366,6 @@ export default {
       method: 'POST',
       path: '/api/file/upload-base64',
       handler: async (req, res, Bot) => {
-        if (!Bot.checkApiAuthorization(req)) {
-          return res.status(403).json({ 
-            success: false, 
-            message: 'Unauthorized',
-            code: 403
-          });
-        }
 
         const { data, filename = 'file', mime = 'application/octet-stream' } = req.body;
 

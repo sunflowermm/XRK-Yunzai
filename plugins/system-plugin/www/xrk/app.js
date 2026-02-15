@@ -408,20 +408,16 @@ class App {
   async loadLlmOptions() {
     try {
       const res = await fetch(`${this.serverUrl}/api/ai/models`, { headers: this.getHeaders() });
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-      const data = await res.json();
-      if (!data?.success) {
-        throw new Error(data?.message || 'LLM 接口返回异常');
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      if (!json?.success) throw new Error(json?.message || 'LLM 接口返回异常');
+      const data = json.data ?? json;
       this._llmOptions = {
         enabled: data.enabled !== false,
         defaultProfile: data.defaultProfile ?? '',
         profiles: data.profiles ?? [],
         workflows: data.workflows ?? []
       };
-
     } catch (e) {
       console.warn('未能加载 LLM 档位信息:', e.message || e);
     }
@@ -2009,13 +2005,13 @@ class App {
 
   async _renderAISettings() {
     await this.loadLlmOptions();
-    const providers = (this._llmOptions?.profiles || []).map(p => ({
+    const profiles = this._llmOptions?.profiles ?? [];
+    const providers = profiles.map(p => ({
       value: p.key || p.provider || p.label || '',
       label: p.label || p.key || p.provider || ''
     })).filter(p => p.value);
-    
-    // 后端已仅返回“带 MCP 工具”的工作流，这里直接作为 MCP 工具工作流多选
-    const allWorkflows = (this._llmOptions?.workflows || []).map(w => ({
+    const workflowsList = this._llmOptions?.workflows ?? [];
+    const allWorkflows = workflowsList.map(w => ({
       value: w.key || w.name || '',
       label: w.label || w.description || w.key || w.name || ''
     })).filter(w => w.value);
@@ -3555,6 +3551,26 @@ class App {
   }
 
   /**
+   * 兼容读取响应体流（支持 getReader 不可用环境，如部分 polyfill）
+   * @param {Response} response - fetch Response
+   * @returns {AsyncGenerator<string>} 解码后的文本块
+   */
+  async *_readResponseStream(response) {
+    if (response.body && typeof response.body.getReader === 'function') {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        yield decoder.decode(value, { stream: true });
+      }
+    } else {
+      const text = await response.text();
+      if (text) yield text;
+    }
+  }
+
+  /**
    * 创建流式消息元素
    * @param {string} additionalClass - 额外的CSS类（如'voice-message'）
    * @returns {HTMLElement} 消息元素
@@ -3703,17 +3719,11 @@ class App {
         body: JSON.stringify(requestBody)
       });
 
-        if (!response.ok) {
+      if (!response.ok) {
         const errorText = await response.text().catch(() => '');
         throw new Error(`HTTP ${response.status}: ${response.statusText}${errorText ? ` - ${errorText}` : ''}`);
       }
 
-      if (!response.body) {
-        throw new Error('响应体为空');
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder('utf-8');
       let buffer = '';
       let assistantMsg = null;
       let fullText = '';
@@ -3721,77 +3731,53 @@ class App {
       let streamEnded = false;
       let mcpTools = [];
 
-      while (!streamEnded) {
-        const { done, value } = await reader.read();
-        
-        if (done) {
-          streamEnded = true;
-          break;
-        }
-
-        const rawChunk = decoder.decode(value, { stream: true });
+      for await (const rawChunk of this._readResponseStream(response)) {
         buffer += rawChunk;
-
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
-
         for (const line of lines) {
           if (!line.trim() || !line.startsWith('data: ')) continue;
-          
           const data = line.slice(6).trim();
-          
           if (data === '[DONE]') {
             streamEnded = true;
             break;
           }
-
           let json;
           try {
             json = JSON.parse(data);
           } catch (e) {
             continue;
           }
-
           if (json.error) {
             hasError = true;
-            const msg = json.error.message || 'AI 请求失败';
-            this.showToast(`AI 请求失败: ${msg}`, 'error');
+            this.showToast(`AI 请求失败: ${json.error.message || 'AI 请求失败'}`, 'error');
             streamEnded = true;
             break;
           }
-
+          if (!assistantMsg) assistantMsg = this._createStreamingMessage();
           if (json.mcp_tools && Array.isArray(json.mcp_tools) && json.mcp_tools.length > 0) {
             mcpTools = json.mcp_tools;
-            if (assistantMsg) {
-              this._addMCPToolsInfo(assistantMsg, mcpTools);
-            }
+            this._addMCPToolsInfo(assistantMsg, mcpTools);
           }
-
           const delta = json.choices?.[0]?.delta?.content || '';
           if (delta) {
             fullText += delta;
-            if (!assistantMsg) {
-              assistantMsg = this._createStreamingMessage();
-            }
             this._updateStreamingMarkdown(assistantMsg, fullText, mcpTools);
           }
-
           if (json.choices?.[0]?.finish_reason) {
             streamEnded = true;
             break;
           }
         }
+        if (streamEnded) break;
       }
 
-      if (!hasError && assistantMsg && fullText) {
+      if (!hasError && assistantMsg) {
         assistantMsg.classList.remove('streaming');
-        // 使用统一的Markdown渲染
         this._updateStreamingMarkdown(assistantMsg, fullText, mcpTools);
         this._addMessageActions(assistantMsg, 'assistant', fullText, assistantMsg.dataset.messageId);
-        const messageId = assistantMsg.dataset.messageId;
-        this._getCurrentChatHistory().push({ role: 'assistant', text: fullText, ts: Date.now(), id: messageId, mcpTools: mcpTools.length > 0 ? mcpTools : undefined });
+        this._getCurrentChatHistory().push({ role: 'assistant', text: fullText, ts: Date.now(), id: assistantMsg.dataset.messageId, mcpTools: mcpTools.length > 0 ? mcpTools : undefined });
         this._saveChatHistory();
-        // 流式结束后一次性渲染 Mermaid，避免用户手动刷新
         this._renderMermaidIn(assistantMsg);
       }
       
@@ -3847,121 +3833,76 @@ class App {
         throw new Error(`HTTP ${response.status}: ${response.statusText}${errorText ? ` - ${errorText}` : ''}`);
       }
 
-      if (!response.body) {
-        throw new Error('响应体为空');
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder('utf-8');
       let buffer = '';
       let assistantMsg = null;
       let fullText = '';
       let hasError = false;
       let streamEnded = false;
-      this._ttsSentTextLength = 0; // 重置已发送文本长度
+      this._ttsSentTextLength = 0;
 
-      while (!streamEnded) {
-        const { done, value } = await reader.read();
-        
-        if (done) {
-          streamEnded = true;
-          break;
-        }
-
-        const rawChunk = decoder.decode(value, { stream: true });
+      for await (const rawChunk of this._readResponseStream(response)) {
         buffer += rawChunk;
-
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
-
         for (const line of lines) {
           if (!line.trim() || !line.startsWith('data: ')) continue;
-          
           const data = line.slice(6).trim();
-          
           if (data === '[DONE]') {
             streamEnded = true;
             break;
           }
-
           let json;
           try {
             json = JSON.parse(data);
           } catch (e) {
             continue;
           }
-
           if (json.error) {
             hasError = true;
-            const msg = json.error.message || 'AI 请求失败';
-            this.showToast(`AI 请求失败: ${msg}`, 'error');
+            this.showToast(`AI 请求失败: ${json.error.message || 'AI 请求失败'}`, 'error');
             streamEnded = true;
             break;
           }
-
           const delta = json.choices?.[0]?.delta?.content || '';
           if (delta) {
             fullText += delta;
-            
-            if (!assistantMsg) {
-              assistantMsg = this._createStreamingMessage('voice-message');
-            }
-            
-            // 使用统一的Markdown流式渲染
+            if (!assistantMsg) assistantMsg = this._createStreamingMessage('voice-message');
             this._updateStreamingMarkdown(assistantMsg, fullText);
             this.updateVoiceEmotion('💬');
-            
-            // 提前发送TTS：优化分句逻辑，减少不必要的分句，支持英文标点与背压
             const currentText = fullText.trim();
             const unsentText = currentText.slice(this._ttsSentTextLength);
             const unsentForTTS = this._stripMarkdownForTTS(unsentText);
             const unsentLength = unsentForTTS.length;
-            
-            // 中英文句尾标点（含 . ! ? 。！？）
             const hasSentenceEnd = /[。！？.!?]/.test(unsentForTTS);
             const hasNewline = /\n/.test(unsentForTTS);
             const queueLen = (this._ttsAudioQueue && this._ttsAudioQueue.length) || 0;
-            const backpressure = queueLen >= 12; // 播放队列积压时减少发送
-            
-            // 分句策略（偏向“更快开口说话”，降低首句延迟）：
-            // 1. 无标点时：累积 35 字再发（减少等待，提升跟手感）
-            // 2. 有句尾标点：>=8 字即发
-            // 3. 有换行：>=6 字即发
-            // 4. 背压时：仅在有句尾/换行且足够长时发，或未发长度>=50 才发
+            const backpressure = queueLen >= 12;
             const charThreshold = backpressure ? 50 : 35;
             const shouldSend = (unsentLength >= charThreshold) ||
               (hasSentenceEnd && unsentLength >= 8) ||
               (hasNewline && unsentLength >= 6);
-            
             if (shouldSend && currentText.length > this._ttsSentTextLength) {
               let textToSend = unsentForTTS;
               if (hasSentenceEnd && !hasNewline) {
                 const sentenceEndIndex = unsentForTTS.search(/[。！？.!?]/);
-                if (sentenceEndIndex >= 0) {
-                  textToSend = unsentForTTS.slice(0, sentenceEndIndex + 1);
-                }
+                if (sentenceEndIndex >= 0) textToSend = unsentForTTS.slice(0, sentenceEndIndex + 1);
               } else if (hasNewline) {
                 const newlineIndex = unsentForTTS.indexOf('\n');
-                if (newlineIndex >= 0) {
-                  textToSend = unsentForTTS.slice(0, newlineIndex + 1);
-                }
+                if (newlineIndex >= 0) textToSend = unsentForTTS.slice(0, newlineIndex + 1);
               }
-              
-              // 确保发送到TTS的文本已去除所有Markdown符号
               const cleanText = this._stripMarkdownForTTS(textToSend.trim());
               if (cleanText) {
                 this._sendTTSChunk(cleanText).catch(() => {});
-                // 以原始文本的已发送长度推进，保证后续 unsentText 计算正确
                 this._ttsSentTextLength = currentText.length;
               }
             }
           }
-
           if (json.choices?.[0]?.finish_reason) {
             streamEnded = true;
             break;
           }
         }
+        if (streamEnded) break;
       }
 
         if (!hasError && assistantMsg && fullText) {

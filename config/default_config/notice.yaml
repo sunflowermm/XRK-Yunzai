@@ -1,8 +1,12 @@
-# IYUU(https://iyuu.cn/)
+# ========================================
+# 通知推送配置
+# ========================================
+# 各类 Webhook 或推送密钥，用于告警、上线通知等。
+# 实际生效路径：data/server_bots/{port}/notice.yaml
+# ----------------------------------------
+# IYUU 推送（https://iyuu.cn/）
 iyuu: ""
-
-# Server酱(https://sct.ftqq.com/)
+# Server 酱（https://sct.ftqq.com/）
 sct: ""
-
-# 飞书自定义机器人Webhook (https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot)
+# 飞书自定义机器人 Webhook（https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot）
 feishu_webhook: ""

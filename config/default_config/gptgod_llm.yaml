@@ -1,43 +1,42 @@
 # ========================================
 # GPTGod LLM 配置
 # ========================================
-# GPTGod大语言模型配置，支持识图功能
-# 接口地址: https://api.gptgod.online/v1
-# 
-# 配置说明:
-# - enabled: 是否启用此提供商
-# - baseUrl: API基础地址
-# - apiKey: API密钥（必填）
-# - model: 模型名称
-# - chatModel: 聊天模型名称（与model相同）
-# - temperature: 温度参数（0-2），控制输出随机性
-# - maxTokens: 最大Token数
-# - topP: 核采样参数（0-1）
-# - presencePenalty: 存在惩罚（-2到2）
-# - frequencyPenalty: 频率惩罚（-2到2）
-# - timeout: 请求超时时间（毫秒）
-# - enableStream: 是否启用流式输出
-# - enableTools: 是否启用工具调用
-# - proxy: 代理配置（可选）
-
+# GPTGod 大语言模型，支持识图，OpenAI 兼容
+# 工厂类：GPTGodLLMClient
+# 接口：https://api.gptgod.online/v1
+# 配置文件实际路径：data/server_bots/{port}/gptgod_llm.yaml
+# ----------------------------------------
+# 基础
+# ----------------------------------------
+# enabled: 是否启用该提供商
 enabled: true
+# baseUrl: API 基础地址
 baseUrl: "https://api.gptgod.online/v1"
+# apiKey: GPTGod API Key（必填）
 apiKey: ""
+# model: 模型名称
 model: "gemini-exp-1114"
-chatModel: "gemini-exp-1114"
+# temperature: 温度 0～2
 temperature: 0.8
+# maxTokens: 最大生成 token 数
 maxTokens: 6000
-max_tokens: 6000
+# topP: 核采样 0～1
 topP: 0.9
-top_p: 0.9
+# presencePenalty: 存在惩罚 -2～2
 presencePenalty: 0.6
-presence_penalty: 0.6
+# frequencyPenalty: 频率惩罚 -2～2
 frequencyPenalty: 0.6
-frequency_penalty: 0.6
+# timeout: 单次请求超时（毫秒）
 timeout: 360000
+# enableStream: 是否允许流式输出
 enableStream: true
+# enableTools: 启用后注入 MCP 工具
 enableTools: true
+# ----------------------------------------
+# 代理（可选）
+# ----------------------------------------
 proxy:
+  # enabled: 是否启用代理
   enabled: false
-  http: ""
-  https: ""
+  # url: 代理地址
+  url: ""

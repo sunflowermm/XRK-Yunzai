@@ -1,34 +1,36 @@
 # ========================================
-# Anthropic LLM 配置
+# Anthropic Claude LLM 配置
 # ========================================
-# Anthropic Claude Messages API配置
-# 接口地址: https://api.anthropic.com/v1
-# 
-# 配置说明:
-# - enabled: 是否启用此提供商
-# - baseUrl: API基础地址
-# - apiKey: Anthropic API密钥（必填）
-# - model: 模型名称（如claude-3-5-sonnet-20241022）
-# - chatModel: 聊天模型名称
-# - temperature: 温度参数（0-1，Claude限制）
-# - maxTokens: 最大Token数
-# - timeout: 请求超时时间（毫秒）
-# - enableStream: 是否启用流式输出
-# - enableTools: 是否启用工具调用
-# - proxy: 代理配置（可选）
-
+# Anthropic Messages API（Claude）
+# 工厂类：AnthropicLLMClient
+# 文档：https://docs.anthropic.com/en/api
+# 配置文件实际路径：data/server_bots/{port}/anthropic_llm.yaml
+# ----------------------------------------
+# 基础
+# ----------------------------------------
+# enabled: 是否启用该提供商
 enabled: true
+# baseUrl: API 基础地址
 baseUrl: "https://api.anthropic.com/v1"
+# apiKey: Anthropic API Key（必填）
 apiKey: ""
+# model: 模型名称，如 claude-3-5-sonnet-20241022
 model: "claude-3-5-sonnet-20241022"
-chatModel: "claude-3-5-sonnet-20241022"
+# temperature: 温度，Claude 常用 0～1
 temperature: 1
+# maxTokens: 最大生成 token 数
 maxTokens: 4096
-max_tokens: 4096
+# timeout: 单次请求超时（毫秒）
 timeout: 60000
+# enableStream: 是否允许流式输出
 enableStream: true
+# enableTools: 启用后注入 MCP 工具
 enableTools: true
+# ----------------------------------------
+# 代理（可选）
+# ----------------------------------------
 proxy:
+  # enabled: 是否启用代理
   enabled: false
-  http: ""
-  https: ""
+  # url: 代理地址
+  url: ""

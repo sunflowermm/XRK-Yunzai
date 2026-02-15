@@ -4,9 +4,7 @@ import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
  * OpenAI 官方 LLM 工厂配置管理（文本）
  * 配置文件：data/server_bots/{port}/openai_llm.yaml
  *
- * 字段命名策略：
- * - 配置侧优先使用更“官方”的 model/max_tokens/top_p 等语义
- * - 为兼容项目现有字段，运行时允许使用 maxTokens/topP/chatModel 等别名（由 LLMClient 侧做兼容）
+ * 配置使用规范字段：model、maxTokens、topP、presencePenalty、frequencyPenalty 等。
  */
 export default class OpenAILLMConfig extends ConfigBase {
   constructor() {
@@ -44,7 +42,6 @@ export default class OpenAILLMConfig extends ConfigBase {
             component: 'Input'
           },
           model: { type: 'string', label: '模型', default: 'gpt-4', component: 'Input' },
-          chatModel: { type: 'string', label: '聊天模型', default: 'gpt-4', component: 'Input' },
           temperature: {
             type: 'number',
             label: '温度（temperature）',

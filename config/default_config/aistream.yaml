@@ -1,32 +1,51 @@
-# 是否启用工作流系统
+# ========================================
+# AI 工作流全局配置
+# ========================================
+# 控制工作流开关、目录、默认 LLM、缓存与 MCP。
+# 注意：本文件为全局默认配置，端口级覆盖请使用 data/server_bots/{port}/ 下同名文件（若存在）。
+# ----------------------------------------
+# 工作流系统开关与目录
+# ----------------------------------------
+# enabled: 是否启用工作流系统
 enabled: true
-  
-# 工作流目录路径（相对于项目根目录）
+# streamDir: 工作流脚本目录，相对于项目根，如 plugins/stream
 streamDir: "plugins/stream"
-
-# 默认LLM运营商配置
-# 可选值: gptgod, volcengine, xiaomimimo, openai, gemini, openai_compat, anthropic, azure_openai
-# 如果不指定，将使用第一个启用的运营商
+# ----------------------------------------
+# 默认 LLM 运营商
+# ----------------------------------------
+# defaultProvider: 未指定 model 时使用的提供商；可选：gptgod, volcengine, xiaomimimo, openai, gemini, openai_compat, anthropic, azure_openai；空字符串表示使用第一个启用的运营商
 defaultProvider: ""
-  
-# 工作流全局设置
+# ----------------------------------------
+# 工作流全局参数
+# ----------------------------------------
 global:
-  # 最大执行超时时间（毫秒）
+  # maxTimeout: 单次执行最大超时（毫秒）
   maxTimeout: 30000
-    
-  # 是否启用调试日志
+  # debug: 是否输出调试日志
   debug: false
-    
-  # 并发执行限制
+  # maxConcurrent: 最大并发执行数
   maxConcurrent: 5
-  
-# 工作流缓存设置
+# ----------------------------------------
+# 工作流缓存
+# ----------------------------------------
 cache:
-  # 是否启用缓存
+  # enabled: 是否启用工作流缓存
   enabled: true
-    
-  # 缓存过期时间（秒）
+  # ttl: 缓存过期时间（秒）
   ttl: 300
-    
-  # 最大缓存条数
+  # maxSize: 最大缓存条数
   maxSize: 100
+# ----------------------------------------
+# MCP 服务（Model Context Protocol）
+# ----------------------------------------
+# 本体工作流工具通过 StreamLoader 注册到 global.mcpServer；remote 可桥接外部 MCP 服务器（stdio 子进程或 HTTP JSON-RPC）。
+mcp:
+  # enabled: 是否启用 MCP（含本地工作流工具注册）
+  enabled: true
+  remote:
+    # enabled: 是否加载远程 MCP 服务器
+    enabled: false
+    # selected: 要加载的服务器 name 列表；留空表示加载 servers 中的全部
+    selected: []
+    # servers: 远程 MCP 服务器列表；stdio 用 command+args 启动子进程，HTTP 用 url+transport
+    servers: []
