@@ -1,6 +1,7 @@
 /**
- * 设备 HTTP/WebSocket 业务层
+ * 设备 HTTP/WebSocket 业务层（与 XRK-AGT 协议对齐）
  * - REST: 注册、设备列表、单设备、TTS、AI 工作流
+ * - WS 下行：reply(segments)、asr_interim/asr_final、command.play_tts_audio
  * - 事件链用 Bot.PluginsLoader，工作流用 Bot.StreamLoader
  */
 import path from 'node:path';
@@ -110,16 +111,12 @@ function normalizeReplySegments(input) {
   return [{ type: 'text', text: '' }];
 }
 
-/** 解析 reply 入参：若为 { title, description, segments } 或 forward/node 则返回统一结构；否则返回 { segments } */
+/** 解析 reply 入参：{ title, description, segments } 或 forward/node，否则 { segments } */
 function parseReplyPayload(content) {
-  if (content && typeof content === 'object' && Array.isArray(content.segments)) {
-    return {
-      title: content.title ?? '',
-      description: content.description ?? '',
-      segments: normalizeReplySegments(content.segments)
-    };
+  if (content != null && typeof content === 'object' && Array.isArray(content.segments)) {
+    return { title: content.title ?? '', description: content.description ?? '', segments: normalizeReplySegments(content.segments) };
   }
-  if (content && typeof content === 'object' && (content.type === 'node' || content.type === 'forward' || Array.isArray(content.data) || Array.isArray(content.messages))) {
+  if (content != null && typeof content === 'object' && (content.type === 'node' || content.type === 'forward' || Array.isArray(content.data) || Array.isArray(content.messages))) {
     const converted = forwardToSegments(content);
     if (converted) return converted;
   }
@@ -388,13 +385,25 @@ export default {
               send(conn, { type: 'typing', typing: false });
               return;
             }
+            const replySeg = message.find(m => m && m.type === 'reply');
+            const replyId = replySeg?.id ?? null;
+            const replyText = (replySeg?.text ?? '').toString().trim();
+            if (replyId) BotUtil.makeLog('debug', `[Device] 引用 reply_id=${replyId}`, 'DeviceAPI');
+            const _replyPayload = replyId ? {
+              message_id: replyId,
+              id: replyId,
+              text: replyText,
+              raw_message: replyText,
+              segments: replyText ? [{ type: 'text', text: replyText }] : []
+            } : null;
+
             const deviceInfo = deviceStore.get(deviceId) || {};
             const now = Math.floor(Date.now() / 1000);
             const eventId = `device_message_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
             const user_id = data.user_id || data.userId || deviceId;
             const sender = data.sender || { nickname: data.nickname || 'Web', card: data.nickname || 'Web' };
             const meta = data.meta || {};
-            const raw_message = typeof text === 'string' && text ? text : (message.map(m => m.type === 'text' ? (m.text || '') : `[${m.type}]`).join('').trim() || '')
+            const raw_message = typeof text === 'string' && text ? text : (message.map(m => m.type === 'text' ? (m.text || '') : `[${m.type}]`).join('').trim() || '');
             const event = {
               post_type: 'device',
               adapter: 'device',
@@ -412,11 +421,12 @@ export default {
               time: now,
               event_id: eventId,
               message_id: eventId,
+              ...(replyId != null && { reply_id: replyId, _replyPayload }),
               ...(data.group_id != null && { group_id: data.group_id, group_name: data.group_name || `群${data.group_id}`, message_type: 'group' }),
               reply: async (segmentsOrText) => {
                 const payload = await buildReplyPayload(segmentsOrText, deviceId, Bot);
                 send(conn, payload);
-                return { message_id: null, time: Date.now() / 1000 };
+                return { message_id: payload?.message_id ?? null, time: Date.now() / 1000 };
               }
             };
 

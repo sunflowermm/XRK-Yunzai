@@ -183,8 +183,8 @@ XRK-Yunzai/
 
 主要配置位于 `config/default_config/*.yaml`，首次运行自动复制到 `data/server_bots/<port>/`。
 
-- `aistream.yaml`：AI 工作流通用配置。
-- LLM 提供商配置：通过 CommonConfig 系统管理（插件内 `commonconfig/*.js`，如 `plugins/system-plugin/commonconfig/openai_llm.js`）。
+- `aistream.yaml`：工作流开关、目录、缓存、MCP（无「默认运营商」配置项；未传 model 时使用第一个启用的 LLM 提供商）。
+- LLM 提供商配置：通过 CommonConfig 系统管理（插件内 `commonconfig/*.js`，如 `plugins/system-plugin/commonconfig/openai_llm.js`），在 Web 面板或请求中选择运营商。
 - `server.yaml`：HTTP/HTTPS、CORS、安全策略、静态目录。
 - `redis.yaml`：Redis 连接信息与数据库序号。
 - `device.yaml` / `group.yaml` / `notice.yaml`：设备、群、通知策略。

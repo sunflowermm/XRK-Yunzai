@@ -53,6 +53,7 @@
 * 渲染器与插件层进一步收口：删冗余代码、无意义保护逻辑与多余 import，提高对象引用（RendererLoader、getRenderer）复用
 * 更新日志与版本号梳理，3.1.x 为当前维护主线
 * 依赖与配置说明见 README，渲染器接入详见 `lib/renderer/README.md`
+* 文档：USER_GUIDE 端口改为「以实际配置为准」、补充设备 WS 下行类型（reply/asr_interim/asr_final/play_tts_audio）、Event 引用回复与 v3 对话接口说明；FACTORY/README 明确无默认运营商配置项
 
 ---
 

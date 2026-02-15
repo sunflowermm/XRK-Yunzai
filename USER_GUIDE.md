@@ -27,19 +27,18 @@
 
 ### 1.1 启动服务
 
-启动 XRK-Yunzai 后，服务默认运行在：
+启动 XRK-Yunzai 后，HTTP/HTTPS 端口以**实际配置为准**（见 `config/default_config/server.yaml` 或 `data/server_bots/<port>/server.yaml`），控制台会打印访问地址。
 
-- **HTTP 端口**: `3000`（可在配置中修改）
-- **访问地址**: `http://localhost:3000` 或 `http://你的IP:3000`
+- **访问地址**：`http://localhost:<端口>` 或 `http://你的IP:<端口>`（如 1234）
 
 ### 1.2 查看服务状态
 
-启动后，控制台会显示服务地址，例如：
+启动后，控制台会显示实际端口与地址，例如：
 
 ```
 ✓ HTTP服务器已启动
-  本地访问: http://localhost:3000
-  公网访问: http://192.168.1.100:3000
+  本地访问: http://localhost:1234
+  公网访问: http://192.168.1.100:1234
 ```
 
 ---
@@ -48,11 +47,11 @@
 
 ### 2.1 主页
 
-**http://localhost:3000/** — 欢迎页，项目介绍与仓库链接。
+**http://localhost:端口/** — 欢迎页（端口见启动日志，如 1234）。
 
 ### 2.2 API 控制中心（xrk 面板）
 
-**http://localhost:3000/xrk/** — 系统状态监控、葵宝聊天（AI 流式对话）、配置管理、API 调试。顶部可填 API Key，左侧切换功能模块。
+**http://localhost:端口/xrk/** — 系统状态监控、AI 对话（Event/语音/文本）、配置管理、API 调试。顶部可填 API Key，左侧切换功能模块。**Event 模式**下支持引用回复（点击消息「引用」后发送，与后端 getReply 协议一致）。
 
 ### 2.3 静态资源
 
@@ -68,7 +67,7 @@
 
 ### 3.2 核心 API 接口
 
-以下接口均需认证时在请求头加 `X-API-Key` 或 URL 加 `?api_key=xxx`。示例：`curl http://localhost:3000/api/system/status`。
+以下接口均需认证时在请求头加 `X-API-Key` 或 URL 加 `?api_key=xxx`。示例：`curl http://localhost:1234/api/system/status`（端口以实际为准）。
 
 #### 3.2.1 系统状态
 
@@ -99,9 +98,11 @@
 | GET /api/device/:deviceId | 单设备详情 |
 | POST /api/device/:deviceId/ai | 请求体 `{ text, workflow? }`，执行设备工作流 |
 
-#### 3.2.6 AI 流式对话
+#### 3.2.6 AI 对话
 
-**GET /api/ai/stream?prompt=…&workflow=chat&persona=…** — SSE 流式输出。
+**GET /api/ai/stream?prompt=…&workflow=chat&persona=…** — SSE 流式输出（传统工作流入口）。
+
+**POST /api/v3/chat/completions** — OpenAI 兼容对话接口，支持 `stream`、`model`（提供商名）、`workflow.streams`（MCP 工具作用域）。请求体同 OpenAI Chat Completions（messages、temperature、max_tokens 等），响应为 SSE 流式或 JSON。xrk 面板 AI 对话与第三方客户端均可用此接口。
 
 **响应格式（Server-Sent Events）**:
 
@@ -143,7 +144,7 @@ eventSource.onmessage = (event) => {
 ### 4.1 curl 示例
 
 ```bash
-curl -X POST http://localhost:3000/api/message/send \
+curl -X POST http://localhost:<端口>/api/message/send \
   -H "Content-Type: application/json" -H "X-API-Key: your-api-key" \
   -d '{"type": "private", "target_id": "987654321", "message": "Hello"}'
 ```
@@ -155,8 +156,8 @@ curl -X POST http://localhost:3000/api/message/send \
 ```python
 import requests
 
-# 配置
-BASE_URL = "http://localhost:3000"
+# 配置（端口以实际为准，见启动日志）
+BASE_URL = "http://localhost:1234"
 API_KEY = "your-api-key"
 
 headers = {
@@ -192,12 +193,12 @@ print(response.json())
 
 ### 5.1 消息监听
 
-**连接地址**: `ws://localhost:3000/messages`
+**连接地址**: `ws://localhost:端口/messages`（端口见启动日志）
 
 **JavaScript 示例**:
 
 ```javascript
-const ws = new WebSocket('ws://localhost:3000/messages');
+const ws = new WebSocket('ws://localhost:1234/messages');  // 端口以实际为准
 
 ws.onopen = () => {
   console.log('WebSocket 连接已建立');
@@ -227,7 +228,7 @@ ws.onclose = () => {
 
 ### 5.2 设备 WebSocket
 
-**连接地址**: `ws://localhost:3000/device`（认证可通过查询参数 `?api_key=xxx` 传递）
+**连接地址**: `ws://localhost:端口/device`（认证可通过查询参数 `?api_key=xxx` 传递）。协议与 XRK-AGT 对齐。
 
 **设备注册（客户端发送）**:
 
@@ -253,7 +254,19 @@ ws.onclose = () => {
 
 服务端响应：`{"type": "heartbeat_response", "timestamp": 1704067200000}`
 
-**消息类型**：客户端发送 `{"type": "message", "text": "..."}` 或 `{"type": "message", "message": [{ "type": "text", "text": "..." }]}` 可触发事件链；服务端可能回复 `type: "reply"`（含 `text`、`segments`）、`type: "typing"`、`type: "error"` 等。
+**客户端发送**：`{"type": "message", "text": "..."}` 或 `{"type": "message", "message": [{ "type": "text", "text": "..." }, { "type": "reply", "id": "...", "text": "被引用内容" }]}` 可触发事件链。
+
+**服务端下行类型**：
+
+| type | 说明 |
+|------|------|
+| `reply` | 回复内容：`segments`（文本/图片/引用/工具卡片等）、可选 `title`/`description`、可选 `mcp_tools` |
+| `asr_interim` | 语音识别中间结果：`session_id`、`text` |
+| `asr_final` | 语音识别最终结果：`session_id`、`text` |
+| `command` | 子类型 `play_tts_audio`：`parameters.audio_data` 为 PCM 十六进制字符串，16kHz 单声道 |
+| `typing` | 输入状态：`typing: true/false` |
+| `error` | 错误：`message` |
+| `register_response` / `heartbeat_response` | 注册与心跳响应 |
 
 ---
 
@@ -261,7 +274,7 @@ ws.onclose = () => {
 
 | 现象 | 处理 |
 |------|------|
-| 无法打开 3000 端口页面 | 确认服务已启动；Windows 用 `netstat -ano` 查端口，Linux/Mac 用 `lsof -i :3000`；检查防火墙 |
+| 无法打开服务端口页面 | 确认服务已启动，查看控制台打印的端口；Windows 用 `netstat -ano` 查端口，Linux/Mac 用 `lsof -i :端口`；检查防火墙 |
 | API 返回 403 | 检查 API Key、请求头 `X-API-Key` 或 `?api_key=`；本地可用 127.0.0.1/localhost 免认证 |
 | /api/message/send 失败 | 确认机器人在线（GET /api/bots）、target_id 与 type 正确、消息格式符合要求；查服务端日志 |
 | WebSocket 连不上 | 确认地址为 `ws://` 或 `wss://`、防火墙放行、服务支持 WS |

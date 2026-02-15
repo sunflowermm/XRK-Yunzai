@@ -49,6 +49,8 @@ class App {
       _lastUpdate: null
     };
     this._eventChatHistory = this._loadChatHistory(App.CHAT_MODE.EVENT);
+    /** Event 模式引用回复（回复=引用）：{ id, text }，发送后清空，与 AGT/getReply 协议一致 */
+    this._eventReplyTo = null;
     this._aiChatHistory = this._loadChatHistory(App.CHAT_MODE.AI);
     this._voiceChatHistory = this._loadChatHistory(App.CHAT_MODE.VOICE);
     this._isRestoringHistory = false;
@@ -129,8 +131,6 @@ class App {
     this._latestSystem = null;
     this._homeDataCache = this._loadHomeDataCache();
     this._chartPluginsRegistered = false;
-    // 事件绑定状态跟踪，避免重复绑定
-    this._chatEventsBound = false;
     this._chatEventHandlers = new Map();
     
     this.init();
@@ -140,6 +140,7 @@ class App {
     initLazyLoad();
     await this.loadAPIConfig();
     this.bindEvents();
+    this._bindMermaidDocumentDelegation();
     this.loadSettings();
     await this.loadLlmOptions();
     this._initMermaid();
@@ -198,141 +199,87 @@ class App {
     }
   }
 
-  _bindMermaidToolbar(root) {
-    if (!root) return;
-    const wrappers = root.querySelectorAll('.md-mermaid');
-    if (!wrappers.length) return;
-
-    wrappers.forEach((wrap) => {
-      if (wrap.dataset._toolbarBound) return;
-      wrap.dataset._toolbarBound = '1';
-
-      const copyBtn = wrap.querySelector('.md-mermaid-copy');
-      const downloadBtn = wrap.querySelector('.md-mermaid-download');
-
-      // 复制 Mermaid 源码
-      if (copyBtn && navigator.clipboard) {
-        copyBtn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          const raw = wrap.getAttribute('data-mermaid-raw') || '';
-          const text = raw
-            .replace(/&lt;/g, '<')
-            .replace(/&gt;/g, '>')
-            .replace(/&amp;/g, '&');
-          try {
-            await navigator.clipboard.writeText(text);
-            this.showToast('Mermaid 已复制到剪贴板', 'success');
-          } catch {
-            this.showToast('复制 Mermaid 失败', 'error');
-          }
-        });
+  /** 文档级委托：Mermaid 复制/下载，只绑一次，无需每块 _toolbarBound */
+  _bindMermaidDocumentDelegation() {
+    document.addEventListener('click', (e) => {
+      const wrap = (e.target.closest('.md-mermaid-copy') || e.target.closest('.md-mermaid-download'))?.closest('.md-mermaid');
+      if (!wrap) return;
+      if (e.target.closest('.md-mermaid-copy') && navigator.clipboard) {
+        e.stopPropagation();
+        const raw = (wrap.getAttribute('data-mermaid-raw') || '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+        navigator.clipboard.writeText(raw).then(() => this.showToast('Mermaid 已复制到剪贴板', 'success')).catch(() => this.showToast('复制 Mermaid 失败', 'error'));
+        return;
       }
-
-      // 下载高清 PNG
-      if (downloadBtn) {
-        downloadBtn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          try {
-            const svg = wrap.querySelector('svg');
-            if (!svg) {
-              this.showToast('找不到图表内容', 'warning');
-              return;
-            }
-            // 为了避免导出不完整，使用 SVG 的 viewBox / 边界框精确计算尺寸
-            const cloned = svg.cloneNode(true);
-            let width = Number(cloned.getAttribute('width')) || 0;
-            let height = Number(cloned.getAttribute('height')) || 0;
-
-            const vb = cloned.viewBox && cloned.viewBox.baseVal;
-            if (vb && vb.width && vb.height) {
-              width = vb.width;
-              height = vb.height;
-              cloned.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.width} ${vb.height}`);
-            } else {
-              // 回退：用几何边界框
-              const bbox = svg.getBBox();
-              width = bbox.width;
-              height = bbox.height;
-              cloned.setAttribute('viewBox', `${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`);
-            }
-            if (!width || !height) {
-              this.showToast('图表尺寸异常，无法导出', 'error');
-              return;
-            }
-            cloned.setAttribute('width', String(width));
-            cloned.setAttribute('height', String(height));
-
-            const xml = new XMLSerializer().serializeToString(cloned);
-            const svgBlob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
-
-            // 优先尝试导出高清 PNG；如果被跨域安全策略阻止，则优雅回退为下载 SVG
-            const tryExportPng = () => new Promise((resolve, reject) => {
-              const url = URL.createObjectURL(svgBlob);
-              const img = new Image();
-              img.onload = () => {
-                try {
-                  const scale = 2; // 高清倍数
-                  const canvas = document.createElement('canvas');
-                  canvas.width = width * scale;
-                  canvas.height = height * scale;
-                  const ctx = canvas.getContext('2d');
-                  ctx.setTransform(scale, 0, 0, scale, 0, 0);
-                  ctx.clearRect(0, 0, canvas.width, canvas.height);
-                  ctx.drawImage(img, 0, 0, width, height);
-                  URL.revokeObjectURL(url);
-
-                  try {
-                    canvas.toBlob((blob) => {
-                      if (!blob) {
-                        reject(new Error('toBlob 返回空 blob'));
-                        return;
-                      }
-                      const a = document.createElement('a');
-                      a.download = `mermaid-${Date.now()}.png`;
-                      a.href = URL.createObjectURL(blob);
-                      a.click();
-                      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-                      resolve(true);
-                    }, 'image/png');
-                  } catch (err) {
-                    // 例如 SecurityError: tainted canvas
-                    reject(err);
-                  }
-                } catch (err) {
-                  URL.revokeObjectURL(url);
-                  reject(err);
-                }
-              };
-              img.onerror = () => {
-                URL.revokeObjectURL(url);
-                reject(new Error('Image 加载失败'));
-              };
-              img.src = url;
-            });
-
-            let exported = false;
-            try {
-              exported = await tryExportPng();
-            } catch {
-              exported = false;
-            }
-
-            // 如果 PNG 导出失败（如跨域导致 canvas 污染），回退为下载 SVG 源文件
-            if (!exported) {
-              const a = document.createElement('a');
-              const url = URL.createObjectURL(svgBlob);
-              a.download = `mermaid-${Date.now()}.svg`;
-              a.href = url;
-              a.click();
-              setTimeout(() => URL.revokeObjectURL(url), 2000);
-              this.showToast('PNG 导出受限，已改为下载 SVG 原图', 'warning');
-            }
-          } catch {
-            this.showToast('导出 PNG 失败', 'error');
-          }
-        });
+      if (e.target.closest('.md-mermaid-download')) {
+        e.stopPropagation();
+        this._handleMermaidDownload(wrap);
       }
     });
+  }
+
+  async _handleMermaidDownload(wrap) {
+    const svg = wrap?.querySelector('svg');
+    if (!svg) { this.showToast('找不到图表内容', 'warning'); return; }
+    try {
+      const cloned = svg.cloneNode(true);
+      let width = Number(cloned.getAttribute('width')) || 0, height = Number(cloned.getAttribute('height')) || 0;
+      const vb = cloned.viewBox?.baseVal;
+      if (vb?.width && vb?.height) {
+        width = vb.width; height = vb.height;
+        cloned.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.width} ${vb.height}`);
+      } else {
+        const bbox = svg.getBBox();
+        width = bbox.width; height = bbox.height;
+        cloned.setAttribute('viewBox', `${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`);
+      }
+      if (!width || !height) { this.showToast('图表尺寸异常，无法导出', 'error'); return; }
+      cloned.setAttribute('width', String(width));
+      cloned.setAttribute('height', String(height));
+      const xml = new XMLSerializer().serializeToString(cloned);
+      const svgBlob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
+      const tryPng = () => new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(svgBlob);
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const scale = 2;
+            const canvas = document.createElement('canvas');
+            canvas.width = width * scale; canvas.height = height * scale;
+            const ctx = canvas.getContext('2d');
+            ctx.setTransform(scale, 0, 0, scale, 0, 0);
+            ctx.drawImage(img, 0, 0, width, height);
+            URL.revokeObjectURL(url);
+            canvas.toBlob((blob) => {
+              if (!blob) { reject(new Error('toBlob 空')); return; }
+              const a = document.createElement('a');
+              a.download = `mermaid-${Date.now()}.png`;
+              a.href = URL.createObjectURL(blob);
+              a.click();
+              setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+              resolve(true);
+            }, 'image/png');
+          } catch (err) { URL.revokeObjectURL(url); reject(err); }
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image 加载失败')); };
+        img.src = url;
+      });
+      try {
+        await tryPng();
+      } catch {
+        const a = document.createElement('a');
+        a.download = `mermaid-${Date.now()}.svg`;
+        a.href = URL.createObjectURL(svgBlob);
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        this.showToast('PNG 导出受限，已改为下载 SVG 原图', 'warning');
+      }
+    } catch {
+      this.showToast('导出 PNG 失败', 'error');
+    }
+  }
+
+  _bindMermaidToolbar(_root) {
+    /* 复制/下载已由 _bindMermaidDocumentDelegation 文档级委托处理 */
   }
 
   /**
@@ -370,7 +317,7 @@ class App {
     if (!url) return;
     try {
       URL.revokeObjectURL(url);
-      this._objectUrls?.delete(url);
+      this._objectUrls.delete(url);
     } catch {}
   }
 
@@ -385,12 +332,9 @@ class App {
   }
 
   _revokeAllObjectUrls() {
-    if (!this._objectUrls) return;
     try {
       for (const url of this._objectUrls) {
-        try {
-          URL.revokeObjectURL(url);
-        } catch {}
+        try { URL.revokeObjectURL(url); } catch {}
       }
       this._objectUrls.clear();
     } catch {}
@@ -1863,6 +1807,8 @@ class App {
         `}
         <div class="chat-messages ${isVoiceMode ? 'voice-messages' : ''}" id="chatMessages"></div>
         <div class="chat-input-area">
+          ${!isAIMode && !isVoiceMode ? `<div class="event-quote-strip u-hidden" id="eventQuoteStrip"><span class="event-quote-label">引用：</span><span class="event-quote-text"></span><button type="button" class="event-quote-cancel" aria-label="取消引用">×</button></div>` : ''}
+          <div class="chat-input-row">
           ${isVoiceMode ? `
           <button class="voice-mic-btn" id="micBtn" title="按住或点击说话">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1916,8 +1862,8 @@ class App {
             </svg>
           </button>
           `}
-        </div>
-        ${!isVoiceMode ? `<div class="chat-image-preview" id="chatImagePreview" style="display: none;"></div>` : ''}
+          </div>
+        ${!isVoiceMode ? `<div class="chat-image-preview u-hidden" id="chatImagePreview"></div>` : ''}
         </div>
       </div>
     `;
@@ -1977,15 +1923,13 @@ class App {
       this.ensureDeviceWs();
     } else {
       const aiSettingsPanel = sidebar?.querySelector('.ai-settings-panel');
-      if (aiSettingsPanel) {
-        aiSettingsPanel.remove();
-      }
+      if (aiSettingsPanel) aiSettingsPanel.remove();
+      this._ensureEventQuoteStripElement();
       this.ensureDeviceWs();
     }
-    
-    // 统一绑定事件（_bindChatEvents 内部已处理解绑和重复绑定）
+
     this._bindChatEvents();
-    
+
     const cached = mode === App.CHAT_MODE.AI ? this._chatMessagesCache.ai : null;
     if (cached?.html) {
       box.style.overflow = 'hidden';
@@ -2024,10 +1968,7 @@ class App {
         <div class="ai-settings-section">
           <label class="ai-settings-label">运营商</label>
           <select id="aiProviderSelect" class="ai-settings-select">
-            ${(function() {
-              const effective = this._chatSettings.provider || this._llmOptions?.profiles?.[0]?.key || '';
-              return providers.map(p => `<option value="${p.value}" ${p.value === effective ? 'selected' : ''}>${p.label}</option>`).join('');
-            }).call(this)}
+            ${providers.map(p => `<option value="${p.value}" ${p.value === this._getEffectiveProvider() ? 'selected' : ''}>${p.label}</option>`).join('')}
           </select>
         </div>
         <div class="ai-settings-section">
@@ -2064,24 +2005,14 @@ class App {
     `;
   }
   
-  /**
-   * 解绑聊天相关事件
-   */
   _unbindChatEvents() {
     for (const [element, handlers] of this._chatEventHandlers.entries()) {
-      if (element && Array.isArray(handlers)) {
-        handlers.forEach(({ event, handler }) => element.removeEventListener(event, handler));
-      }
+      if (element) handlers.forEach(({ event, handler }) => element.removeEventListener(event, handler));
     }
     this._chatEventHandlers.clear();
-    this._chatEventsBound = false;
   }
 
-  /**
-   * 绑定聊天相关事件（企业级事件管理，支持解绑）
-   */
   _bindChatEvents() {
-    // 先解绑旧的事件，避免重复绑定
     this._unbindChatEvents();
     
     const sendBtn = document.getElementById('chatSendBtn');
@@ -2091,8 +2022,7 @@ class App {
     const imageUploadBtn = document.getElementById('imageUploadBtn');
     const imageInput = document.getElementById('chatImageInput');
     if (imageInput) imageInput.setAttribute('accept', this._getChatModeConfig().accept);
-    
-    // 辅助函数：安全地绑定事件并记录
+
     const safeBind = (element, event, handler) => {
       if (!element) return;
       element.addEventListener(event, handler);
@@ -2101,8 +2031,45 @@ class App {
       }
       this._chatEventHandlers.get(element).push({ event, handler });
     };
-    
-    // 聊天模式切换按钮 - 使用事件委托（统一交给 _unbindChatEvents 管理，避免 dataset 标记导致失效）
+
+    const chatMessagesBox = document.getElementById('chatMessages');
+    if (chatMessagesBox) {
+      const onMessagesClick = (e) => {
+        const msg = e.target.closest('.chat-message');
+        const messageId = msg?.dataset?.messageId;
+        if (e.target.closest('.chat-copy-btn') && msg) {
+          e.stopPropagation();
+          const text = this._getMessageTextFromElement(msg);
+          if (text) navigator.clipboard.writeText(text).then(() => this.showToast('已复制到剪贴板', 'success')).catch(() => this.showToast('复制失败', 'error'));
+          return;
+        }
+        if (e.target.closest('.chat-quote-btn') && msg && this._isEventMode()) {
+          e.stopPropagation();
+          this._eventReplyTo = { id: messageId, summary: this._getReplySummaryFromMessage(msg, messageId) };
+          this._updateEventQuoteStrip();
+          document.getElementById('chatInput')?.focus();
+          return;
+        }
+        if (e.target.closest('.chat-delete-btn') && messageId) {
+          e.stopPropagation();
+          this._deleteMessage(messageId);
+          return;
+        }
+        if (e.target.closest('.chat-regen-btn') && messageId && this._isAIMode()) {
+          e.stopPropagation();
+          this._regenerateMessage(messageId);
+          return;
+        }
+        const toolHeader = e.target.closest('.chat-tool-block-header');
+        if (toolHeader) {
+          const content = toolHeader.nextElementSibling;
+          const toggleEl = toolHeader.querySelector('.chat-tool-block-toggle');
+          if (content && toggleEl) { content.hidden = !content.hidden; toggleEl.textContent = content.hidden ? '展开' : '收起'; }
+        }
+      };
+      safeBind(chatMessagesBox, 'click', onMessagesClick);
+    }
+
     const modeSelector = document.querySelector('.chat-mode-selector');
     if (modeSelector) {
       const modeHandler = async (e) => {
@@ -2118,12 +2085,17 @@ class App {
         }
         this._chatMode = mode;
         localStorage.setItem('chatMode', mode);
+        if (oldMode === App.CHAT_MODE.EVENT) this._clearEventReplyState();
         await this._switchChatMode(mode, oldMode);
       };
       safeBind(modeSelector, 'click', modeHandler);
     }
 
-    // AI 模式特定设置
+    const quoteCancelBtn = document.getElementById('eventQuoteStrip')?.querySelector('.event-quote-cancel');
+    if (quoteCancelBtn) {
+      safeBind(quoteCancelBtn, 'click', () => { this._clearEventReplyState(); });
+    }
+
     if (this._isAIMode()) {
       const providerSelect = document.getElementById('aiProviderSelect');
       const personaInput = document.getElementById('aiPersonaInput');
@@ -2144,7 +2116,6 @@ class App {
         safeBind(personaInput, 'input', personaHandler);
       }
 
-      // MCP 工具工作流多选：使用事件委托（交给 safeBind/_unbindChatEvents 管理，无需 dataset 标记）
       const workflowContainer = document.querySelector('.ai-settings-checkboxes');
       if (workflowContainer) {
         const workflowHandler = () => {
@@ -2156,46 +2127,32 @@ class App {
         safeBind(workflowContainer, 'change', workflowHandler);
       }
 
-      // 远程MCP配置按钮
       const remoteMCPBtn = document.getElementById('remoteMCPConfigBtn');
       if (remoteMCPBtn) {
-        const remoteMCPHandler = () => {
-          // 跳转到配置管理页面
+        safeBind(remoteMCPBtn, 'click', () => {
           this.navigateTo('config');
-          // 等待配置列表加载完成后选中aistream配置
           setTimeout(() => {
-            if (this._configState) {
-              // 查找system配置
-              const systemConfig = this._configState.list.find(cfg => cfg.name === 'system');
-              if (systemConfig) {
-                // 选中system配置的aistream子配置
-                this.selectConfig('system', 'aistream');
-                // 等待配置加载后，尝试展开mcp.remote部分（如果支持）
-                setTimeout(() => {
-                  // 可以在这里添加逻辑来高亮或展开mcp.remote配置项
-                  const mcpRemoteField = document.querySelector('[data-path="mcp.remote"]');
-                  if (mcpRemoteField) {
-                    mcpRemoteField.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    mcpRemoteField.style.background = 'var(--primary-50)';
-                    setTimeout(() => {
-                      if (mcpRemoteField) mcpRemoteField.style.background = '';
-                    }, 2000);
-                  }
-                }, 500);
-              }
+            const systemConfig = this._configState?.list?.find(cfg => cfg.name === 'system');
+            if (systemConfig) {
+              this.selectConfig('system', 'aistream');
+              setTimeout(() => {
+                const mcpRemoteField = document.querySelector('[data-path="mcp.remote"]');
+                if (mcpRemoteField) {
+                  mcpRemoteField.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  mcpRemoteField.style.background = 'var(--primary-50)';
+                  setTimeout(() => { mcpRemoteField.style.background = ''; }, 2000);
+                }
+              }, 500);
             }
           }, 300);
-        };
-        safeBind(remoteMCPBtn, 'click', remoteMCPHandler);
+        });
       }
     }
     
-    // 发送按钮
     if (sendBtn) {
       safeBind(sendBtn, 'click', () => this.sendChatMessage());
     }
     
-    // 输入框
     if (input) {
       const inputHandler = (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -2206,17 +2163,14 @@ class App {
       safeBind(input, 'keypress', inputHandler);
     }
     
-    // 麦克风按钮
     if (micBtn) {
       safeBind(micBtn, 'click', () => this.toggleMic());
     }
     
-    // 清空按钮
     if (clearBtn) {
       safeBind(clearBtn, 'click', () => this.clearChat());
     }
     
-    // 语音模式特定事件
     if (this._isVoiceMode()) {
       const voiceClearBtn = document.getElementById('voiceClearBtn');
       if (voiceClearBtn) {
@@ -2259,7 +2213,6 @@ class App {
       }
     }
     
-    // 图片上传
     if (imageUploadBtn && imageInput) {
       safeBind(imageUploadBtn, 'click', () => imageInput.click());
       safeBind(imageInput, 'change', (e) => {
@@ -2267,71 +2220,47 @@ class App {
       });
     }
 
-    // 拖拽区域绑定（只在首次绑定时执行）
+    const chatInputArea = document.querySelector('.chat-input-area');
+    if (chatInputArea) {
+      safeBind(chatInputArea, 'click', (e) => {
+        const removeBtn = e.target.closest('.chat-image-preview-remove');
+        if (removeBtn) { e.stopPropagation(); this.removeImagePreview(removeBtn.dataset.fileId); }
+      });
+    }
+
     const chatContainer = document.querySelector('.chat-container');
-    if (chatContainer && !chatContainer.dataset._dropBound) {
-      chatContainer.dataset._dropBound = '1';
-      this._bindDropArea(chatContainer, {
-        onDragStateChange: (active) => {
-          chatContainer?.classList.toggle('is-dragover', Boolean(active));
-        },
+    if (chatContainer) {
+      this._bindDropArea(chatContainer, safeBind, {
+        onDragStateChange: (active) => chatContainer.classList.toggle('is-dragover', Boolean(active)),
         onFiles: (files) => {
-          if (!files || files.length === 0) return;
+          if (!files?.length) return;
           const isAIMode = this._isAIMode();
-          const filteredFiles = isAIMode 
-            ? files.filter(f => f?.type?.startsWith('image/'))
-            : files;
-          if (!filteredFiles.length) {
+          const filtered = isAIMode ? files.filter(f => f?.type?.startsWith('image/')) : files;
+          if (!filtered.length) {
             this.showToast(isAIMode ? '只能上传图片文件' : '文件格式不支持', 'warning');
             return;
           }
-          this.handleImageSelect(filteredFiles);
-          this.showToast(`已添加 ${filteredFiles.length} ${isAIMode ? '张图片' : '个文件'}，点击发送即可上传`, 'success');
+          this.handleImageSelect(filtered);
+          this.showToast(`已添加 ${filtered.length} ${isAIMode ? '张图片' : '个文件'}，点击发送即可上传`, 'success');
         }
       });
     }
-    
-    this._chatEventsBound = true;
+
   }
 
-  /**
-   * 统一绑定拖拽投放区域（减少冗余事件绑定）
-   * @param {HTMLElement} el
-   * @param {Object} options
-   * @param {(active:boolean)=>void} [options.onDragStateChange]
-   * @param {(files:File[])=>void} options.onFiles
-   */
-  _bindDropArea(el, options = {}) {
+  /** 拖拽投放区。签名为 (el, safeBind, options) 或 (el, options)；有 safeBind 时随 _unbindChatEvents 解绑 */
+  _bindDropArea(el, safeBindOrOptions, maybeOptions = {}) {
+    const hasSafeBind = typeof safeBindOrOptions === 'function';
+    const options = hasSafeBind ? maybeOptions : safeBindOrOptions || {};
     if (!el || typeof options.onFiles !== 'function') return;
-
+    const bind = hasSafeBind ? (target, evt, fn) => safeBindOrOptions(target, evt, fn) : (target, evt, fn) => target.addEventListener(evt, fn);
     let dragDepth = 0;
-    const setActive = (active) => {
-      options.onDragStateChange?.(active);
-    };
-
-    const prevent = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-    };
-
-    el.addEventListener('dragenter', (e) => {
-      prevent(e);
-      dragDepth++;
-      setActive(true);
-    });
-    el.addEventListener('dragover', prevent);
-    el.addEventListener('dragleave', (e) => {
-      prevent(e);
-      dragDepth = Math.max(0, dragDepth - 1);
-      if (dragDepth === 0) setActive(false);
-    });
-    el.addEventListener('drop', (e) => {
-      prevent(e);
-      dragDepth = 0;
-      setActive(false);
-      const dropped = this._extractFilesFromDataTransfer(e.dataTransfer);
-      options.onFiles(dropped);
-    });
+    const setActive = (active) => options.onDragStateChange?.(active);
+    const prevent = (e) => { e.preventDefault(); e.stopPropagation(); };
+    bind(el, 'dragenter', (e) => { prevent(e); dragDepth++; setActive(true); });
+    bind(el, 'dragover', prevent);
+    bind(el, 'dragleave', (e) => { prevent(e); dragDepth = Math.max(0, dragDepth - 1); if (dragDepth === 0) setActive(false); });
+    bind(el, 'drop', (e) => { prevent(e); dragDepth = 0; setActive(false); options.onFiles(this._extractFilesFromDataTransfer(e.dataTransfer)); });
   }
 
   _getHistoryForMode(mode) {
@@ -2357,6 +2286,10 @@ class App {
     if (this._isAIMode()) return { accept: 'image/*', placeholderIdle: '输入消息...', placeholderBusy: 'AI 正在处理...', title: 'AI 对话', imageOnly: true };
     if (this._isVoiceMode()) return { accept: 'image/*,video/*,audio/*', placeholderIdle: '输入消息或发送语音...', placeholderBusy: '正在处理...', title: '语音', imageOnly: false };
     return { accept: 'image/*,video/*,audio/*', placeholderIdle: '输入消息或发送语音...', placeholderBusy: '正在处理...', title: 'Event 对话', imageOnly: false };
+  }
+
+  _getEffectiveProvider() {
+    return this._chatSettings.provider || this._llmOptions?.profiles?.[0]?.key || '';
   }
 
   /** 过滤掉 blob: URL，只保留可持久化的媒体地址（刷新后仍有效） */
@@ -2539,88 +2472,95 @@ class App {
     return div;
   }
   
+  _getMessageTextFromElement(msgElement) {
+    if (!msgElement) return '';
+    let text = '';
+    const walker = document.createTreeWalker(msgElement, NodeFilter.SHOW_TEXT, null, false);
+    let node;
+    while (node = walker.nextNode()) text += node.textContent + ' ';
+    return text.trim();
+  }
+
+  /** QQ 式引用：从历史或 DOM 生成 summary（文本/图片/视频/语音/文件/聊天记录） */
+  _getReplySummaryFromMessage(msgElement, messageId) {
+    const history = this._getCurrentChatHistory();
+    const item = history.find(m => (m.id || m.recordId) === messageId);
+    if (item?.type === 'record') {
+      const t = item.title || item.description || '';
+      if (t) return t.length > 60 ? t.slice(0, 60) + '…' : t;
+      const first = item.messages?.[0];
+      const str = typeof first === 'string' ? first : (first?.message ?? first?.content ?? '');
+      return (str && str.trim()) ? str.trim().slice(0, 60) + (str.length > 60 ? '…' : '') : '聊天记录';
+    }
+    if (item?.segments?.length) {
+      const parts = [];
+      for (const s of item.segments) {
+        if (s.type === 'text' && (s.text || '').trim()) parts.push((s.text || '').trim().slice(0, 40));
+        else if (s.type === 'image') parts.push('[图片]');
+        else if (s.type === 'video') parts.push('[视频]');
+        else if (s.type === 'record' || s.type === 'audio') parts.push('[语音]');
+        else if (s.type === 'file') parts.push('[文件]');
+      }
+      return parts.length ? parts.join(' ') : '(引用)';
+    }
+    if (item?.text) return item.text.length > 80 ? item.text.slice(0, 80) + '…' : item.text;
+    const text = this._getMessageTextFromElement(msgElement).trim();
+    return text || '(引用)';
+  }
+
+  /** 发送协议适配：将当前引用转为 reply segment，发送后清空 */
+  _buildReplySegment() {
+    const r = this._eventReplyTo;
+    if (!r?.id) return null;
+    const text = (r.summary || '').slice(0, 200);
+    this._clearEventReplyState();
+    return { type: 'reply', id: r.id, text };
+  }
+
+  /** 仅创建消息操作按钮 DOM，点击由 #chatMessages 委托处理 */
   _addMessageActions(msgElement, role, text, messageId) {
-    if (!msgElement) return;
-    
-    // 检查是否已有操作按钮，避免重复添加
-    if (msgElement.querySelector('.chat-message-actions')) return;
-    
+    if (!msgElement || msgElement.querySelector('.chat-message-actions')) return;
+    const messageText = (text || this._getMessageTextFromElement(msgElement)).trim();
     const actionsContainer = document.createElement('div');
     actionsContainer.className = 'chat-message-actions';
-    
-    // 提取消息中的所有文本内容（包括markdown渲染后的文本）
-    const extractText = (element) => {
-      let text = '';
-      const walker = document.createTreeWalker(
-        element,
-        NodeFilter.SHOW_TEXT,
-        null,
-        false
-      );
-      let node;
-      while (node = walker.nextNode()) {
-        text += node.textContent + ' ';
-      }
-      return text.trim();
-    };
-    
-    const messageText = text || extractText(msgElement);
-    
-    // 所有消息都有复制按钮
+
     if (messageText) {
       const copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
       copyBtn.className = 'chat-action-btn chat-copy-btn';
       copyBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg><span>复制</span>';
-      copyBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        navigator.clipboard.writeText(messageText).then(() => {
-          this.showToast('已复制到剪贴板', 'success');
-        }).catch(() => {
-          this.showToast('复制失败', 'error');
-        });
-      });
       actionsContainer.appendChild(copyBtn);
     }
-    
-    // 用户消息：撤回按钮
+    if (this._isEventMode()) {
+      const quoteBtn = document.createElement('button');
+      quoteBtn.type = 'button';
+      quoteBtn.className = 'chat-action-btn chat-quote-btn';
+      quoteBtn.title = '引用回复';
+      quoteBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10h10v8H3zM11 10h10v8H11z"/><path d="M7 6V4M17 6V4"/></svg><span>引用</span>';
+      actionsContainer.appendChild(quoteBtn);
+    }
     if (role === 'user') {
       const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
       deleteBtn.className = 'chat-action-btn chat-delete-btn';
       deleteBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg><span>撤回</span>';
-      deleteBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this._deleteMessage(messageId);
-      });
       actionsContainer.appendChild(deleteBtn);
     }
-    
-    // AI消息：删除按钮（Event模式不显示重新生成）
     if (role === 'assistant') {
       const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
       deleteBtn.className = 'chat-action-btn chat-delete-btn';
       deleteBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg><span>删除</span>';
-      deleteBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this._deleteMessage(messageId);
-      });
       actionsContainer.appendChild(deleteBtn);
-      
-      // 只在AI模式显示重新生成按钮
       if (this._isAIMode()) {
         const regenBtn = document.createElement('button');
+        regenBtn.type = 'button';
         regenBtn.className = 'chat-action-btn chat-regen-btn';
         regenBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 003.51 15M3.51 9a9 9 0 0016.98 6"/></svg><span>重新生成</span>';
-        regenBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          this._regenerateMessage(messageId);
-        });
         actionsContainer.appendChild(regenBtn);
       }
     }
-    
-    if (actionsContainer.children.length > 0) {
-      msgElement.appendChild(actionsContainer);
-    }
+    if (actionsContainer.children.length > 0) msgElement.appendChild(actionsContainer);
   }
   
   /** 每个工具一张卡片，标题为工具名，可展开/收起参数与结果 */
@@ -2646,11 +2586,6 @@ class App {
       content.className = 'chat-tool-block-content';
       content.hidden = true;
       content.innerHTML = `<div class="chat-tool-block-item-body"><div class="chat-tool-block-item-section"><span class="chat-tool-block-label">参数</span><pre class="chat-tool-block-code">${this.escapeHtml(argsText)}</pre></div><div class="chat-tool-block-item-section"><span class="chat-tool-block-label">结果</span><pre class="chat-tool-block-code">${this.escapeHtml(resultText)}</pre></div></div>`;
-      header.addEventListener('click', () => {
-        const open = content.hidden;
-        content.hidden = !open;
-        header.querySelector('.chat-tool-block-toggle').textContent = open ? '收起' : '展开';
-      });
       block.appendChild(header);
       block.appendChild(content);
       msgElement.appendChild(block);
@@ -3084,16 +3019,12 @@ class App {
 
     div.innerHTML = content;
     box.appendChild(div);
-    // 记录卡片里也可能包含 Mermaid 图表，这里统一触发一次局部渲染
     this._renderMermaidIn(div);
-    
-    if (!this._isRestoringHistory) {
-    this.scrollToBottom();
-    }
-
+    const recordSummary = (title || description || (messagesArray[0] && (typeof messagesArray[0] === 'string' ? messagesArray[0] : (messagesArray[0].message ?? messagesArray[0].content ?? '')))) || '';
+    this._addMessageActions(div, 'assistant', recordSummary, msgId);
+    if (!this._isRestoringHistory) this.scrollToBottom();
     this._applyMessageEnter(div, persist);
 
-    // 保存到聊天历史（仅在需要持久化时）；id 与 DOM data-message-id 一致以便删除
     if (persist) {
       const recordData = {
         role: 'assistant',
@@ -3304,13 +3235,12 @@ class App {
     if (!previewContainer) return;
     
     if (!this._selectedImages || this._selectedImages.length === 0) {
-      previewContainer.style.display = 'none';
+      previewContainer.classList.add('u-hidden');
       previewContainer.innerHTML = '';
       return;
     }
-    
+    previewContainer.classList.remove('u-hidden');
     const isAIMode = this._isAIMode();
-    previewContainer.style.display = 'flex';
     previewContainer.innerHTML = this._selectedImages.map((item) => {
       const isImage = item.file.type.startsWith('image/');
       if (isImage && item.previewUrl) {
@@ -3338,13 +3268,6 @@ class App {
         `;
       }
     }).join('');
-    
-    previewContainer.querySelectorAll('.chat-image-preview-remove').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const fileId = btn.dataset.fileId;
-        this.removeImagePreview(fileId);
-      });
-    });
   }
   
   /**
@@ -3396,10 +3319,16 @@ class App {
 
   async sendEventMessage(text, images) {
     try {
-      if (text) {
-        this.appendChat('user', text);
+      if (text && images.length === 0) {
+        const replySeg = this._buildReplySegment();
+        const segments = replySeg ? [replySeg, { type: 'text', text }] : [{ type: 'text', text }];
+        if (segments.length > 1) this.appendSegments(segments, true, 'user');
+        else this.appendChat('user', text);
+        this.sendDeviceMessage(text, { source: 'manual', message: segments, skipAppend: true });
+        this.scrollToBottom();
+        return;
       }
-      
+
       if (images.length > 0) {
         const keepPreviewUrls = new Set();
         const pendingFileNodes = [];
@@ -3660,7 +3589,7 @@ class App {
       }
 
       const apiKey = localStorage.getItem('apiKey') || BotUtil.apiKey || '';
-      const provider = this._chatSettings.provider || this._llmOptions?.profiles?.[0]?.key || '';
+      const provider = this._getEffectiveProvider();
       const persona = this._chatSettings.persona || '';
 
       // 构造消息列表：历史 + 本次用户输入（可选人设）
@@ -3769,17 +3698,9 @@ class App {
       });
 
       const apiKey = localStorage.getItem('apiKey') || BotUtil.apiKey || '';
-      const provider = this._chatSettings.provider || this._llmOptions?.profiles?.[0]?.key || '';
-
-      const requestBody = {
-        messages,
-        stream: true,
-        apiKey: apiKey
-      };
-      
-      if (provider) {
-        requestBody.model = provider;
-      }
+      const provider = this._getEffectiveProvider();
+      const requestBody = { messages, stream: true, apiKey };
+      if (provider) requestBody.model = provider;
 
       this._chatStreamState = { running: true, source: 'voice' };
       this.updateVoiceStatus('AI 思考中...');
@@ -4405,12 +4326,11 @@ class App {
     }
 
     const urls = await this._uploadImagesCore(files);
-
     const segments = [];
-    if ((text ?? '').trim()) {
-      segments.push({ type: 'text', text: (text ?? '').trim() });
-    }
-    
+    const replySeg = this._buildReplySegment();
+    if (replySeg) segments.push(replySeg);
+    if ((text ?? '').trim()) segments.push({ type: 'text', text: (text ?? '').trim() });
+
     // 根据文件类型创建对应的segment
     urls.forEach((u, index) => {
       const file = files[index]?.file;
@@ -4483,14 +4403,37 @@ class App {
   updateChatStatus(message) {
     const statusEl = document.getElementById('chatStreamStatus');
     if (!statusEl) return;
-    
     const isRunning = this._chatStreamState.running;
-    statusEl.textContent = isRunning 
-      ? (message || `${this._chatStreamState.source === 'voice' ? '语音' : '文本'}生成中...`)
-      : '空闲';
+    statusEl.textContent = isRunning ? (message || `${this._chatStreamState.source === 'voice' ? '语音' : '文本'}生成中...`) : '空闲';
     statusEl.classList.toggle('active', isRunning);
   }
-  
+
+  /** 从 AI 切到 Event 时聊天壳未重绘，需保证引用条在 DOM 中 */
+  _ensureEventQuoteStripElement() {
+    if (document.getElementById('eventQuoteStrip')) return;
+    const area = document.querySelector('.chat-input-area');
+    if (!area) return;
+    const strip = document.createElement('div');
+    strip.className = 'event-quote-strip u-hidden';
+    strip.id = 'eventQuoteStrip';
+    strip.innerHTML = '<span class="event-quote-label">引用：</span><span class="event-quote-text"></span><button type="button" class="event-quote-cancel" aria-label="取消引用">×</button>';
+    area.insertBefore(strip, area.firstChild);
+  }
+
+  _updateEventQuoteStrip() {
+    const strip = document.getElementById('eventQuoteStrip');
+    if (!strip) return;
+    const textEl = strip.querySelector('.event-quote-text');
+    const summary = this._eventReplyTo?.summary ?? '';
+    strip.classList.toggle('u-hidden', !summary);
+    if (textEl) textEl.textContent = summary.length > 60 ? summary.slice(0, 60) + '…' : summary;
+  }
+
+  _clearEventReplyState() {
+    this._eventReplyTo = null;
+    this._updateEventQuoteStrip();
+  }
+
   /**
    * 设置聊天交互状态（禁用/启用输入）
    * @param {boolean} streaming - 是否正在流式输出
@@ -5744,7 +5687,6 @@ class App {
     this.updateArrayObjectValue(parentPath, index, objectPath, value);
   }
 
-  // 获取配置数组的辅助函数，减少重复代码
   _getConfigArray(path) {
     if (!this._configState) return [];
     const rawArray = this.getNestedValue(this._configState.rawObject ?? {}, path);
@@ -7087,33 +7029,9 @@ class App {
 
     this.ensureDeviceWs();
     const ws = this._deviceWs;
-
-    if (ws?.readyState !== WebSocket.OPEN) {
-      console.warn('[Device WS] 连接未就绪，state=', ws?.readyState, '(1=OPEN 0=CONNECTING 2=CLOSING 3=CLOSED)');
-      if (ws?.readyState === WebSocket.CONNECTING) {
-        // 正在连接中，等待连接完成
-        const checkConnection = setInterval(() => {
-          if (ws?.readyState === WebSocket.OPEN) {
-            clearInterval(checkConnection);
-            this.sendDeviceMessage(text, meta);
-          } else if (ws?.readyState === WebSocket.CLOSED) {
-            clearInterval(checkConnection);
-            this.showToast('设备通道连接失败', 'error');
-          }
-        }, 500);
-        
-        // 5秒后超时
-        setTimeout(() => {
-          clearInterval(checkConnection);
-          if (ws?.readyState !== WebSocket.OPEN) {
-            this.showToast('设备通道连接超时', 'warning');
-          }
-        }, 5000);
-        return;
-      } else {
-        this.showToast('设备通道未连接，正在重连...', 'warning');
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      this.showToast('设备通道未连接', 'warning');
       return;
-      }
     }
 
     const deviceId = ws.device_id || this.getWebUserId();
@@ -7225,7 +7143,7 @@ class App {
         const segments = Array.isArray(data.segments) ? data.segments : [];
         if (segments.length === 0 && data.text) segments.push({ type: 'text', text: String(data.text) });
         this.clearChatStreamState();
-        const replyOptions = (data.mcp_tools && data.mcp_tools.length > 0) ? { mcpTools: data.mcp_tools } : null;
+        const replyOptions = (data.mcp_tools?.length > 0) ? { mcpTools: data.mcp_tools } : {};
         if (data.title || data.description) {
           const messages = segments
             .filter(seg => typeof seg === 'string' || seg?.type === 'text' || seg?.type === 'raw')
@@ -7301,20 +7219,10 @@ class App {
       case 'command':
         if (data.command?.command === 'play_tts_audio') {
           const hexData = data.command.parameters?.audio_data;
-          
-          // 检查数据有效性
-          if (!hexData || typeof hexData !== 'string' || hexData.length === 0) {
-            console.warn(`[TTS] 收到无效的音频数据`);
-            return;
+          if (typeof hexData === 'string' && hexData.length > 0 && hexData.length % 2 === 0) {
+            this._ttsStats.wsMessageCount++;
+            this._playTTSAudio(hexData);
           }
-          
-          if (hexData.length % 2 !== 0) {
-            console.warn(`[TTS] 收到奇数长度的hex数据: 长度=${hexData.length}`);
-            return;
-          }
-          
-          this._ttsStats.wsMessageCount++;
-          this._playTTSAudio(hexData);
         } else if (data.command === 'display' && data.parameters?.text) {
           this.appendChat('assistant', data.parameters.text, { persist: true, withCopyBtn: true });
         } else if (data.command === 'display_emotion' && data.parameters?.emotion) {

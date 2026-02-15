@@ -9,7 +9,7 @@
 - **统一接口**：所有 LLM 提供商通过同一套 API 创建与使用。
 - **易扩展**：新提供商只需 `registerProvider(name, factoryFn)`。
 - **配置**：从 `cfg.getLLMConfig(provider)` 读取，支持 CommonConfig/YAML。
-- **动态选择**：运行时通过 `createClient({ provider })` 指定或使用默认。
+- **动态选择**：运行时通过 `createClient({ provider })` 指定提供商；未传 `provider` 时使用**第一个启用的**提供商（无「默认运营商」配置项）。
 
 ---
 
@@ -83,7 +83,7 @@ return await client.chat(messages, apiConfig);
 **Q: 如何切换？** → `createClient({ provider: 'gemini' })`  
 **Q: 如何添加？** → 实现客户端类 + `registerProvider`  
 **Q: 配置从哪读？** → `cfg.getLLMConfig(provider)`，见上配置来源  
-**Q: 默认提供商？** → 第一个启用的，否则 gptgod  
+**Q: 默认提供商？** → 无配置项；未传 model/provider 时用第一个启用的，否则兜底 gptgod  
 
 ---
 

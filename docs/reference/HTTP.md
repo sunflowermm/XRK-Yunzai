@@ -1,6 +1,6 @@
 # HTTP / WebSocket API 手册 (`lib/http/http.js`)
 
-> 适用于 `plugins/<插件根>/http/*.js`，对象式导出或继承类方式均支持。
+> 适用于 `plugins/<插件根>/http/*.js`。导出方式：**default 为类（函数）**则 `new default()`，**default 为普通对象**则 `new HttpApi(default)`；无 default 或类型不符则加载失败。
 
 ---
 
