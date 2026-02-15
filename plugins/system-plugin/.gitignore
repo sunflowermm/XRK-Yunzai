@@ -31,6 +31,7 @@ http/*
 !http/plugin.js
 !http/stdin.js
 !http/write.js
+!http/device.js
 
 # commonconfig/
 commonconfig/*
