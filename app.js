@@ -17,6 +17,17 @@ import { BASE_DIRS } from './lib/base-dirs.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/** Windows 下统一为 UTF-8，避免引导/菜单中文乱码（双击 start.bat 时 CMD 多为 GBK） */
+if (process.platform === 'win32') {
+  try {
+    spawnSync('chcp', ['65001'], { stdio: 'ignore', windowsHide: true });
+    process.stdout.setEncoding('utf8');
+    process.stderr.setEncoding('utf8');
+  } catch {
+    // 忽略
+  }
+}
+
 // 确保进程带 --expose-gc，供 start.js 及系统优化使用；缺失则自举一次
 if (!process.execArgv.includes('--expose-gc')) {
   const appPath = process.argv[1] || path.join(__dirname, 'app.js');
