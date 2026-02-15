@@ -27,7 +27,7 @@
 * 初步实现了守护进程完全挂载，服务器启动后可以通过http随时重启或关机（icqq和其他启动方式都有）
 * 借用了时雨崽适配器的全部底层，很多的实现也得益于时雨崽，时雨崽就是艺术品
 * commond.js 拆分为 rmj 和 roj，以方便开发：roj 读取对象数组等数值，rmj 用于运行 JavaScript 代码
-* 多数文件重构，以方便后续开发，修复了 e.gerReply() 冲突问题，对日志记录进行优化
+* 多数文件重构，以方便后续开发，修复了 e.getReply() 冲突问题，对日志记录进行优化
 * 进入稳定版，后续将慢慢更新，锅巴也已适配
 * 更新了 Onebot 的更多接口
 
@@ -54,6 +54,8 @@
 * 更新日志与版本号梳理，3.1.x 为当前维护主线
 * 依赖与配置说明见 README，渲染器接入详见 `lib/renderer/README.md`
 * 文档：USER_GUIDE 端口改为「以实际配置为准」、补充设备 WS 下行类型（reply/asr_interim/asr_final/play_tts_audio）、Event 引用回复与 v3 对话接口说明；FACTORY/README 明确无默认运营商配置项
+* 设备/Web 引用协议：后端解析 `message` 中 `type:'reply'` 段，注入 `e.reply_id` 与 `e._replyPayload`，loader 为设备事件提供 `e.getReply()` 返回引用 payload，插件侧 `e.getReply()` 不再为 null；详见 `docs/reference/DEVICE.md`
+* 底层文档修订：HTTP.md 明确加载来源与导出约定；新增 DEVICE.md 设备与引用协议；USER_GUIDE 补充 getReply 说明。文档端口统一为占位符 `<端口>`，明确端口为自定义配置、无项目内硬编码默认值
 
 ---
 

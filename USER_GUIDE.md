@@ -27,18 +27,18 @@
 
 ### 1.1 启动服务
 
-启动 XRK-Yunzai 后，HTTP/HTTPS 端口以**实际配置为准**（见 `config/default_config/server.yaml` 或 `data/server_bots/<port>/server.yaml`），控制台会打印访问地址。
+启动 XRK-Yunzai 后，HTTP/HTTPS **端口为自定义配置**，无项目内硬编码默认端口。配置来源：`config/default_config/server.yaml` 或按运行端口隔离的 `data/server_bots/<port>/server.yaml`；启动时控制台会打印实际访问地址。
 
-- **访问地址**：`http://localhost:<端口>` 或 `http://你的IP:<端口>`（如 1234）
+- **访问地址**：`http://localhost:<端口>` 或 `http://你的IP:<端口>`，端口为**自定义配置**（见下方配置说明），启动时控制台会打印实际地址。
 
 ### 1.2 查看服务状态
 
-启动后，控制台会显示实际端口与地址，例如：
+启动后，控制台会显示**实际端口与地址**（端口来自 `server.yaml` 或启动参数，项目内无硬编码默认端口），例如：
 
 ```
 ✓ HTTP服务器已启动
-  本地访问: http://localhost:1234
-  公网访问: http://192.168.1.100:1234
+  本地访问: http://localhost:<端口>
+  公网访问: http://<本机IP>:<端口>
 ```
 
 ---
@@ -47,11 +47,11 @@
 
 ### 2.1 主页
 
-**http://localhost:端口/** — 欢迎页（端口见启动日志，如 1234）。
+**http://localhost:<端口>/** — 欢迎页。`<端口>` 为自定义配置，见启动日志或 `server.yaml`。
 
 ### 2.2 API 控制中心（xrk 面板）
 
-**http://localhost:端口/xrk/** — 系统状态监控、AI 对话（Event/语音/文本）、配置管理、API 调试。顶部可填 API Key，左侧切换功能模块。**Event 模式**下支持引用回复（点击消息「引用」后发送，与后端 getReply 协议一致）。
+**http://localhost:<端口>/xrk/** — 系统状态监控、AI 对话（Event/语音/文本）、配置管理、API 调试。顶部可填 API Key，左侧切换功能模块。**Event 模式**下支持引用回复（点击消息「引用」后发送，与后端 getReply 协议一致）。`<端口>` 以实际配置为准。
 
 ### 2.3 静态资源
 
@@ -67,7 +67,7 @@
 
 ### 3.2 核心 API 接口
 
-以下接口均需认证时在请求头加 `X-API-Key` 或 URL 加 `?api_key=xxx`。示例：`curl http://localhost:1234/api/system/status`（端口以实际为准）。
+以下接口均需认证时在请求头加 `X-API-Key` 或 URL 加 `?api_key=xxx`。示例：`curl http://localhost:<端口>/api/system/status`（`<端口>` 以实际配置或启动日志为准，下同）。
 
 #### 3.2.1 系统状态
 
@@ -144,6 +144,7 @@ eventSource.onmessage = (event) => {
 ### 4.1 curl 示例
 
 ```bash
+# <端口> 为自定义配置，见 server.yaml 或启动日志
 curl -X POST http://localhost:<端口>/api/message/send \
   -H "Content-Type: application/json" -H "X-API-Key: your-api-key" \
   -d '{"type": "private", "target_id": "987654321", "message": "Hello"}'
@@ -156,8 +157,8 @@ curl -X POST http://localhost:<端口>/api/message/send \
 ```python
 import requests
 
-# 配置（端口以实际为准，见启动日志）
-BASE_URL = "http://localhost:1234"
+# 端口为自定义配置，见 server.yaml 或启动日志，无项目内硬编码默认值
+BASE_URL = "http://localhost:<端口>"
 API_KEY = "your-api-key"
 
 headers = {
@@ -193,12 +194,13 @@ print(response.json())
 
 ### 5.1 消息监听
 
-**连接地址**: `ws://localhost:端口/messages`（端口见启动日志）
+**连接地址**: `ws://localhost:<端口>/messages`（`<端口>` 以实际配置为准）
 
 **JavaScript 示例**:
 
 ```javascript
-const ws = new WebSocket('ws://localhost:1234/messages');  // 端口以实际为准
+// 端口为自定义配置，见 server.yaml 或启动日志
+const ws = new WebSocket('ws://localhost:<端口>/messages');
 
 ws.onopen = () => {
   console.log('WebSocket 连接已建立');
@@ -228,7 +230,7 @@ ws.onclose = () => {
 
 ### 5.2 设备 WebSocket
 
-**连接地址**: `ws://localhost:端口/device`（认证可通过查询参数 `?api_key=xxx` 传递）。协议与 XRK-AGT 对齐。
+**连接地址**: `ws://localhost:<端口>/device`（`<端口>` 以实际配置为准；认证可通过查询参数 `?api_key=xxx` 传递）。协议与 XRK-AGT 对齐。
 
 **设备注册（客户端发送）**:
 
@@ -254,7 +256,7 @@ ws.onclose = () => {
 
 服务端响应：`{"type": "heartbeat_response", "timestamp": 1704067200000}`
 
-**客户端发送**：`{"type": "message", "text": "..."}` 或 `{"type": "message", "message": [{ "type": "text", "text": "..." }, { "type": "reply", "id": "...", "text": "被引用内容" }]}` 可触发事件链。
+**客户端发送**：`{"type": "message", "text": "..."}` 或带消息段数组的 `{"type": "message", "message": [...]}`。若首条为引用，可传 `{ "type": "reply", "id": "被引用消息ID", "text": "摘要" }`，后端会注入 `e.reply_id` 与 `e._replyPayload`，插件内 `e.getReply()` 将返回 `{ message_id, id, text, raw_message, segments }`（不再为 null）。
 
 **服务端下行类型**：
 
@@ -274,7 +276,7 @@ ws.onclose = () => {
 
 | 现象 | 处理 |
 |------|------|
-| 无法打开服务端口页面 | 确认服务已启动，查看控制台打印的端口；Windows 用 `netstat -ano` 查端口，Linux/Mac 用 `lsof -i :端口`；检查防火墙 |
+| 无法打开服务端口页面 | 确认服务已启动，查看控制台打印的端口（端口为自定义配置，无硬编码）；Windows 用 `netstat -ano`、Linux/Mac 用 `lsof -i :<端口>` 排查；检查防火墙 |
 | API 返回 403 | 检查 API Key、请求头 `X-API-Key` 或 `?api_key=`；本地可用 127.0.0.1/localhost 免认证 |
 | /api/message/send 失败 | 确认机器人在线（GET /api/bots）、target_id 与 type 正确、消息格式符合要求；查服务端日志 |
 | WebSocket 连不上 | 确认地址为 `ws://` 或 `wss://`、防火墙放行、服务支持 WS |

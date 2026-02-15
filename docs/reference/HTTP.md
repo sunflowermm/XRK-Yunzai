@@ -1,6 +1,7 @@
-# HTTP / WebSocket API 手册 (`lib/http/http.js`)
+# HTTP / WebSocket API 手册
 
-> 适用于 `plugins/<插件根>/http/*.js`。导出方式：**default 为类（函数）**则 `new default()`，**default 为普通对象**则 `new HttpApi(default)`；无 default 或类型不符则加载失败。
+> **加载**：由 `lib/http/loader.js` 从 `plugins/<插件根>/http/*.js` 加载。**基类**：`lib/http/http.js` 的 `HttpApi`。  
+> **导出约定**：default 为**类或构造函数**时 `new default()` 得到实例；default 为**普通对象**（含 name/routes 等）时 `new HttpApi(default)` 包装；无 default 或类型不符则加载失败。
 
 ---
 
