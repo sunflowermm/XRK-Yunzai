@@ -6,24 +6,7 @@ import path from "node:path";
 import cfg from "../../../lib/config/config.js";
 import BotUtil from "../../../lib/util.js";
 import { cropTopAndBottom } from "../../../lib/renderer/crop.js";
-
-const _path = process.cwd();
-
-function toBuffer(buff) {
-  if (Buffer.isBuffer(buff)) return buff;
-  if (buff?.buffer != null && Buffer.isBuffer(buff.buffer)) return buff.buffer;
-  if (buff?.buffer instanceof ArrayBuffer) return Buffer.from(buff.buffer);
-  if (typeof ArrayBuffer !== "undefined" && (buff instanceof ArrayBuffer || ArrayBuffer.isView(buff))) return Buffer.from(buff);
-  try {
-    return Buffer.from(buff);
-  } catch {
-    return null;
-  }
-}
-
-function toFileUrl(filePath) {
-  return `file:///${path.normalize(filePath).replace(/\\/g, "/").replace(/^\/+/, "")}`;
-}
+import { toBuffer, toFileUrl } from "../../../lib/renderer/screenshot-utils.js";
 
 export default class PlaywrightRenderer extends Renderer {
   constructor(config = {}) {
@@ -246,7 +229,7 @@ export default class PlaywrightRenderer extends Renderer {
         if (!savePath) return false;
       }
     }
-    const filePath = useUrl ? null : (directFilePath || path.join(_path, String(savePath).replace(/^\.\/?/, "")));
+    const filePath = useUrl ? null : (directFilePath || path.join(process.cwd(), String(savePath).replace(/^\.\/?/, "")));
     if (!useUrl && (typeof filePath !== "string" || !fs.existsSync(filePath))) {
       BotUtil.makeLog("error", `HTML file does not exist: ${filePath}`, "PlaywrightRenderer");
       return false;
