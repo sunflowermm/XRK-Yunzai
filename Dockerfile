@@ -1,4 +1,4 @@
-FROM node:18-alpine
+FROM node:24-alpine
 
 # 安装系统依赖 + Chromium + Playwright依赖 + 基本字体
 RUN apk add --no-cache \
@@ -34,7 +34,7 @@ RUN apk add --no-cache \
     # 其他工具
     curl \
     wget \
-  && npm install -g pnpm@latest pm2@latest
+  && npm install -g pnpm@9 pm2@latest
 
 WORKDIR /app
 

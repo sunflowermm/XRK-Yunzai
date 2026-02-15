@@ -1,46 +1,26 @@
 /**
  * @file start.js
  * @description 葵崽服务器主启动脚本
- * @author XRK
- * @copyright 2025 XRK Studio
- * @license MIT
- * 
- * 功能特性：
- * - 交互式菜单管理
- * - PM2进程管理集成
- * - 优雅的信号处理
- * - 完整的错误追踪和日志记录
- * - 多端口服务器支持
- * 
- * 开发道德声明：
- * - 所有错误都被安全捕获并记录
- * - 用户数据路径完全隔离
- * - 进程管理遵循最小权限原则
- * - 日志记录符合隐私保护标准
  */
 
 import { promises as fs } from 'fs';
 import path from 'path';
-import { spawnSync } from 'child_process';
+import readline from 'node:readline';
+import { spawn, spawnSync } from 'child_process';
 import inquirer from 'inquirer';
 import chalk from 'chalk';
 import cfg from './lib/config/config.js';
 
-/** 修复 Windows UTF-8 编码问题 */
 if (process.platform === 'win32') {
   try {
     process.stdout.setEncoding('utf8');
     process.stderr.setEncoding('utf8');
     spawnSync('chcp', ['65001'], { stdio: 'ignore', shell: false });
-  } catch {
-    // 忽略错误
-  }
+  } catch {}
 }
 
-/** 增加事件监听器上限以支持复杂的进程管理 */
 process.setMaxListeners(30);
 
-/** 若以 start.js 为入口，则先通过 app.js 做依赖检查再进入本脚本 */
 const entry = process.argv[1];
 if (entry && path.basename(entry) === 'start.js') {
   const appPath = path.resolve(process.cwd(), 'app.js');
@@ -48,7 +28,6 @@ if (entry && path.basename(entry) === 'start.js') {
   process.exit(result.status !== null ? result.status : 1);
 }
 
-/** @type {SignalHandler|null} 全局信号处理器单例 */
 let globalSignalHandler = null;
 
 /**
@@ -437,7 +416,6 @@ class ServerManager extends BaseManager {
     const portDir = path.join(PATHS.SERVER_BOTS, port.toString());
 
     try {
-      // 交给配置系统按“端口级配置”列表初始化（不会复制全局配置）
       cfg.ensurePortConfigs(port);
 
       await this.logger.success(`端口 ${port} 的配置已就绪 (${portDir})`);
@@ -447,30 +425,16 @@ class ServerManager extends BaseManager {
     }
   }
 
-  /**
-   * 启动服务器模式
-   * @param {number} port - 端口号
-   * @returns {Promise<void>}
-   */
   async startServerMode(port) {
-    // 检查是否跳过配置检查（用于自动重启场景，避免重复日志）
     const skipConfigCheck = process.env.XRK_SKIP_CONFIG_CHECK === '1';
-    
     if (!skipConfigCheck) {
       await this.logger.log(`启动葵崽服务器，端口: ${port}`);
       await this.ensurePortConfig(port);
     }
-    
     global.selectedMode = 'server';
-    
     try {
-      /** 动态导入Bot类 */
       const { default: BotClass } = await import('./lib/bot.js');
-      
-      /** 清理旧实例 */
       delete global.Bot;
-      
-      /** 创建并运行新实例 */
       global.Bot = new BotClass();
       await global.Bot.run({ port });
     } catch (error) {
@@ -479,98 +443,67 @@ class ServerManager extends BaseManager {
     }
   }
 
-  /**
-   * 带自动重启机制的服务器启动
-   * @param {number} port - 端口号
-   * @returns {Promise<void>}
-   */
   async startWithAutoRestart(port) {
-    global.selectedMode = 'server';
-    
-    if (!this.signalHandler.isSetup) {
-      this.signalHandler.setup();
-    }
-    
+    await this.ensurePortConfig(port);
+    if (!this.signalHandler.isSetup) this.signalHandler.setup();
+    this.signalHandler.inRestartLoop = true;
     let restartCount = 0;
     const startTime = Date.now();
-    
-    while (restartCount < CONFIG.MAX_RESTARTS) {
-      if (restartCount > 0) {
-        await this.logger.log(`重启进程 (尝试 ${restartCount + 1}/${CONFIG.MAX_RESTARTS})`);
-      } else {
-        await this.logger.log(`启动进程 (尝试 ${restartCount + 1}/${CONFIG.MAX_RESTARTS})`);
+    try {
+      while (restartCount < CONFIG.MAX_RESTARTS) {
+        if (restartCount > 0) {
+          await this.logger.log(`重启进程 (尝试 ${restartCount + 1}/${CONFIG.MAX_RESTARTS})`);
+        }
+        
+        const exitCode = await this.runServerProcess(port, restartCount > 0);
+        if (exitCode === 0 || exitCode === 255) {
+          await this.logger.log('正常退出');
+          return;
+        }
+        await this.logger.log(`进程退出，状态码: ${exitCode}`);
+        
+        const waitTime = this.calculateRestartDelay(Date.now() - startTime, restartCount);
+        if (waitTime > 0) {
+          await this.logger.warning(`将在 ${waitTime / 1000} 秒后重启`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+        restartCount++;
       }
-      
-      const exitCode = await this.runServerProcess(port, restartCount > 0);
-      
-      // 0 = 正常关闭（回到菜单，不再自动重启）；其余视为异常，按策略自动重启
-      if (exitCode === 0) {
-        await this.logger.log('正常退出，返回菜单');
-        return;
-      }
-      
-      await this.logger.log(`进程退出，状态码: ${exitCode}，准备根据策略自动重启`);
-      
-      const waitTime = this.calculateRestartDelay(Date.now() - startTime, restartCount);
-      if (waitTime > 0) {
-        await this.logger.warning(`将在 ${waitTime / 1000} 秒后重启`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
-      }
-      restartCount++;
+      await this.logger.error(`达到最大重启次数 (${CONFIG.MAX_RESTARTS})，停止自动重启并返回菜单`);
+    } finally {
+      this.signalHandler.inRestartLoop = false;
     }
-    
-    await this.logger.error(`达到最大重启次数 (${CONFIG.MAX_RESTARTS})，停止自动重启并返回菜单`);
   }
 
-  /**
-   * 运行服务器进程
-   * @param {number} port - 端口号
-   * @param {boolean} skipConfigCheck - 是否跳过配置检查
-   * @returns {Promise<number>} 退出代码
-   */
   async runServerProcess(port, skipConfigCheck = false) {
     const nodeArgs = getNodeArgs();
-    const entryScript = path.join(process.cwd(), 'start.js');
+    const entryScript = path.join(process.cwd(), 'app.js');
     const startArgs = [...nodeArgs, entryScript, 'server', port.toString()];
-    
     const cleanEnv = {
       ...process.env,
-      XRK_SELECTED_MODE: 'server',
       XRK_SERVER_PORT: port.toString(),
       XRK_SKIP_CONFIG_CHECK: skipConfigCheck ? '1' : '0'
     };
-    
-    const result = spawnSync(process.argv[0], startArgs, {
-      stdio: 'inherit',
-      windowsHide: true,
-      env: cleanEnv,
-      detached: false
+    return new Promise((resolve) => {
+      const child = spawn(process.argv[0], startArgs, {
+        stdio: 'inherit',
+        windowsHide: true,
+        env: cleanEnv,
+        detached: false
+      });
+      child.on('exit', (code, signal) => {
+        const ret = signal ? 1 : (code !== null && code !== undefined ? code : 0);
+        if (signal) this.logger.warning(`子进程被信号 ${signal} 终止，将自动重启`).catch(() => {});
+        resolve(ret);
+      });
+      child.on('error', (err) => {
+        this.logger.error(`子进程启动失败: ${err.message}`).catch(() => {});
+        resolve(1);
+      });
     });
-    
-    // 如果是被信号终止（例如 Ctrl+C -> SIGINT），不要把它当成“正常退出 0”
-    // 这里将常见信号映射为特定退出码，交给上层决定是否继续自动重启
-    if (result.signal) {
-      await this.logger.warning(`子进程被信号 ${result.signal} 终止`);
-      if (result.signal === 'SIGINT') {
-        // 约定：SIGINT 统一使用 130（Linux 约定），触发自动重启
-        return 130;
-      }
-      // 其他信号也避免返回 0，使用 1 代表异常
-      return 1;
-    }
-    
-    return typeof result.status === 'number' ? result.status : 0;
   }
 
-  /**
-   * 计算重启延迟时间
-   * @private
-   * @param {number} runTime - 运行时间(毫秒)
-   * @param {number} restartCount - 重启次数
-   * @returns {number} 延迟时间(毫秒)
-   */
   calculateRestartDelay(runTime, restartCount) {
-    /** 快速崩溃检测 */
     if (runTime < 10000 && restartCount > 2) {
       return restartCount > 5 
         ? CONFIG.RESTART_DELAYS.LONG 
@@ -579,11 +512,6 @@ class ServerManager extends BaseManager {
     return CONFIG.RESTART_DELAYS.SHORT;
   }
 
-  /**
-   * 停止服务器
-   * @param {number} port - 端口号
-   * @returns {Promise<void>}
-   */
   async stopServer(port) {
     await this.logger.log(`尝试停止端口 ${port} 的服务器`);
     
@@ -653,106 +581,70 @@ class ServerManager extends BaseManager {
   }
 }
 
-/**
- * 信号处理器（单例）
- * 负责优雅地处理系统信号
- * 
- * @class SignalHandler
- */
 class SignalHandler {
-  /**
-   * @param {Logger} logger - 日志实例
-   */
   constructor(logger) {
     this.logger = logger;
     this.lastSignal = null;
     this.lastSignalTime = 0;
     this.isSetup = false;
+    this.inRestartLoop = false;
     this.handlers = {};
   }
 
-  /**
-   * 设置信号监听器
-   * @returns {void}
-   */
   setup() {
     if (this.isSetup) return;
     
     const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
-    
-    /** 创建信号处理函数 */
     const createHandler = (signal) => async () => {
+      if (this.inRestartLoop) return;
       const currentTime = Date.now();
-      
       if (this.shouldExit(signal, currentTime)) {
         await this.logger.log(`检测到双击 ${signal} 信号，准备退出`);
         await this.cleanup();
         process.exit(0);
       }
-      
       this.lastSignal = signal;
       this.lastSignalTime = currentTime;
       await this.logger.warning(`收到 ${signal} 信号，再次发送将退出程序`);
     };
     
-    /** 注册信号处理器 */
     signals.forEach(signal => {
       this.handlers[signal] = createHandler(signal);
       process.on(signal, this.handlers[signal]);
     });
-    
+    if (process.platform === 'win32' && process.stdin.isTTY) {
+      this._rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      this._rl.on('SIGINT', () => process.emit('SIGINT'));
+    }
     this.isSetup = true;
   }
 
-  /**
-   * 清理信号监听器
-   * @returns {Promise<void>}
-   */
   async cleanup() {
     if (!this.isSetup) return;
-    
+    if (this._rl) {
+      this._rl.close();
+      this._rl = null;
+    }
     Object.keys(this.handlers).forEach(signal => {
       process.removeListener(signal, this.handlers[signal]);
       delete this.handlers[signal];
     });
-    
     this.isSetup = false;
     await this.logger.log('信号处理器已清理');
   }
 
-  /**
-   * 判断是否应该退出
-   * @private
-   * @param {string} signal - 信号类型
-   * @param {number} currentTime - 当前时间戳
-   * @returns {boolean} 是否退出
-   */
   shouldExit(signal, currentTime) {
     return signal === this.lastSignal && 
            currentTime - this.lastSignalTime < CONFIG.SIGNAL_TIME_THRESHOLD;
   }
 }
 
-/**
- * 菜单管理器
- * 提供交互式用户界面
- * 
- * @class MenuManager
- */
 class MenuManager {
-  /**
-   * @param {ServerManager} serverManager - 服务器管理器
-   * @param {PM2Manager} pm2Manager - PM2管理器
-   */
   constructor(serverManager, pm2Manager) {
     this.serverManager = serverManager;
     this.pm2Manager = pm2Manager;
   }
 
-  /**
-   * 运行主菜单循环
-   * @returns {Promise<void>}
-   */
   async run() {
     if (global.bootstrapLogger) {
       console.log(chalk.gray('  引导日志: logs/bootstrap.log'));
@@ -770,7 +662,6 @@ class MenuManager {
         const selected = await this.showMainMenu();
         shouldExit = await this.handleMenuAction(selected);
       } catch (error) {
-        // 保持与 XRK 一致的行为：不在这里直接退出，由 SignalHandler 统一处理 Ctrl+C 等信号
         if (error?.isTtyError) {
           console.error(chalk.red('无法在当前环境中渲染菜单'));
           console.error(chalk.yellow('提示: 请确保终端支持交互式输入'));

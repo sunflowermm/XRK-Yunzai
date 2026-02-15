@@ -62,8 +62,7 @@ export default class PlaywrightRenderer extends Renderer {
     this.healthCheckTimer = null;
 
     process.on("exit", () => this.cleanup());
-    process.on("SIGINT", () => this.cleanup());
-    process.on("SIGTERM", () => this.cleanup());
+    // 不在此处注册 SIGINT/SIGTERM，由 lib/config/loader.js 统一处理；进程退出时 exit 事件会触发 cleanup
   }
 
   async getMac() {

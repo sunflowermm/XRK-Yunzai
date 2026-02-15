@@ -6,6 +6,11 @@
   "license": "MIT",
   "main": "app.js",
   "type": "module",
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.0.0",
   "dependencies": {
     "systeminformation": "^5.25.11",
     "glob": "^11.0.3",

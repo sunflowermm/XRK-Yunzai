@@ -3,7 +3,7 @@
 <div align="center">
 
 ![XRK-Yunzai](https://img.shields.io/badge/XRK--Yunzai-v3.1.3-blue?style=flat-square)
-![Node.js](https://img.shields.io/badge/Node.js-18%2B-green?style=flat-square&logo=node.js)
+![Node.js](https://img.shields.io/badge/Node.js-24%2B-green?style=flat-square&logo=node.js)
 ![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)
 
 </div>

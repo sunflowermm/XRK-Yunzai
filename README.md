@@ -9,7 +9,7 @@
 
 ![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)
 ![Version](https://img.shields.io/badge/Version-3.1.3-brightgreen?style=flat-square)
-![Node.js](https://img.shields.io/badge/Node.js-18%2B-green?style=flat-square&logo=node.js)
+![Node.js](https://img.shields.io/badge/Node.js-24%2B-green?style=flat-square&logo=node.js)
 ![Redis](https://img.shields.io/badge/Redis-5%2B-red?style=flat-square&logo=redis)
 
 </div>
@@ -33,7 +33,7 @@
 
 | 层级 | 组件 | 说明 |
 |------|------|------|
-| 运行时 | Node.js 18+、pnpm | ESM + 顶级 await，pnpm workspaces 管理插件依赖。 |
+| 运行时 | Node.js 24+、pnpm 9+ | ESM + 顶级 await，pnpm workspaces 管理插件依赖。 |
 | Web 服务 | Express 4、`ws`、`http-proxy-middleware` | HTTP/WS、一体化代理、Helmet 安全头、独立速率限制器。 |
 | 数据缓存 | Redis 5+（官方 client） | 记忆系统、会话缓存、API 限流、工作流语义检索索引、跨进程通信。 |
 | 语义能力 | `node-fetch` + 第三方 LLM API | Chat Completions、流式输出、BM25 语义检索（轻量级，无外部依赖）。 |
@@ -66,10 +66,10 @@
 
 | 组件 | 版本 |
 |------|------|
-| Node.js | ≥ 18.14.0 |
+| Node.js | ≥ 24.0.0 |
 | Redis | ≥ 5.0.0（支持 RESP3） |
 | 浏览器 | Chrome / Chromium / Edge（渲染或 Web 面板需要） |
-| 包管理器 | 推荐 pnpm（npm/yarn 亦可） |
+| 包管理器 | 推荐 pnpm ≥ 9（npm/yarn 亦可） |
 
 ### 安装
 

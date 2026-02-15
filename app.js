@@ -1,11 +1,6 @@
 /**
  * @file app.js
- * @description 应用程序引导文件（依赖检查与环境校验后启动 start.js）
- * @author XRK
- * @copyright 2025 XRK Studio
- * @license MIT
- *
- * 逻辑对齐 XRK-AGT：Node 版本校验、基础目录创建、根依赖与插件依赖检查安装，再加载 start.js。
+ * @description 应用程序引导（依赖检查后加载 start.js）
  */
 
 import fs from 'fs/promises';
@@ -17,19 +12,15 @@ import { BASE_DIRS } from './lib/base-dirs.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-/** Windows 下统一为 UTF-8，避免引导/菜单中文乱码（双击 start.bat 时 CMD 多为 GBK） */
 if (process.platform === 'win32') {
   try {
     spawnSync('chcp', ['65001'], { stdio: 'ignore', windowsHide: true });
     process.stdout.setEncoding('utf8');
     process.stderr.setEncoding('utf8');
-  } catch {
-    // 忽略
-  }
+  } catch {}
 }
 
-// 确保进程带 --expose-gc，供 start.js 及系统优化使用；缺失则自举一次
-if (!process.execArgv.includes('--expose-gc')) {
+if (process.argv[2] !== 'server' && !process.execArgv.includes('--expose-gc')) {
   const appPath = process.argv[1] || path.join(__dirname, 'app.js');
   const result = spawnSync(process.argv[0], ['--expose-gc', ...process.execArgv, appPath, ...process.argv.slice(2)], {
     stdio: 'inherit',
@@ -38,16 +29,12 @@ if (!process.execArgv.includes('--expose-gc')) {
   process.exit(result.status ?? (result.signal ? 128 + 1 : 1));
 }
 
-/**
- * 引导阶段日志：写文件 + 控制台着色
- * @param {string} logFile - 日志文件路径
- * @param {boolean} useConsole - 是否同时输出到控制台
- */
 function createBootstrapLogger(logFile, useConsole = true) {
   const colors = { INFO: '\x1b[36m', SUCCESS: '\x1b[32m', WARNING: '\x1b[33m', ERROR: '\x1b[31m', RESET: '\x1b[0m' };
   async function write(message, level = 'INFO') {
     const line = `[${new Date().toISOString()}] [${level}] ${message}\n`;
     try {
+      await fs.mkdir(path.dirname(logFile), { recursive: true });
       await fs.appendFile(logFile, line, 'utf8');
     } catch {}
     if (useConsole) {
@@ -62,20 +49,14 @@ function createBootstrapLogger(logFile, useConsole = true) {
   };
 }
 
-/**
- * 环境校验：Node 版本 + 基础目录
- */
 async function validateEnvironment() {
-  const [major, minor] = process.version.slice(1).split('.').map(Number);
-  if (major < 18 || (major === 18 && minor < 14)) {
-    throw new Error(`Node.js 需 v18.14.0+，当前: ${process.version}`);
+  const major = parseInt(process.version.slice(1).split('.')[0], 10);
+  if (major < 24) {
+    throw new Error(`Node.js 需 v24.0.0+，当前: ${process.version}`);
   }
   await Promise.all(BASE_DIRS.map(dir => fs.mkdir(dir, { recursive: true }).catch(() => {})));
 }
 
-/**
- * 依赖管理器（对齐 XRK-AGT：缺失检测 + pnpm install）
- */
 class DependencyManager {
   constructor(logger) {
     this.logger = logger;
@@ -130,9 +111,6 @@ class DependencyManager {
     }
   }
 
-  /**
-   * 扫描 plugins/、renderers/ 下子目录，对有 package.json 的做依赖检查与安装
-   */
   async ensurePluginDependencies(rootDir = process.cwd()) {
     const baseDirs = ['plugins', 'renderers'];
     const dirs = [];
@@ -166,10 +144,6 @@ class DependencyManager {
 
 const BOOTSTRAP_LOG = path.join('./logs', 'bootstrap.log');
 
-/**
- * 引导器：环境校验 → 根依赖 → 插件依赖 → 加载 start.js
- * 引导日志仅写文件，不刷控制台，避免被菜单覆盖、一闪而过；挂 global 供 start.js 复用
- */
 class Bootstrap {
   constructor() {
     this.logger = createBootstrapLogger(BOOTSTRAP_LOG, false);

@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Tech Stack](https://img.shields.io/badge/Tech%20Stack-Overview-blue?style=flat-square)
-![Node.js](https://img.shields.io/badge/Node.js-18%2B-green?style=flat-square&logo=node.js)
+![Node.js](https://img.shields.io/badge/Node.js-24%2B-green?style=flat-square&logo=node.js)
 ![Redis](https://img.shields.io/badge/Redis-7-red?style=flat-square&logo=redis)
 ![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)
 
@@ -17,7 +17,7 @@
 
 | 模块 | 说明 |
 |------|------|
-| Node.js 18+ | 原生 ES Modules、顶级 `await`、`fetch`、`AbortController`。 |
+| Node.js 24+ | 原生 ES Modules、顶级 `await`、`fetch`、`AbortController`。 |
 | pnpm workspaces | 插件与核心库共用一套依赖树，锁版本更快。 |
 | Type Strategy | 目前 TypeScript 与 JSDoc 并存，核心库使用 JSDoc 注释暴露签名。 |
 
