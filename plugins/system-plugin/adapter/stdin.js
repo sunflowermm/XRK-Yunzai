@@ -438,6 +438,7 @@ export class StdinHandler {
 
   setupListeners() {
     this.rl.on('line', async (input) => await this.handleInput(input));
+    this.rl.on('SIGINT', () => process.emit('SIGINT'));
   }
 
   async handleInput(input) {
