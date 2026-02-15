@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import cfg from "../../../lib/config/config.js";
 import BotUtil from "../../../lib/util.js";
+import { cropTopAndBottom } from "../../../lib/renderer/crop.js";
 
 const _path = process.cwd();
 
@@ -303,7 +304,13 @@ export default class PlaywrightRenderer extends Renderer {
       if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
 
       if (fullPage) {
-        const buf = toBuffer(await page.screenshot({ ...screenshotOpts, fullPage: true }));
+        let buf = toBuffer(await page.screenshot({ ...screenshotOpts, fullPage: true }));
+        const cropTop = data.cropTopPercent;
+        const cropBottom = data.cropBottomPercent;
+        if (buf && ((typeof cropTop === "number" && cropTop > 0 && cropTop < 1) || (typeof cropBottom === "number" && cropBottom > 0 && cropBottom < 1))) {
+          const cropped = await cropTopAndBottom(buf, cropTop || 0, cropBottom || 0);
+          if (cropped) buf = cropped;
+        }
         if (buf) ret.push(buf);
         this.renderNum++;
         if (ret[0]) BotUtil.makeLog("info", `[${name}][${this.renderNum}] fullPage ${(ret[0].length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PlaywrightRenderer");

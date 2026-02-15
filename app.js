@@ -12,11 +12,10 @@ import fs from 'fs/promises';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { dirname } from 'path';
 import { BASE_DIRS } from './lib/base-dirs.js';
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __dirname = path.dirname(__filename);
 
 // 确保进程带 --expose-gc，供 start.js 及系统优化使用；缺失则自举一次
 if (!process.execArgv.includes('--expose-gc')) {

@@ -1,8 +1,7 @@
 import fs from 'fs'
 import path from 'path'
-import { spawn } from 'child_process'
+import { spawn, exec, execSync } from 'child_process'
 import { promisify } from 'util'
-import { exec, execSync } from 'child_process'
 import common from '../../../lib/common/common.js'
 
 const execAsync = promisify(exec)
@@ -25,7 +24,7 @@ export class example2 extends plugin {
   async handleXRK() {
     const pluginsPath = path.join(process.cwd(), 'plugins')
     const repos = [
-      { name: 'XRK', url: 'https://gitcode.com/Xrkseek/XRK', requiredFiles: ['apps', 'package.json'] },
+      { name: 'XRK-plugin', url: 'https://gitcode.com/Xrkseek/XRK-plugin', requiredFiles: ['apps', 'package.json'] },
       { name: 'XRK-Core', url: 'https://gitcode.com/Xrkseek/XRK-Core', requiredFiles: ['index.js'] }
     ]
 

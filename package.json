@@ -14,6 +14,7 @@
     "figures": "^4.0.0",
     "https-proxy-agent": "7.0.6",
     "image-size": "^1.2.0",
+    "sharp": "^0.33.5",
     "express": "^4.21.2",
     "playwright": "^1.56.0",
     "chalk": "^5.4.1",
