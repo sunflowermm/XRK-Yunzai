@@ -153,12 +153,15 @@ class DependencyManager {
   }
 }
 
+const BOOTSTRAP_LOG = path.join('./logs', 'bootstrap.log');
+
 /**
  * 引导器：环境校验 → 根依赖 → 插件依赖 → 加载 start.js
+ * 引导日志仅写文件，不刷控制台，避免被菜单覆盖、一闪而过；挂 global 供 start.js 复用
  */
 class Bootstrap {
   constructor() {
-    this.logger = createBootstrapLogger(path.join('./logs', 'bootstrap.log'), true);
+    this.logger = createBootstrapLogger(BOOTSTRAP_LOG, false);
     this.dependencyManager = new DependencyManager(this.logger);
   }
 
@@ -175,26 +178,18 @@ class Bootstrap {
   async run() {
     try {
       await this.initialize();
+      global.bootstrapLogger = this.logger;
+      console.log(`[引导完成] 日志已写入 ${BOOTSTRAP_LOG}\n`);
       await new Promise(r => setImmediate(r));
       await import('./start.js');
     } catch (e) {
       await this.logger.error(`引导失败: ${e.stack || e.message}`);
       await this.logger.log('\n可尝试: pnpm install');
+      console.error(`引导失败: ${e.message}\n详见 ${BOOTSTRAP_LOG}`);
       process.exit(1);
     }
   }
 }
-
-process.on('uncaughtException', err => {
-  createBootstrapLogger(path.join('./logs', 'bootstrap.log'), true)
-    .error(`未捕获的异常: ${err?.stack || err?.message || err}`)
-    .then(() => process.exit(1));
-});
-
-process.on('unhandledRejection', reason => {
-  createBootstrapLogger(path.join('./logs', 'bootstrap.log'), true)
-    .error(`未处理的 Promise 拒绝: ${reason?.stack || reason?.message || reason}`);
-});
 
 const bootstrap = new Bootstrap();
 bootstrap.run();

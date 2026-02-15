@@ -754,12 +754,15 @@ class MenuManager {
    * @returns {Promise<void>}
    */
   async run() {
+    if (global.bootstrapLogger) {
+      console.log(chalk.gray('  引导日志: logs/bootstrap.log'));
+    }
     console.log(chalk.cyan('\n' + '='.repeat(50)));
     console.log(chalk.cyan.bold('  🤖 XRK-Yunzai 多端口服务器管理系统'));
     console.log(chalk.cyan('='.repeat(50)));
     console.log(chalk.gray(`  版本: 3.1.3 | Node.js: ${process.version}`));
     console.log(chalk.cyan('='.repeat(50) + '\n'));
-    
+
     let shouldExit = false;
     
     while (!shouldExit) {
@@ -1066,53 +1069,28 @@ function getNodeArgs() {
   return nodeArgs;
 }
 
-/**
- * 全局异常处理器
- * 确保所有未捕获的错误都被记录
- */
+/** 统一使用 bootstrap 日志（来自 app.js）或 start 自带 Logger，避免 app/start 双份日志 */
+function getLogger() {
+  return global.bootstrapLogger || new Logger();
+}
+
 process.on('uncaughtException', async (error) => {
-  const logger = new Logger();
-  await logger.error(`未捕获的异常: ${error.message}\n${error.stack}`);
-  
-  if (globalSignalHandler) {
-    await globalSignalHandler.cleanup();
-  }
-  
+  await getLogger().error(`未捕获的异常: ${error.message}\n${error.stack}`);
+  if (globalSignalHandler) await globalSignalHandler.cleanup();
   process.exit(1);
 });
 
-/**
- * Promise拒绝处理器
- * 确保所有未处理的Promise拒绝都被记录
- */
 process.on('unhandledRejection', async (reason) => {
-  const logger = new Logger();
-  const errorMessage = reason instanceof Error 
-    ? `${reason.message}\n${reason.stack}` 
-    : String(reason);
-  
-  await logger.error(`未处理的Promise拒绝: ${errorMessage}`);
+  const msg = reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason);
+  await getLogger().error(`未处理的 Promise 拒绝: ${msg}`);
 });
 
-/**
- * 进程退出处理器
- * 确保资源被正确清理
- */
-process.on('exit', async () => {
-  if (globalSignalHandler) {
-    await globalSignalHandler.cleanup();
-  }
+process.on('exit', () => {
+  if (globalSignalHandler) globalSignalHandler.cleanup();
 });
 
-/**
- * 主函数
- * 应用程序入口点
- * 
- * @async
- * @returns {Promise<void>}
- */
 async function main() {
-  const logger = new Logger();
+  const logger = getLogger();
   const pm2Manager = new PM2Manager(logger);
   const serverManager = new ServerManager(logger, pm2Manager);
   const menuManager = new MenuManager(serverManager, pm2Manager);
@@ -1149,14 +1127,8 @@ async function main() {
 /** 导出主函数供外部调用 */
 export default main;
 
-/** 启动应用程序 */
 main().catch(async (error) => {
-  const logger = new Logger();
-  await logger.error(`启动失败: ${error.message}\n${error.stack}`);
-  
-  if (globalSignalHandler) {
-    await globalSignalHandler.cleanup();
-  }
-  
+  await getLogger().error(`启动失败: ${error.message}\n${error.stack}`);
+  if (globalSignalHandler) await globalSignalHandler.cleanup();
   process.exit(1);
 });

@@ -59,16 +59,29 @@ export default class connectEvent extends EventListener {
     await redis.del(`${RESTART_KEY}:${currentUin}`)
   }
 
-  /** 使用 renderer 截图，返回 Buffer 或路径字符串 */
+  /** 使用 renderer 截图，返回 Buffer 或路径字符串；兼容返回 { type, file, name } 的渲染器 */
   async takeScreenshot(htmlPath, name, options = {}) {
     if (!this.renderer) return false
     try {
       const raw = await this.renderer.screenshot(name, { tplFile: htmlPath, saveId: name, ...options })
       if (!raw) return false
       if (Buffer.isBuffer(raw)) return raw
+      if (typeof raw === 'string') return raw
       const buf = toBuffer(raw)
       if (buf) return buf
-      if (typeof raw === 'string') return raw
+      if (raw && typeof raw === 'object') {
+        const file = raw.file ?? raw.data
+        if (file != null) {
+          if (Buffer.isBuffer(file)) return file
+          if (typeof file === 'string') return file
+          const b = toBuffer(file)
+          if (b) return b
+          try {
+            const fromData = Buffer.from(file)
+            if (fromData.length) return fromData
+          } catch { }
+        }
+      }
       return false
     } catch (err) {
       logger.error(`[connect] 截图失败: ${err.message}`)
@@ -85,10 +98,16 @@ export default class connectEvent extends EventListener {
 
   async sendPluginLoadReport(target) {
     const stats = Bot.PluginsLoader?.getPluginStats?.()
-    if (!stats?.plugins?.length) return
+    if (!stats) return
     const htmlPath = await this.generateHTML('plugin_load', this.getPluginLoadHTML(stats))
     const img = await this.takeScreenshot(htmlPath, 'plugin_load_report', { width: 800, deviceScaleFactor: 1.5 })
-    if (img) await target.sendMsg([segment.image(img)])
+    if (!img) {
+      logger.warn('[connect] 插件加载报告: 截图未得到 img（见上方 takeScreenshot 日志），未发送')
+      this.cleanupFile(htmlPath)
+      return
+    }
+    await target.sendMsg([segment.image(img)])
+    logger.mark('[connect] 插件加载报告已 reply 发出')
     this.cleanupFile(htmlPath)
   }
 
@@ -370,7 +389,7 @@ export default class connectEvent extends EventListener {
   }
 
   getPluginLoadHTML(stats) {
-    const plugins = [...stats.plugins].sort((a, b) => b.loadTime - a.loadTime)
+    const plugins = [...(stats?.plugins || [])].sort((a, b) => (b.loadTime || 0) - (a.loadTime || 0))
     const success = plugins.filter(p => p.success)
     const failed = plugins.filter(p => !p.success)
     
