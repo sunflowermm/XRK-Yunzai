@@ -166,12 +166,13 @@ Bot.adapter.push(
       )
     }
 
+    /** 发送戳一戳。群聊传 group_id+user_id，私聊仅传 user_id（好友） */
     sendPoke(data, user_id) {
-      Bot.makeLog("info", `发送戳一戳：${user_id}`, `${data.self_id} => ${data.group_id}`, true)
-      return data.bot.sendApi("send_poke", {
-        group_id: data.group_id,
-        user_id: Number(user_id)
-      })
+      const uid = Number(user_id)
+      const isGroup = data.group_id != null && data.group_id !== ''
+      Bot.makeLog("info", `发送戳一戳：${user_id}`, `${data.self_id} => ${isGroup ? data.group_id : 'private'}`, true)
+      const params = isGroup ? { group_id: data.group_id, user_id: uid } : { user_id: uid }
+      return data.bot.sendApi("send_poke", params)
     }
 
     sendGuildMsg(data, msg) {
@@ -1538,6 +1539,7 @@ Bot.adapter.push(
         getChatHistory: this.getFriendMsgHistory.bind(this, i),
         thumbUp: this.sendLike.bind(this, i),
         delete: this.deleteFriend.bind(this, i),
+        poke: () => this.sendPoke(i, user_id),
       }
     }
 

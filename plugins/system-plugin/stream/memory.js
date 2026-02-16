@@ -33,10 +33,10 @@ export default class MemoryStream extends AIStream {
 
   registerAllFunctions() {
     this.registerMCPTool('save_memory', {
-      description: '保存长期记忆。记忆会跨会话持久化存储，与用户ID和场景关联。',
+      description: '【重要】当用户说出希望被记住的内容时调用此工具，将信息持久化到长期记忆。适用场景：用户说“记住/记一下/别忘了/帮我记着”、提到个人偏好（口味、习惯、生日）、约定（下次要做的事）、重要信息（名字、关系、地址）、或明确要求“以后要记得”。content 填一句简洁完整的记忆句子，不要只填关键词。',
       inputSchema: {
         type: 'object',
-        properties: { content: { type: 'string', description: '记忆内容' } },
+        properties: { content: { type: 'string', description: '一句完整可读的记忆内容，例如：用户不喜欢吃辣；用户生日是3月15日；约定下周六一起看电影' } },
         required: ['content']
       },
       handler: async (args = {}, context = {}) => {
@@ -52,10 +52,10 @@ export default class MemoryStream extends AIStream {
     });
 
     this.registerMCPTool('query_memory', {
-      description: '根据关键词查询相关的长期记忆。',
+      description: '根据关键词从长期记忆中检索相关内容。当需要“回忆/之前记过/你记得吗/查一下记忆”或回答与用户过去偏好、约定、个人信息相关的问题时，先调用此工具用 1～3 个关键词查询，再根据返回的记忆回复。keyword 用与主题相关的词，如：生日、口味、约定、名字。',
       inputSchema: {
         type: 'object',
-        properties: { keyword: { type: 'string', description: '搜索关键词' } },
+        properties: { keyword: { type: 'string', description: '检索关键词，如：生日、不吃辣、约定、昵称' } },
         required: ['keyword']
       },
       handler: async (args = {}, context = {}) => {
@@ -71,7 +71,7 @@ export default class MemoryStream extends AIStream {
     });
 
     this.registerMCPTool('list_memories', {
-      description: '列出当前用户在当前场景下的所有记忆。',
+      description: '列出当前用户在当前场景（群聊/私聊）下已保存的全部长期记忆。当用户问“你记得我什么/我有哪些记忆/看看你记了什么/记忆列表”时调用，无需参数。',
       inputSchema: { type: 'object', properties: {}, required: [] },
       handler: async (_args = {}, context = {}) => {
         const memories = await this.listMemories(context);
@@ -81,10 +81,10 @@ export default class MemoryStream extends AIStream {
     });
 
     this.registerMCPTool('delete_memory', {
-      description: '根据记忆ID删除指定的长期记忆。',
+      description: '按记忆ID删除一条长期记忆。当用户说“删掉这条/忘记这个/取消记忆/那条记错了”并指向某条记忆时，先 list_memories 或 query_memory 拿到对应记忆的 id，再调用此工具传入该 id。',
       inputSchema: {
         type: 'object',
-        properties: { id: { type: 'string', description: '记忆ID' } },
+        properties: { id: { type: 'string', description: '要删除的记忆条目的 id，从 list_memories 或 query_memory 返回结果中获取' } },
         required: ['id']
       },
       handler: async (args = {}, context = {}) => {
@@ -206,7 +206,13 @@ export default class MemoryStream extends AIStream {
   }
 
   buildSystemPrompt() {
-    return '记忆工作流插件，提供长期记忆的保存与查询。';
+    return [
+      '你具备长期记忆能力，可以跨会话记住与用户相关的内容。',
+      '· 用户说“记住/记一下/别忘了”或提到偏好、约定、重要信息时，使用 save_memory 保存。',
+      '· 回答“你记得吗/之前记过什么”或需要回忆时，先用 query_memory 按关键词查，再结合结果回复。',
+      '· 用户问“我有哪些记忆”时用 list_memories；要删除某条记忆时用 delete_memory 并传入该条 id。',
+      '记忆按用户与场景（群/私聊）隔离，只读写当前用户在当前场景下的记忆。'
+    ].join('\n');
   }
 
   async buildChatContext() {

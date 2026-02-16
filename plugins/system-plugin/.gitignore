@@ -11,6 +11,7 @@ plugin/*
 !plugin/invite.js
 !plugin/disablePrivate.js
 !plugin/friend.js
+!plugin/ai.js
 
 # stream/
 stream/*
@@ -48,6 +49,7 @@ commonconfig/*
 !commonconfig/azure_openai_llm.js
 !commonconfig/volcengine_asr.js
 !commonconfig/volcengine_tts.js
+!commonconfig/ai_config.js
 
 # events/
 events/*

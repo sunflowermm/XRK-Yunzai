@@ -22,20 +22,7 @@ function randomRange(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-/**
- * 聊天工作流
- * 
- * 功能分类：
- * - MCP工具（返回JSON）：getGroupInfoEx（获取群信息ex）、getAtAllRemain（获取@全体剩余）、getBanList（获取禁言列表）
- * 
- *   - 互动功能：poke（戳一戳）、emojiReaction（表情回应）、thumbUp（点赞）、sign（签到）
- *   - 群管理：mute/unmute（禁言/解禁）、muteAll/unmuteAll（全员禁言）、setCard（改名片）、setGroupName（改群名）
- *   - 权限管理：setAdmin/unsetAdmin（设置/取消管理员）、setTitle（设置头衔）、kick（踢人）
- *   - 消息管理：setEssence/removeEssence（设置/取消精华）、announce（群公告）、recall（撤回）、setGroupTodo（群代办）
- *   - 消息格式：at（@某人）、reply（回复消息）
- * 
- * 支持表情包、群管理、表情回应等功能
- */
+/** 聊天工作流：群管/互动/表情/消息管理，MCP 工具 at、poke、emojiReaction、mute、setCard、recall 等 */
 export default class ChatStream extends AIStream {
   static emotionImages = {};
   static messageHistory = new Map();
@@ -103,11 +90,6 @@ export default class ChatStream extends AIStream {
     }
   }
 
-  /**
-   * 检查是否为群聊环境
-   * @param {Object} context - 上下文对象
-   * @returns {Object|null} 如果不是群聊返回错误对象，否则返回null
-   */
   _requireGroup(context) {
     if (!context.e?.isGroup) {
       return { success: false, error: '非群聊环境' };
@@ -115,12 +97,6 @@ export default class ChatStream extends AIStream {
     return null;
   }
 
-  /**
-   * 统一错误处理包装器
-   * @param {Function} fn - 要执行的异步函数
-   * @param {number} [delay=300] - 执行后的延迟（毫秒）
-   * @returns {Promise<Object>} 返回结果对象
-   */
   async _wrapHandler(fn, delay = 300) {
     try {
       const result = await fn();
@@ -131,42 +107,19 @@ export default class ChatStream extends AIStream {
     }
   }
 
-  /**
-   * 注册所有功能
-   * 
-   * 所有功能都通过 MCP 工具提供
-   */
   registerAllFunctions() {
-    // 表情包（作为消息段的一部分，不在工具调用/函数解析中处理）
-    // 表情包标记会在parseCQToSegments中解析，保持顺序
-
-    /**
-     * @某人
-     * 
-     * @description 在群聊中@指定用户。此工具仅执行@操作，不附带文本内容，文本内容由LLM正常回复。
-     * 
-     * @param {string} qq - 要@的用户QQ号（必填）
-     * 
-     * @returns {Object} 返回结果对象
-     * @returns {boolean} returns.success - 是否成功
-     * @returns {string} returns.message - 操作结果消息
-     * @returns {Object} returns.data - 数据对象
-     * @returns {string} returns.data.qq - 被@的用户QQ号
-     * @returns {string} returns.error - 失败时的错误信息
-     * 
-     * @example
-     * { qq: "123456789" }
-     * 
-     * @note 此功能仅在群聊环境中可用。如无特殊需要，不要对同一用户重复调用。
-     */
     this.registerMCPTool('at', {
-      description: '@群成员。在群聊中@指定用户，仅执行@操作，不附带文本内容。仅群聊环境可用。',
+      description: '@群成员并可选附带一句话。在群聊中@指定用户，可只发 at 或 at+文本（如 @某人 你好）。仅群聊可用。',
       inputSchema: {
         type: 'object',
         properties: {
           qq: {
             type: 'string',
-            description: '要@的用户QQ号（必填）。例如："123456789"。必须是群内的成员QQ号。'
+            description: '要@的用户QQ号（必填），须为群内成员。'
+          },
+          text: {
+            type: 'string',
+            description: '可选。@ 后跟的简短文字，与 at 同条消息发出。'
           }
         },
         required: ['qq']
@@ -176,70 +129,54 @@ export default class ChatStream extends AIStream {
         if (groupCheck) return groupCheck;
 
         const qq = String(args.qq || '').trim();
-        if (!qq) {
-          return { success: false, error: 'QQ号不能为空' };
-        }
+        if (!qq) return { success: false, error: 'QQ号不能为空' };
 
+        const text = String(args.text ?? '').trim();
         return this._wrapHandler(async () => {
           const seg = global.segment || segment;
-          await context.e.reply([seg.at(qq)]);
-          return {
-            success: true,
-            message: `已在当前群聊中成功 @ 了 QQ=${qq} 的用户，如无特殊需要请不要再次对同一用户调用此工具。`,
-            data: { qq }
-          };
+          if (text) {
+            await context.e.reply([seg.at(qq), ' ', text]);
+          } else {
+            await context.e.reply([seg.at(qq)]);
+          }
+          return { success: true, message: text ? '已发送 @+文本' : '已 @ 该用户', data: { qq, text: text || undefined } };
         }, 200);
       },
       enabled: true
     });
 
-    /**
-     * 戳一戳群成员
-     * 
-     * @description 戳一戳指定的群成员。如果未指定QQ号，默认戳当前触发消息的用户。
-     * 
-     * @param {string} [qq] - 要戳的成员QQ号（可选，默认是当前说话用户）
-     * 
-     * @returns {Object} 返回结果对象
-     * @returns {boolean} returns.success - 是否成功
-     * @returns {string} returns.message - 操作结果消息
-     * @returns {Object} returns.data - 数据对象
-     * @returns {string} returns.data.qq - 被戳的用户QQ号
-     * @returns {string} returns.error - 失败时的错误信息
-     * 
-     * @example
-     * // 戳指定用户
-     * { qq: "123456789" }
-     * 
-     * // 戳当前说话用户
-     * {}
-     * 
-     * @note 此功能仅在群聊环境中可用
-     */
     this.registerMCPTool('poke', {
-      description: '戳一戳群成员。如果未指定QQ号，默认戳当前触发消息的用户。仅群聊环境可用。',
+      description: '戳一戳对方。群聊戳群成员，私聊戳好友。仅当你想戳用户时调用，qq 填当前说话人；同一轮最多调用一次。',
       inputSchema: {
         type: 'object',
         properties: {
           qq: {
             type: 'string',
-            description: '要戳的成员QQ号（可选，默认是当前说话用户）'
+            description: '要戳的QQ号（用户说戳我时填当前说话人），须为 5-10 位数字'
           }
         },
         required: []
       },
       handler: async (args = {}, context = {}) => {
-        const groupCheck = this._requireGroup(context);
-        if (groupCheck) return groupCheck;
-
         const e = context.e;
-        const targetQq = String(args.qq || e.user_id || '').trim();
-        if (!targetQq) {
-          return { success: false, error: '无法确定要戳的成员QQ号' };
-        }
+        if (!e) return { success: false, error: '无会话上下文' };
+        let targetQq = String(args.qq ?? e?.user_id ?? '').trim();
+        if (!targetQq) return { success: false, error: '无法确定要戳的QQ号' };
+        if (!/^\d{5,10}$/.test(targetQq)) return { success: false, error: 'qq 须为 5-10 位数字' };
+        const qqNum = parseInt(targetQq, 10);
+        if (qqNum > 0xFFFFFFFF || qqNum < 1) return { success: false, error: 'qq 超出有效范围' };
+        targetQq = String(qqNum);
 
         return this._wrapHandler(async () => {
-          await e.group.pokeMember(targetQq);
+          if (e.isGroup && e.group?.pokeMember) {
+            await e.group.pokeMember(targetQq);
+          } else if (e.bot?.sendApi) {
+            await e.bot.sendApi('send_poke', { user_id: qqNum });
+          } else if (e.friend?.poke && String(e.user_id) === targetQq) {
+            await e.friend.poke();
+          } else {
+            return { success: false, error: '当前环境不支持戳一戳' };
+          }
           return { success: true, message: '戳一戳成功', data: { qq: targetQq } };
         });
       },
@@ -247,23 +184,40 @@ export default class ChatStream extends AIStream {
     });
 
     this.registerMCPTool('reply', {
-      description: '回复消息',
+      description: '向当前会话发送一条消息（立即发出，用户可见）。用于先快速回复（如「正在查～」「稍等」）再执行其他工具，或引用回复某条消息。建议：用户提问/查东西时先调用本工具发一句短回复再调其他工具。',
       inputSchema: {
         type: 'object',
         properties: {
           messageId: {
             type: 'string',
-            description: '要回复的消息ID'
+            description: '要引用回复的消息ID（可选）。填写则发送为「回复该条消息」的形式。'
           },
           content: {
             type: 'string',
-            description: '回复内容'
+            description: '要发送的文本内容（必填）'
           }
         },
         required: ['content']
       },
-      handler: async (args = {}, _context = {}) => {
-        return { success: true, message: '消息已回复', data: { content: args.content } };
+      handler: async (args = {}, context = {}) => {
+        const e = context.e;
+        if (!e?.reply) {
+          return { success: false, error: '当前环境无法发送消息' };
+        }
+        const content = String(args.content ?? '').trim();
+        if (!content) {
+          return { success: false, error: 'content 不能为空' };
+        }
+        return this._wrapHandler(async () => {
+          const seg = global.segment || segment;
+          if (args.messageId) {
+            const replySeg = seg.reply(args.messageId);
+            await e.reply([replySeg, ' ', content]);
+          } else {
+            await e.reply(content);
+          }
+          return { success: true, message: '消息已发送', data: { content } };
+        });
       },
       enabled: true
     });
@@ -350,6 +304,44 @@ export default class ChatStream extends AIStream {
         } catch (error) {
           return { success: false, error: error.message };
         }
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('emotion', {
+      description: '发表情包到当前会话，可带可选文字（同条消息发出）。表达情绪时调用，类型：开心/惊讶/伤心/大笑/害怕/生气。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          emotionType: {
+            type: 'string',
+            description: '表情类型：开心、惊讶、伤心、大笑、害怕、生气',
+            enum: ['开心', '惊讶', '伤心', '大笑', '害怕', '生气']
+          },
+          text: {
+            type: 'string',
+            description: '可选。与表情包同条消息发出的简短文字（如「哈哈」）。'
+          }
+        },
+        required: ['emotionType']
+      },
+      handler: async (args = {}, context = {}) => {
+        const e = context.e;
+        if (!e?.reply) return { success: false, error: '当前环境无法发送' };
+        const t = String(args.emotionType || '').trim();
+        if (!EMOTION_TYPES.includes(t)) return { success: false, error: '无效表情类型' };
+        const image = this.getRandomEmotionImage(t);
+        if (!image) return { success: false, error: '该表情暂无可用图片' };
+        const text = String(args.text ?? '').trim();
+        return this._wrapHandler(async () => {
+          const seg = global.segment || segment;
+          if (text) {
+            await e.reply([seg.image(image), text]);
+          } else {
+            await e.reply(seg.image(image));
+          }
+          return { success: true, message: text ? '已发表情包+文字' : '已发表情包', data: { emotionType: t, text: text || undefined } };
+        });
       },
       enabled: true
     });
@@ -873,24 +865,6 @@ export default class ChatStream extends AIStream {
       enabled: true
     });
 
-    /**
-     * 获取群的扩展详细信息
-     * 
-     * @description 获取当前群的扩展详细信息，包括更多群信息（如群等级、成员数上限等）。
-     * 
-     * @param {} 无需参数
-     * 
-     * @returns {Object} 返回结果对象
-     * @returns {boolean} returns.success - 是否成功
-     * @returns {Object} returns.data - 群的扩展信息对象
-     * @returns {string} returns.error - 失败时的错误信息
-     * 
-     * @example
-     * // 调用示例
-     * {}
-     * 
-     * @note 此功能仅在群聊环境中可用
-     */
     this.registerMCPTool('getGroupInfoEx', {
       description: '获取群的扩展详细信息（包括更多群信息）。此功能仅在群聊中可用。',
       inputSchema: {
@@ -1016,7 +990,6 @@ export default class ChatStream extends AIStream {
       enabled: true
     });
 
-    // 获取好友列表（QQ号、昵称、备注）
     this.registerMCPTool('getFriendList', {
       description: '获取当前机器人的好友列表（QQ号、昵称、备注）',
       inputSchema: {
@@ -1061,36 +1034,6 @@ export default class ChatStream extends AIStream {
       enabled: true
     });
 
-    // 获取当前群成员列表（包含QQ号、昵称、名片、角色、是否管理员/群主）
-    /**
-     * 获取群成员列表
-     * 
-     * @description 获取当前群的所有成员列表，包含QQ号、昵称、名片、角色、是否管理员/群主等信息。
-     * 
-     * @param {} 无需参数
-     * 
-     * @returns {Object} 返回结果对象
-     * @returns {boolean} returns.success - 是否成功
-     * @returns {Object} returns.data - 数据对象
-     * @returns {Array} returns.data.members - 成员列表，每个元素包含 { qq, nickname, card, role, is_owner, is_admin }
-     * @returns {string} returns.error - 失败时的错误信息
-     * 
-     * @example
-     * // 调用示例
-     * {}
-     * 
-     * // 返回示例
-     * {
-     *   success: true,
-     *   data: {
-     *     members: [
-     *       { qq: "123456789", nickname: "用户A", card: "名片", role: "owner", is_owner: true, is_admin: true }
-     *     ]
-     *   }
-     * }
-     * 
-     * @note 此功能仅在群聊环境中可用
-     */
     this.registerMCPTool('getGroupMembers', {
       description: '获取群成员列表。返回当前群的所有成员列表，包含QQ号、昵称、名片、角色等信息。仅群聊环境可用。',
       inputSchema: {
@@ -1108,7 +1051,6 @@ export default class ChatStream extends AIStream {
         }
 
         try {
-          // 优先使用 getMemberMap（包含完整信息）
           let memberMap = null;
           if (typeof group.getMemberMap === 'function') {
             memberMap = await group.getMemberMap();
@@ -1116,7 +1058,7 @@ export default class ChatStream extends AIStream {
 
           const members = [];
 
-          if (memberMap && typeof memberMap.forEach === 'function') {
+          if (memberMap?.forEach) {
             memberMap.forEach((info, uid) => {
               if (!uid) return;
               const qq = String(uid);
@@ -1133,7 +1075,6 @@ export default class ChatStream extends AIStream {
               });
             });
           } else if (typeof group.getMemberArray === 'function') {
-            // 兼容只提供成员数组的情况
             const arr = await group.getMemberArray();
             for (const info of Array.isArray(arr) ? arr : []) {
               if (!info || info.user_id === undefined) continue;
@@ -1156,7 +1097,7 @@ export default class ChatStream extends AIStream {
 
           BotUtil.makeLog(
             'debug',
-            `[chat.getGroupMembers] 群 ${e.group_id} 成员数量: ${members.length}`,
+            `[chat.getGroupMembers] 群 ${context.e?.group_id} 成员数量: ${members.length}`,
             'ChatStream'
           );
 
@@ -1172,30 +1113,20 @@ export default class ChatStream extends AIStream {
     });
   }
 
-  /**
-   * 获取随机表情
-   */
   getRandomEmotionImage(emotion) {
     const images = ChatStream.emotionImages[emotion];
     if (!images || images.length === 0) return null;
     return images[Math.floor(Math.random() * images.length)];
   }
 
-  /**
-   * 记录消息到历史（多平台兼容）
-   * 历史记录包含：用户信息、消息内容、消息ID、时间戳
-   * 支持onebot、其他平台的事件对象
-   */
   recordMessage(e) {
     if (!e) return;
     
     try {
-      // 多平台兼容：获取群组ID或用户ID
       const groupId = e.group_id || e.groupId || null;
       const userId = e.user_id || e.userId || e.user?.id || null;
       const historyKey = groupId || `private_${userId}`;
 
-      // 多平台兼容：提取消息内容
       let message = '';
       if (e.raw_message) {
         message = e.raw_message;
@@ -1205,7 +1136,6 @@ export default class ChatStream extends AIStream {
         if (typeof e.message === 'string') {
           message = e.message;
         } else if (Array.isArray(e.message)) {
-          // onebot格式：消息段数组
           message = e.message.map(seg => {
             switch (seg.type) {
               case 'text': return seg.text || '';
@@ -1220,25 +1150,17 @@ export default class ChatStream extends AIStream {
         message = typeof e.content === 'string' ? e.content : e.content.text || '';
       }
 
-      // 多平台兼容：获取用户信息
       const nickname = e.sender?.card || e.sender?.nickname || 
                       e.user?.name || e.user?.nickname || 
                       e.from?.name || '未知';
-      
-      // 优先使用真实的消息ID，确保准确
-      // 优先级：message_id > real_id > messageId > id > source?.id
-      // 参考 tasker 层消息结构：message_id 和 real_id 都是有效的消息ID
+
       let messageId = e.message_id || e.real_id || e.messageId || e.id || e.source?.id;
-      
-      // 如果消息ID不存在，尝试从消息段中提取（回复消息的ID）
       if (!messageId && e.message && Array.isArray(e.message)) {
         const replySeg = e.message.find(seg => seg.type === 'reply');
         if (replySeg && replySeg.id) {
           messageId = replySeg.id;
         }
       }
-      
-      // 如果仍然没有消息ID，使用时间戳作为临时ID（不推荐，但作为兜底）
       if (!messageId) {
         messageId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         BotUtil.makeLog('debug', `消息ID缺失，使用临时ID: ${messageId}`, 'ChatStream');
@@ -1252,10 +1174,9 @@ export default class ChatStream extends AIStream {
         message,
         message_id: messageId,
         time: e.time || Date.now(),
-        platform: e.platform || 'onebot' // 标识平台类型
+        platform: e.platform || 'onebot'
       };
 
-      // 群聊内存历史（仅群聊，最多保留50条）
       if (groupId && e.isGroup !== false) {
         if (!ChatStream.messageHistory.has(groupId)) {
           ChatStream.messageHistory.set(groupId, []);
@@ -1267,7 +1188,6 @@ export default class ChatStream extends AIStream {
         }
       }
 
-      // 语义检索存储（启用embedding时）
       if (this.embeddingConfig?.enabled && message && message.length > 5) {
         this.storeMessageWithEmbedding(historyKey, msgData).catch(() => {});
       }
@@ -1317,42 +1237,34 @@ export default class ChatStream extends AIStream {
 
   async buildSystemPrompt(context) {
     const { e, question } = context;
-    const persona =
-      question?.persona ||
-      '你是在这个QQ群里的普通聊天助手，正常聊天、帮忙解决问题即可，不要刻意卖萌或重复固定话术。';
+    const persona = question?.persona || '你是本群聊天助手，正常聊天、解决问题，不刻意卖萌或复读固定话术。';
     const botRole = question?.botRole || await this.getBotRole(e);
     const dateStr = question?.dateStr || new Date().toLocaleString('zh-CN');
-    
-    let embeddingHint = '';
-    if (this.embeddingConfig?.enabled) {
-      embeddingHint = '\n💡 系统会自动检索相关历史对话\n';
-    }
-
+    const embeddingHint = this.embeddingConfig?.enabled ? '\n💡 系统会自动检索相关历史对话\n' : '';
     const botName = e.bot?.nickname || e.bot?.info?.nickname || e.bot?.name || 'Bot';
     const isMaster = e.isMaster === true;
-    
-    return `人设（最高优先级，请始终遵守）：${persona}
-身份：昵称=${botName}，QQ=${e.self_id}，群=${e.group_id}，角色=${botRole}${isMaster ? '（当前说话的是主人，可以稍微亲近一点，但不要过头）' : ''}
-时间：${dateStr}
-${embeddingHint}
-说话风格：
-- 正常聊天或解决问题即可，回答紧贴用户内容。
-- 语言口语化、简洁，不要堆太多表情或套话。
-- 听不懂用户想干嘛时，用一句话简单确认，不要连续追问很多句。
-工具使用（必须遵守权限和安全）：
-- 需要群管/互动（@、戳一戳、改名片、禁言、踢人、设管理员、群代办等）时，直接调用对应工具完成，不要在回复里写指令或协议。
-- 修改群名片（setCard）时：
-  · “把你自己改成 X”→ 修改机器人自己的名片（QQ=${e.self_id}）。
-  · 明确 @ 某人或给出 QQ 时→ 修改那个人的名片。
-  · “把我改成 X”→ 修改当前说话人的名片（QQ=${e.user_id}）。
-- 禁言/解禁/踢人/设管理员等操作：
-  · 只有在用户明确提出、且理由合理（如刷屏、骂人）时才考虑执行。
-  · 如果当前机器人不是管理员或群主，只能礼貌说明权限不足，不要假装执行成功。
-- 设置群代办（setGroupTodo）等对全群有影响的操作，只在用户明确要求且语义清晰时执行，避免频繁创建无意义代办。
-回复要求：
-- 一次回复只做当前这一轮能完成的事。
-- 如果通过工具完成了操作，用很简短的话说明结果即可。
-- 在任何情况下，都不要违背上面的人设和权限约束。`;
+
+    return `【身份】昵称=${botName}，QQ=${e.self_id}，群=${e.group_id}，角色=${botRole}${isMaster ? '（当前是主人）' : ''} | 时间=${dateStr}${embeddingHint}
+
+【人设】${persona}
+
+【原则】所有回复与工具都基于「你想做」：想简短就简短，想多聊就多聊一句，想用表情/戳一戳/@ 就选对应工具，不想用就不必用。回复风格可多变，不必每次同一种句式或套路；像真人一样有时只回几个字、有时带情绪、有时先回再干活。单条消息建议别太长，可拆成多条或先短句再补一句。
+
+【能力与选用】（需要时再用，不必每条消息都调工具）
+- reply：发文字，可带 messageId 引用；想先回一句再干别的就先用 reply，再调其他。
+- at：@某人，可选带 text 同条发（at+一句话）。想 @ 时用。
+- emotion：发表情包（开心/惊讶/伤心/大笑/害怕/生气），可选带 text。想表达情绪时用。
+- emojiReaction：对某条消息点表情回应（群聊）。想点个反应时用。
+- poke：戳一戳（群聊/私聊皆可）。对方说「戳我」且你想戳时用，同一轮最多一次。
+- 查票/查天气/查资料等：想帮查就先 reply 带出在查什么，在执行完之前说的话都打包进reply，无需输出，因为你事先输出的内容用户看不见（如「正在查沈阳到邯郸 2月28 的票～」），再调远程工具，最后 reply 结果。
+- 改名片 setCard、群管等：用户明确要且你想执行时再调；非管理则说明权限不足。
+
+【场景参考】（按你当下是否想做来选，非必须）
+- 对方说戳我：可 reply 一句 + poke（qq=${e.user_id}）+ 想加的话再 reply 或 emotion。
+- 在么/打招呼：随意简短回，不套固定模板。
+- 已合并本群+远程工具（查票、记忆等），需要时调即可。
+
+【格式】纯文本，禁止 Markdown。紧扣用户原话，不套固定模板。`;
   }
 
   async buildChatContext(e, question) {
@@ -1391,6 +1303,23 @@ ${embeddingHint}
             images.push(url);
           }
         }
+      }
+    }
+
+    // 被回复消息中的图片一并交给工厂多模态处理（e.getReply 取被回复条目的图片）
+    if (e?.source && typeof e.getReply === 'function') {
+      try {
+        const reply = await e.getReply();
+        if (reply && Array.isArray(reply.message)) {
+          for (const seg of reply.message) {
+            if (seg.type === 'image') {
+              const url = seg.url || seg.data?.url || seg.data?.file;
+              if (url) replyImages.push(url);
+            }
+          }
+        }
+      } catch (err) {
+        BotUtil.makeLog('debug', `[ChatStream] getReply 获取被回复图片失败: ${err?.message}`, 'ChatStream');
       }
     }
 
@@ -1443,10 +1372,8 @@ ${embeddingHint}
     try {
       let rawHistory;
       try {
-        // 优先使用 (message_seq, count, reverseOrder) 签名，message_seq 为空表示从最近开始
         rawHistory = await getter(undefined, 50, true);
       } catch {
-        // 兼容只接受 (count) 的实现
         rawHistory = await getter(50);
       }
 
@@ -1521,11 +1448,8 @@ ${embeddingHint}
   }
 
   async mergeMessageHistory(messages, e) {
-    if (!e?.isGroup || messages.length < 2) {
-      return messages;
-    }
+    if (!e?.isGroup || messages.length < 2) return messages;
 
-    // 每次构建上下文前，同步一次外部聊天记录到内存缓存
     await this.syncHistoryFromAdapter(e);
 
     const userMessage = messages[messages.length - 1];
@@ -1533,26 +1457,21 @@ ${embeddingHint}
     const history = ChatStream.messageHistory.get(e.group_id) || [];
     
     const mergedMessages = [messages[0]];
-    
-    // 获取当前用户消息的 message_id
     const currentMsgId = e.message_id || e.real_id || e.messageId || e.id || e.source?.id || '未知';
     const currentUserNickname = e.sender?.card || e.sender?.nickname || e.user?.name || '用户';
     const currentContent = typeof userMessage.content === 'string' 
       ? userMessage.content 
       : (userMessage.content?.text ?? '');
-    
-    // 格式化单条消息
+
     const formatMessage = (msg) => {
       const msgId = msg.message_id || msg.real_id || '未知';
       return `${msg.nickname}(${msg.user_id})[ID:${msgId}]: ${msg.message}`;
     };
-    
-    // 过滤历史记录：排除当前消息（避免重复）
+
     const filteredHistory = history.filter(msg => 
       String(msg.message_id) !== String(currentMsgId)
     );
-    
-    // 去重：按消息ID去重，保留最新的
+
     const uniqueHistory = [];
     const seenIds = new Set();
     for (let i = filteredHistory.length - 1; i >= 0; i--) {
@@ -1563,7 +1482,7 @@ ${embeddingHint}
         uniqueHistory.unshift(msg);
       }
     }
-    
+
     if (isGlobalTrigger) {
       const recentMessages = uniqueHistory.slice(-15);
       if (recentMessages.length > 0) {
@@ -1574,18 +1493,13 @@ ${embeddingHint}
       }
     } else {
       const recentMessages = uniqueHistory.slice(-10);
-      
-      // 分别显示历史记录和当前消息
       if (recentMessages.length > 0) {
         mergedMessages.push({
           role: 'user',
           content: `[群聊记录]\n${recentMessages.map(formatMessage).join('\n')}`
         });
       }
-      
-      // 当前消息单独显示
       if (currentMsgId !== '未知' && currentContent) {
-        // 若原始内容包含图片结构，则保留图片，仅在 text 前加上当前消息标记
         if (typeof userMessage.content === 'object' && userMessage.content !== null) {
           const content = userMessage.content;
           const baseText = content.text || content.content || currentContent;
@@ -1604,7 +1518,6 @@ ${embeddingHint}
           });
         }
       } else if (currentContent) {
-        // 如果无法获取消息ID，使用原始消息格式（保留多模态结构）
         const content = userMessage.content;
         if (typeof content === 'object' && content.text) {
           mergedMessages.push({
@@ -1620,25 +1533,22 @@ ${embeddingHint}
         }
       }
     }
-    
     return mergedMessages;
   }
 
   async execute(e, messages, config) {
     const StreamLoader = Bot.StreamLoader;
     try {
-      // 构建消息上下文
+      if (e) this.recordMessage(e);
       if (!Array.isArray(messages)) {
         messages = await this.buildChatContext(e, messages);
       }
       messages = await this.mergeMessageHistory(messages, e);
       const query = Array.isArray(messages) ? this.extractQueryFromMessages(messages) : messages;
       messages = await this.buildEnhancedContext(e, query, messages);
-      
-      const StreamLoader = Bot.StreamLoader;
+
       if (StreamLoader) StreamLoader.currentEvent = e || null;
-      
-      // 打印给 LLM 的消息概要，便于调试 Prompt 结构（只截取前几百字符，避免刷屏）
+
       try {
         const preview = (messages || []).map((m, idx) => {
           const role = m.role || `msg${idx}`;
@@ -1662,15 +1572,9 @@ ${embeddingHint}
         // 调试日志失败直接忽略
       }
       
-      // 调用AI获取响应
       const response = await this.callAI(messages, config);
-      
-      if (!response) {
-        return null;
-      }
-
-      // 工具调用由 LLM 工厂（tool calling + MCP）内部完成，这里只负责发送最终文本
       const text = (response ?? '').toString().trim();
+      if (!response) return null;
       if (text) {
         await this.sendMessages(e, text);
         this.recordAIResponse(e, text, []);
@@ -1687,122 +1591,59 @@ ${embeddingHint}
     }
   }
 
-  /**
-   * 解析CQ码和表情包标记为segment数组，保持顺序
-   * @param {string} text - 包含CQ码和表情包标记的文本
-   * @param {Object} e - 事件对象
-   * @returns {Object} { replyId: string|null, segments: Array } - 回复ID和消息段数组
-   */
   parseCQToSegments(text, e) {
     const segments = [];
     let replyId = null;
     
-    // 先提取回复消息段（只取第一个）
     const replyMatch = text.match(/\[CQ:reply,id=(\d+)\]/);
     if (replyMatch) {
       replyId = replyMatch[1];
       // 从文本中移除回复CQ码
       text = text.replace(/\[CQ:reply,id=\d+\]/g, '').trim();
     }
-    
-    // 使用正则匹配所有标记（CQ码和表情包标记），按顺序处理
-    // 匹配模式：CQ码 [CQ:type,params] 或表情包 [表情类型]
-    const combinedPattern = /(\[CQ:[^\]]+\]|\[(开心|惊讶|伤心|大笑|害怕|生气)\])/g;
-    const markers = [];
+
+    const cqPattern = /\[CQ:(\w+)(?:,([^\]]+))?\]/g;
     let match;
-    
-    // 收集所有标记及其位置
-    while ((match = combinedPattern.exec(text)) !== null) {
-      markers.push({
-        content: match[0],
-        index: match.index,
-        emotion: match[2] // 如果是表情包，这里会有值
-      });
-    }
-    
-    // 按照标记顺序解析
     let currentIndex = 0;
-    for (const marker of markers) {
-      // 添加标记前的文本
-      if (marker.index > currentIndex) {
-        const textBefore = text.slice(currentIndex, marker.index);
-        if (textBefore.trim()) {
-          segments.push(textBefore);
-        }
+    const seg = global.segment || segment;
+    while ((match = cqPattern.exec(text)) !== null) {
+      const [full, type, params] = match;
+      if (match.index > currentIndex) {
+        const textBefore = text.slice(currentIndex, match.index);
+        if (textBefore.trim()) segments.push(textBefore);
       }
-      
-      // 处理标记
-      if (marker.emotion) {
-        // 表情包标记
-        const image = this.getRandomEmotionImage(marker.emotion);
-        if (image) {
-          const seg = global.segment || segment;
-          segments.push(seg.image(image));
-        }
-      } else if (marker.content.startsWith('[CQ:')) {
-        // CQ码
-        const cqMatch = marker.content.match(/\[CQ:(\w+)(?:,([^\]]+))?\]/);
-        if (cqMatch) {
-          const [, type, params] = cqMatch;
-          const paramObj = {};
-          const seg = global.segment || segment;
-          
-          if (params) {
-            params.split(',').forEach(p => {
-              const [key, value] = p.split('=');
-              if (key && value) {
-                paramObj[key.trim()] = value.trim();
-              }
-            });
-          }
-          
-          switch (type) {
-            case 'at':
-              if (paramObj.qq) {
-                // 验证QQ号是否在群聊记录中（如果是群聊）
-                if (e.isGroup) {
-                  const history = ChatStream.messageHistory.get(e.group_id) || [];
-                  const userExists = history.some(msg => 
-                    String(msg.user_id) === String(paramObj.qq)
-                  );
-                  
-                  if (userExists || e.isMaster) {
-                    segments.push(seg.at(paramObj.qq));
-                  }
-                } else {
-                  // 私聊直接添加
-                  segments.push(seg.at(paramObj.qq));
-                }
-              }
-              break;
-            case 'image':
-              if (paramObj.file) {
-                segments.push(seg.image(paramObj.file));
-              }
-              break;
-            // poke等其他不支持整合的CQ码：当前忽略或由下游按需扩展
-          }
-        }
+      currentIndex = match.index + full.length;
+      const paramObj = {};
+      if (params) {
+        params.split(',').forEach(p => {
+          const [key, value] = p.split('=');
+          if (key && value) paramObj[key.trim()] = value.trim();
+        });
       }
-      
-      currentIndex = marker.index + marker.content.length;
+      if (type === 'at' && paramObj.qq) {
+        if (e.isGroup) {
+          const history = ChatStream.messageHistory.get(e.group_id) || [];
+          const userExists = history.some(msg => String(msg.user_id) === String(paramObj.qq));
+          if (userExists || e.isMaster) segments.push(seg.at(paramObj.qq));
+        } else {
+          segments.push(seg.at(paramObj.qq));
+        }
+      } else if (type === 'image' && paramObj.file) {
+        segments.push(seg.image(paramObj.file));
+      }
     }
-    
-    // 添加最后剩余的文本（如果没有标记，currentIndex为0，会添加整个文本）
+
     if (currentIndex < text.length) {
       const textAfter = text.slice(currentIndex);
       if (textAfter.trim()) {
         segments.push(textAfter);
       }
     }
-    
-    // 合并相邻的文本段，避免重复
+
     const mergedSegments = [];
     for (let i = 0; i < segments.length; i++) {
       const current = segments[i];
       const last = mergedSegments[mergedSegments.length - 1];
-      
-      // 如果当前段和上一段都是文本字符串，合并它们
       if (typeof current === 'string' && typeof last === 'string') {
         mergedSegments[mergedSegments.length - 1] = last + current;
       } else {
@@ -1853,16 +1694,14 @@ ${embeddingHint}
 
   cleanupCache() {
     for (const [groupId, messages] of ChatStream.messageHistory.entries()) {
-      if (!messages || messages.length === 0) {
+      if (!messages?.length) {
         ChatStream.messageHistory.delete(groupId);
         continue;
       }
-      // 始终只保留最近50条消息
       if (messages.length > 50) {
         ChatStream.messageHistory.set(groupId, messages.slice(-50));
       }
     }
-    
   }
 
   async cleanup() {
