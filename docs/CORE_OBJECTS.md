@@ -487,7 +487,7 @@ flowchart TD
 
 ### 9.3 代码示例
 
-- 协议适配器示例：`plugins/adapter/OneBotv11.js`
+- 协议适配器示例：`plugins/system-plugin/adapter/OneBotv11.js`
 - 事件增强实现：`lib/plugins/loader.js`, `lib/bot.js`
 - 插件示例：`plugins/` 目录下的各种插件
 - 工厂模式示例：`lib/factory/llm/LLMFactory.js`

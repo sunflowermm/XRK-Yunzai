@@ -27,14 +27,44 @@ export class XRKAIAssistant extends plugin {
     this.config = await this.loadConfig();
 
     const secondaries = this.config.mergeStreams;
-    if (Array.isArray(secondaries) && secondaries.length > 0 && Bot.StreamLoader) {
-      Bot.StreamLoader.mergeStreams({
-        name: CHAT_MERGED_NAME,
-        main: 'chat',
-        secondary: secondaries,
-        prefixSecondary: true
-      });
-      logger.info(`├─ 🔀 合并工作流: chat + [${secondaries.join(', ')}]`);
+    if (Array.isArray(secondaries) && secondaries.length > 0) {
+      const doMerge = () => {
+        try {
+          const loader = Bot.StreamLoader;
+          if (!loader || typeof loader.mergeStreams !== 'function') {
+            logger.warn('├─ ⚠️ StreamLoader 未就绪，1秒后重试合并工作流', 'XRK-AI');
+            setTimeout(doMerge, 1000);
+            return;
+          }
+
+          // 如果已经合并过就直接返回，避免重复日志
+          const existing = loader.getStream
+            ? loader.getStream(CHAT_MERGED_NAME)
+            : null;
+          if (existing) {
+            logger.info(`├─ 🔀 合并工作流已存在: ${CHAT_MERGED_NAME}`);
+            return;
+          }
+
+          const merged = loader.mergeStreams({
+            name: CHAT_MERGED_NAME,
+            main: 'chat',
+            secondary: secondaries,
+            prefixSecondary: true
+          });
+
+          if (merged) {
+            logger.info(`├─ 🔀 合并工作流: chat + [${secondaries.join(', ')}] -> ${CHAT_MERGED_NAME}`);
+          } else {
+            logger.warn('├─ ⚠️ 合并工作流失败，请检查配置与工作流名称', 'XRK-AI');
+          }
+        } catch (err) {
+          logger.error(`├─ ⚠️ 合并工作流异常: ${err.message || err}`, 'XRK-AI');
+        }
+      };
+
+      // 延迟执行，确保 StreamLoader 和各工作流已经完成初始化与注册
+      setTimeout(doMerge, 0);
     }
 
     logger.info(`├─ 📝 人设: 已加载`);
@@ -89,19 +119,69 @@ export class XRKAIAssistant extends plugin {
 
   async handleMessage(e) {
     try {
-      if (!(await this.shouldTriggerAI(e))) return false;
+      // 检查是否是清除对话指令
+      const clearCommands = ['重置对话', '清除对话', '清空对话', '重置聊天', '清除聊天', '清空聊天', '重置记录', '清除记录', '清空记录'];
+      const msgText = (e.msg || '').trim();
+      const isClearCommand = clearCommands.some(cmd => msgText.includes(cmd));
+      
+      if (isClearCommand && e.isMaster) {
+        // 主人可以清除对话
+        const ChatStream = (await import('../stream/chat.js')).default;
+        const groupId = e.group_id || e.user_id;
+        BotUtil.makeLog('info', `[XRK-AI] 检测到清除对话指令 group=${groupId} user=${e.user_id}`, 'XRK-AI');
+        
+        try {
+          const result = await ChatStream.clearConversation(groupId, { clearEmbedding: true });
+          
+          // 清除所有相关实例的回复内容记录
+          const streamName = this.config?.mergeStreams?.length ? CHAT_MERGED_NAME : 'chat';
+          const stream = this.getStream(streamName) ?? this.getStream('chat');
+          if (stream && typeof stream.clearReplyContents === 'function') {
+            stream.clearReplyContents(groupId);
+          }
+          
+          // 如果使用了合并工作流，也清除主工作流的记录
+          if (streamName === CHAT_MERGED_NAME) {
+            const mainStream = this.getStream('chat');
+            if (mainStream && typeof mainStream.clearReplyContents === 'function') {
+              mainStream.clearReplyContents(groupId);
+            }
+          }
+          
+          if (result.success) {
+            const clearedItems = [];
+            if (result.cleared.history) clearedItems.push('聊天记录');
+            if (result.cleared.embedding) clearedItems.push('语义记忆');
+            if (result.cleared.replyContents) clearedItems.push('回复记录');
+            
+            await e.reply(`✅ 对话已重置！已清除：${clearedItems.join('、') || '无'}`);
+            BotUtil.makeLog('info', `[XRK-AI] 清除对话成功 group=${groupId} cleared=${JSON.stringify(result.cleared)}`, 'XRK-AI');
+          } else {
+            await e.reply('❌ 清除对话失败，请稍后重试');
+          }
+        } catch (err) {
+          BotUtil.makeLog('error', `[XRK-AI] 清除对话异常: ${err.message}`, 'XRK-AI');
+          await e.reply('❌ 清除对话时发生错误');
+        }
+        return true;
+      }
+
+      const trigger = await this.shouldTriggerAI(e);
+      BotUtil.makeLog('debug', `[XRK-AI] handleMessage 触发检查 group=${e.group_id} user=${e.user_id} atBot=${e.atBot} trigger=${trigger}`, 'XRK-AI');
+      if (!trigger) return false;
 
       if (!this.config) this.config = await this.loadConfig();
-      const stream = this.getStream(this.config.mergeStreams?.length ? CHAT_MERGED_NAME : 'chat')
-        ?? this.getStream('chat');
+      const streamName = this.config.mergeStreams?.length ? CHAT_MERGED_NAME : 'chat';
+      const stream = this.getStream(streamName) ?? this.getStream('chat');
       if (!stream) {
-        logger.error('chat 工作流未加载');
+        logger.error('[XRK-AI] chat 工作流未加载');
         return false;
       }
+      BotUtil.makeLog('debug', `[XRK-AI] 使用工作流 stream=${streamName} name=${stream?.name}`, 'XRK-AI');
 
       const isRandom = !e.atBot && !(this.config.prefix && e.msg?.startsWith(this.config.prefix));
       const { content } = await this.processMessageContent(e);
-
+      BotUtil.makeLog('debug', `[XRK-AI] 消息内容 isRandom=${isRandom} contentLen=${content?.length ?? 0} content=${content ?? ''}`, 'XRK-AI');
       if (!isRandom && !content) {
         const img = stream.getRandomEmotionImage?.('惊讶');
         if (img) await e.reply(segment.image(img));
@@ -110,17 +190,19 @@ export class XRKAIAssistant extends plugin {
         return true;
       }
 
-      const result = await stream.process(e, {
-        content: content ?? '',
-        text: content ?? '',
+      const text = content ?? '';
+      BotUtil.makeLog('debug', `[XRK-AI] 调用 stream.process personaLen=${(this.config.persona ?? '').length}`, 'XRK-AI');
+      await stream.process(e, {
+        content: text,
+        text,
         persona: this.config.persona ?? '',
         isGlobalTrigger: isRandom
       }, {});
-
-      if (!result) return isRandom ? false : true;
+      BotUtil.makeLog('debug', `[XRK-AI] stream.process 完成`, 'XRK-AI');
       return true;
     } catch (err) {
-      logger.error(`消息处理错误: ${err.message}`);
+      logger.error(`[XRK-AI] 消息处理错误: ${err.message}`);
+      BotUtil.makeLog('error', `[XRK-AI] handleMessage 异常: ${err.message}`, 'XRK-AI');
       return false;
     }
   }
@@ -132,37 +214,58 @@ export class XRKAIAssistant extends plugin {
       if (e.isGroup) {
         const groupId = String(e.group_id);
         return this.config.groups?.some(g => String(g) === groupId) || false;
-      } else {
-        const userId = String(e.user_id);
-        return this.config.users?.some(u => String(u) === userId) || false;
       }
+      const userId = String(e.user_id);
+      return this.config.users?.some(u => String(u) === userId) || false;
     };
 
-    if (e.atBot) return isInWhitelist();
-    if (this.config.prefix && e.msg?.startsWith(this.config.prefix)) return isInWhitelist();
+    if (e.atBot) {
+      const ok = isInWhitelist();
+      BotUtil.makeLog('debug', `[XRK-AI] shouldTrigger atBot 白名单=${ok}`, 'XRK-AI');
+      return ok;
+    }
+    if (this.config.prefix && e.msg?.startsWith(this.config.prefix)) {
+      const ok = isInWhitelist();
+      BotUtil.makeLog('debug', `[XRK-AI] shouldTrigger prefix 白名单=${ok}`, 'XRK-AI');
+      return ok;
+    }
 
-    if (!e.isGroup) return false;
-    if (!isInWhitelist()) return false;
+    if (!e.isGroup) {
+      BotUtil.makeLog('debug', '[XRK-AI] shouldTrigger 非群聊 不触发', 'XRK-AI');
+      return false;
+    }
+    if (!isInWhitelist()) {
+      BotUtil.makeLog('debug', `[XRK-AI] shouldTrigger 不在白名单 group=${e.group_id}`, 'XRK-AI');
+      return false;
+    }
 
     const groupId = String(e.group_id);
     const now = Date.now();
     const cooldown = (this.config.cooldown || 300) * 1000;
-    const chance = this.config.chance || 0.1;
-
+    const chance = this.config.chance ?? 0.1;
     const lastTrigger = cooldownState.get(groupId) || 0;
-    if (now - lastTrigger < cooldown) return false;
-    if (Math.random() < chance) {
+    const inCooldown = now - lastTrigger < cooldown;
+    if (inCooldown) {
+      BotUtil.makeLog('debug', `[XRK-AI] shouldTrigger 冷却中 group=${groupId} remain=${Math.round((cooldown - (now - lastTrigger)) / 1000)}s`, 'XRK-AI');
+      return false;
+    }
+    const roll = Math.random();
+    if (roll < chance) {
       cooldownState.set(groupId, now);
+      BotUtil.makeLog('debug', `[XRK-AI] shouldTrigger 随机命中 group=${groupId} roll=${roll.toFixed(3)} chance=${chance}`, 'XRK-AI');
       return true;
     }
-
+    BotUtil.makeLog('debug', `[XRK-AI] shouldTrigger 随机未中 group=${groupId} roll=${roll.toFixed(3)} chance=${chance}`, 'XRK-AI');
     return false;
   }
 
   async processMessageContent(e) {
     const fallback = e.msg || '';
     const message = e.message;
-    if (!Array.isArray(message)) return { content: fallback, text: fallback };
+    if (!Array.isArray(message)) {
+      BotUtil.makeLog('debug', `[XRK-AI] processMessageContent 非数组消息 使用 fallback len=${fallback.length}`, 'XRK-AI');
+      return { content: fallback, text: fallback };
+    }
 
     try {
       let content = '';
@@ -171,11 +274,11 @@ export class XRKAIAssistant extends plugin {
           const reply = await e.getReply();
           if (reply) {
             const name = reply.sender?.card || reply.sender?.nickname || '未知';
-            const raw = reply.raw_message?.substring(0, 30) || '';
-            content += `[回复${name}的"${raw}..."] `;
+            const raw = reply.raw_message || '';
+            content += `[回复${name}的"${raw}"] `;
           }
         } catch (err) {
-          logger.error(`处理回复消息失败: ${err.message}`);
+          BotUtil.makeLog('debug', `[XRK-AI] processMessageContent getReply 失败: ${err.message}`, 'XRK-AI');
         }
       }
       for (const seg of message) {
@@ -191,9 +294,10 @@ export class XRKAIAssistant extends plugin {
       }
       if (this.config.prefix) content = content.replace(new RegExp(`^${this.config.prefix}`), '');
       const text = content.trim();
+      BotUtil.makeLog('debug', `[XRK-AI] processMessageContent 完成 segs=${message.length} textLen=${text.length}`, 'XRK-AI');
       return { content: text, text };
     } catch (err) {
-      logger.error(`处理消息内容失败: ${err.message}`);
+      logger.error(`[XRK-AI] 处理消息内容失败: ${err.message}`);
       return { content: fallback, text: fallback };
     }
   }

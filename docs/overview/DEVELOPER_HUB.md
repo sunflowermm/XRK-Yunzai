@@ -166,7 +166,7 @@ export default {
 
 | 🎯 扩展类型 | 📁 路径 | 📖 参考示例 |
 |:---:|---|:---:|
-| **🔌 Adapter** | `plugins/adapter/*` | `OneBotv11.js` - 将第三方协议注入 `Bot` |
+| **🔌 Adapter** | `plugins/system-plugin/adapter/` | `OneBotv11.js`、`stdin.js` - 将协议注入 `Bot` |
 | **🎨 渲染器** | `renderers/puppeteer`<br/>`renderers/playwright` | 可新增自定义渲染流程 |
 
 ---

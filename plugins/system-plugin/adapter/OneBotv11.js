@@ -1378,7 +1378,7 @@ Bot.adapter.push(
         };
         if (character_id) params.character_id = String(character_id);
         if (character_name) params.character_name = String(character_name);
-        Bot.makeLog("info", `发送群 AI 语音：${text.substring(0, 20)}...`, `${data.self_id} => ${data.group_id}`);
+        Bot.makeLog("info", `发送群 AI 语音：${text}`, `${data.self_id} => ${data.group_id}`);
         return await data.bot.sendApi("send_group_ai_record", params).catch(error => {
           Bot.makeLog("warn", `发送群 AI 语音失败: ${error.message}`, data.self_id);
           return { success: false, error: error.message };
@@ -1405,7 +1405,7 @@ Bot.adapter.push(
         };
         if (character_id) params.character_id = String(character_id);
         if (character_name) params.character_name = String(character_name);
-        Bot.makeLog("info", `发送私聊 AI 语音：${text.substring(0, 20)}...`, `${data.self_id} => ${data.user_id}`);
+        Bot.makeLog("info", `发送私聊 AI 语音：${text}`, `${data.self_id} => ${data.user_id}`);
         return await data.bot.sendApi("send_private_ai_record", params).catch(error => {
           Bot.makeLog("warn", `发送私聊 AI 语音失败: ${error.message}`, data.self_id);
           return { success: false, error: error.message };
@@ -1477,7 +1477,7 @@ Bot.adapter.push(
         if (show_edit_card !== undefined) params.show_edit_card = Boolean(show_edit_card);
         if (show_popup !== undefined) params.show_popup = Boolean(show_popup);
         if (require_confirmation !== undefined) params.require_confirmation = Boolean(require_confirmation);
-        Bot.makeLog("info", `设置群公告：${content.substring(0, 20)}...`, `${data.self_id} => ${targetGroupId}`);
+        Bot.makeLog("info", `设置群公告：${content}`, `${data.self_id} => ${targetGroupId}`);
         return await data.bot.sendApi("set_group_announcement", params).catch(error => {
           Bot.makeLog("warn", `设置群公告失败: ${error.message}`, data.self_id);
           return { success: false, error: error.message };

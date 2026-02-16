@@ -1772,8 +1772,9 @@ select.form-input {
   color: var(--text-primary);
 }
 
-.chat-content.chat-markdown {
-  /* appendChat 里直接渲染 Markdown，不需要额外的卡片内边距 */
+.chat-content.chat-markdown,
+.chat-text.chat-markdown {
+  /* appendChat 和 appendSegments 里直接渲染 Markdown，不需要额外的卡片内边距 */
   margin-top: 0;
   padding: 0;
   background: transparent;

@@ -52,7 +52,7 @@ enableTools: true
 toolChoice: "auto"
 # parallelToolCalls: 是否允许并行工具调用
 parallelToolCalls: true
-# maxToolRounds: 单轮对话内最大工具调用轮数
+# maxToolRounds: 单轮对话内「模型→执行工具→再问模型」的最多轮数（每轮可并行多个工具），非工具调用总次数
 maxToolRounds: 5
 # ----------------------------------------
 # 代理（可选）

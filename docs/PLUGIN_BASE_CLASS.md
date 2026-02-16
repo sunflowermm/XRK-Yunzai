@@ -31,7 +31,7 @@ constructor(options = {})
 | `name` | string | `"your-plugin"` | 插件名称（必填，用于标识） |
 | `dsc` | string | `"无"` | 插件描述（用于日志和文档） |
 | `event` | string | `"message"` | 监听的事件类型 |
-| `priority` | number | `5000` | 优先级（数字越大优先级越高） |
+| `priority` | number | `5000` | 优先级（数字越小越先执行） |
 | `task` | object | `{ name: "", fnc: "", cron: "" }` | 定时任务配置 |
 | `rule` | array | `[]` | 规则数组（匹配规则和处理函数） |
 | `bypassThrottle` | boolean | `false` | 是否绕过节流限制 |
@@ -209,7 +209,7 @@ export default class ContextPlugin extends plugin {
 }
 ```
 
-> **注意**: 插件存放路径说明见 [工作流基类文档](./WORKFLOW_BASE_CLASS.md) 中的"工作流存放路径"部分（插件文件存放在 `plugins/` 目录下）。
+> **注意**: 插件为 `plugins/<插件名>/` 目录，入口通常为 `index.js`；工作流存放路径见 [工作流基类文档](./WORKFLOW_BASE_CLASS.md)。
 
 ## 权限控制
 

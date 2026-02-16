@@ -213,8 +213,10 @@ graph TB
 
 ### 5.1 适配器集成
 
+适配器实际路径：`plugins/system-plugin/adapter/`（如 OneBotv11、stdin 等）。自定义适配器可放同目录或其它插件的 `adapter/` 下。
+
 ```javascript
-// 在 plugins/adapter/MyAdapter.js
+// 在 plugins/system-plugin/adapter/MyAdapter.js（或任意插件 adapter/）
 export default class MyAdapter {
   constructor() {
     Bot.adapter.push(this);
@@ -251,7 +253,7 @@ export default {
 ### 5.3 插件开发
 
 ```javascript
-// 在 plugins/MyPlugin.js
+// 在 plugins/myplugin/index.js（插件目录下入口）
 // 假设已导入: import plugin from '../../lib/plugins/plugin.js';
 
 export default class MyPlugin extends plugin {

@@ -133,6 +133,7 @@ export default class OpenAICompatibleLLMConfig extends ConfigBase {
           maxToolRounds: {
             type: 'number',
             label: '最大工具轮次',
+            description: '「模型→执行工具→再问模型」的最多轮数，每轮可并行多个工具，非工具调用总次数',
             min: 1,
             max: 20,
             default: 5,

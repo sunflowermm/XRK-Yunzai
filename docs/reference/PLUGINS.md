@@ -1,6 +1,6 @@
 # 插件运行时手册 (`lib/plugins/plugin.js`)
 
-> 插件文件（如 `plugins/example/*.js`）`extends plugin` 即可获得以下方法。
+> 插件为目录，入口如 `plugins/<插件名>/index.js`，类 `extends plugin` 即可获得以下方法。
 
 ---
 

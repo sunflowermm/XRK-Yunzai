@@ -333,7 +333,7 @@ export default class connectEvent extends EventListener {
           <div class="command-tag">
             <i class="fa fa-magic"></i>向日葵妈咪妈咪哄
           </div>
-          <div class="command-desc">安装原神适配器和向日葵插件</div>
+          <div class="command-desc">安装原神适配器和向日葵插件（本控制台默认主人）</div>
         </div>
         
         <div class="command">

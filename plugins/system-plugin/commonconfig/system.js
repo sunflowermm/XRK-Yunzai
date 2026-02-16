@@ -1213,7 +1213,7 @@ export default class SystemConfig extends ConfigBase {
             },
             streamDir: {
               type: 'string',
-              label: '工作流目录',
+              label: '工作流目录（兼容保留，实际从各插件 stream/ 加载）',
               default: 'plugins/stream',
               component: 'Input'
             },

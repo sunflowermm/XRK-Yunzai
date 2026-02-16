@@ -131,7 +131,8 @@ plugins/system-plugin/
 - **status.js**：状态查询。  
 - **disablePrivate.js**：禁用私聊/好友戳一戳等。  
 - **进群退群通知.js**：新人进群、退群通知。  
-- **伪造消息.js**、**主动复读.js**、**模拟定时输入.js**、**葵崽插件.js**：示例或扩展功能。
+- **伪造消息.js**、**主动复读.js**、**模拟定时输入.js**：示例或扩展功能。
+- **葵崽插件.js**：主人发送「向日葵妈咪妈咪哄」一键安装/更新向日葵插件（XRK-plugin）与原神适配器（XRK-Genshin-Adapter-plugin）；也可在 Web 控制台、stdin 或 API 中发送该指令（上述渠道默认视为主人）。GitCode 克隆失败时自动切换 GitHub 镜像。
 
 ### 3.4 HTTP（http）
 
@@ -218,7 +219,7 @@ mergeStreams:
 2. **合并到聊天**：在 `data/ai/config.yaml` 的 `mergeStreams` 中加上工作流名称即可（如 `desktop`、`device`），前提是 AI 助手 init 时已调用 `mergeStreams`。  
 3. **适配器**：新端实现与 OneBotv11 类似的接口（事件上报、`sendMsg`、`sendApi` 等），并 `Bot.adapter.push(实例)`。  
 4. **表情包资源**：chat 工作流从 `resources/aiimages/{开心|惊讶|伤心|大笑|害怕|生气}/` 读取图片，可按需放置。  
-5. **文档与仓库**：本文档仅描述 system-plugin 自带的能力与结构；框架整体的 StreamLoader、AIStream、MCP 规范等见项目根目录及 `lib/aistream/` 源码或文档。
+5. **文档与仓库**：本文档仅描述 system-plugin 自带的能力与结构。框架底层文档见项目根 **`docs/`** 与 **`docs/overview/DEVELOPER_HUB.md`**（核心对象、插件/工作流基类、适配器、配置等）。
 
 ---
 

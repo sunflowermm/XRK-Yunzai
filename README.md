@@ -138,7 +138,7 @@ XRK-Yunzai/
 │
 ├── plugins/
 │   └── <插件名>/
-│       ├── adapter/       # 协议接入 (OneBotv11 等)
+│       ├── adapter/       # 协议适配器（如 system-plugin 内 OneBotv11、stdin）
 │       ├── http/          # REST/WS/SSE
 │       ├── stream/        # AI 工作流 (chat/device/…)
 │       ├── events/        # 消息/系统事件
@@ -161,6 +161,7 @@ XRK-Yunzai/
 
 | 主题 | 入口 | 说明 |
 |------|------|------|
+| **文档索引** | [`docs/README.md`](./docs/README.md) | 底层文档一览与推荐阅读顺序。 |
 | 技术栈全景 | [`docs/TECH_STACK.md`](./docs/TECH_STACK.md) | 框架栈、依赖、部署策略。 |
 | 开发者导航（可视化） | [`docs/overview/DEVELOPER_HUB.md`](./docs/overview/DEVELOPER_HUB.md) | Mermaid 拓扑展示 `Bot → Plugins → Workflows` 关系及基类入口。 |
 | 核心对象 | [`docs/CORE_OBJECTS.md`](./docs/CORE_OBJECTS.md) | Bot / 事件 `e` / `logger` / `cfg` / `segment` / `redis` 速查。 |
@@ -199,7 +200,7 @@ XRK-Yunzai/
 <summary>插件内调用 Chat 工作流</summary>
 
 ```js
-// plugins/example/workflow-demo.js
+// plugins/<插件名>/stream/ 或 插件目录下 stream/*.js
 import plugin from '../../lib/plugins/plugin.js';
 
 export default class WorkflowDemo extends plugin {

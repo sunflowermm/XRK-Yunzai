@@ -2672,6 +2672,18 @@ class App {
     const textParts = [];
     const allText = [];
     
+    // 辅助函数：统一渲染文本段，与热更新保持一致的结构
+    const renderTextSegment = (text) => {
+      if (!text || !text.trim()) return;
+      const wrap = document.createElement('div');
+      wrap.className = 'chat-segment chat-segment-text';
+      const content = document.createElement('div');
+      content.className = 'chat-content chat-markdown';
+      content.innerHTML = this.renderMarkdown(text);
+      wrap.appendChild(content);
+      div.appendChild(wrap);
+    };
+    
     segments.forEach(seg => {
       if (typeof seg === 'string') {
         textParts.push(seg);
@@ -2684,10 +2696,7 @@ class App {
         }
       } else if (seg?.type === 'image') {
         if (textParts.length > 0) {
-          const textDiv = document.createElement('div');
-          textDiv.className = 'chat-text chat-markdown';
-          textDiv.innerHTML = this.renderMarkdown(textParts.join(''));
-          div.appendChild(textDiv);
+          renderTextSegment(textParts.join(''));
           textParts.length = 0;
         }
         const url = this._segmentMediaUrl(seg);
@@ -2716,10 +2725,7 @@ class App {
         }
       } else if (seg?.type === 'video') {
         if (textParts.length > 0) {
-          const textDiv = document.createElement('div');
-          textDiv.className = 'chat-text chat-markdown';
-          textDiv.innerHTML = this.renderMarkdown(textParts.join(''));
-          div.appendChild(textDiv);
+          renderTextSegment(textParts.join(''));
           textParts.length = 0;
         }
         const url = this._segmentMediaUrl(seg);
@@ -2741,10 +2747,7 @@ class App {
         }
       } else if (seg?.type === 'record') {
         if (textParts.length > 0) {
-          const textDiv = document.createElement('div');
-          textDiv.className = 'chat-text chat-markdown';
-          textDiv.innerHTML = this.renderMarkdown(textParts.join(''));
-          div.appendChild(textDiv);
+          renderTextSegment(textParts.join(''));
           textParts.length = 0;
         }
         const url = this._segmentMediaUrl(seg);
@@ -2778,10 +2781,7 @@ class App {
         allText.push(atText);
       } else if (seg.type === 'tools' && Array.isArray(seg.tools) && seg.tools.length > 0) {
         if (textParts.length > 0) {
-          const textDiv = document.createElement('div');
-          textDiv.className = 'chat-text chat-markdown';
-          textDiv.innerHTML = this.renderMarkdown(textParts.join(''));
-          div.appendChild(textDiv);
+          renderTextSegment(textParts.join(''));
           textParts.length = 0;
         }
         const wrap = document.createElement('div');
@@ -2791,10 +2791,7 @@ class App {
       } else if (seg.type === 'reply') {
         // 回复：显示为引用样式
         if (textParts.length > 0) {
-          const textDiv = document.createElement('div');
-          textDiv.className = 'chat-text chat-markdown';
-          textDiv.innerHTML = this.renderMarkdown(textParts.join(''));
-          div.appendChild(textDiv);
+          renderTextSegment(textParts.join(''));
           textParts.length = 0;
         }
         
@@ -2806,10 +2803,7 @@ class App {
       } else if (seg.type === 'file') {
         // 文件：显示为下载链接
         if (textParts.length > 0) {
-          const textDiv = document.createElement('div');
-          textDiv.className = 'chat-text chat-markdown';
-          textDiv.innerHTML = this.renderMarkdown(textParts.join(''));
-          div.appendChild(textDiv);
+          renderTextSegment(textParts.join(''));
           textParts.length = 0;
         }
         
@@ -2829,10 +2823,7 @@ class App {
       } else if (seg.type === 'markdown' || seg.type === 'raw') {
         // Markdown 或原始内容：直接渲染
         if (textParts.length > 0) {
-          const textDiv = document.createElement('div');
-          textDiv.className = 'chat-text chat-markdown';
-          textDiv.innerHTML = this.renderMarkdown(textParts.join(''));
-          div.appendChild(textDiv);
+          renderTextSegment(textParts.join(''));
           textParts.length = 0;
         }
         
@@ -2846,10 +2837,7 @@ class App {
       } else if (seg.type === 'button') {
         // 按钮：显示为交互按钮
         if (textParts.length > 0) {
-          const textDiv = document.createElement('div');
-          textDiv.className = 'chat-text chat-markdown';
-          textDiv.innerHTML = this.renderMarkdown(textParts.join(''));
-          div.appendChild(textDiv);
+          renderTextSegment(textParts.join(''));
           textParts.length = 0;
         }
         
@@ -2905,10 +2893,7 @@ class App {
       }
     });
     if (textParts.length > 0) {
-      const textDiv = document.createElement('div');
-      textDiv.className = 'chat-text';
-      textDiv.innerHTML = this.renderMarkdown(textParts.join(''));
-      div.appendChild(textDiv);
+      renderTextSegment(textParts.join(''));
     }
     if (div.children.length === 0 && !(opts?.mcpTools?.length)) return null;
     if (opts?.mcpTools?.length) this._addToolBlocks(div, opts.mcpTools);

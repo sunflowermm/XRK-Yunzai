@@ -4,7 +4,7 @@
 
 ![Tech Stack](https://img.shields.io/badge/Tech%20Stack-Overview-blue?style=flat-square)
 ![Node.js](https://img.shields.io/badge/Node.js-24%2B-green?style=flat-square&logo=node.js)
-![Redis](https://img.shields.io/badge/Redis-7-red?style=flat-square&logo=redis)
+![Redis](https://img.shields.io/badge/Redis-5%2B-red?style=flat-square&logo=redis)
 ![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)
 
 </div>
@@ -113,7 +113,7 @@ Redis 连接策略：
 
 ## 8. 扩展建议
 
-- **更多协议**：在 `plugins/adapter` 新增适配器，复用 `Bot`/`e` API，可参考 OneBotv11 实现。
+- **更多协议**：在 `plugins/system-plugin/adapter` 或任意插件 `adapter/` 新增适配器，复用 `Bot`/`e` API，可参考 OneBotv11 实现。
 - **任务编排**：基于 Workflow Manager 快速构建多工作流协作（串行/并行/条件触发）。
 - **观测性**：结合 `logger` 与 `Bot._setupRequestLogging` 输出结构化日志，再由 Loki/ELK 收集。
 - **Redis 集群**：如需高可用，可将 `cfg.redis` 指向哨兵/集群并扩展 `redisInit` 逻辑。

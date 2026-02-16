@@ -87,7 +87,6 @@
 | 优先级 | 目录 | key 格式 |
 |--------|------|----------|
 | 高 | `plugins/<插件名>/commonconfig/*.js` | `插件名_文件名` |
-| 中 | `config/commonconfig/*.js` | `文件名` |
-| 低 | `core/<模块>/commonconfig/*.js` | `模块名_文件名` |
+| 低 | `config/commonconfig/*.js` | `文件名` |
 
-同名按上表优先级覆盖。须导出 `default`（类或对象）。
+同名时插件配置优先覆盖。须导出 `default`（类或对象）。

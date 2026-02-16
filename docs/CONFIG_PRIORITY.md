@@ -30,7 +30,7 @@ export default class MyWorkflow extends AIStream {
     super({
       name: 'my-workflow',
       config: {
-        chatModel: 'gpt-4',  // 这个会覆盖kuizai.yaml和默认值
+        chatModel: 'gpt-4',  // 会覆盖 aistream/LLM 配置和默认值
         temperature: 0.7
       }
     });

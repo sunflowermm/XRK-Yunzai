@@ -6,40 +6,16 @@
 
 **文件路径**: `lib/aistream/aistream.js`
 
-**工作流存放路径**: 支持多个位置（按优先级从高到低）
-
-### 1. 插件专用目录（推荐）
-
-每个插件可以在自己的目录下创建 `stream/` 子目录来存放专属的工作流：
-
-```
-plugins/
-├── myplugin/
-│   └── stream/
-│       ├── workflow1.js      # 插件专属工作流
-│       └── workflow2.js
-└── anotherplugin/
-    └── stream/
-        └── workflow.js
-```
-
-**优点：**
-- 插件代码集中管理，便于维护
-- 插件可以独立分发，不依赖 `plugins/stream/` 目录
-- 支持插件级别的热重载
-
-### 2. 工作流加载规则
-
-当前版本仅从插件内部加载工作流：
+**工作流存放路径**：仅从插件目录加载，路径为 `plugins/<插件根>/stream/`。
 
 ```
 plugins/<插件根>/stream/
 ├── chat.js          # 聊天工作流
 ├── device.js        # 设备工作流
-└── [自定义].js     # 自定义工作流
+└── [自定义].js      # 自定义工作流
 ```
 
-`StreamLoader` 不再扫描 `plugins/stream/` 或 `core/*/stream/`，统一约定**每个插件自带自己的 `stream/` 业务层目录**。
+`StreamLoader` 扫描各插件的 `stream/` 目录并加载，不扫描根级 `plugins/stream/` 或 `core/*/stream/`。
 
 **注意:** 
 - 工作流必须继承 `AIStream` 基类

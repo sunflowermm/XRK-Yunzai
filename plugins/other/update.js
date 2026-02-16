@@ -37,10 +37,10 @@ export class update extends plugin {
     this.typeName = 'XRK-Yunzai'
     this.messages = []
     
-    /** XRK相关插件配置 */
+    /** XRK 相关插件（与向日葵妈咪妈咪哄一致，不含已废弃的 XRK-Core） */
     this.xrkPlugins = [
       { name: 'XRK-plugin', requiredFiles: ['apps', 'package.json'] },
-      { name: 'XRK-Core', requiredFiles: ['index.js'] }
+      { name: 'XRK-Genshin-Adapter-plugin', requiredFiles: ['apps', 'package.json'] }
     ]
     
     /** 记录已更新的插件，避免重复 */

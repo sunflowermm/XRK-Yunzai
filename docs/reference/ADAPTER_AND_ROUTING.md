@@ -70,7 +70,7 @@
 ### 1.7 适配器示例
 
 ```javascript
-// plugins/adapter/MyAdapter.js
+// plugins/system-plugin/adapter/MyAdapter.js（与 OneBotv11、stdin 同目录）
 Bot.adapter.push(new class MyAdapter {
   id = "MY_PROTOCOL"; name = "MyProtocol"; path = this.name; echo = new Map(); timeout = 60000;
   sendFriendMsg(data, msg) { return this.sendApi(data, ws, "send_private_msg", { user_id: data.user_id, message: msg }); }

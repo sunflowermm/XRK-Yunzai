@@ -8,7 +8,7 @@
 # ----------------------------------------
 # enabled: 是否启用工作流系统
 enabled: true
-# streamDir: 工作流脚本目录，相对于项目根，如 plugins/stream
+# streamDir: 兼容保留；实际从各插件 plugins/<插件名>/stream 加载
 streamDir: "plugins/stream"
 # ----------------------------------------
 # 工作流全局参数
