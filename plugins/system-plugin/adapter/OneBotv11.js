@@ -27,7 +27,8 @@ Bot.adapter.push(
       this.echo.set(echo, cache)
       const timeout = setTimeout(() => {
         cache.reject(Bot.makeError("请求超时", request, { timeout: this.timeout }))
-        Bot.makeLog("warn", [`API调用超时: ${action}`, request], data.self_id)
+        // 超时错误使用 debug 级别，减少日志噪音
+        Bot.makeLog("debug", `API调用超时（已静默）: ${action}`, data.self_id)
         this.echo.delete(echo)
       }, this.timeout)
 
@@ -48,7 +49,23 @@ Bot.adapter.push(
             : data
         })
         .catch(err => {
-          Bot.makeLog("warn", [`API调用失败: ${action}`, err.message], data.self_id)
+          // 提取错误消息，避免 [object Object]
+          const errorMsg = err?.message || err?.wording || String(err) || '未知错误';
+          const errorCode = err?.code || err?.retcode;
+          
+          // 网络超时错误静默处理（降低日志级别）
+          const isTimeoutError = errorCode === 1200 || 
+                                 errorMsg.includes('ETIMEDOUT') || 
+                                 errorMsg.includes('请求超时') ||
+                                 errorMsg.includes('timeout');
+          
+          if (isTimeoutError) {
+            // 网络超时错误使用 debug 级别，减少日志噪音
+            Bot.makeLog("debug", `API调用超时（已静默）: ${action}`, data.self_id);
+          } else {
+            // 其他错误正常记录
+            Bot.makeLog("warn", `API调用失败: ${action} - ${errorMsg}`, data.self_id);
+          }
           throw err
         })
         .finally(() => {
@@ -1934,7 +1951,12 @@ Bot.adapter.push(
                     data.bot.cookies[domain] = result.cookies
                   }
                 } catch (err) {
-                  Bot.makeLog("debug", `获取 ${domain} cookies 失败: ${err.message}`, self_id)
+                  // 网络超时错误静默处理
+                  const errorMsg = err?.message || String(err);
+                  const isTimeout = errorMsg.includes('ETIMEDOUT') || err?.retcode === 1200;
+                  if (!isTimeout) {
+                    Bot.makeLog("debug", `获取 ${domain} cookies 失败: ${errorMsg}`, self_id);
+                  }
                 }
               }
             }
