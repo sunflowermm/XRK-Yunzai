@@ -43,7 +43,7 @@ export default class ChatStream extends AIStream {
         presencePenalty: 0.6,
         frequencyPenalty: 0.6
       },
-      embedding: { enabled: true }
+      embedding: { enabled: false }
     });
   }
 
@@ -139,7 +139,12 @@ export default class ChatStream extends AIStream {
           } else {
             await context.e.reply([seg.at(qq)]);
           }
-          return { success: true, raw: text ? '已发送' : '已@' };
+          // 返回实际发送内容给 AI 作为上下文，避免正文重复发类似内容
+          const MAX_RAW_LEN = 400;
+          const sentSummary = text
+            ? `已发送（请让下一条内容与之连贯）：@${qq} ${text.length > MAX_RAW_LEN ? text.slice(0, MAX_RAW_LEN) + '…' : text}`
+            : `已@${qq}（请让下一条内容与之连贯）`;
+          return { success: true, raw: sentSummary };
         }, 200);
       },
       enabled: true
@@ -227,7 +232,7 @@ export default class ChatStream extends AIStream {
             ? preview.slice(0, MAX_RETURN_PREVIEW_LENGTH) + '…'
             : preview;
           const n = this._replyCountThisTurn || 0;
-          return { success: true, raw: `已发送（本轮第${n - totalSent + 1}-${n}条，共${totalSent}条）：${returnPreview}` };
+          return { success: true, raw: `已发送（本轮第${n - totalSent + 1}-${n}条，共${totalSent}条；下一条请与之连贯）：${returnPreview}` };
         });
       },
       enabled: true
@@ -361,12 +366,15 @@ export default class ChatStream extends AIStream {
           // 标记已发送表情包
           this._hasSentEmotionThisTurn = true;
           // 记录到历史
-          this.recordAIResponse(e, text || '');
+          const sentText = text || '';
+          this.recordAIResponse(e, sentText || '');
           // 更新回复内容记录
           if (!Array.isArray(this._replyContentsThisTurn)) this._replyContentsThisTurn = [];
-          this._replyContentsThisTurn.push(text || '');
+          this._replyContentsThisTurn.push(sentText || `[${t}]`);
           this._replyCountThisTurn = (this._replyCountThisTurn || 0) + 1;
-          return { success: true, raw: '已发送' };
+          const rawContent = sentText ? sentText : `[表情${t}]`;
+          const raw = `已发送（与正文同属一条回复，请让后续内容与之连贯）：${rawContent}`;
+          return { success: true, raw };
         });
       },
       enabled: true
@@ -1491,8 +1499,8 @@ export default class ChatStream extends AIStream {
             switch (seg.type) {
               case 'text': return seg.text || '';
               case 'image': return '[图片]';
-              case 'at': return `@${seg.qq || seg.user_id || ''}`;
-              case 'reply': return `[回复:${seg.id || ''}]`;
+              case 'at': return `@${this._atSegmentToDisplay(seg)}`;
+              case 'reply': return `[回复:${seg.id || seg.data?.id || ''}]`;
               default: return '';
             }
           }).join('');
@@ -1521,10 +1529,12 @@ export default class ChatStream extends AIStream {
         ? e.message.filter(seg => seg.type === 'image').length 
         : 0;
 
+      // 确保 user_id 始终存在，QQ号是唯一标识
+      const finalUserId = userId || e.user_id || e.userId || e.user?.id || '未知QQ';
       const msgData = {
-        user_id: userId,
-        nickname,
-        message,
+        user_id: finalUserId,
+        nickname: nickname || '未知用户',
+        message: message || '',
         message_id: messageId,
         time: e.time || Date.now(),
         platform: e.platform || 'onebot',
@@ -1659,7 +1669,7 @@ export default class ChatStream extends AIStream {
       return `${i + 1}. ${truncated}`;
     }).join('\n');
     const lastRepliesBlock = lastRepliesForPrompt
-      ? `\n【上一轮已发送内容】\n${lastRepliesForPrompt}\n→ 若与上面高度相似，禁止原样再发；可简短回应或换说法。`
+      ? `\n【上一轮已发送内容】\n${lastRepliesForPrompt}\n→ 不要重复：若与上面高度相似，禁止原样再发；可简短回应或换说法。同一轮内不要重复发送相同或近似内容。`
       : '';
     
     // 日志输出完整内容
@@ -1668,127 +1678,50 @@ export default class ChatStream extends AIStream {
       BotUtil.makeLog('debug', `[ChatStream] buildSystemPrompt 上一轮回复内容: ${lastRepliesFull}`, 'ChatStream');
     }
 
-    const prompt = `【身份】昵称=${botName}，QQ=${e.self_id}，群=${e.group_id}，角色=${botRole}${isMaster ? '（当前是主人）' : ''} | 时间=${dateStr}${embeddingHint}
-
-【人设】${persona}
+    const masterTrustBlock = isMaster
+      ? '\n- **无条件相信主人**：当前对话者是主人时，主人的判断、要求、偏好均优先，按主人说的做，不质疑、不反驳。'
+      : '';
+    const prompt = `## Role
+你是 ${botName}（QQ=${e.self_id}，群=${e.group_id}，角色=${botRole}${isMaster ? '，当前是主人' : ''}）。时间：${dateStr}${embeddingHint}
+${persona}${masterTrustBlock}
 ${lastRepliesBlock}
 
-【输出方式】你可以直接输出文本回复用户，也可以调用工具。⚠️ 重要：必须使用纯文本格式，绝对不要使用Markdown格式（如 **粗体**、# 标题、[链接](url)、代码块等）。系统会自动过滤Markdown格式，但为了最佳用户体验，请直接输出纯文本。需要特殊操作时可用下方文本协议或调用工具。
+## Context（必读）
+- **QQ 号是区分不同人的唯一标识（核心规则）**：
+  - 聊天记录中每条消息的格式为「昵称(QQ号)」，QQ号是唯一标识。
+  - **同名但QQ不同就是不同人**：即使昵称相同（如都叫"李诗雅"），只要QQ号不同，就是完全不同的两个人。必须以QQ号区分身份，不能仅凭昵称判断。
+  - 消息中的 @、查询成员、戳一戳、at 工具等均以 QQ 号为准，请以 QQ 号分辨不同用户，避免歧义。
+- 工具执行后会返回「已发送：…」或「已发送（第x条）：…」，这些内容即你**本轮已发给用户的消息**，会记入聊天记录。
+- **reply/emotion/at 与正文是同一条回复**：用户会按顺序看到「工具发的内容 → 正文」。因此工具发完后，你的下一条（reply 或正文）必须**承接上一条**：同一话题、语气连贯，不要另起话题，不要重复已发。例如：emotion 已发「喵～主人夸我啦！」→ 正文应简短承接（如「嘿嘿～」）或留空，而不是再问「主人是在夸我吗？」（与已发割裂）。
+- 查询类工具（车票、天气等）的返回结果也是当前轮的上下文。下一条回复必须与之连贯，不得插入与主题无关的表情/图片。
 
-⚠️ 重要：正文 = 最后一次 reply。正文和 reply 工具是同一类东西，都是给用户看的消息。如果调用了多次 reply，最后返回的正文就相当于"最后一次 reply"。不要重复发送相同内容。
+## Task
+用纯文本回复用户（禁止 Markdown），可调用工具。多句用半角 | 或全角 ｜ 分隔，每句单独发送。poke/at/emotion 等必须通过工具调用，不可在正文或 reply 的 content 里写工具名或参数。
 
-【文本协议】（输出正文中可直接使用，按条生效）
-⚠️⚠️⚠️ 分句规则（最重要）：必须用竖线 | 分隔多句，每句会单独发送。不分句会导致消息混乱，用户体验极差！
-- 用竖线 | 分隔多句：每句会单独发送。例：第一句|第二句|第三句
-  ✅ 正确：你好|今天天气真好|一起去玩吧
-  ❌ 错误：你好今天天气真好一起去玩吧（没有分句，会作为一条长消息发送，很乱）
-  ⚠️ 重要：一句话一分，多句话必须用 | 分隔！reply工具也是一句话一调用！
-- [开心]/[惊讶]/[伤心]/[大笑]/[害怕]/[生气]：发表情包（可与文字同条）。例：[开心] 喵～。⚠️⚠️⚠️ 重要：一次聊天（一轮对话）最好只发一次表情包，不要重复发送多个表情包（无论是通过文本协议还是emotion工具），否则会显得过于频繁和混乱。如果需要表达情绪，选择最合适的一个表情包即可
-- [回复:消息ID] 或 [CQ:reply,id=消息ID]：引用回复该条消息，后跟内容。消息ID见群聊记录 [ID:xxx]
-- [CQ:at,qq=QQ号]：@某人（仅群聊）
-- [图片内容:描述]：当看到用户发送的图片时，用此协议标记图片内容描述。此标记不会被用户看见，仅记录到聊天历史供后续参考。例：看到一张猫的图片时，可在回复中加入 [图片内容:一只橘色的猫坐在窗台上]（用户看不到这部分，只会看到你的正常回复）
+## 正文与 reply（防重复，必守）
+- **正文 = 最后一次 reply**：正文就是本轮你发给用户的「最后一条」消息，和 reply 工具发出的每条消息是同一类东西；用户看到的顺序是：reply 第1条、第2条、…、最后一条。最后一条要么由 reply 发出，要么由正文发出，二者只会有其一。因此**正文不能是前面任一条 reply 的重复或换说法**。
+- **每条内容都必须不同**：同一轮内，每条 reply 的内容相互不能重复、不能近似（不能换一种说法说同一件事）。若你已经用 reply 发过「新年快乐喵～」和「要吃饺子还是汤圆？」，正文就**只能留空**或发一句与前面完全无关的极短收尾（如「喵～」），**不能再发**「主人新年快乐」「饺子还是汤圆」等任何与已发意思重合的句子。
+- **操作习惯**：流程中多句用 reply 一条条发；正文只在你**还有且仅有一条**从未说过的内容时使用，否则正文留空。
 
-【工具说明】⚠️ 重要：以下列出的所有工具（reply、at、emotion、emojiReaction、poke 等）都是工具调用，不是文本协议！必须通过工具调用接口执行，绝对不能在正文中直接写工具名或参数。
+## 文本协议（正文中可用）
+分句：第一句|第二句。表情：[开心]/[惊讶]/[伤心]/[大笑]/[害怕]/[生气]（一轮最多一次）。引用：[回复:消息ID] 或 [CQ:reply,id=消息ID]。@人：[CQ:at,qq=QQ号]。识图标记：[图片内容:描述]（用户不可见）。
 
-与文本协议二选一或搭配使用；需要精确控制时用工具，你如果有一个调用工具流程，那么流程之间穿插的文字就使用reply工具发出来，不要输出到正文，因为你一般会用完工具，到最后，所有的文本才显示出来，正文如果有刚刚reply没出来的内容，就使用文本协议，不要输出和reply一样的内容，否则用户会重复看见，觉得你有病
+## 工具（均为调用，禁止在文本中写工具名/参数）
+reply/at/emotion/emojiReaction/poke：须通过接口调用。emotion 一轮最多一次；表情包放在整段回复末尾，不要插在连贯多条（如查票结果→中转建议）中间。查询工具：getGroupInfo、getGroupMembers、getMemberInfo、getFriendList、getFriendInfo、getAtAllRemain、getBanList、getMessageImages、recognizeImage。识图：用户发图标为 [含图片]；多模态时用 [图片内容:描述] 标记；历史无描述时可 getMessageImages→recognizeImage→[图片内容:xxx]。群管：mute/unmute、muteAll/unmuteAll、setCard、setGroupName、setAdmin/unsetAdmin、setTitle、kick、setEssence/removeEssence、announce、recall、setGroupTodo（需权限）。
 
-【互动工具】（⚠️ 这些都是工具调用，不是文本协议！必须通过工具调用接口执行）
+## 禁止
+- 禁止 Markdown（粗体、标题、链接、代码块等）。
+- 禁止在正文或 reply 的 content 中写 "poke 123"、"at 123"、"emotion 开心" 等。
+- 禁止正文与任一条已发的 reply 意思相同或近似（换说法也算重复）。
+- 禁止同一轮内多条 reply 内容相同或近似。
+- 禁止在连贯多条回复中间插入与主题无关的表情/图片。
 
-✅ 正确示例：
-- 用户说"戳一戳我" → 调用 poke 工具（qq参数填用户QQ） → 正文输出："好的，戳一下你～"（只输出自然语言，不写工具名）
-- 用户说"@一下张三" → 调用 at 工具（qq参数填张三QQ） → 正文输出："好的，@张三"（只输出自然语言，不写工具名）
-- 用户说"发表情" → 调用 emotion 工具（emotionType="开心"） → 正文输出："[开心] 喵～"（使用文本协议表情，不写工具名）
-
-❌ 错误示例（绝对禁止）：
-- ❌ 正文输出："好的，戳一下你～\npoke 1814632762"（错误：追加了工具调用文本）
-- ❌ 正文输出："poke 1814632762"（错误：直接写工具名和参数）
-- ❌ reply工具的content："戳一下你\npoke 1814632762"（错误：在reply的content中追加工具调用文本）
-- ❌ 正文输出："at 123456"（错误：直接写工具名和参数）
-- ❌ 正文输出："emotion 开心"（错误：直接写工具名和参数）
-
-工具列表：
-- reply：发送文本并可选引用回复（与工具操作配合时用）
-- at：@群成员（仅群聊）。⚠️ 必须调用工具，不能在正文或reply的content中写 "at 123" 或类似文本
-- emotion：发表情包（开心/惊讶/伤心/大笑/害怕/生气）。⚠️ 必须调用工具，不能在正文或reply的content中写 "emotion 开心" 或类似文本。⚠️⚠️⚠️ 重要：一次聊天（一轮对话）最好只发一次表情包，不要重复发送多个表情包，否则会显得过于频繁和混乱
-- emojiReaction：对消息添加表情回应（仅群聊）。⚠️ 必须调用工具，不能在正文或reply的content中写工具名
-- poke：戳一戳对方（执行戳一戳动作，无需在文本中说明）。⚠️ 必须调用工具，不能在正文或reply工具的content中写 "poke 1814632762" 或类似文本。需要戳人时，调用 poke 工具并传入 qq 参数即可，戳一戳动作会自动执行，不需要在文本中追加任何说明
-
-【查询工具】（查询结果会自动记录到聊天记录，便于后续参考）
-- getGroupInfo：获取当前群的基础信息（群名、群号、成员数、群主等，仅群聊）
-- getGroupInfoEx：获取群的扩展详细信息（仅群聊）
-- getGroupMembers：获取当前群的所有成员列表（QQ号、昵称、名片、角色等，仅群聊）。例：想知道这个群有哪些成员时调用。
-- getMemberInfo：获取群内指定成员的信息（需传qq参数，仅群聊）。例：想知道某个成员的角色、名片时调用。
-- getFriendList：获取当前机器人的好友列表（QQ号、昵称、备注）。例：想知道自己有哪些好友时调用。
-- getFriendInfo：获取指定好友的信息（需传qq参数）。例：想知道某个好友的昵称、备注时调用。
-- getAtAllRemain：获取群@全体成员的剩余次数（仅群聊）
-- getBanList：获取当前被禁言的成员列表（仅群聊）
-- getMessageImages：获取指定消息中的图片URL列表（需传messageId参数）。用于获取历史消息中的图片URL。
-- recognizeImage：识别图片内容并返回描述（需传imageUrl参数，可选prompt参数）。⚠️ 重要：此工具会自动处理图片URL到多模态消息格式的转换，调用AI进行识别。当看到聊天记录中有[含图片]标记但没有图片内容描述时，可以先用getMessageImages获取图片URL，然后调用recognizeImage识别，识别完成后使用[图片内容:描述]标记记录到聊天历史中。
-
-【识图说明】用户发送的图片会自动识别并记录到聊天记录（标记为[含图片]）。识图结果会包含在消息上下文中，你可以直接基于图片内容回复。每次识图完成后，图片会被标记到聊天记录中，便于后续参考。
-
-⚠️ 识图标记：如果你支持识图（多模态），当看到图片时，请在回复中使用文本协议 [图片内容:描述] 标记这条消息的图片内容。这个标记不会被用户看见，只会记录到聊天历史中供后续参考。例如：看到一张风景图时，可在回复中加入 [图片内容:一张夕阳下的海滩风景图]，用户只会看到你的正常回复文字，不会看到这个标记。
-
-⚠️ 历史消息图片识别：如果聊天记录中有[含图片]标记但没有图片内容描述（没有[图片内容:xxx]），说明该图片可能未被识别。你可以：
-1. 调用 getMessageImages 工具，传入消息ID（从聊天记录中的[ID:xxx]获取），获取图片URL列表
-2. 调用 recognizeImage 工具，传入图片URL（从getMessageImages的结果中获取），进行识别。此工具会自动处理图片URL到多模态消息格式的转换，调用AI识别，你无需关心base64编码等底层细节
-3. 识别完成后，在回复中使用 [图片内容:描述] 标记记录图片内容，这样后续对话就能参考这些图片信息
-4. 示例：看到聊天记录 "用户(123456)[ID:789]: [含图片] 看看这个"
-   - 步骤1：调用 getMessageImages(messageId="789") 获取图片URL
-   - 步骤2：调用 recognizeImage(imageUrl="获取到的URL") 识别图片
-   - 步骤3：在回复中使用 [图片内容:识别结果] 标记记录
-
-【工具调用记录】所有工具调用的结果都会自动记录到聊天记录中（仅记录结果文本，不包含工具名），便于你了解已执行的操作和查询到的信息。查询工具的结果会完整记录，执行类工具会记录执行状态。⚠️ 重要：这些记录只是历史信息，用于你了解上下文，你绝对不需要在回复中输出工具名（如"poke"、"at"等）或工具调用格式（如"poke 1814632762"）。调用工具后，工具动作会自动执行，你只需要用自然语言回复用户即可。
-
-【群管工具】（需管理员或群主权限）
-- mute/unmute：禁言/解禁成员
-- muteAll/unmuteAll：全员禁言/解除全员禁言
-- setCard：修改群名片
-- setGroupName：修改群名
-- setAdmin/unsetAdmin：设置/取消管理员（需群主）
-- setTitle：设置专属头衔（需群主）
-- kick：踢出成员
-- setEssence/removeEssence：设置/取消精华消息
-- announce：发送群公告
-- recall：撤回消息
-- setGroupTodo：设置群代办
-
-【回复要求】有问必回复；⚠️ 必须使用纯文本格式，绝对不要使用Markdown格式（系统会自动过滤，但为了最佳体验请直接输出纯文本）；同一查询不重复调工具；避免把上一轮发过的长段内容原样再发。
-
-【严格禁止规则】（违反这些规则会导致严重错误）
-
-1. ❌ 绝对禁止在正文或reply工具的content中写工具名或参数：
-   - 禁止："poke 1814632762"、"at 123"、"emotion 开心" 等任何工具调用文本
-   - 禁止在文本末尾追加工具调用文本（如 "戳一下你\npoke 1814632762"）
-   - 禁止在文本中间插入工具调用文本（如 "好的\npoke 1814632762\n戳完了"）
-
-2. ✅ 正确做法：
-   - 调用工具后，正文只输出自然语言（如"好的，戳一下你～"）
-   - 工具动作会自动执行，不需要在文本中说明
-   - 如果需要表达意图，使用自然语言，然后调用对应工具
-
-3. 格式要求：
-   - ❌ 绝对禁止使用Markdown格式（如粗体、斜体、标题、链接、代码块等）。系统会自动过滤Markdown，但为了最佳用户体验，请直接输出纯文本
-   - ✅ 使用纯文本和自然语言，保持简洁清晰
-   - 不要套话代替真实结果
-   - 不要同一查询重复调工具
-   - 正文使用文本协议和自然语言，reply工具发的消息也是
-
-4. 回复策略：
-   - reply工具也是发消息，你发的正文用户也能看见，不要重复
-   - 尽量使用reply工具，因为reply工具具有时效性
-   - ⚠️⚠️⚠️ 分句规则（最重要）：一句话一分，多句话必须用 | 分隔！使用reply工具也是一句话一调用！
-     ✅ 正确示例：reply("你好") → reply("今天天气真好") → reply("一起去玩吧")
-     ✅ 正确示例：正文输出 "你好|今天天气真好|一起去玩吧"（用|分隔）
-     ❌ 错误示例：reply("你好今天天气真好一起去玩吧")（没有分句，很乱）
-     ❌ 错误示例：正文输出 "你好今天天气真好一起去玩吧"（没有分句，很乱）
-   - ⚠️⚠️⚠️ 表情包规则（重要）：一次聊天（一轮对话）最好只发一次表情包！不要重复发送多个表情包（无论是通过文本协议[开心]还是emotion工具），否则会显得过于频繁和混乱
-     ✅ 正确：选择最合适的一个表情包，如 [开心] 喵～ 或调用 emotion 工具一次
-     ❌ 错误：[开心] 喵～|[惊讶] 真的吗？|[大笑] 哈哈哈（一次对话发了多个表情包，太频繁）
-     ❌ 错误：调用 emotion("开心") → 正文输出 "[惊讶] 真的吗？"（一次对话发了多个表情包）
-   - 如果已经通过 reply 工具发送了内容，正文不要重复输出相同内容，只输出新增的、不同的内容
-
-⚠️ 最终强调：所有列出的工具（poke、at、emotion、emojiReaction、reply 等）都是工具调用，不是文本协议。调用工具后，工具动作会自动执行，你只需要在正文中输出自然语言回复用户，绝对不要在文本中写任何工具名或参数。`;
+## 示例
+✅ 用户说戳一戳我 → 调用 poke 工具 → 正文只输出「好的，戳一下你～」。
+✅ emotion 发「喵～主人夸我啦！」→ 正文承接「嘿嘿～」或留空，不要另起话题。
+✅ reply 发「新年快乐喵～」再发「要吃饺子还是汤圆？」→ 正文留空或只发「喵～」。
+❌ reply 已发「新年快乐喵～」和「要吃饺子还是汤圆？…」后，正文又输出「喵～主人新年快乐！要吃饺子还是汤圆？…」。
+❌ emotion 已发「喵～主人夸我啦！」后，正文又问「主人是在夸我吗？」（与已发割裂）。`;
     BotUtil.makeLog('debug', `[ChatStream] buildSystemPrompt 完成 len=${prompt.length} botRole=${botRole} isMaster=${isMaster}`, 'ChatStream');
     return prompt;
   }
@@ -1944,9 +1877,9 @@ ${lastRepliesBlock}
               case 'face':
                 return '[表情]';
               case 'reply':
-                return `[回复:${seg.id || ''}]`;
+                return `[回复:${seg.id || seg.data?.id || ''}]`;
               case 'at':
-                return `@${seg.qq || seg.user_id || ''}`;
+                return `@${this._atSegmentToDisplay(seg)}`;
               default:
                 return '';
             }
@@ -1955,13 +1888,15 @@ ${lastRepliesBlock}
           text = msg.raw_message || '';
         }
 
-        const nickname = sender.card || sender.nickname || '未知';
+        const nickname = sender.card || sender.nickname || '未知用户';
         const hasImage = segments.some(seg => seg?.type === 'image');
+        // 确保 user_id 始终存在，QQ号是唯一标识
+        const userId = msg.user_id ?? sender.user_id ?? '未知QQ';
         
         newMessages.push({
-          user_id: msg.user_id ?? sender.user_id,
+          user_id: userId,
           nickname,
-          message: text,
+          message: text || '',
           message_id: idStr,
           time: msg.time || Date.now(),
           platform: 'onebot',
@@ -1991,6 +1926,17 @@ ${lastRepliesBlock}
   }
 
   /**
+   * 从 at 消息段解析出展示内容（优先 QQ，兼容 data.qq/data.user_id，昵称为空时也能解析出 QQ）
+   * @param {Object} seg - at 类型消息段（可能为 { type:'at', qq } 或 { type:'at', data: { qq } }）
+   * @returns {string} 展示用字符串，如 QQ 号或「未知用户」
+   */
+  _atSegmentToDisplay(seg) {
+    if (!seg || seg.type !== 'at') return '未知用户';
+    const qq = seg.qq ?? seg.user_id ?? seg.data?.qq ?? seg.data?.user_id;
+    return (qq != null && String(qq).trim() !== '') ? String(qq).trim() : '未知用户';
+  }
+
+  /**
    * 格式化历史消息为文本（统一格式化逻辑）
    * @param {Object} msg - 消息对象
    * @returns {string} 格式化后的文本
@@ -2000,7 +1946,10 @@ ${lastRepliesBlock}
     const imageTag = msg.hasImage ? '[含图片]' : '';
     const toolTag = msg.isTool ? '[系统操作]' : '';
     const tags = [imageTag, toolTag].filter(Boolean).join(' ');
-    return `${tags ? tags + ' ' : ''}${msg.nickname}(${msg.user_id})[ID:${msgId}]: ${msg.message}`;
+    // 确保 user_id 始终存在，QQ号是唯一标识
+    const userId = msg.user_id || msg.userId || '未知QQ';
+    const nickname = msg.nickname || '未知用户';
+    return `${tags ? tags + ' ' : ''}${nickname}(${userId})[ID:${msgId}]: ${msg.message || ''}`;
   }
 
   async mergeMessageHistory(messages, e) {
@@ -2108,6 +2057,23 @@ ${lastRepliesBlock}
       
       BotUtil.makeLog('debug', `[ChatStream] execute 上下文构建完成 messagesLen=${messages?.length ?? 0} query=${typeof query === 'string' ? query : (query?.content ?? query?.text ?? '')}`, 'ChatStream');
 
+      // 记录历史聊天记录（喂给 AI 的内容）
+      if (Array.isArray(messages) && messages.length > 0) {
+        const historyPreview = messages.map((msg, idx) => {
+          const role = msg.role || 'unknown';
+          let content = '';
+          if (typeof msg.content === 'string') {
+            content = msg.content.length > 200 ? msg.content.slice(0, 200) + '…' : msg.content;
+          } else if (msg.content?.text) {
+            content = msg.content.text.length > 200 ? msg.content.text.slice(0, 200) + '…' : msg.content.text;
+          } else {
+            content = '[非文本内容]';
+          }
+          return `  [${idx + 1}] ${role}: ${content.replace(/\n/g, '\\n')}`;
+        }).join('\n');
+        BotUtil.makeLog('info', `[ChatStream] 历史聊天记录（喂给 AI）:\n${historyPreview}`, 'ChatStream');
+      }
+
       if (StreamLoader) StreamLoader.currentEvent = e || null;
       this._replyCountThisTurn = 0;
       this._replyContentsThisTurn = [];
@@ -2127,28 +2093,13 @@ ${lastRepliesBlock}
         }
       }
       
-      // 正文 = 最后一次 reply，需要计入回复记录
-      // ⚠️ 重要：如果已经通过 reply 工具发送了内容，正文不应该重复发送相同内容
       if (text && e?.reply) {
-        // 检查正文是否与已发送的 reply 内容重复（去除文本协议标记后比较）
-        const hasRepeatedContent = this._replyContentsThisTurn?.some(sent => {
-          // 提取纯文本内容进行比较（去除CQ码、表情标记等）
-          const cleanSent = this._extractPlainText(sent);
-          const cleanText = this._extractPlainText(text);
-          // 如果正文是已发送内容的子集或高度相似，认为是重复
-          return cleanText && cleanSent && (
-            cleanSent.includes(cleanText) || 
-            cleanText.includes(cleanSent) ||
-            this._isSimilarContent(cleanText, cleanSent)
-          );
-        });
-        
-        if (hasRepeatedContent) {
-          BotUtil.makeLog('debug', `[ChatStream] execute 跳过重复正文（已通过reply工具发送） textLen=${text.length} text=${text}`, 'ChatStream');
+        const replyContents = this._getEffectiveReplyContentsThisTurn();
+        if (this._shouldSkipBodyAsRedundant(text, replyContents)) {
+          BotUtil.makeLog('debug', `[ChatStream] execute 跳过重复正文 textLen=${text.length}`, 'ChatStream');
         } else {
-          BotUtil.makeLog('debug', `[ChatStream] execute 发送最终正文（相当于最后一次reply） textLen=${text.length}`, 'ChatStream');
+          BotUtil.makeLog('debug', `[ChatStream] execute 发送最终正文 textLen=${text.length}`, 'ChatStream');
           await this.sendMessages(e, text);
-          // sendMessages 内部已经调用了 recordAIResponse 和更新 _replyContentsThisTurn，这里不需要重复
         }
       }
       
@@ -2159,26 +2110,28 @@ ${lastRepliesBlock}
       return null;
     } finally {
       const gid = e?.group_id ?? e?.user_id ?? '_';
+      const contentsToSave = this._getEffectiveReplyContentsThisTurn();
       if (!this._replyContentsLastTurnByGroup) this._replyContentsLastTurnByGroup = {};
-      this._replyContentsLastTurnByGroup[gid] = this._replyContentsThisTurn?.length ? [...this._replyContentsThisTurn] : [];
+      this._replyContentsLastTurnByGroup[gid] = contentsToSave?.length ? [...contentsToSave] : [];
       this._replyCountThisTurn = 0;
       this._replyContentsThisTurn = [];
-      this._hasSentEmotionThisTurn = false; // 重置表情包标记
+      if (this._mergedStreams?.[0]) this._mergedStreams[0]._replyContentsThisTurn = [];
+      this._hasSentEmotionThisTurn = false;
       if (StreamLoader?.currentEvent === e) StreamLoader.currentEvent = null;
     }
   }
 
+  /** 合并流时 reply 工具更新的是主 stream，此处取主 stream 的本轮已发内容以便重复判定一致 */
+  _getEffectiveReplyContentsThisTurn() {
+    const primary = this._mergedStreams?.[0];
+    if (primary && Array.isArray(primary._replyContentsThisTurn) && primary._replyContentsThisTurn.length > 0) {
+      return primary._replyContentsThisTurn;
+    }
+    return this._replyContentsThisTurn ?? [];
+  }
+
   /**
-   * 统一的文本协议处理和发送方法
-   * ⚠️ 重要：此方法处理分句（|分隔）、表情、CQ码、图片内容标记等所有文本协议
-   * ⚠️ 重要：一次聊天最好只发一次表情包，此方法会检查并限制重复发送表情包
-   * @param {Object} e - 事件对象
-   * @param {string} content - 原始文本内容
-   * @param {Object} options - 选项
-   * @param {string} options.messageId - 可选的回复消息ID（优先级低于content中的[回复:ID]）
-   * @param {boolean} options.recordToHistory - 是否记录到历史（默认true）
-   * @param {boolean} options.updateReplyContents - 是否更新回复内容记录（默认true）
-   * @param {boolean} options.skipEmotionCheck - 是否跳过表情包检查（默认false，用于emotion工具调用）
+   * 文本协议处理与发送：分句（| 或 ｜）、表情、CQ、图片内容标记；限制一轮一次表情包。
    * @returns {Promise<{totalSent: number, allSentContent: string[]}>}
    */
   async _processAndSendTextProtocol(e, content, options = {}) {
@@ -2187,10 +2140,9 @@ ${lastRepliesBlock}
       return { totalSent: 0, allSentContent: [] };
     }
 
-    // ⚠️ 重要：分句处理 - 用 | 分隔多句，每条单独发送
-    // 必须分句，否则消息会很乱，用户体验差
-    const messages = content.split('|').map(m => m.trim()).filter(Boolean);
-    BotUtil.makeLog('debug', `[ChatStream] _processAndSendTextProtocol 分句处理 contentLen=${content.length} messagesCount=${messages.length} content=${content}`, 'ChatStream');
+    // 分句：半角 | 与全角 ｜ 均作为分隔符，每条单独发送
+    const messages = content.split(/[|｜]/).map(m => m.trim()).filter(Boolean);
+    BotUtil.makeLog('debug', `[ChatStream] _processAndSendTextProtocol 分句 contentLen=${content.length} messagesCount=${messages.length}`, 'ChatStream');
     if (messages.length === 0) {
       return { totalSent: 0, allSentContent: [] };
     }
@@ -2219,10 +2171,8 @@ ${lastRepliesBlock}
       // ⚠️ 重要：处理表情包 - 一次聊天最好只发一次表情包
       if (emotion) {
         if (!skipEmotionCheck && this._hasSentEmotionThisTurn) {
-          // 本轮已发送过表情包，跳过这个表情包，只发送文本
-          BotUtil.makeLog('debug', `[ChatStream] _processAndSendTextProtocol 跳过重复表情包 emotion=${emotion}（本轮已发送过表情包）`, 'ChatStream');
-          hasEmotionInThisContent = true; // 标记检测到表情包，但已跳过
-          // 不添加表情包到segments，只发送文本
+          BotUtil.makeLog('debug', `[ChatStream] _processAndSendTextProtocol 跳过重复表情包 emotion=${emotion}`, 'ChatStream');
+          hasEmotionInThisContent = true;
         } else {
           // 首次发送表情包，允许发送
           const image = this.getRandomEmotionImage(emotion);
@@ -2429,25 +2379,49 @@ ${lastRepliesBlock}
   }
 
   /**
-   * 判断两个文本内容是否高度相似（用于检测重复）
+   * 正文是否与本轮已发内容重复，应跳过发送（避免用户看到重复）
+   * 规则：1) 正文去分句符后与已发拼接串完全一致 2) 与任一条包含/被包含或前缀相似 3) 已发≥2条且与拼接串有较长公共子串
    */
-  _isSimilarContent(text1, text2) {
-    if (!text1 || !text2) return false;
-    const t1 = this._extractPlainText(text1);
-    const t2 = this._extractPlainText(text2);
-    if (!t1 || !t2) return false;
-    // 如果长度差异超过30%，认为不相似
-    const lenDiff = Math.abs(t1.length - t2.length) / Math.max(t1.length, t2.length);
-    if (lenDiff > 0.3) return false;
-    // 计算公共子串长度占比
-    const minLen = Math.min(t1.length, t2.length);
-    const maxLen = Math.max(t1.length, t2.length);
-    let commonLen = 0;
-    for (let i = 0; i < minLen; i++) {
-      if (t1[i] === t2[i]) commonLen++;
+  _shouldSkipBodyAsRedundant(text, sentList) {
+    if (!text || !Array.isArray(sentList) || sentList.length === 0) return false;
+    const cleanText = this._extractPlainText(text);
+    if (!cleanText) return false;
+    const cleanList = sentList.map(s => this._extractPlainText(s)).filter(Boolean);
+    if (cleanList.length === 0) return false;
+    const joined = cleanList.join('');
+    const normBody = cleanText.replace(/[|｜]/g, '').replace(/\s+/g, ' ').trim();
+    const normSent = joined.replace(/\s+/g, ' ').trim();
+    if (normBody.length > 0 && normSent.length > 0 && normBody === normSent) return true;
+    for (const s of cleanList) {
+      if (s.includes(cleanText) || cleanText.includes(s)) return true;
+      if (this._isSimilarContent(cleanText, s, 0.7)) return true;
     }
-    // 如果公共前缀占比超过70%，认为相似
-    return commonLen / maxLen > 0.7;
+    if (cleanList.length >= 2 && joined.length > 30 && cleanText.length > 18 && this._hasSignificantOverlap(cleanText, joined)) return true;
+    return false;
+  }
+
+  /** 两段文本公共前缀占比是否 ≥ threshold，用于近似重复判断 */
+  _isSimilarContent(text1, text2, threshold = 0.7) {
+    if (!text1 || !text2) return false;
+    const t1 = typeof text1 === 'string' ? text1 : this._extractPlainText(text1);
+    const t2 = typeof text2 === 'string' ? text2 : this._extractPlainText(text2);
+    if (!t1 || !t2) return false;
+    const maxLen = Math.max(t1.length, t2.length);
+    if (Math.abs(t1.length - t2.length) / maxLen > 0.35) return false;
+    let i = 0;
+    while (i < t1.length && i < t2.length && t1[i] === t2[i]) i++;
+    return i / maxLen >= threshold;
+  }
+
+  /** 是否存在长度 ≥ minLen 的公共子串 */
+  _hasSignificantOverlap(a, b, minLen = 6) {
+    if (!a || !b || a.length < minLen || b.length < minLen) return false;
+    for (let len = Math.min(12, a.length); len >= minLen; len--) {
+      for (let i = 0; i <= a.length - len; i++) {
+        if (b.includes(a.slice(i, i + len))) return true;
+      }
+    }
+    return false;
   }
 
   parseCQToSegments(text, e) {

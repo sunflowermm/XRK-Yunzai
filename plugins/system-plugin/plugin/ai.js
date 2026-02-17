@@ -119,11 +119,16 @@ export class XRKAIAssistant extends plugin {
 
   async handleMessage(e) {
     try {
-      // 检查是否是清除对话指令
+      // 检查是否是清除对话指令（仅主人触发有效）
       const clearCommands = ['重置对话', '清除对话', '清空对话', '重置聊天', '清除聊天', '清空聊天', '重置记录', '清除记录', '清空记录'];
       const msgText = (e.msg || '').trim();
       const isClearCommand = clearCommands.some(cmd => msgText.includes(cmd));
-      
+      if (isClearCommand) {
+        if (!e.isMaster) {
+          await e.reply('仅主人可以清空对话哦～');
+          return true;
+        }
+      }
       if (isClearCommand && e.isMaster) {
         // 主人可以清除对话
         const ChatStream = (await import('../stream/chat.js')).default;
@@ -283,12 +288,23 @@ export class XRKAIAssistant extends plugin {
       }
       for (const seg of message) {
         if (seg.type === 'text') content += seg.text || '';
-        else if (seg.type === 'at' && seg.qq != e.self_id) {
-          try {
-            const info = await e.group?.pickMember(seg.qq)?.getInfo();
-            content += `@${info?.card || info?.nickname || seg.qq} `;
-          } catch {
-            content += `@${seg.qq} `;
+        else if (seg.type === 'at') {
+          const qq = seg.qq ?? seg.user_id ?? seg.data?.qq ?? seg.data?.user_id;
+          BotUtil.makeLog('debug', `[XRK-AI] processMessageContent at seg raw: qq=${seg.qq} user_id=${seg.user_id} data.qq=${seg.data?.qq} data.user_id=${seg.data?.user_id} => 提取qq=${qq}`, 'XRK-AI');
+          if (qq != null && String(qq).trim() !== '' && String(qq) !== String(e.self_id)) {
+            let namePart = '';
+            try {
+              const info = await e.group?.pickMember(qq)?.getInfo();
+              const card = (info?.card ?? '').trim();
+              const nickname = (info?.nickname ?? '').trim();
+              if (card || nickname) namePart = (card || nickname) + '(' + qq + ')';
+              else namePart = String(qq);
+              BotUtil.makeLog('debug', `[XRK-AI] processMessageContent at qq=${qq} card=${card || '(空)'} nickname=${nickname || '(空)'} => @${namePart}`, 'XRK-AI');
+            } catch (err) {
+              namePart = String(qq);
+              BotUtil.makeLog('debug', `[XRK-AI] processMessageContent at qq=${qq} getInfo异常 => @${namePart}`, 'XRK-AI');
+            }
+            content += `@${namePart} `;
           }
         } else if (seg.type === 'image') content += '[图片] ';
       }

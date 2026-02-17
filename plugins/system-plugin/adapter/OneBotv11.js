@@ -1845,7 +1845,13 @@ Bot.adapter.push(
         },
         
         _ready: false,
-        _initializing: false
+        _initializing: false,
+        
+        // 设置 tasker 用于 web 界面显示
+        tasker: {
+          name: this.name,
+          id: this.id
+        }
       }
       
       data.bot = Bot[self_id]
