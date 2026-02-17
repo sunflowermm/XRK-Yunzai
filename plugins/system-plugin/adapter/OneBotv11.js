@@ -26,10 +26,7 @@ Bot.adapter.push(
       const cache = Promise.withResolvers()
       this.echo.set(echo, cache)
       const timeout = setTimeout(() => {
-        // 超时属于可预期网络错误：不使用 Bot.makeError 的默认 error 日志，避免刷屏
-        cache.reject(Bot.makeError("请求超时", request, { timeout: this.timeout, silent: true, logLevel: 'debug' }))
-        // 超时错误使用 debug 级别，减少日志噪音
-        Bot.makeLog("debug", `API调用超时（已静默）: ${action}`, data.self_id)
+        cache.reject(Bot.makeError("请求超时", request, { timeout: this.timeout }))
         this.echo.delete(echo)
       }, this.timeout)
 
@@ -48,26 +45,6 @@ Bot.adapter.push(
               get: (target, prop) => target.data[prop] || target[prop],
             })
             : data
-        })
-        .catch(err => {
-          // 提取错误消息，避免 [object Object]
-          const errorMsg = err?.message || err?.wording || String(err) || '未知错误';
-          const errorCode = err?.code || err?.retcode;
-          
-          // 网络超时错误静默处理（降低日志级别）
-          const isTimeoutError = errorCode === 1200 || 
-                                 errorMsg.includes('ETIMEDOUT') || 
-                                 errorMsg.includes('请求超时') ||
-                                 errorMsg.includes('timeout');
-          
-          if (isTimeoutError) {
-            // 网络超时错误使用 debug 级别，减少日志噪音
-            Bot.makeLog("debug", `API调用超时（已静默）: ${action}`, data.self_id);
-          } else {
-            // 其他错误正常记录
-            Bot.makeLog("warn", `API调用失败: ${action} - ${errorMsg}`, data.self_id);
-          }
-          throw err
         })
         .finally(() => {
           clearTimeout(timeout)

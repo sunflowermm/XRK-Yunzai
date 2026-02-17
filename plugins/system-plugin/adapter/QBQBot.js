@@ -19,9 +19,7 @@ Bot.adapter.push(
       const cache = Promise.withResolvers()
       this.echo.set(ReqId, cache)
       const timeout = setTimeout(() => {
-        // 超时属于可预期网络错误：静默处理，避免刷屏
-        cache.reject(Bot.makeError("请求超时", request, { timeout: this.timeout, silent: true, logLevel: 'debug' }))
-        Bot.makeLog("debug", ["请求超时（已静默）", request], id)
+        cache.reject(Bot.makeError("请求超时", request, { timeout: this.timeout }))
       }, this.timeout)
 
       return cache.promise
