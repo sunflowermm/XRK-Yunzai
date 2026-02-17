@@ -17,9 +17,9 @@ apiKey: ""
 authMode: "api-key"
 # model: 模型名称
 model: "mimo-v2-flash"
-# temperature: 温度 0～2
-temperature: 0.8
-# maxTokens: 最大生成 token 数（MiMo 将映射到 max_completion_tokens）
+# temperature: 采样温度，文档 [0, 1.5]，默认 0.3
+temperature: 0.3
+# maxTokens: 最大生成 token 数（映射为 max_completion_tokens，范围 [0, 131072]）
 maxTokens: 4000
 # topP: 核采样 0～1（可选）
 topP: 0.95
@@ -31,8 +31,10 @@ frequencyPenalty: 0
 stop: []
 # response_format: 响应格式（可选，如 json_object）
 response_format: ""
-# toolChoice: 工具选择策略（通常 auto）
+# toolChoice: 工具选择策略（官方仅支持 auto）
 toolChoice: "auto"
+# thinkingType: 思维链 enabled / disabled（默认）
+thinkingType: "disabled"
 # timeout: 单次请求超时（毫秒）
 timeout: 60000
 # enableStream: 是否允许流式输出（底层会映射到 stream 字段）

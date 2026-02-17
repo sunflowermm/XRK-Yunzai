@@ -50,9 +50,9 @@ export default class XiaomiMiMoLLMConfig extends ConfigBase {
           temperature: {
             type: 'number',
             label: '温度',
-            description: '生成文本的随机性，范围 0-2，建议 0.0~1.0',
+            description: '采样温度，文档范围 [0, 1.5]，默认 0.3',
             min: 0,
-            max: 2,
+            max: 1.5,
             default: 0.3,
             component: 'InputNumber'
           },
@@ -112,6 +112,14 @@ export default class XiaomiMiMoLLMConfig extends ConfigBase {
             description: 'tool_choice 字段，目前官方仅支持 auto',
             default: 'auto',
             component: 'Input'
+          },
+          thinkingType: {
+            type: 'string',
+            label: '思维链',
+            description: 'thinking.type：enabled 启用思维链，disabled 关闭（默认）',
+            enum: ['disabled', 'enabled'],
+            default: 'disabled',
+            component: 'Select'
           },
           timeout: {
             type: 'number',
