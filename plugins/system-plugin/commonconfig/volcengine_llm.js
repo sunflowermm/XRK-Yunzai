@@ -19,6 +19,13 @@ export default class VolcengineLLMConfig extends ConfigBase {
       fileType: 'yaml',
       schema: {
         fields: {
+          enabled: {
+            type: 'boolean',
+            label: '启用该提供商',
+            description: '关闭后不会被选择为默认提供商',
+            default: true,
+            component: 'Switch'
+          },
           baseUrl: {
             type: 'string',
             label: 'API 基础地址',
@@ -33,18 +40,11 @@ export default class VolcengineLLMConfig extends ConfigBase {
             default: '',
             component: 'InputPassword'
           },
-          region: {
-            type: 'string',
-            label: '区域',
-            description: '火山引擎服务区域，如 cn-beijing、cn-shanghai',
-            default: 'cn-beijing',
-            component: 'Input'
-          },
           model: {
             type: 'string',
-            label: '模型（推理接入点 ID）',
-            description: '方舟控制台创建的推理接入点，如 ep-xxxxx',
-            default: 'ep-20241220101210-xxxxx',
+            label: '模型（model）',
+            description: '可填模型名称（如 doubao-pro-4k 等）或推理接入点 ID（如 ep-xxxxx），两者均是 model 字段的取值形式',
+            default: '',
             component: 'Input'
           },
           temperature: {
@@ -96,7 +96,7 @@ export default class VolcengineLLMConfig extends ConfigBase {
             label: '超时时间 (ms)',
             description: 'API 请求超时时间',
             min: 1000,
-            default: 360000,
+            default: 60000,
             component: 'InputNumber'
           },
           path: {
@@ -142,6 +142,33 @@ export default class VolcengineLLMConfig extends ConfigBase {
             description: '是否启用流式输出（默认启用，所有运营商均支持）',
             default: true,
             component: 'Switch'
+          },
+          headers: {
+            type: 'object',
+            label: '额外请求头',
+            description: '可选：额外请求头（会与 Authorization 一起发送）',
+            default: {},
+            component: 'SubForm',
+            fields: {}
+          },
+          extraBody: {
+            type: 'object',
+            label: '额外请求体字段',
+            description: '可选：原样合并到请求 body 顶层（用于火山扩展字段）',
+            default: {},
+            component: 'SubForm',
+            fields: {}
+          },
+          proxy: {
+            type: 'object',
+            label: '代理配置',
+            description: '仅影响本机请求火山 API 的 HTTP 出口',
+            component: 'SubForm',
+            default: { enabled: false, url: '' },
+            fields: {
+              enabled: { type: 'boolean', label: '启用代理', default: false, component: 'Switch' },
+              url: { type: 'string', label: '代理地址', description: '如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080', default: '', component: 'Input' }
+            }
           }
         }
       }

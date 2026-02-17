@@ -10,27 +10,49 @@
 # ----------------------------------------
 # enabled: 是否启用该提供商
 enabled: true
-# baseUrl: 需包含 /api/v3，如 https://ark.cn-beijing.volces.com/api/v3
+# baseUrl: API 基础地址（需包含 /api/v3），如 https://ark.cn-beijing.volces.com/api/v3
 baseUrl: "https://ark.cn-beijing.volces.com/api/v3"
 # apiKey: 火山引擎 API Key（方舟控制台获取）
 apiKey: ""
+# path: Chat Completions 路径（一般固定 /chat/completions）
+path: "/chat/completions"
 # ----------------------------------------
 # 模型与生成参数
 # ----------------------------------------
-# model: 推理接入点 ID，控制台创建后为 ep-xxxxx
-model: "ep-20241220101210-xxxxx"
+# model: 模型标识（必填）
+# - 可填写「模型名称」（如 doubao-pro-4k / doubao-lite-4k 等，取决于你账号可用模型）
+# - 也可填写你在方舟控制台创建的「推理接入点 ID」（通常形如 ep-xxxxxx）
+# 注意：字段名仍然是 model；“推理接入点”只是 model 的一种取值形式
+model: ""
 # temperature: 温度 0～2
 temperature: 0.8
-# maxTokens: 最大生成 token 数
+# maxTokens: 最大生成 token 数（将映射到 max_tokens）
 maxTokens: 4000
 # topP: 核采样 0～1
 topP: 0.9
+# presencePenalty: 存在惩罚 -2～2
+presencePenalty: 0
+# frequencyPenalty: 频率惩罚 -2～2
+frequencyPenalty: 0
 # timeout: 单次请求超时（毫秒）
 timeout: 60000
-# enableStream: 是否允许流式输出
+# enableStream: 是否允许流式输出（底层会映射到 stream 字段）
 enableStream: true
 # enableTools: 启用后注入 MCP 工具
 enableTools: true
+# toolChoice: 工具选择策略（auto/none/required，或函数选择对象；以火山实际支持为准）
+toolChoice: "auto"
+# parallelToolCalls: 是否允许并行工具调用（若下游不支持可能忽略）
+parallelToolCalls: true
+# maxToolRounds: 「模型→执行工具→再问模型」最多轮数
+maxToolRounds: 5
+# ----------------------------------------
+# 额外字段（可选）
+# ----------------------------------------
+# headers: 额外请求头（键值对），会与 Authorization 一起发送
+headers: {}
+# extraBody: 额外请求体字段（对象），会原样合并到请求体顶层
+# extraBody: {}
 # ----------------------------------------
 # 代理（可选）
 # ----------------------------------------

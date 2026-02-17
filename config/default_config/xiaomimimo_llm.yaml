@@ -9,24 +9,38 @@
 # ----------------------------------------
 # enabled: 是否启用该提供商
 enabled: true
-# baseUrl: API 基础地址
+# baseUrl: API 基础地址（OpenAI 兼容）
 baseUrl: "https://api.xiaomimimo.com/v1"
 # apiKey: 小米 MiMo API Key；认证头默认 api-key，可改为 bearer
 apiKey: ""
 # authMode: 认证方式，api-key 或 bearer
 authMode: "api-key"
 # model: 模型名称
-model: "mimo-1.5"
+model: "mimo-v2-flash"
 # temperature: 温度 0～2
 temperature: 0.8
-# maxTokens: 最大生成 token 数
+# maxTokens: 最大生成 token 数（MiMo 将映射到 max_completion_tokens）
 maxTokens: 4000
+# topP: 核采样 0～1（可选）
+topP: 0.95
+# presencePenalty: 存在惩罚 -2～2（可选）
+presencePenalty: 0
+# frequencyPenalty: 频率惩罚 -2～2（可选）
+frequencyPenalty: 0
+# stop: 停止词列表（可选）
+stop: []
+# response_format: 响应格式（可选，如 json_object）
+response_format: ""
+# toolChoice: 工具选择策略（通常 auto）
+toolChoice: "auto"
 # timeout: 单次请求超时（毫秒）
 timeout: 60000
-# enableStream: 是否允许流式输出
+# enableStream: 是否允许流式输出（底层会映射到 stream 字段）
 enableStream: true
 # enableTools: 启用后注入 MCP 工具
 enableTools: true
+# maxToolRounds: 「模型→执行工具→再问模型」最多轮数
+maxToolRounds: 5
 # ----------------------------------------
 # 代理（可选）
 # ----------------------------------------

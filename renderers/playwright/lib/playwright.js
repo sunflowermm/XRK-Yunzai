@@ -35,6 +35,7 @@ export default class PlaywrightRenderer extends Renderer {
     this.retryDelay = config.retryDelay ?? rendererCfg.retryDelay ?? 2000;
     this.memoryThreshold = config.memoryThreshold ?? rendererCfg.memoryThreshold ?? 1024;
     this.maxConcurrent = config.maxConcurrent ?? rendererCfg.maxConcurrent ?? 3;
+    this._fileCache = new Map();
 
     this.config = {
       headless: config.headless ?? rendererCfg.headless ?? true,
@@ -55,6 +56,7 @@ export default class PlaywrightRenderer extends Renderer {
         height: rendererCfg.viewport?.height ?? 720 
       },
       deviceScaleFactor: rendererCfg.viewport?.deviceScaleFactor ?? 1,
+      ignoreHTTPSErrors: rendererCfg.contextOptions?.ignoreHTTPSErrors ?? rendererCfg.ignoreHTTPSErrors ?? false,
       bypassCSP: rendererCfg.contextOptions?.bypassCSP ?? true,
       reducedMotion: rendererCfg.contextOptions?.reducedMotion ?? "reduce",
     };
@@ -88,6 +90,8 @@ export default class PlaywrightRenderer extends Renderer {
 
       // 资源拦截（默认仅拦截 media，不拦截 font）
       blockResourceTypes: rendererCfg.blockResourceTypes ?? ["media"],
+      // 资源重写（用于把在线字体/图标映射到本地文件，避免服务器无外网）
+      resourceRewrite: rendererCfg.resourceRewrite ?? [],
 
       // 其它
       delayBeforeScreenshot: rendererCfg.delayBeforeScreenshot,
@@ -97,6 +101,63 @@ export default class PlaywrightRenderer extends Renderer {
 
       ...data,
     };
+  }
+
+  guessContentType(filePath) {
+    const ext = String(path.extname(filePath) || "").toLowerCase();
+    if (ext === ".woff2") return "font/woff2";
+    if (ext === ".woff") return "font/woff";
+    if (ext === ".ttf") return "font/ttf";
+    if (ext === ".otf") return "font/otf";
+    if (ext === ".svg") return "image/svg+xml";
+    if (ext === ".png") return "image/png";
+    if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+    if (ext === ".webp") return "image/webp";
+    if (ext === ".css") return "text/css";
+    if (ext === ".js") return "application/javascript";
+    if (ext === ".json") return "application/json";
+    return "application/octet-stream";
+  }
+
+  getResourceRewriteRules(d) {
+    const rendererCfg = cfg.renderer?.playwright || {};
+    const list = []
+      .concat(Array.isArray(rendererCfg.resourceRewrite) ? rendererCfg.resourceRewrite : [])
+      .concat(Array.isArray(d.resourceRewrite) ? d.resourceRewrite : []);
+    return list
+      .filter(r => r && typeof r === "object")
+      .map(r => ({
+        match: r.match,
+        type: r.type || "substring",
+        toUrl: r.toUrl || r.to_url,
+        toFile: r.toFile || r.to_file,
+        contentType: r.contentType || r.content_type,
+      }))
+      .filter(r => typeof r.match === "string" && r.match && (typeof r.toUrl === "string" || typeof r.toFile === "string"));
+  }
+
+  matchRewrite(rule, url) {
+    if (!rule || !url) return false;
+    if (rule.type === "regex") {
+      try {
+        return new RegExp(rule.match).test(url);
+      } catch {
+        return false;
+      }
+    }
+    return String(url).includes(rule.match);
+  }
+
+  readCacheFile(filePath) {
+    const abs = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
+    if (this._fileCache.has(abs)) return this._fileCache.get(abs);
+    try {
+      const buf = fs.readFileSync(abs);
+      this._fileCache.set(abs, buf);
+      return buf;
+    } catch {
+      return null;
+    }
   }
 
   /** 计算要拦截的资源类型（兼容旧字段 blockFonts/blockMedia） */
@@ -290,21 +351,43 @@ export default class PlaywrightRenderer extends Renderer {
     const start = Date.now();
 
     try {
-      context = await this.browser.newContext(this.contextOptions);
+      const contextOptions = {
+        ...this.contextOptions,
+        viewport: { width: d.width, height: d.height },
+        deviceScaleFactor: d.deviceScaleFactor ?? this.contextOptions.deviceScaleFactor,
+        ignoreHTTPSErrors: d.ignoreHTTPSErrors ?? this.contextOptions.ignoreHTTPSErrors,
+      };
+      context = await this.browser.newContext(contextOptions);
       page = await context.newPage();
 
       const blockTypes = this.getBlockResourceTypes(d);
-      if (blockTypes.length > 0) {
-        await page.route("**/*", (route) => {
+      const rewriteRules = this.getResourceRewriteRules(d);
+      if (blockTypes.length > 0 || rewriteRules.length > 0) {
+        await page.route("**/*", async (route) => {
+          const reqUrl = route.request().url();
+          for (const rule of rewriteRules) {
+            if (!this.matchRewrite(rule, reqUrl)) continue;
+            try {
+              if (rule.toUrl) return await route.continue({ url: rule.toUrl });
+              if (rule.toFile) {
+                const buf = this.readCacheFile(rule.toFile);
+                if (buf) {
+                  return await route.fulfill({
+                    status: 200,
+                    contentType: rule.contentType || this.guessContentType(rule.toFile),
+                    body: buf,
+                  });
+                }
+              }
+            } catch (e) {
+              BotUtil.makeLog("debug", `[${name}] rewrite failed: ${e?.message || e}`, "PlaywrightRenderer");
+            }
+          }
           const resourceType = route.request().resourceType();
-          if (blockTypes.includes(resourceType)) route.abort();
-          else route.continue();
+          if (blockTypes.includes(resourceType)) return route.abort();
+          return route.continue();
         });
       }
-
-      const viewportWidth = d.width;
-      const viewportHeight = d.height;
-      await page.setViewportSize({ width: viewportWidth, height: viewportHeight });
 
       const pageGotoParams = Object.assign(
         { timeout: this.playwrightTimeout, waitUntil: d.waitUntil || "domcontentloaded" },

@@ -119,17 +119,15 @@ export class XRKAIAssistant extends plugin {
 
   async handleMessage(e) {
     try {
-      // 检查是否是清除对话指令（仅主人触发有效）
-      const clearCommands = ['重置对话', '清除对话', '清空对话', '重置聊天', '清除聊天', '清空聊天', '重置记录', '清除记录', '清空记录'];
-      const msgText = (e.msg || '').trim();
-      const isClearCommand = clearCommands.some(cmd => msgText.includes(cmd));
+      // 清空对话指令：严格“四字全匹配”，避免包含触发误判
+      const msgText = String(e.msg || '').trim();
+      const normalized = msgText.startsWith('#') ? msgText.slice(1).trim() : msgText;
+      const isClearCommand = normalized === '清空对话';
       if (isClearCommand) {
         if (!e.isMaster) {
           await e.reply('仅主人可以清空对话哦～');
           return true;
         }
-      }
-      if (isClearCommand && e.isMaster) {
         // 主人可以清除对话
         const ChatStream = (await import('../stream/chat.js')).default;
         const groupId = e.group_id || e.user_id;

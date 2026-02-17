@@ -4,6 +4,7 @@ chromiumPath: ""
 wsEndpoint: ""
 channel: ""
 headless: true
+ignoreHTTPSErrors: false
 args:
   - --no-sandbox
   - --disable-setuid-sandbox
@@ -21,3 +22,32 @@ viewport:
 contextOptions:
   bypassCSP: true
   reducedMotion: reduce
+
+# 截图等待策略
+waitUntil: domcontentloaded
+waitImages: true
+imageWaitTimeout: 800
+waitFonts: true
+fontWaitTimeout: 800
+
+# 输出默认
+imgType: jpeg # jpeg/png
+quality: 85 # jpeg 时有效
+omitBackground: false
+
+# 资源拦截：默认只拦截 media（不拦 font）
+blockResourceTypes:
+  - media
+
+# fullPage 截图时的默认额外等待（ms）
+delayBeforeScreenshotUrl: 1500
+delayBeforeScreenshotFile: 0
+
+# 资源重写：用于把在线字体/图标映射到本地文件（服务器无外网时很有用）
+# 写法示例：
+# resourceRewrite:
+#   - match: "https://dd.atxrom.com/qweather-icons/fonts/qweather-icons.woff2"
+#     type: substring
+#     toFile: "data/fonts/qweather-icons.woff2"
+#     contentType: "font/woff2"
+resourceRewrite: []

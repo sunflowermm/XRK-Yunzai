@@ -30,6 +30,7 @@ export default class PuppeteerRenderer extends Renderer {
     this.puppeteerTimeout = config.puppeteerTimeout ?? rendererCfg.puppeteerTimeout ?? 120000;
     this.memoryThreshold = config.memoryThreshold ?? rendererCfg.memoryThreshold ?? 1024;
     this.maxConcurrent = config.maxConcurrent ?? rendererCfg.maxConcurrent ?? 3;
+    this._fileCache = new Map();
 
     this.config = {
       headless: config.headless ?? rendererCfg.headless ?? "new",
@@ -41,6 +42,7 @@ export default class PuppeteerRenderer extends Renderer {
       ],
       executablePath: config.chromiumPath ?? rendererCfg.chromiumPath,
       wsEndpoint: config.puppeteerWS ?? rendererCfg.wsEndpoint,
+      ignoreHTTPSErrors: config.ignoreHTTPSErrors ?? rendererCfg.ignoreHTTPSErrors ?? false,
     };
 
     this.healthCheckTimer = null;
@@ -72,6 +74,8 @@ export default class PuppeteerRenderer extends Renderer {
 
       // 资源拦截（默认仅拦截 media，不拦截 font）
       blockResourceTypes: rendererCfg.blockResourceTypes ?? ["media"],
+      // 资源重写（用于把在线字体/图标映射到本地文件，避免服务器无外网）
+      resourceRewrite: rendererCfg.resourceRewrite ?? [],
 
       // 其它
       delayBeforeScreenshot: rendererCfg.delayBeforeScreenshot,
@@ -81,6 +85,63 @@ export default class PuppeteerRenderer extends Renderer {
 
       ...data,
     };
+  }
+
+  guessContentType(filePath) {
+    const ext = String(path.extname(filePath) || "").toLowerCase();
+    if (ext === ".woff2") return "font/woff2";
+    if (ext === ".woff") return "font/woff";
+    if (ext === ".ttf") return "font/ttf";
+    if (ext === ".otf") return "font/otf";
+    if (ext === ".svg") return "image/svg+xml";
+    if (ext === ".png") return "image/png";
+    if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+    if (ext === ".webp") return "image/webp";
+    if (ext === ".css") return "text/css";
+    if (ext === ".js") return "application/javascript";
+    if (ext === ".json") return "application/json";
+    return "application/octet-stream";
+  }
+
+  getResourceRewriteRules(d) {
+    const rendererCfg = cfg.renderer?.puppeteer || {};
+    const list = []
+      .concat(Array.isArray(rendererCfg.resourceRewrite) ? rendererCfg.resourceRewrite : [])
+      .concat(Array.isArray(d.resourceRewrite) ? d.resourceRewrite : []);
+    return list
+      .filter(r => r && typeof r === "object")
+      .map(r => ({
+        match: r.match,
+        type: r.type || "substring",
+        toUrl: r.toUrl || r.to_url,
+        toFile: r.toFile || r.to_file,
+        contentType: r.contentType || r.content_type,
+      }))
+      .filter(r => typeof r.match === "string" && r.match && (typeof r.toUrl === "string" || typeof r.toFile === "string"));
+  }
+
+  matchRewrite(rule, url) {
+    if (!rule || !url) return false;
+    if (rule.type === "regex") {
+      try {
+        return new RegExp(rule.match).test(url);
+      } catch {
+        return false;
+      }
+    }
+    return String(url).includes(rule.match);
+  }
+
+  readCacheFile(filePath) {
+    const abs = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
+    if (this._fileCache.has(abs)) return this._fileCache.get(abs);
+    try {
+      const buf = fs.readFileSync(abs);
+      this._fileCache.set(abs, buf);
+      return buf;
+    } catch {
+      return null;
+    }
   }
 
   /** 计算要拦截的资源类型（兼容旧字段 blockFonts/blockMedia） */
@@ -274,9 +335,32 @@ export default class PuppeteerRenderer extends Renderer {
       page = await this.browser.newPage();
 
       const blockTypes = this.getBlockResourceTypes(d);
-      if (blockTypes.length > 0) {
+      const rewriteRules = this.getResourceRewriteRules(d);
+      if (blockTypes.length > 0 || rewriteRules.length > 0) {
         await page.setRequestInterception(true);
-        page.on("request", (request) => {
+        page.on("request", async (request) => {
+          const reqUrl = request.url();
+          // 先处理 URL 重写（优先级高于 block），用于离线/内网部署的字体、图标等
+          for (const rule of rewriteRules) {
+            if (!this.matchRewrite(rule, reqUrl)) continue;
+            try {
+              if (rule.toUrl) {
+                return await request.continue({ url: rule.toUrl });
+              }
+              if (rule.toFile) {
+                const buf = this.readCacheFile(rule.toFile);
+                if (buf) {
+                  return await request.respond({
+                    status: 200,
+                    contentType: rule.contentType || this.guessContentType(rule.toFile),
+                    body: buf,
+                  });
+                }
+              }
+            } catch (e) {
+              BotUtil.makeLog("debug", `[${name}] rewrite failed: ${e?.message || e}`, "PuppeteerRenderer");
+            }
+          }
           const resourceType = request.resourceType();
           if (blockTypes.includes(resourceType)) request.abort();
           else request.continue();

@@ -44,7 +44,7 @@ export default class XiaomiMiMoLLMConfig extends ConfigBase {
             type: 'string',
             label: '模型',
             description: '用于文本对话的模型名称，例如 mimo-1.5、mimo-v2-flash',
-            default: 'mimo-1.5',
+            default: 'mimo-v2-flash',
             component: 'Input'
           },
           temperature: {
@@ -98,14 +98,6 @@ export default class XiaomiMiMoLLMConfig extends ConfigBase {
             itemType: 'string',
             default: [],
             component: 'Tags'
-          },
-          thinkingType: {
-            type: 'string',
-            label: '思维链模式',
-            description: '控制是否启用思维链（thinking.type），默认 disabled',
-            enum: ['enabled', 'disabled'],
-            default: 'disabled',
-            component: 'Select'
           },
           response_format: {
             type: 'string',

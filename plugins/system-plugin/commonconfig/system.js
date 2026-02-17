@@ -1832,10 +1832,8 @@ export default class SystemConfig extends ConfigBase {
         name: 'renderer',
         displayName: '渲染器配置',
         description: 'Puppeteer/Playwright 配置（data/server_bots/{port}/renderers/{type}/config.yaml）',
-        filePath: (c) => {
-          const port = getPort(c);
-          return port ? `data/server_bots/${port}/renderers/placeholder/config.yaml` : null;
-        },
+        // 多文件配置由 multiFile.getFilePath/getDefaultFilePath 决定，避免使用 placeholder 路径造成困惑
+        filePath: '',
         fileType: 'yaml',
         multiFile: {
           keys: ['puppeteer', 'playwright'],
@@ -1863,6 +1861,13 @@ export default class SystemConfig extends ConfigBase {
                   enum: ['new', 'old', 'false'],
                   default: 'new',
                   component: 'Select'
+                },
+                ignoreHTTPSErrors: {
+                  type: 'boolean',
+                  label: '忽略HTTPS证书错误',
+                  description: '用于解决部分服务器证书链/代理导致的资源加载失败',
+                  default: false,
+                  component: 'Switch'
                 },
                 chromiumPath: {
                   type: 'string',
@@ -1934,6 +1939,102 @@ export default class SystemConfig extends ConfigBase {
                       component: 'InputNumber'
                     }
                   }
+                },
+                waitUntil: {
+                  type: 'string',
+                  label: '页面等待策略',
+                  description: '截图前等待策略：domcontentloaded/load/networkidle0/networkidle2（不同引擎支持略有差异）',
+                  enum: ['domcontentloaded', 'load', 'networkidle0', 'networkidle2'],
+                  default: 'domcontentloaded',
+                  component: 'Select'
+                },
+                waitImages: {
+                  type: 'boolean',
+                  label: '等待图片加载',
+                  default: true,
+                  component: 'Switch'
+                },
+                imageWaitTimeout: {
+                  type: 'number',
+                  label: '图片等待超时(ms)',
+                  min: 0,
+                  default: 800,
+                  component: 'InputNumber'
+                },
+                waitFonts: {
+                  type: 'boolean',
+                  label: '等待字体加载',
+                  description: '等待 document.fonts.ready（本地/在线 @font-face 更稳定）',
+                  default: true,
+                  component: 'Switch'
+                },
+                fontWaitTimeout: {
+                  type: 'number',
+                  label: '字体等待超时(ms)',
+                  min: 0,
+                  default: 800,
+                  component: 'InputNumber'
+                },
+                imgType: {
+                  type: 'string',
+                  label: '输出格式',
+                  enum: ['jpeg', 'png'],
+                  default: 'jpeg',
+                  component: 'Select'
+                },
+                quality: {
+                  type: 'number',
+                  label: 'JPEG质量',
+                  description: '仅在输出为 jpeg 时生效',
+                  min: 0,
+                  max: 100,
+                  default: 85,
+                  component: 'InputNumber'
+                },
+                omitBackground: {
+                  type: 'boolean',
+                  label: '透明背景',
+                  description: '仅 png 透明背景有效；部分页面可能出现边缘锯齿',
+                  default: false,
+                  component: 'Switch'
+                },
+                blockResourceTypes: {
+                  type: 'array',
+                  label: '拦截资源类型',
+                  description: '默认仅拦截 media；不建议拦截 font（会导致字体回退）',
+                  itemType: 'string',
+                  enum: ['media', 'font', 'image', 'stylesheet', 'script', 'xhr', 'fetch', 'document', 'other'],
+                  default: ['media'],
+                  component: 'MultiSelect'
+                },
+                delayBeforeScreenshotUrl: {
+                  type: 'number',
+                  label: 'URL整页截图额外等待(ms)',
+                  min: 0,
+                  default: 1500,
+                  component: 'InputNumber'
+                },
+                delayBeforeScreenshotFile: {
+                  type: 'number',
+                  label: '本地HTML整页截图额外等待(ms)',
+                  min: 0,
+                  default: 0,
+                  component: 'InputNumber'
+                },
+                resourceRewrite: {
+                  type: 'array',
+                  label: '资源重写规则',
+                  description: '将在线资源URL重写为本地文件或新URL（常用于服务器无外网时的字体/图标）',
+                  component: 'ArrayForm',
+                  itemType: 'object',
+                  default: [],
+                  fields: {
+                    match: { type: 'string', label: '匹配内容', description: 'substring: 包含即匹配；regex: 正则表达式', component: 'Input', default: '' },
+                    type: { type: 'string', label: '匹配方式', enum: ['substring', 'regex'], default: 'substring', component: 'Select' },
+                    toUrl: { type: 'string', label: '重写到URL', description: '可选：将请求直接转发到另一个URL', component: 'Input', default: '' },
+                    toFile: { type: 'string', label: '重写到本地文件', description: '可选：返回本地文件内容（相对路径以项目根目录为准）', component: 'Input', default: '' },
+                    contentType: { type: 'string', label: 'Content-Type', description: '可选：例如 font/woff2、font/ttf', component: 'Input', default: '' }
+                  }
                 }
               }
             },
@@ -1955,6 +2056,13 @@ export default class SystemConfig extends ConfigBase {
                   type: 'boolean',
                   label: '无头模式',
                   default: true,
+                  component: 'Switch'
+                },
+                ignoreHTTPSErrors: {
+                  type: 'boolean',
+                  label: '忽略HTTPS证书错误',
+                  description: '用于解决部分服务器证书链/代理导致的资源加载失败',
+                  default: false,
                   component: 'Switch'
                 },
                 chromiumPath: {
@@ -2049,6 +2157,47 @@ export default class SystemConfig extends ConfigBase {
                       default: 1,
                       component: 'InputNumber'
                     }
+                  }
+                },
+                waitUntil: {
+                  type: 'string',
+                  label: '页面等待策略',
+                  description: '截图前等待策略：domcontentloaded/load/networkidle（Playwright）',
+                  enum: ['domcontentloaded', 'load', 'networkidle'],
+                  default: 'domcontentloaded',
+                  component: 'Select'
+                },
+                waitImages: { type: 'boolean', label: '等待图片加载', default: true, component: 'Switch' },
+                imageWaitTimeout: { type: 'number', label: '图片等待超时(ms)', min: 0, default: 800, component: 'InputNumber' },
+                waitFonts: { type: 'boolean', label: '等待字体加载', description: '等待 document.fonts.ready（本地/在线 @font-face 更稳定）', default: true, component: 'Switch' },
+                fontWaitTimeout: { type: 'number', label: '字体等待超时(ms)', min: 0, default: 800, component: 'InputNumber' },
+                imgType: { type: 'string', label: '输出格式', enum: ['jpeg', 'png'], default: 'jpeg', component: 'Select' },
+                quality: { type: 'number', label: 'JPEG质量', description: '仅在输出为 jpeg 时生效', min: 0, max: 100, default: 85, component: 'InputNumber' },
+                omitBackground: { type: 'boolean', label: '透明背景', description: '仅 png 透明背景有效；部分页面可能出现边缘锯齿', default: false, component: 'Switch' },
+                blockResourceTypes: {
+                  type: 'array',
+                  label: '拦截资源类型',
+                  description: '默认仅拦截 media；不建议拦截 font（会导致字体回退）',
+                  itemType: 'string',
+                  enum: ['media', 'font', 'image', 'stylesheet', 'script', 'xhr', 'fetch', 'document', 'other'],
+                  default: ['media'],
+                  component: 'MultiSelect'
+                },
+                delayBeforeScreenshotUrl: { type: 'number', label: 'URL整页截图额外等待(ms)', min: 0, default: 1500, component: 'InputNumber' },
+                delayBeforeScreenshotFile: { type: 'number', label: '本地HTML整页截图额外等待(ms)', min: 0, default: 0, component: 'InputNumber' },
+                resourceRewrite: {
+                  type: 'array',
+                  label: '资源重写规则',
+                  description: '将在线资源URL重写为本地文件或新URL（常用于服务器无外网时的字体/图标）',
+                  component: 'ArrayForm',
+                  itemType: 'object',
+                  default: [],
+                  fields: {
+                    match: { type: 'string', label: '匹配内容', description: 'substring: 包含即匹配；regex: 正则表达式', component: 'Input', default: '' },
+                    type: { type: 'string', label: '匹配方式', enum: ['substring', 'regex'], default: 'substring', component: 'Select' },
+                    toUrl: { type: 'string', label: '重写到URL', description: '可选：将请求直接转发到另一个URL', component: 'Input', default: '' },
+                    toFile: { type: 'string', label: '重写到本地文件', description: '可选：返回本地文件内容（相对路径以项目根目录为准）', component: 'Input', default: '' },
+                    contentType: { type: 'string', label: 'Content-Type', description: '可选：例如 font/woff2、font/ttf', component: 'Input', default: '' }
                   }
                 },
                 contextOptions: {
