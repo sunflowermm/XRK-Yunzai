@@ -49,6 +49,55 @@ export default class PuppeteerRenderer extends Renderer {
     // 不在此处注册 SIGINT/SIGTERM，由 lib/config/loader.js 统一处理；进程退出时 exit 事件会触发 cleanup
   }
 
+  /** 将 cfg 默认值与调用参数合并，保持 data 优先级最高 */
+  normalizeScreenshotData(data = {}) {
+    const rendererCfg = cfg.renderer?.puppeteer || {};
+    const viewport = rendererCfg.viewport || {};
+    return {
+      width: viewport.width ?? 1280,
+      height: viewport.height ?? 720,
+      deviceScaleFactor: viewport.deviceScaleFactor ?? 1,
+
+      // 页面加载/等待策略
+      waitUntil: rendererCfg.waitUntil ?? "domcontentloaded",
+      imageWaitTimeout: rendererCfg.imageWaitTimeout ?? 800,
+      fontWaitTimeout: rendererCfg.fontWaitTimeout ?? 800,
+      waitImages: rendererCfg.waitImages ?? true,
+      waitFonts: rendererCfg.waitFonts ?? true,
+
+      // 输出
+      imgType: rendererCfg.imgType ?? "jpeg",
+      quality: rendererCfg.quality ?? 85,
+      omitBackground: rendererCfg.omitBackground ?? false,
+
+      // 资源拦截（默认仅拦截 media，不拦截 font）
+      blockResourceTypes: rendererCfg.blockResourceTypes ?? ["media"],
+
+      // 其它
+      delayBeforeScreenshot: rendererCfg.delayBeforeScreenshot,
+      delayBeforeScreenshotUrl: rendererCfg.delayBeforeScreenshotUrl,
+      delayBeforeScreenshotFile: rendererCfg.delayBeforeScreenshotFile,
+      pageGotoParams: rendererCfg.pageGotoParams,
+
+      ...data,
+    };
+  }
+
+  /** 计算要拦截的资源类型（兼容旧字段 blockFonts/blockMedia） */
+  getBlockResourceTypes(d) {
+    const rendererCfg = cfg.renderer?.puppeteer || {};
+    let types = Array.isArray(d.blockResourceTypes)
+      ? d.blockResourceTypes
+      : (Array.isArray(rendererCfg.blockResourceTypes) ? rendererCfg.blockResourceTypes : ["media"]);
+
+    // 兼容旧字段
+    if (d.blockFonts === true && !types.includes("font")) types = [...types, "font"];
+    if (d.blockMedia === false) types = types.filter(t => t !== "media");
+
+    // 去重 + 过滤非字符串
+    return Array.from(new Set(types.filter(t => typeof t === "string" && t)));
+  }
+
   async getMac() {
     try {
       for (const ifaces of Object.values(os.networkInterfaces())) {
@@ -178,6 +227,7 @@ export default class PuppeteerRenderer extends Renderer {
   }
 
   async screenshot(name, data = {}) {
+    const d = this.normalizeScreenshotData(data);
     const isUserTriggered = data.priority === true || data.userTriggered === true;
     if (isUserTriggered) {
       while (this.shotingUser.length >= 1) {
@@ -197,16 +247,16 @@ export default class PuppeteerRenderer extends Renderer {
       return false;
     }
 
-    const useUrl = data.url && /^https?:\/\//i.test(String(data.url));
-    const pageHeight = data.multiPageHeight ?? 4000;
+    const useUrl = d.url && /^https?:\/\//i.test(String(d.url));
+    const pageHeight = d.multiPageHeight ?? 4000;
     let savePath = null;
     let directFilePath = null;
     if (!useUrl) {
-      const tpl = data.tplFile;
+      const tpl = d.tplFile;
       if (typeof tpl === "string" && path.isAbsolute(tpl) && fs.existsSync(tpl)) {
         directFilePath = path.resolve(tpl);
       } else {
-        savePath = this.dealTpl(name, data);
+        savePath = this.dealTpl(name, d);
         if (!savePath) return false;
       }
     }
@@ -223,19 +273,19 @@ export default class PuppeteerRenderer extends Renderer {
     try {
       page = await this.browser.newPage();
 
-      await page.setRequestInterception(true);
-      page.on('request', (request) => {
-        const resourceType = request.resourceType();
-        if (['font', 'media'].includes(resourceType)) {
-          request.abort();
-        } else {
-          request.continue();
-        }
-      });
+      const blockTypes = this.getBlockResourceTypes(d);
+      if (blockTypes.length > 0) {
+        await page.setRequestInterception(true);
+        page.on("request", (request) => {
+          const resourceType = request.resourceType();
+          if (blockTypes.includes(resourceType)) request.abort();
+          else request.continue();
+        });
+      }
 
-      const viewportWidth = data.width ?? 1280;
-      const viewportHeight = data.height ?? 720;
-      const deviceScaleFactor = data.deviceScaleFactor ?? 1;
+      const viewportWidth = d.width;
+      const viewportHeight = d.height;
+      const deviceScaleFactor = d.deviceScaleFactor;
       await page.setViewport({
         width: viewportWidth,
         height: viewportHeight,
@@ -243,39 +293,59 @@ export default class PuppeteerRenderer extends Renderer {
       });
 
       const pageGotoParams = Object.assign(
-        { timeout: this.puppeteerTimeout, waitUntil: data.waitUntil || "domcontentloaded" },
-        data.pageGotoParams || {}
+        { timeout: this.puppeteerTimeout, waitUntil: d.waitUntil || "domcontentloaded" },
+        d.pageGotoParams || {}
       );
 
-      const loadUrl = useUrl ? data.url : toFileUrl(filePath);
+      const loadUrl = useUrl ? d.url : toFileUrl(filePath);
       await page.goto(loadUrl, pageGotoParams);
 
-      const imageWait = data.imageWaitTimeout ?? 800;
-      await page.evaluate((ms) => new Promise(resolve => {
-        const timeout = setTimeout(resolve, ms);
-        const images = document.querySelectorAll("img");
-        if (images.length === 0) { clearTimeout(timeout); return resolve(); }
-        let loaded = 0;
-        const done = () => { loaded++; if (loaded === images.length) { clearTimeout(timeout); resolve(); } };
-        images.forEach(img => img.complete ? done() : (img.onload = img.onerror = done));
-      }), imageWait);
+      if (d.waitImages !== false) {
+        const imageWait = Number.isFinite(d.imageWaitTimeout) ? d.imageWaitTimeout : 800;
+        if (imageWait > 0) {
+          await page.evaluate((ms) => new Promise(resolve => {
+            const timeout = setTimeout(resolve, ms);
+            const images = Array.from(document.querySelectorAll("img"));
+            if (images.length === 0) { clearTimeout(timeout); return resolve(); }
+            let loaded = 0;
+            const done = () => { loaded++; if (loaded === images.length) { clearTimeout(timeout); resolve(); } };
+            images.forEach(img => img.complete ? done() : (img.onload = img.onerror = done));
+          }), imageWait);
+        }
+      }
 
-      const fullPage = data.fullPage === true || (useUrl && data.fullPage !== false);
+      if (d.waitFonts !== false) {
+        const fontWait = Number.isFinite(d.fontWaitTimeout) ? d.fontWaitTimeout : 800;
+        if (fontWait > 0) {
+          await page.evaluate((ms) => new Promise((resolve) => {
+            // 部分环境 document.fonts 不可用，直接跳过
+            if (!document.fonts || !document.fonts.ready) return resolve();
+            const timeout = setTimeout(resolve, ms);
+            document.fonts.ready
+              .then(() => { clearTimeout(timeout); resolve(); })
+              .catch(() => { clearTimeout(timeout); resolve(); });
+          }), fontWait);
+        }
+      }
+
+      const fullPage = d.fullPage === true || (useUrl && d.fullPage !== false);
+      const imgType = String(d.imgType ?? "jpeg").toLowerCase();
       const screenshotOpts = {
-        type: data.imgType ?? "jpeg",
-        omitBackground: data.omitBackground ?? false,
-        quality: data.quality ?? 85,
-        path: data.path ?? "",
+        type: imgType === "png" ? "png" : "jpeg",
+        omitBackground: d.omitBackground ?? false,
+        quality: d.quality ?? 85,
       };
-      if (data.imgType === "png") delete screenshotOpts.quality;
+      if (screenshotOpts.type === "png") delete screenshotOpts.quality;
+      if (d.path) screenshotOpts.path = d.path;
 
-      const delayMs = fullPage ? (data.delayBeforeScreenshot ?? (useUrl ? 1500 : 0)) : 0;
+      const defaultDelay = useUrl ? (d.delayBeforeScreenshotUrl ?? 1500) : (d.delayBeforeScreenshotFile ?? 0);
+      const delayMs = fullPage ? (d.delayBeforeScreenshot ?? defaultDelay) : 0;
       if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
 
       if (fullPage) {
         let buf = toBuffer(await page.screenshot({ ...screenshotOpts, fullPage: true }));
-        const cropTop = data.cropTopPercent;
-        const cropBottom = data.cropBottomPercent;
+        const cropTop = d.cropTopPercent;
+        const cropBottom = d.cropBottomPercent;
         if (buf && ((typeof cropTop === "number" && cropTop > 0 && cropTop < 1) || (typeof cropBottom === "number" && cropBottom > 0 && cropBottom < 1))) {
           const cropped = await cropTopAndBottom(buf, cropTop || 0, cropBottom || 0);
           if (cropped) buf = cropped;
@@ -283,16 +353,22 @@ export default class PuppeteerRenderer extends Renderer {
         if (buf) ret.push(buf);
         this.renderNum++;
         if (ret[0]) BotUtil.makeLog("info", `[${name}][${this.renderNum}] fullPage ${(ret[0].length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PuppeteerRenderer");
-      } else if (data.clip && typeof data.clip === "object" && ["x", "y", "width", "height"].every(k => Number.isFinite(data.clip[k]))) {
-        const buf = toBuffer(await page.screenshot({ ...screenshotOpts, clip: data.clip }));
+      } else if (d.clip && typeof d.clip === "object" && ["x", "y", "width", "height"].every(k => Number.isFinite(d.clip[k]))) {
+        const buf = toBuffer(await page.screenshot({ ...screenshotOpts, clip: d.clip }));
         if (buf) ret.push(buf);
         this.renderNum++;
         if (ret.length) BotUtil.makeLog("info", `[${name}][${this.renderNum}] clip ${Date.now() - start}ms`, "PuppeteerRenderer");
       } else {
         const body = (await page.$("#container")) || (await page.$("body"));
+        if (!body) throw new Error("No body element found");
         const boundingBox = await body.boundingBox();
-        let num = data.multiPage ? Math.ceil(boundingBox.height / pageHeight) || 1 : 1;
-        if (data.multiPage) screenshotOpts.type = "jpeg";
+        if (!boundingBox) {
+          const buf = toBuffer(await page.screenshot({ ...screenshotOpts, fullPage: false }));
+          if (buf) ret.push(buf);
+          this.renderNum++;
+        } else {
+          let num = d.multiPage ? Math.ceil(boundingBox.height / pageHeight) || 1 : 1;
+          if (d.multiPage) screenshotOpts.type = "jpeg";
         if (num === 1) {
           const buf = toBuffer(await body.screenshot(screenshotOpts));
           if (buf) ret.push(buf);
@@ -313,13 +389,14 @@ export default class PuppeteerRenderer extends Renderer {
           }
           BotUtil.makeLog("info", `[${name}] multiPage ${num} ${Date.now() - start}ms`, "PuppeteerRenderer");
         }
+        }
       }
     } catch (error) {
       BotUtil.makeLog("error", `[${name}] Screenshot failed: ${error.message}`, "PuppeteerRenderer");
       ret = [];
     } finally {
       if (page) {
-        page.removeAllListeners('request');
+        page.removeAllListeners("request");
         await page.close().catch(() => {});
       }
       if (isUserTriggered) this.shotingUser = this.shotingUser.filter(i => i !== name);
