@@ -350,7 +350,12 @@ export default class ChatStream extends AIStream {
         // ⚠️ 重要：检查是否已发送过表情包
         if (this._hasSentEmotionThisTurn) {
           BotUtil.makeLog('debug', `[ChatStream] emotion 工具调用被跳过（本轮已发送过表情包） emotionType=${t}`, 'ChatStream');
-          return { success: false, error: '本轮对话已发送过表情包，一次聊天最好只发一次表情包' };
+          return {
+            success: false,
+            // 给模型更明确的“别重试+下一步”，避免反复 tool_calls 刷屏
+            error:
+              '本轮对话已发送过一次表情包（emotion）。请勿再次调用 emotion（重试无效）。直接继续正文承接并尽快收尾：最多再说 1-2 句即可。'
+          };
         }
         
         const image = this.getRandomEmotionImage(t);
@@ -1694,6 +1699,7 @@ ${lastRepliesBlock}
 - 工具执行后会返回「已发送：…」或「已发送（第x条）：…」，这些内容即你**本轮已发给用户的消息**，会记入聊天记录。
 - **reply/emotion/at 与正文是同一条回复**：用户会按顺序看到「工具发的内容 → 正文」。因此工具发完后，你的下一条（reply 或正文）必须**承接上一条**：同一话题、语气连贯，不要另起话题，不要重复已发。例如：emotion 已发「喵～主人夸我啦！」→ 正文应简短承接（如「嘿嘿～」）或留空，而不是再问「主人是在夸我吗？」（与已发割裂）。
 - 查询类工具（车票、天气等）的返回结果也是当前轮的上下文。下一条回复必须与之连贯，不得插入与主题无关的表情/图片。
+- **工具失败不要重试**：若工具返回 success=false 或提示“重试无效/请勿再次调用”，则**禁止**在同一轮里重复调用同一工具（尤其是 emotion/reply/poke/at）。应接受失败结果，改用正文继续回答并**立刻见好就收**。
 
 ## Task
 用纯文本回复用户（禁止 Markdown），可调用工具。**防刷屏：默认只发 1 条消息，能用 2~3 句话讲清就立刻收尾**；除非确有必要（例如必须先发工具结果再承接），不要把一句话拆成多条发送。poke/at/emotion 等必须通过工具调用，不可在正文或 reply 的 content 里写工具名或参数。
