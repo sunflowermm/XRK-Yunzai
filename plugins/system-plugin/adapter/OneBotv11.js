@@ -26,7 +26,8 @@ Bot.adapter.push(
       const cache = Promise.withResolvers()
       this.echo.set(echo, cache)
       const timeout = setTimeout(() => {
-        cache.reject(Bot.makeError("请求超时", request, { timeout: this.timeout }))
+        // 超时属于可预期网络错误：不使用 Bot.makeError 的默认 error 日志，避免刷屏
+        cache.reject(Bot.makeError("请求超时", request, { timeout: this.timeout, silent: true, logLevel: 'debug' }))
         // 超时错误使用 debug 级别，减少日志噪音
         Bot.makeLog("debug", `API调用超时（已静默）: ${action}`, data.self_id)
         this.echo.delete(echo)
