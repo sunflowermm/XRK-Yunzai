@@ -160,18 +160,12 @@ export default class PlaywrightRenderer extends Renderer {
     }
   }
 
-  /** 计算要拦截的资源类型（兼容旧字段 blockFonts/blockMedia） */
+  /** 计算要拦截的资源类型 */
   getBlockResourceTypes(d) {
     const rendererCfg = cfg.renderer?.playwright || {};
-    let types = Array.isArray(d.blockResourceTypes)
+    const types = Array.isArray(d.blockResourceTypes)
       ? d.blockResourceTypes
       : (Array.isArray(rendererCfg.blockResourceTypes) ? rendererCfg.blockResourceTypes : ["media"]);
-
-    // 兼容旧字段
-    if (d.blockFonts === true && !types.includes("font")) types = [...types, "font"];
-    if (d.blockMedia === false) types = types.filter(t => t !== "media");
-
-    // 去重 + 过滤非字符串
     return Array.from(new Set(types.filter(t => typeof t === "string" && t)));
   }
 

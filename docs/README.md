@@ -2,6 +2,8 @@
 
 本目录为框架底层与开发参考文档，与主 [README](../README.md)、[USER_GUIDE](../USER_GUIDE.md) 配合使用。
 
+**文档结构约定**：根目录为概览与基类指南，`reference/` 为 API 与规范手册，`overview/` 为可视化导航。配置与工厂等专题独立成篇，与代码结构（如 `lib/commonconfig` 仅从插件加载、工作流仅从 `plugins/<名>/stream` 加载）保持一致。
+
 ---
 
 ## 文档一览

@@ -84,9 +84,10 @@
 
 ## 配置文件存放与加载
 
-| 优先级 | 目录 | key 格式 |
-|--------|------|----------|
-| 高 | `plugins/<插件名>/commonconfig/*.js` | `插件名_文件名` |
-| 低 | `config/commonconfig/*.js` | `文件名` |
+| 目录 | key 格式 | 说明 |
+|------|----------|------|
+| `plugins/<插件名>/commonconfig/*.js` | `插件名_文件名`（system-plugin 的 system.js 特殊映射为 `system`） | ConfigLoader 仅扫描各插件下 commonconfig 目录，不加载项目根下旧目录。 |
 
-同名时插件配置优先覆盖。须导出 `default`（类或对象）。
+须导出 `default`（类或对象）。  
+**实现**：`ConfigLoader`（`lib/commonconfig/loader.js`）在 `load()` 时扫描上述目录，`watch()` 仅对已加载目录做热重载。  
+**设计说明**：配置与插件绑定，便于按插件热重载与权限隔离；键名带插件前缀避免跨插件同名冲突。

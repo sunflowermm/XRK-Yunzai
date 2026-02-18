@@ -139,6 +139,7 @@ XRK-Yunzai/
 ├── plugins/
 │   └── <插件名>/
 │       ├── adapter/       # 协议适配器（如 system-plugin 内 OneBotv11、stdin）
+│       ├── commonconfig/  # 公共配置（ConfigLoader 仅从此目录加载，键名 插件名_文件名）
 │       ├── http/          # REST/WS/SSE
 │       ├── stream/        # AI 工作流 (chat/device/…)
 │       ├── events/        # 消息/系统事件
@@ -146,8 +147,7 @@ XRK-Yunzai/
 │
 ├── config/
 │   ├── default_config/*.yaml   # 默认模板
-│   ├── cmd/tools.yaml
-│   └── commonconfig/           # 公共配置加载
+│   └── cmd/tools.yaml
 │
 ├── data/                  # 字体 / 渲染输出 / 登录数据
 ├── docs/                  # 开发文档 & 参考

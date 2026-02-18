@@ -41,8 +41,8 @@ export default class MyWorkflow extends AIStream {
 ### 3. aistream / LLM 提供商配置（中）
 
 配置来源包括：
-- `cfg.aistream`：AI工作流通用配置（`config/default_config/aistream.yaml`）
-- `cfg.getLLMConfig(provider)`：特定LLM提供商配置（如 `config/commonconfig/openai_llm.js`）
+- `cfg.aistream`：AI 工作流通用配置（`config/default_config/aistream.yaml`）
+- `cfg.getLLMConfig(provider)`：特定 LLM 提供商配置（来自插件 CommonConfig，如 `plugins/system-plugin/commonconfig/openai_llm.js`）
 
 ```yaml
 # config/default_config/aistream.yaml
@@ -52,10 +52,10 @@ aistream:
   max_tokens: 2000
 ```
 
-或通过 CommonConfig 系统：
+或通过 CommonConfig 系统（配置类放在插件目录，由 ConfigLoader 扫描加载）：
 
 ```javascript
-// config/commonconfig/openai_llm.js
+// plugins/<插件名>/commonconfig/openai_llm.js
 export default class OpenAILLMConfig extends ConfigBase {
   constructor() {
     super({

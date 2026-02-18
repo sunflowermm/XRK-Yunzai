@@ -69,7 +69,7 @@ return await client.chat(messages, apiConfig);
 
 ## 配置集成
 
-配置来源：`plugins/*/commonconfig/*_llm.js`、`config/commonconfig/*.js`、`config/default_config/*.yaml`。详见 [CONFIG_PRIORITY.md](./CONFIG_PRIORITY.md)、[COMMONCONFIG_BASE.md](./COMMONCONFIG_BASE.md)。
+配置来源：`plugins/*/commonconfig/*_llm.js`（CommonConfig 仅从插件目录加载）、`config/default_config/*.yaml`。详见 [CONFIG_PRIORITY.md](./CONFIG_PRIORITY.md)、[COMMONCONFIG_BASE.md](./COMMONCONFIG_BASE.md)。
 
 ---
 

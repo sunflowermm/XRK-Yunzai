@@ -151,7 +151,7 @@ plugins/system-plugin/
 
 ### 3.6 通用配置（commonconfig）
 
-- **ConfigManager**（ConfigLoader）扫描：项目根下 **config/commonconfig**（若存在）、以及各插件目录 **plugins/&lt;插件名&gt;/commonconfig/** 下的 `.js` 文件；加载后通过 **配置管理 API**（`http/config.js`，路由前缀 `/api/config/:name/`）暴露读写。
+- **ConfigManager**（ConfigLoader）仅扫描各插件目录 **plugins/&lt;插件名&gt;/commonconfig/** 下的 `.js` 文件；加载后通过 **配置管理 API**（`http/config.js`，路由前缀 `/api/config/:name/`）暴露读写。
 - **system.js**：系统级子配置（bot、other、server、device、aistream 等），对应 `data/server_bots/{port}/` 或 `config/default_config/` 下各 yaml；loader 对 system-plugin 的 system 做特殊映射，**键名为 `system`**。
 - **ai_config.js**：AI 助手配置，对应 **data/ai/config.yaml**，**键名为 `system-plugin_ai_config`**（插件名_文件名）。用户可通过 `GET /api/config/system-plugin_ai_config/read`、`POST /api/config/system-plugin_ai_config/write` 等接口或前端配置页编辑，与 `plugin/ai.js` 读取的为同一文件。
 - 其余为 LLM/ASR/TTS 等工厂配置（OpenAI、Volc、小蜜、Gemini 等），被 aistream 等引用。
