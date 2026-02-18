@@ -200,7 +200,7 @@ export default class ChatStream extends AIStream {
     });
 
     this.registerMCPTool('reply', {
-      description: '发送文本到当前会话（立即发出），支持文本协议：|分隔多句、[开心]表情、[CQ:at,qq=QQ号]@人、[回复:消息ID]引用回复。需要引用回复某条消息、或需要与工具操作（如搜索/查票）配合时使用。直接输出文本时无需调用此工具。',
+      description: '发送文本到当前会话（立即发出），支持文本协议：|分隔多句、[开心]表情、[CQ:at,qq=QQ号]@人、[回复:消息ID]引用回复。需要引用回复某条消息、或需要与工具操作（如搜索/查票）配合时使用。直接输出文本时无需调用此工具。调用成功后返回「已成功发送」即表示用户已收到，禁止再次调用本工具发送相同或相似内容。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -227,7 +227,12 @@ export default class ChatStream extends AIStream {
           if (filteredContent !== content) {
             BotUtil.makeLog('debug', `[ChatStream] reply 工具过滤Markdown beforeLen=${content.length} afterLen=${filteredContent.length}`, 'ChatStream');
           }
-          
+          // 底层防护：本轮已发过相同或相似内容则不再发送，避免重复刷屏
+          const replyContents = this._getEffectiveReplyContentsThisTurn();
+          if (replyContents.length > 0 && this._shouldSkipBodyAsRedundant(filteredContent, replyContents)) {
+            BotUtil.makeLog('debug', `[ChatStream] reply 工具跳过重复发送 contentLen=${filteredContent.length}`, 'ChatStream');
+            return { success: true, raw: '本轮已发送过相同或相似内容，本次未重复发送。请直接结束本轮，勿再调用 reply。' };
+          }
           // ⚠️ 使用统一的文本协议处理和发送方法
           const { totalSent, allSentContent } = await this._processAndSendTextProtocol(e, filteredContent, {
             messageId: args.messageId,
@@ -235,16 +240,13 @@ export default class ChatStream extends AIStream {
             updateReplyContents: true
           });
           
-          const preview = allSentContent.join('|');
-          // 日志输出完整内容
-          BotUtil.makeLog('debug', `[ChatStream] reply 已发送 ${totalSent}条消息 contentLen=${content.length} content=${content} preview=${preview}`, 'ChatStream');
-          // 返回给AI的结果可以截断（避免工具返回过长）
-          const MAX_RETURN_PREVIEW_LENGTH = 500;
-          const returnPreview = preview.length > MAX_RETURN_PREVIEW_LENGTH
-            ? preview.slice(0, MAX_RETURN_PREVIEW_LENGTH) + '…'
-            : preview;
-          const n = this._replyCountThisTurn || 0;
-          return { success: true, raw: `已发送（本轮第${n - totalSent + 1}-${n}条，共${totalSent}条；下一条请与之连贯；见好就收：如已足够回答用户就别再追加多条消息/复述/消息内容内核别重复）。若已满足用户需求：建议直接结束本轮（优先不再调用其它工具，也无需再输出正文）：${returnPreview}` };
+          // 返回完整已发内容，不截断，避免 AI 误以为未发完而重复调用 reply
+          const lines = allSentContent.map((c, i) => `${i + 1}. ${c}`).join('\n');
+          BotUtil.makeLog('debug', `[ChatStream] reply 已发送 ${totalSent}条消息 contentLen=${content.length} content=${content} preview=${allSentContent.join('|')}`, 'ChatStream');
+          return {
+            success: true,
+            raw: `【reply 已成功】已成功发送以下内容（共${totalSent}条），用户已收到。请勿再次调用 reply 发送相同或相似内容，如m直接结束本轮。\n\n已发内容：\n${lines}`
+          };
         });
       },
       enabled: true
@@ -1682,7 +1684,7 @@ export default class ChatStream extends AIStream {
       return `${i + 1}. ${truncated}`;
     }).join('\n');
     const lastRepliesBlock = lastRepliesForPrompt
-      ? `\n【上一轮已发送内容】\n${lastRepliesForPrompt}\n→ 不要重复：若与上面高度相似，禁止原样再发；可简短回应或换说法。同一轮内不要重复发送相同或近似内容。`
+      ? `\n【上一轮你已发送】\n${lastRepliesForPrompt}\n→ 本轮勿再发与上面相同或近似的内容。`
       : '';
     
     // 日志输出完整内容
@@ -1700,28 +1702,20 @@ ${persona}${masterTrustBlock}
 ${lastRepliesBlock}
 
 ## Context（必读）
-- **QQ 号是区分不同人的唯一标识（核心规则）**：
-  - 聊天记录中每条消息的格式为「昵称(QQ号)」，QQ号是唯一标识。
-  - **同名但QQ不同就是不同人**：即使昵称相同（如都叫"李诗雅"），只要QQ号不同，就是完全不同的两个人。必须以QQ号区分身份，不能仅凭昵称判断。
-  - 消息中的 @、查询成员、戳一戳、at 工具等均以 QQ 号为准，请以 QQ 号分辨不同用户，避免歧义。
-- 工具执行后会返回「已发送：…」或「已发送（第x条）：…」，这些内容即你**本轮已发给用户的消息**，会记入聊天记录。
-- **reply/emotion/at 与正文是同一条回复**：用户会按顺序看到「工具发的内容 → 正文」。因此工具发完后，你的下一条（reply 或正文）必须**承接上一条**：同一话题、语气连贯，不要另起话题，不要重复已发。例如：emotion 已发「喵～主人夸我啦！」→ 正文应简短承接（如「嘿嘿～」）或留空，而不是再问「主人是在夸我吗？」（与已发割裂）。
-- 查询类工具（车票、天气等）的返回结果也是当前轮的上下文。下一条回复必须与之连贯，不得插入与主题无关的表情/图片。
-- **工具失败优先不重试**：若工具返回 success=false，或返回文本包含“重试无效/请勿再次调用/已跳过”，说明本轮继续同参重试大概率无效。此时**优先**接受结果，换策略用正文继续回答并**尽快收尾**；如确有必要再次调用，必须**改变参数/目标**且最多再试 1 次。
-- **已完成就停止**：若你已经通过工具（reply/emotion/at/poke 等）把用户需要的内容发出（工具提示“已发送/已跳过”），本轮通常就已经完成；**优先直接结束**（不再追加工具、不再补一段重复正文），除非用户明确要求继续。
-
+- **QQ 号是区分不同人的唯一标识**：聊天记录格式为「昵称(QQ号)」。同名但 QQ 不同即不同人，以 QQ 号为准。@、at、戳一戳等均用 QQ 号。
+- **reply 工具返回「【reply 已成功】」即表示消息已发出且用户已收到**。此时**禁止再次调用 reply** 发送相同或相似内容（包括换说法、缩写、摘抄部分），**直接结束本轮**（不再输出正文、不再调用任何工具）。工具返回的「已发内容」列表即本轮已发送的完整内容，不要重复发送。
+- **emotion/at 与正文**：工具发完后，若还需一句话承接，正文可简短承接（如「嘿嘿～」）或留空；不要另起话题，不要重复已发内容。
+- **查询类工具**（车票、天气等）返回后，下一条回复与之连贯，不插入无关表情/图片。
+- **工具失败不重试**：工具返回 success=false 或含「请勿再次调用/已跳过」时，不再同参重试，换策略用正文收尾或直接结束。
+- **一旦 reply/emotion/at/poke 已把用户需要的内容发出**，本轮即完成，直接结束，除非用户明确要求继续。
 ## Task
-用纯文本回复用户（禁止 Markdown），可调用工具。**防刷屏：默认只发 1 条消息，能用 2~3 句话讲清就立刻收尾**；除非确有必要（例如必须先发工具结果再承接），不要把一句话拆成多条发送。poke/at/emotion 等必须通过工具调用，不可在正文或 reply 的 content 里写工具名或参数。
+用纯文本回复用户（禁止 Markdown），可调用工具。防刷屏：默认 1 条消息、2~3 句话收尾；确需多句时再用 reply 分条。poke/at/emotion 须通过工具调用，不可在正文或 reply 的 content 里写工具名或参数。
 
-## 输出风格（防刷屏，必守）
-- **普通聊天**：优先 1 条消息内完成，**2~3 句为宜**，不拓展到长篇科普；用户没要求时不要列清单/分点长写。
-- **调用工具后**：只做结论性承接与下一步建议，**最多 5 句**；不要逐条复述工具返回的原文，必要时只摘最关键的 1~3 个要点。
-- **见好就收**：答案足够就停，不要追加“顺便再讲讲…”；除非用户明确要求，不要追问多轮澄清。
-
-## 正文与 reply（防重复，必守）
-- **正文 = 最后一次 reply**：正文就是本轮你发给用户的「最后一条」消息，和 reply 工具发出的每条消息是同一类东西；用户看到的顺序是：reply 第1条、第2条、…、最后一条。最后一条要么由 reply 发出，要么由正文发出，二者只会有其一。因此**正文不能是前面任一条 reply 的重复或换说法**。
-- **每条内容都必须不同**：同一轮内，每条 reply 的内容相互不能重复、不能近似（不能换一种说法说同一件事）。若你已经用 reply 发过「新年快乐喵～」和「要吃饺子还是汤圆？」，正文就**只能留空**或发一句与前面完全无关的极短收尾（如「喵～」），**不能再发**「主人新年快乐」「饺子还是汤圆」等任何与已发意思重合的句子。
-- **操作习惯**：除非需要工具（at/poke/emotion/emojiReaction/reply）或需要先发一条承接语再补充，否则**尽量不要在一轮里发多条 reply**；能用 1 条正文讲完就不要拆分。正文只在你**还有且仅有一条**从未说过的内容时使用，否则正文留空。
+## 输出与防重复
+- 普通聊天：1 条消息、2~3 句完成；用户未要求时不长篇列点。
+- **reply 返回「已成功发送」后**：禁止再次调用 reply；禁止在正文中重复或换说法发送相同内容；直接结束本轮。
+- 同一轮内：多条 reply 内容不得相同或近似；正文不得与任一条已发 reply 意思重合。
+- 能用 1 条正文讲完就不拆成多条 reply；正文仅用于尚未说过的、且仅此一句的内容，否则正文留空。
 
 ## 文本协议（正文中可用）
 分句：尽量用 |/｜ 拆分；若确需分开发送，最多拆成少量几句并各自简短。表情：[开心]/[惊讶]/[伤心]/[大笑]/[害怕]/[生气]（一轮最多一次）。引用：[回复:消息ID] 或 [CQ:reply,id=消息ID]。@人：[CQ:at,qq=QQ号]。识图标记：[图片内容:描述]（用户不可见）。
@@ -1730,18 +1724,19 @@ ${lastRepliesBlock}
 reply/at/emotion/emojiReaction/poke：须通过接口调用。emotion 一轮最多一次；表情包放在整段回复末尾，不要插在连贯多条（如查票结果→中转建议）中间。查询工具：getGroupInfo、getGroupMembers、getMemberInfo、getFriendList、getFriendInfo、getAtAllRemain、getBanList、getMessageImages、recognizeImage。识图：用户发图标为 [含图片]；多模态时用 [图片内容:描述] 标记；历史无描述时可 getMessageImages→recognizeImage→[图片内容:xxx]。群管：mute/unmute、muteAll/unmuteAll、setCard、setGroupName、setAdmin/unsetAdmin、setTitle、kick、setEssence/removeEssence、announce、recall、setGroupTodo（需权限）。
 
 ## 禁止
-- 禁止 Markdown（粗体、标题、链接、代码块等）。
+- 禁止 Markdown。
 - 禁止在正文或 reply 的 content 中写 "poke 123"、"at 123"、"emotion 开心" 等。
-- 禁止正文与任一条已发的 reply 意思相同或近似（换说法也算重复）。
+- **禁止在 reply 返回「已成功发送」后再次调用 reply 发送相同或相似内容。**
+- 禁止正文与已发 reply 意思相同或近似。
 - 禁止同一轮内多条 reply 内容相同或近似。
-- 禁止在连贯多条回复中间插入与主题无关的表情/图片。
+- 禁止在连贯回复中间插入与主题无关的表情/图片。
 
 ## 示例
-✅ 用户说戳一戳我 → 调用 poke 工具 → 正文只输出「好的，戳一下你～」。
-✅ emotion 发「喵～主人夸我啦！」→ 正文承接「嘿嘿～」或留空，不要另起话题。
-✅ reply 发「新年快乐喵～」再发「要吃饺子还是汤圆？」→ 正文留空或只发「喵～」。
-❌ reply 已发「新年快乐喵～」和「要吃饺子还是汤圆？…」后，正文又输出「喵～主人新年快乐！要吃饺子还是汤圆？…」。
-❌ emotion 已发「喵～主人夸我啦！」后，正文又问「主人是在夸我吗？」（与已发割裂）。`;
+✅ 调用 reply 发送天气结果 → 工具返回「【reply 已成功】已成功发送…」→ 直接结束，不再调用 reply，不输出正文。
+✅ 用户说戳一戳我 → 调用 poke → 正文「好的，戳一下你～」。
+✅ emotion 发「喵～主人夸我啦！」→ 正文「嘿嘿～」或留空。
+❌ reply 已成功发送天气后，再次调用 reply 发送相同或缩略的天气内容。
+❌ reply 已发多条后，正文又复述已发内容。`;
     BotUtil.makeLog('debug', `[ChatStream] buildSystemPrompt 完成 len=${prompt.length} botRole=${botRole} isMaster=${isMaster}`, 'ChatStream');
     return prompt;
   }
