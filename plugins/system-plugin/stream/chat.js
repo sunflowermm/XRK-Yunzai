@@ -107,6 +107,18 @@ export default class ChatStream extends AIStream {
     }
   }
 
+  /**
+   * 查询类工具统一返回格式：明确「已获取」+「请根据 data 回复、无需再次调用」，避免 AI 循环调用
+   * @param {string} description - 如「群扩展信息」「群成员列表」
+   * @param {*} data - 查询结果，会序列化后附在 raw 中（过长会截断）
+   */
+  _queryToolRaw(description, data) {
+    const MAX_DATA_LEN = 4000;
+    const dataStr = data != null ? (typeof data === 'string' ? data : JSON.stringify(data)) : '{}';
+    const truncated = dataStr.length > MAX_DATA_LEN ? dataStr.slice(0, MAX_DATA_LEN) + '\n...[已截断]' : dataStr;
+    return `已获取${description}。请根据下方 data 回复用户，无需再次调用本工具。\n\ndata:\n${truncated}`;
+  }
+
   registerAllFunctions() {
     this.registerMCPTool('at', {
       description: '@群成员并可选附带一句话。在群聊中@指定用户，可只发 at 或 at+文本（如 @某人 你好）。仅群聊可用。',
@@ -142,8 +154,8 @@ export default class ChatStream extends AIStream {
           // 返回实际发送内容给 AI 作为上下文，避免正文重复发类似内容
           const MAX_RAW_LEN = 400;
           const sentSummary = text
-            ? `已发送（请让下一条内容与之连贯）：@${qq} ${text.length > MAX_RAW_LEN ? text.slice(0, MAX_RAW_LEN) + '…' : text}`
-            : `已@${qq}（请让下一条内容与之连贯）`;
+            ? `已发送@${qq}及文字。无需再调用本工具，下一条请与之连贯。内容：${text.length > MAX_RAW_LEN ? text.slice(0, MAX_RAW_LEN) + '…' : text}`
+            : `已@${qq}。无需再调用本工具，下一条请与之连贯。`;
           return { success: true, raw: sentSummary };
         }, 200);
       },
@@ -181,7 +193,7 @@ export default class ChatStream extends AIStream {
           } else {
             return { success: false, error: '当前环境不支持戳一戳' };
           }
-          return { success: true, raw: '戳一戳已发送' };
+          return { success: true, raw: '戳一戳已执行。无需再调用本工具，可直接用回复或正文收尾。' };
         });
       },
       enabled: true
@@ -313,7 +325,7 @@ export default class ChatStream extends AIStream {
             const result = await group.setEmojiLike(msgId, emojiId, true);
             if (result !== undefined) {
               await BotUtil.sleep(200);
-              return { success: true, raw: '戳一戳已发送' };
+              return { success: true, raw: '表情回应已发送。无需再调用本工具，可直接结束或回复用户。' };
             }
           }
           return { success: false, error: '表情回应功能不可用' };
@@ -415,7 +427,7 @@ export default class ChatStream extends AIStream {
 
         return this._wrapHandler(async () => {
           await member.thumbUp(thumbCount);
-          return { success: true, raw: '戳一戳已发送' };
+          return { success: true, raw: '点赞已执行。无需再调用本工具，可直接回复用户。' };
         });
       },
       enabled: true
@@ -434,7 +446,7 @@ export default class ChatStream extends AIStream {
         
         return this._wrapHandler(async () => {
           await context.e.group.sign();
-          return { success: true, message: '签到成功' };
+          return { success: true, raw: '群签到已执行。无需再调用本工具，可直接回复用户。' };
         });
       },
       enabled: true
@@ -462,7 +474,7 @@ export default class ChatStream extends AIStream {
         
         return this._wrapHandler(async () => {
           await context.e.group.muteMember(args.qq, args.duration);
-          return { success: true, raw: '戳一戳已发送' };
+          return { success: true, raw: '禁言已执行。无需再调用本工具，可直接回复用户。' };
         });
       },
       enabled: true
@@ -486,7 +498,7 @@ export default class ChatStream extends AIStream {
         
         return this._wrapHandler(async () => {
           await context.e.group.muteMember(args.qq, 0);
-          return { success: true, raw: '戳一戳已发送' };
+          return { success: true, raw: '已解除禁言。无需再调用本工具，可直接回复用户。' };
         });
       },
       enabled: true
@@ -505,7 +517,7 @@ export default class ChatStream extends AIStream {
         
         return this._wrapHandler(async () => {
           await context.e.group.muteAll(true);
-          return { success: true, message: '全员禁言成功' };
+          return { success: true, raw: '全员禁言已执行。无需再调用本工具，可直接回复用户。' };
         });
       },
       enabled: true
@@ -524,7 +536,7 @@ export default class ChatStream extends AIStream {
         
         return this._wrapHandler(async () => {
           await context.e.group.muteAll(false);
-          return { success: true, message: '解除全员禁言成功' };
+          return { success: true, raw: '已解除全员禁言。无需再调用本工具，可直接回复用户。' };
         });
       },
       enabled: true
@@ -561,7 +573,7 @@ export default class ChatStream extends AIStream {
 
         return this._wrapHandler(async () => {
           await context.e.group.setCard(targetQq, args.card);
-          return { success: true, raw: '戳一戳已发送' };
+          return { success: true, raw: '群名片已修改。无需再调用本工具，可直接回复用户。' };
         });
       },
       enabled: true
@@ -585,7 +597,7 @@ export default class ChatStream extends AIStream {
         
         return this._wrapHandler(async () => {
           await context.e.group.setName(args.name);
-          return { success: true, raw: '戳一戳已发送' };
+          return { success: true, raw: '群名已修改。无需再调用本工具，可直接回复用户。' };
         });
       },
       enabled: true
@@ -609,7 +621,7 @@ export default class ChatStream extends AIStream {
         
         return this._wrapHandler(async () => {
           await context.e.group.setAdmin(args.qq, true);
-          return { success: true, raw: '戳一戳已发送' };
+          return { success: true, raw: '已设置管理员。无需再调用本工具，可直接回复用户。' };
         });
       },
       enabled: true
@@ -633,7 +645,7 @@ export default class ChatStream extends AIStream {
         
         return this._wrapHandler(async () => {
           await context.e.group.setAdmin(args.qq, false);
-          return { success: true, raw: '戳一戳已发送' };
+          return { success: true, raw: '已取消管理员。无需再调用本工具，可直接回复用户。' };
         });
       },
       enabled: true
@@ -666,7 +678,7 @@ export default class ChatStream extends AIStream {
         
         return this._wrapHandler(async () => {
           await context.e.group.setTitle(args.qq, args.title, args.duration || -1);
-          return { success: true, raw: '戳一戳已发送' };
+          return { success: true, raw: '专属头衔已设置。无需再调用本工具，可直接回复用户。' };
         });
       },
       enabled: true
@@ -695,7 +707,7 @@ export default class ChatStream extends AIStream {
         
         return this._wrapHandler(async () => {
           await context.e.group.kickMember(args.qq, args.reject || false);
-          return { success: true, raw: '戳一戳已发送' };
+          return { success: true, raw: '已踢出该成员。无需再调用本工具，可直接回复用户。' };
         });
       },
       enabled: true
@@ -726,10 +738,10 @@ export default class ChatStream extends AIStream {
           const group = context.e.group;
           if (group && typeof group.setEssenceMessage === 'function') {
             await group.setEssenceMessage(msgId);
-            return { success: true, raw: '戳一戳已发送' };
+            return { success: true, raw: '已设为本群精华消息。无需再调用本工具，可直接回复用户。' };
           } else if (context.e.bot?.sendApi) {
             await context.e.bot.sendApi('set_essence_msg', { message_id: msgId });
-            return { success: true, raw: '戳一戳已发送' };
+            return { success: true, raw: '已设为本群精华消息。无需再调用本工具，可直接回复用户。' };
           }
           return { success: false, error: 'API不可用' };
         });
@@ -762,7 +774,7 @@ export default class ChatStream extends AIStream {
           const group = context.e.group;
           if (group && typeof group.removeEssenceMessage === 'function') {
             await group.removeEssenceMessage(msgId);
-            return { success: true, raw: '戳一戳已发送' };
+            return { success: true, raw: '已取消精华消息。无需再调用本工具，可直接回复用户。' };
           }
           return { success: false, error: 'API不可用' };
         });
@@ -802,14 +814,14 @@ export default class ChatStream extends AIStream {
           if (group && typeof group.sendNotice === 'function') {
             const result = await group.sendNotice(content, image ? { image } : {});
             if (result !== undefined) {
-              return { success: true, raw: '已发送' };
+              return { success: true, raw: '群公告已发送。无需再调用本工具，可直接回复用户。' };
             }
           } else if (context.e.bot?.sendApi) {
             const apiParams = { group_id: context.e.group_id, content };
             if (image) apiParams.image = image;
             const result = await context.e.bot.sendApi('_send_group_notice', apiParams);
             if (result?.status === 'ok') {
-              return { success: true, raw: '已发送' };
+              return { success: true, raw: '群公告已发送。无需再调用本工具，可直接回复用户。' };
             }
           }
           return { success: false, error: 'API不可用' };
@@ -896,7 +908,7 @@ export default class ChatStream extends AIStream {
             } else if (context.e.bot) {
               await context.e.bot.sendApi('delete_msg', { message_id: args.msgId });
             }
-            return { success: true, raw: '戳一戳已发送' };
+            return { success: true, raw: '消息已撤回。无需再调用本工具，可直接回复用户。' };
           });
         } catch (error) {
           return { success: false, error: error.message };
@@ -921,7 +933,7 @@ export default class ChatStream extends AIStream {
           if (group && typeof group.getInfoEx === 'function') {
             const info = await group.getInfoEx();
             BotUtil.makeLog('debug', `获取群信息ex成功: ${JSON.stringify(info)}`, 'ChatStream');
-            const result = { success: true, data: info };
+            const result = { success: true, data: info, raw: this._queryToolRaw('群扩展信息', info) };
             this.recordToolCallResult(context.e, 'getGroupInfoEx', result);
             return result;
           }
@@ -954,7 +966,7 @@ export default class ChatStream extends AIStream {
           if (group && typeof group.getAtAllRemain === 'function') {
             const remain = await group.getAtAllRemain();
             BotUtil.makeLog('debug', `@全体成员剩余次数: ${JSON.stringify(remain)}`, 'ChatStream');
-            const result = { success: true, data: remain };
+            const result = { success: true, data: remain, raw: this._queryToolRaw('@全体剩余次数', remain) };
             this.recordToolCallResult(context.e, 'getAtAllRemain', result);
             return result;
           }
@@ -987,7 +999,7 @@ export default class ChatStream extends AIStream {
           if (group && typeof group.getBanList === 'function') {
             const banList = await group.getBanList();
             BotUtil.makeLog('debug', `群禁言列表: ${JSON.stringify(banList)}`, 'ChatStream');
-            const result = { success: true, data: banList };
+            const result = { success: true, data: banList, raw: this._queryToolRaw('禁言列表', banList) };
             this.recordToolCallResult(context.e, 'getBanList', result);
             return result;
           }
@@ -1039,7 +1051,7 @@ export default class ChatStream extends AIStream {
               message_id: msgId
             });
             if (result !== undefined) {
-              return { success: true, raw: '戳一戳已发送' };
+              return { success: true, raw: '群代办已设置。无需再调用本工具，可直接回复用户。' };
             }
           }
           return { success: false, error: 'API不可用' };
@@ -1077,7 +1089,8 @@ export default class ChatStream extends AIStream {
 
           const result = {
             success: true,
-            data: { friends }
+            data: { friends },
+            raw: this._queryToolRaw('好友列表', { friends })
           };
           this.recordToolCallResult(context.e, 'getFriendList', result);
           return result;
@@ -1151,7 +1164,7 @@ export default class ChatStream extends AIStream {
             return { success: false, error: '当前适配器不支持获取群成员列表' };
           }
 
-          const result = { success: true, data: { members } };
+          const result = { success: true, data: { members }, raw: this._queryToolRaw('群成员列表', { members }) };
           this.recordToolCallResult(context.e, 'getGroupMembers', result);
           return result;
         } catch (error) {
@@ -1191,7 +1204,7 @@ export default class ChatStream extends AIStream {
             return { success: false, error: '无法获取群信息' };
           }
 
-          const result = { success: true, data: info };
+          const result = { success: true, data: info, raw: this._queryToolRaw('群基础信息', info) };
           this.recordToolCallResult(context.e, 'getGroupInfo', result);
           return result;
         } catch (error) {
@@ -1244,7 +1257,7 @@ export default class ChatStream extends AIStream {
             return { success: false, error: '无法获取成员信息' };
           }
 
-          const result = { success: true, data: info };
+          const result = { success: true, data: info, raw: this._queryToolRaw('群成员信息', info) };
           this.recordToolCallResult(context.e, 'getMemberInfo', { ...result, qq });
           return result;
         } catch (error) {
@@ -1291,7 +1304,7 @@ export default class ChatStream extends AIStream {
             return { success: false, error: '无法获取好友信息' };
           }
 
-          const result = { success: true, data: info };
+          const result = { success: true, data: info, raw: this._queryToolRaw('好友信息', info) };
           this.recordToolCallResult(context.e, 'getFriendInfo', { ...result, qq });
           return result;
         } catch (error) {
@@ -1381,17 +1394,14 @@ export default class ChatStream extends AIStream {
             return { success: false, error: '该消息中没有图片' };
           }
 
-          const result = {
-            success: true,
-            data: {
+          const data = {
               messageId: msgId,
               images,
               imageCount: images.length,
               sender: messageData.sender?.nickname || messageData.sender?.user_id || '未知',
               time: messageData.time || Date.now()
-            }
-          };
-          
+            };
+          const result = { success: true, data, raw: this._queryToolRaw('消息图片URL列表', data) };
           this.recordToolCallResult(context.e, 'getMessageImages', result);
           BotUtil.makeLog('debug', `[ChatStream] getMessageImages 成功获取消息图片 messageId=${msgId} imageCount=${images.length} images=${images.join(',')}`, 'ChatStream');
           return result;
@@ -1457,15 +1467,12 @@ export default class ChatStream extends AIStream {
             return { success: false, error: 'AI识别失败，未返回结果' };
           }
 
-          const result = {
-            success: true,
-            data: {
+          const data = {
               imageUrl,
               description: recognitionResult.trim(),
               prompt
-            }
-          };
-
+            };
+          const result = { success: true, data, raw: this._queryToolRaw('图片识别结果', data) };
           this.recordToolCallResult(context.e, 'recognizeImage', result);
           BotUtil.makeLog('debug', `[ChatStream] recognizeImage 成功识别图片 imageUrl=${imageUrl} descriptionLen=${recognitionResult.trim().length}`, 'ChatStream');
           return result;
