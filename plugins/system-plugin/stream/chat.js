@@ -121,7 +121,7 @@ export default class ChatStream extends AIStream {
 
   registerAllFunctions() {
     this.registerMCPTool('at', {
-      description: '@群成员并可选附带一句话。在群聊中@指定用户，可只发 at 或 at+文本（如 @某人 你好）。仅群聊可用。',
+      description: '@群成员并可选附带一句话。在群聊中@指定用户，可只发 at 或 at+文本（如 @某人 你好）。仅群聊可用。调用成功后请勿再次调用本工具发送相同或相似内容。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -144,6 +144,13 @@ export default class ChatStream extends AIStream {
         if (!qq) return { success: false, error: 'QQ号不能为空' };
 
         const text = String(args.text ?? '').trim();
+        // 与 reply 一致：本轮已发过相同或相似 @ 内容则不再发送，防止重复
+        const pendingContent = text ? `@${qq} ${text}` : `@${qq}`;
+        const replyContents = this._getEffectiveReplyContentsThisTurn();
+        if (replyContents.length > 0 && this._shouldSkipBodyAsRedundant(pendingContent, replyContents)) {
+          BotUtil.makeLog('debug', `[ChatStream] at 工具跳过重复发送 qq=${qq} textLen=${text.length}`, 'ChatStream');
+          return { success: true, raw: '本轮已发送过相同或相似的 @ 内容，本次未重复发送。请直接结束本轮，勿再调用 at。' };
+        }
         return this._wrapHandler(async () => {
           const seg = global.segment || segment;
           if (text) {
@@ -151,12 +158,17 @@ export default class ChatStream extends AIStream {
           } else {
             await context.e.reply([seg.at(qq)]);
           }
-          // 返回实际发送内容给 AI 作为上下文，避免正文重复发类似内容
-          const MAX_RAW_LEN = 400;
-          const sentSummary = text
-            ? `已发送@${qq}及文字。无需再调用本工具，下一条请与之连贯。内容：${text.length > MAX_RAW_LEN ? text.slice(0, MAX_RAW_LEN) + '…' : text}`
-            : `已@${qq}。无需再调用本工具，下一条请与之连贯。`;
-          return { success: true, raw: sentSummary };
+          // 计入本轮已发内容，与 reply 一致，供重复判定与正文去重
+          const sentContent = text ? `@${qq} ${text}` : `@${qq}`;
+          if (!Array.isArray(this._replyContentsThisTurn)) this._replyContentsThisTurn = [];
+          this._replyContentsThisTurn.push(sentContent);
+          this._replyCountThisTurn = (this._replyCountThisTurn || 0) + 1;
+          this.recordAIResponse(context.e, sentContent);
+          // 与 reply 一致：返回完整已发内容，不截断，便于 AI 知晓并避免重复调用
+          return {
+            success: true,
+            raw: `【at 已成功】已成功发送以下内容，用户已收到。请勿再次调用 at 发送相同或相似内容，直接结束本轮。\n\n已发内容：\n1. ${sentContent}`
+          };
         }, 200);
       },
       enabled: true
@@ -193,7 +205,7 @@ export default class ChatStream extends AIStream {
           } else {
             return { success: false, error: '当前环境不支持戳一戳' };
           }
-          return { success: true, raw: '戳一戳已执行。无需再调用本工具，可直接用回复或正文收尾。' };
+          return { success: true, raw: '戳一戳已执行。无需再调用本工具，可直接结束或回复用户。' };
         });
       },
       enabled: true
@@ -245,7 +257,7 @@ export default class ChatStream extends AIStream {
           BotUtil.makeLog('debug', `[ChatStream] reply 已发送 ${totalSent}条消息 contentLen=${content.length} content=${content} preview=${allSentContent.join('|')}`, 'ChatStream');
           return {
             success: true,
-            raw: `【reply 已成功】已成功发送以下内容（共${totalSent}条），用户已收到。请勿再次调用 reply 发送相同或相似内容，如m直接结束本轮。\n\n已发内容：\n${lines}`
+            raw: `【reply 已成功】已成功发送以下内容（共${totalSent}条），用户已收到。请勿再次调用 reply 发送相同或相似内容，直接结束本轮。\n\n已发内容：\n${lines}`
           };
         });
       },
@@ -368,8 +380,7 @@ export default class ChatStream extends AIStream {
           // 改为“成功但跳过”，并明确告知不要再调用
           return {
             success: true,
-            raw:
-              '已跳过（本轮已发送过一次表情包，本次 emotion 不再重复发送）。建议不要再重复调用 emotion（同参重试无效），直接用正文承接并尽快收尾：1-2 句即可。'
+            raw: '已跳过（本轮已发过表情包）。请勿再次调用 emotion，直接结束或发 1～2 句正文收尾。'
           };
         }
         
@@ -393,8 +404,10 @@ export default class ChatStream extends AIStream {
           this._replyContentsThisTurn.push(sentText || `[${t}]`);
           this._replyCountThisTurn = (this._replyCountThisTurn || 0) + 1;
           const rawContent = sentText ? sentText : `[表情${t}]`;
-          const raw = `已发送（与正文同属一条回复，请让后续内容与之连贯）：${rawContent}`;
-          return { success: true, raw };
+          return {
+            success: true,
+            raw: `【emotion 已成功】已成功发送以下内容，用户已收到。请勿再次调用 emotion，直接结束或承接正文。\n\n已发内容：\n1. ${rawContent}`
+          };
         });
       },
       enabled: true
