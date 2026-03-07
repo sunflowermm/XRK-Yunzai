@@ -4063,6 +4063,22 @@ body.dark .json-boolean { color: #f87171; }
   font-weight: 500;
 }
 
+/* 手机端：Event / Voice / AI 三个模式按钮一行平分（与 XRK-AGT 对齐） */
+@media (max-width: 768px) {
+  .chat-mode-selector {
+    flex-direction: row;
+    align-items: stretch;
+    padding: 8px 12px;
+    gap: 8px;
+  }
+
+  .chat-mode-btn {
+    flex: 1 1 0;
+    justify-content: center;
+    padding: 10px 0;
+  }
+}
+
 .chat-mode-btn:hover {
   background: var(--bg-hover);
   border-color: var(--primary-200);
