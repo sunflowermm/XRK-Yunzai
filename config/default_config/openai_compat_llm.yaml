@@ -2,7 +2,10 @@
 # OpenAI Chat Completions 协议兼容 LLM 工厂（多运营商）
 ############################################
 # 位置：data/server_bots/{port}/openai_compat_llm.yaml
-# 未配置 providers 时，若存在 baseUrl 等顶层字段，将自动视为单个运营商 openai_compat（向后兼容）
+#
+# 说明：
+# - 仅当 providers 数组中显式配置了运营商时，这些 key 才会出现在 /api/ai/models 的 models 列表中
+# - 未配置 providers（或 providers 为空）时，不会自动生成任何类似 openai_compat 的虚拟运营商
 
 providers: []
 
