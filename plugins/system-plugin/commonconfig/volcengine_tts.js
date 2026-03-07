@@ -2,16 +2,17 @@ import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
 import { getServerConfigPath } from '../../../lib/config/config-constants.js';
 
 /**
- * 火山引擎 TTS 工厂配置管理
- * 管理火山引擎语音合成（TTS）相关配置
- * 支持前端编辑，配置文件位于 data/server_bots/{port}/volcengine_tts.yaml
+ * 火山引擎 TTS 工厂配置（与 XRK-AGT 对齐）
+ *
+ * 配置文件：data/server_bots/{port}/volcengine_tts.yaml
+ * 管理语音合成：WebSocket V3 双向流、App ID/Access Token、资源 ID、音色/编码/采样率、语速音量情感及分片参数。
  */
 export default class VolcengineTTSConfig extends ConfigBase {
   constructor() {
     super({
       name: 'volcengine_tts',
       displayName: '火山引擎 TTS 工厂配置',
-      description: '火山引擎文本转语音（TTS）配置',
+      description: '火山引擎文本转语音（TTS）：连接与认证、音色与 resourceId（需与音色匹配）、编码/采样率、语速/音量/情感、分片时长',
       filePath: (c) => getServerConfigPath(c?._port ?? 8086, 'volcengine_tts'),
       fileType: 'yaml',
       schema: {

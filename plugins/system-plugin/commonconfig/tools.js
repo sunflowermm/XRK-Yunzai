@@ -1,16 +1,17 @@
 import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
 
 /**
- * 工具配置管理
- * 管理终端指令执行相关配置
- * 支持前端编辑，使用相对路径
+ * 终端指令工具配置（与 XRK-AGT 文档精细度对齐）
+ *
+ * 配置文件：config/cmd/tools.yaml
+ * 管理谁可执行终端命令（权限：master/admin/all）、黑名单与禁止命令列表、Shell 模式、超时与输出长度、分块保存与历史条数等。
  */
 export default class ToolsConfig extends ConfigBase {
   constructor() {
     super({
       name: 'tools',
       displayName: '工具配置',
-      description: '终端指令执行相关配置',
+      description: '终端指令执行：权限控制（master/admin/all）、黑名单与禁止命令、Shell/超时/输出长度、分块保存与历史条数',
       filePath: 'config/cmd/tools.yaml',
       fileType: 'yaml',
       schema: {

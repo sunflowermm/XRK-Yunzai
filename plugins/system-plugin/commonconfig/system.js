@@ -5,20 +5,23 @@ import { getServerConfigPath, SERVER_BOTS_DIR } from '../../../lib/config/config
 const paths = { root: process.cwd(), renderers: path.join(process.cwd(), 'renderers') };
 
 /**
- * 系统配置管理
- * 与 lib/config/config.js (cfg) 一致：默认来自 config/default_config，覆盖来自 data/server_bots/{port}。
- * 路径：有端口时 data/server_bots/{port}/{name}.yaml，无端口时 config/default_config/{name}.yaml。
+ * 系统配置管理（与 XRK-AGT 对齐）
  *
- * configFiles 与 config/default_config/*.yaml 一一对应（见 lib/config/config-constants.js SYSTEM_CONFIG_NAMES）。
- * 各子配置的 schema.fields 应覆盖对应 yaml 的全部顶层字段，以便前端与 API 完整编辑；
- * 写入时 ConfigBase 会与已有内容合并，保留 yaml 中未在 schema 声明的字段。
+ * 路径约定（与 lib/config/config-constants.js 一致）：
+ * - 全局配置（不随端口变化）：data/server_bots/{name}.yaml，见 GLOBAL_CONFIG_NAMES（device/monitor/notice/redis/db/aistream）
+ * - 端口级配置（随端口变化）：data/server_bots/{port}/{name}.yaml，见 PORT_CONFIG_NAMES（bot/other/server/group）
+ * - 默认/模板：config/default_config/{name}.yaml，作为合并基准
+ *
+ * getConfigPath(name) 返回 (cfg) => getServerConfigPath(cfg?._port, name)，由 config-constants 按全局/端口区分路径。
+ * configFiles 与 config/default_config/*.yaml 及 SYSTEM_CONFIG_NAMES 对应；schema.fields 覆盖 yaml 全部顶层字段；
+ * 写入时 ConfigBase 与已有内容合并，保留未在 schema 声明的字段。
  */
 export default class SystemConfig extends ConfigBase {
   constructor() {
     super({
       name: 'system',
       displayName: '系统配置',
-      description: '系统配置管理（与 default_config 对齐）',
+      description: 'XRK-Yunzai 系统配置管理（日志/HTTP 服务器/设备/监控/工作流与工厂等均拆分为子配置；前端可视化编辑时建议从 bot、server、other 入手）',
       filePath: '',
       fileType: 'yaml'
     });
@@ -31,20 +34,20 @@ export default class SystemConfig extends ConfigBase {
       bot: {
         name: 'bot',
         displayName: 'Bot 配置',
-        description: '日志、浏览器、文件系统等（对应 default_config/bot.yaml）',
+        description: 'Bot 全局行为：日志等级与样式、对象检查、文件监听、上线推送冷却、群成员缓存等；与 default_config/bot.yaml 对应',
         filePath: getConfigPath('bot'),
         fileType: 'yaml',
         schema: {
           fields: {
             debug: { type: 'boolean', label: '调试输出', description: '是否输出调试信息（如错误堆栈）', default: false, component: 'Switch' },
             log_level: { type: 'string', label: '日志等级', description: '全局最低输出级别', enum: ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'mark', 'success', 'tip'], default: 'info', component: 'Select' },
-            log_align: { type: 'string', label: '日志头内容', default: 'XRKYZ', component: 'Input' },
+            log_align: { type: 'string', label: '日志头内容', description: '每条日志行首显示的自定义标识', default: 'XRKYZ', component: 'Input' },
             log_modules: { type: 'object', label: '按模块日志等级', description: '模块名→等级，如 DeviceAPI: debug、PluginsLoader: trace；未列出模块使用 log_level', default: {} },
             log_max_days: { type: 'number', label: '主日志保留天数', min: 1, default: 3, component: 'InputNumber' },
             log_trace_days: { type: 'number', label: 'trace 日志保留天数', min: 1, default: 1, component: 'InputNumber' },
-            log_color: { type: 'string', label: '日志头颜色', enum: ['default', 'scheme1', 'scheme2', 'scheme3', 'scheme4', 'scheme5', 'scheme6', 'scheme7'], default: 'default', component: 'Select' },
-            log_id_length: { type: 'number', label: '日志ID长度', min: 1, max: 64, default: 20, component: 'InputNumber' },
-            log_id_filler: { type: 'string', label: 'ID美化字符', enum: ['.', '·', '─', '•', '═', '»', '→'], default: '.', component: 'Select' },
+            log_color: { type: 'string', label: '日志头颜色', description: '日志行首颜色主题', enum: ['default', 'scheme1', 'scheme2', 'scheme3', 'scheme4', 'scheme5', 'scheme6', 'scheme7'], default: 'default', component: 'Select' },
+            log_id_length: { type: 'number', label: '日志ID长度', description: '日志请求/会话 ID 显示长度（字符数）', min: 1, max: 64, default: 20, component: 'InputNumber' },
+            log_id_filler: { type: 'string', label: 'ID美化字符', description: 'ID 不足长度时用于填充的字符', enum: ['.', '·', '─', '•', '═', '»', '→'], default: '.', component: 'Select' },
             ignore_self: { type: 'boolean', label: '过滤自己的消息', default: true, component: 'Switch' },
             chromium_path: { type: 'string', label: 'Chromium路径', default: '', component: 'Input' },
             puppeteer_ws: { type: 'string', label: 'Puppeteer接口地址', default: '', component: 'Input' },
@@ -53,6 +56,7 @@ export default class SystemConfig extends ConfigBase {
             log_object: {
               type: 'object',
               label: '日志对象检查',
+              description: '控制 logger 输出对象时的深度、颜色、隐藏属性等',
               component: 'SubForm',
               fields: {
                 depth: { type: 'number', label: '检查深度', min: 1, default: 10, component: 'InputNumber' },
@@ -65,11 +69,11 @@ export default class SystemConfig extends ConfigBase {
                 maxStringLength: { type: 'number', label: '最大字符串长度', min: 1, default: 1000, component: 'InputNumber' }
               }
             },
-            file_watch: { type: 'boolean', label: '监听文件变化', default: true, component: 'Switch' },
-            online_msg_exp: { type: 'number', label: '上线推送冷却(秒)', min: 0, default: 86400, component: 'InputNumber' },
-            file_to_url_time: { type: 'number', label: '文件URL有效时间(分钟)', min: 1, default: 60, component: 'InputNumber' },
-            file_to_url_times: { type: 'number', label: '文件URL访问次数', min: 1, default: 5, component: 'InputNumber' },
-            cache_group_member: { type: 'boolean', label: '缓存群成员列表', default: true, component: 'Switch' }
+            file_watch: { type: 'boolean', label: '监听文件变化', description: '是否监听插件/配置等文件变更并热更新', default: true, component: 'Switch' },
+            online_msg_exp: { type: 'number', label: '上线推送冷却(秒)', description: 'Bot 上线后在此时间内不重复推送上线通知', min: 0, default: 86400, component: 'InputNumber' },
+            file_to_url_time: { type: 'number', label: '文件URL有效时间(分钟)', description: '临时文件 URL 的有效时长', min: 1, default: 60, component: 'InputNumber' },
+            file_to_url_times: { type: 'number', label: '文件URL访问次数', description: '同一临时 URL 最大可访问次数', min: 1, default: 5, component: 'InputNumber' },
+            cache_group_member: { type: 'boolean', label: '缓存群成员列表', description: '是否缓存群成员以减少 API 调用', default: true, component: 'Switch' }
           }
         }
       },
@@ -77,23 +81,23 @@ export default class SystemConfig extends ConfigBase {
       other: {
         name: 'other',
         displayName: '其他配置',
-        description: '主人、白名单、黑名单、自动处理、私聊等（对应 default_config/other.yaml）',
+        description: '业务策略：主人 QQ、白名单/黑名单（群与 QQ）、自动同意好友/退群、私聊与频道开关、禁用提示语等；与 default_config/other.yaml 对应',
         filePath: getConfigPath('other'),
         fileType: 'yaml',
         schema: {
           fields: {
             autoFriend: { type: 'number', label: '自动同意加好友', description: '1-同意 0-不处理', enum: [0, 1], default: 1, component: 'Select' },
             autoQuit: { type: 'number', label: '自动退群人数', description: '群人数小于此值自动退出，0则不处理', min: 0, default: 50, component: 'InputNumber' },
-            masterQQ: { type: 'array', label: '主人QQ号', itemType: 'string', default: [], component: 'Tags' },
-            disableGuildMsg: { type: 'boolean', label: '禁用频道消息', default: true, component: 'Switch' },
-            disablePrivate: { type: 'boolean', label: '禁用私聊功能', default: false, component: 'Switch' },
-            disableMsg: { type: 'string', label: '禁用私聊提示', default: '私聊功能已禁用', component: 'Input' },
-            qq: { type: 'number', label: '不发送禁用提示的QQ', description: '不向该QQ发送禁用提示，0表示不启用', min: 0, default: 0, component: 'InputNumber' },
-            disableAdopt: { type: 'array', label: '私聊通行字符串', itemType: 'string', default: ['stoken'], component: 'Tags' },
-            whiteGroup: { type: 'array', label: '白名单群', itemType: 'string', default: [], component: 'Tags' },
-            whiteQQ: { type: 'array', label: '白名单QQ', itemType: 'string', default: [], component: 'Tags' },
-            blackGroup: { type: 'array', label: '黑名单群', itemType: 'string', default: [], component: 'Tags' },
-            blackQQ: { type: 'array', label: '黑名单QQ', itemType: 'string', default: [], component: 'Tags' }
+            masterQQ: { type: 'array', label: '主人QQ号', description: '拥有最高权限的 QQ 号列表，不受私聊/黑名单等限制', itemType: 'string', default: [], component: 'Tags' },
+            disableGuildMsg: { type: 'boolean', label: '禁用频道消息', description: '是否不处理频道消息', default: true, component: 'Switch' },
+            disablePrivate: { type: 'boolean', label: '禁用私聊功能', description: '为 true 时私聊仅接受通行关键词或主人；为 false 时可触发全部指令', default: false, component: 'Switch' },
+            disableMsg: { type: 'string', label: '禁用私聊提示', description: '私聊被禁用时回复给用户的文案', default: '私聊功能已禁用', component: 'Input' },
+            qq: { type: 'number', label: '不发送禁用提示的QQ', description: '该 QQ 触发私聊限制时不发送禁用提示，0 表示不启用', min: 0, default: 0, component: 'InputNumber' },
+            disableAdopt: { type: 'array', label: '私聊通行字符串', description: '消息包含任一字符串时不受私聊禁用限制（如 stoken、抽卡链接）', itemType: 'string', default: ['stoken'], component: 'Tags' },
+            whiteGroup: { type: 'array', label: '白名单群', description: '配置后仅在这些群内响应；为空表示不按群白名单限制', itemType: 'string', default: [], component: 'Tags' },
+            whiteQQ: { type: 'array', label: '白名单QQ', description: '白名单用户不受黑名单与部分限制', itemType: 'string', default: [], component: 'Tags' },
+            blackGroup: { type: 'array', label: '黑名单群', description: '在这些群内不响应', itemType: 'string', default: [], component: 'Tags' },
+            blackQQ: { type: 'array', label: '黑名单QQ', description: '黑名单用户消息不响应', itemType: 'string', default: [], component: 'Tags' }
           }
         }
       },
@@ -101,7 +105,7 @@ export default class SystemConfig extends ConfigBase {
       server: {
         name: 'server',
         displayName: '服务器配置',
-        description: 'HTTP/HTTPS服务器、反向代理、SSL证书等配置',
+        description: 'HTTP/HTTPS 监听、反向代理与多域名、SSL、认证、限速、静态资源、CORS、健康检查等；与 default_config/server.yaml 对应',
         filePath: getConfigPath('server'),
         fileType: 'yaml',
         schema: {
@@ -968,18 +972,18 @@ export default class SystemConfig extends ConfigBase {
       device: {
         name: 'device',
         displayName: '设备管理配置',
-        description: '设备管理核心参数（对应 default_config/device.yaml）',
+        description: '设备接入与通信：心跳间隔/超时、单实例最大设备数、每设备日志与数据条数上限、命令超时与批量发送；与 default_config/device.yaml 对应（全局配置，不随端口变化）',
         filePath: getConfigPath('device'),
         fileType: 'yaml',
         schema: {
           fields: {
-            heartbeat_interval: { type: 'number', label: '心跳发送间隔(秒)', min: 1, default: 30, component: 'InputNumber' },
-            heartbeat_timeout: { type: 'number', label: '心跳超时(秒)', min: 1, default: 120, component: 'InputNumber' },
-            max_devices: { type: 'number', label: '最大设备数', min: 1, default: 100, component: 'InputNumber' },
-            max_logs_per_device: { type: 'number', label: '每设备最大日志条数', min: 1, default: 100, component: 'InputNumber' },
-            max_data_per_device: { type: 'number', label: '每设备最大数据条数', min: 1, default: 50, component: 'InputNumber' },
-            command_timeout: { type: 'number', label: '命令超时(毫秒)', min: 100, default: 5000, component: 'InputNumber' },
-            batch_size: { type: 'number', label: '批量发送数量', min: 1, default: 100, component: 'InputNumber' }
+            heartbeat_interval: { type: 'number', label: '心跳发送间隔(秒)', description: '设备向服务端发送心跳的间隔，用于保活与在线状态', min: 1, default: 30, component: 'InputNumber' },
+            heartbeat_timeout: { type: 'number', label: '心跳超时(秒)', description: '超过此时间未收到心跳则视为设备离线', min: 1, default: 120, component: 'InputNumber' },
+            max_devices: { type: 'number', label: '最大设备数', description: '单实例允许接入的设备数量上限', min: 1, default: 100, component: 'InputNumber' },
+            max_logs_per_device: { type: 'number', label: '每设备最大日志条数', description: '每个设备保留的日志条数上限，超出可淘汰', min: 1, default: 100, component: 'InputNumber' },
+            max_data_per_device: { type: 'number', label: '每设备最大数据条数', description: '每个设备保留的业务数据条数上限', min: 1, default: 50, component: 'InputNumber' },
+            command_timeout: { type: 'number', label: '命令超时(毫秒)', description: '下发给设备的单条命令等待响应的超时时间', min: 100, default: 5000, component: 'InputNumber' },
+            batch_size: { type: 'number', label: '批量发送数量', description: '批量下发命令或数据时每批的最大条数', min: 1, default: 100, component: 'InputNumber' }
           }
         }
       },
@@ -987,7 +991,7 @@ export default class SystemConfig extends ConfigBase {
       group: {
         name: 'group',
         displayName: '群组配置',
-        description: '群聊相关配置',
+        description: '群聊策略：默认冷却时间、仅回复@、机器人别名、功能黑白名单、违禁词与禁言、加群限制等；可为特定群号覆盖默认（键为群号）',
         filePath: getConfigPath('group'),
         fileType: 'yaml',
         schema: {
@@ -1139,7 +1143,7 @@ export default class SystemConfig extends ConfigBase {
       notice: {
         name: 'notice',
         displayName: '通知配置',
-        description: '各种通知服务配置',
+        description: '第三方通知通道：IYUU、Server酱、飞书机器人等 Webhook/Token；用于告警、日志推送等（全局配置，不随端口变化）',
         filePath: getConfigPath('notice'),
         fileType: 'yaml',
         schema: {
@@ -1147,20 +1151,21 @@ export default class SystemConfig extends ConfigBase {
             iyuu: {
               type: 'string',
               label: 'IYUU Token',
-              description: 'IYUU通知服务Token',
+              description: 'IYUU 通知服务的 Token，用于推送下载/站点相关通知',
               default: '',
               component: 'Input'
             },
             sct: {
               type: 'string',
-              label: 'Server酱',
-              description: 'Server酱SendKey',
+              label: 'Server酱 SendKey',
+              description: 'Server酱（方糖）的 SendKey，用于微信推送',
               default: '',
               component: 'Input'
             },
             feishu_webhook: {
               type: 'string',
-              label: '飞书机器人Webhook',
+              label: '飞书机器人 Webhook',
+              description: '飞书群机器人的 Webhook URL，用于推送消息到飞书',
               default: '',
               component: 'Input'
             }
@@ -1171,16 +1176,16 @@ export default class SystemConfig extends ConfigBase {
       redis: {
         name: 'redis',
         displayName: 'Redis 配置',
-        description: 'Redis 连接（对应 default_config/redis.yaml）',
+        description: 'Redis 连接参数：主机、端口、认证、逻辑库索引；用于会话、缓存等（全局配置，不随端口变化）',
         filePath: getConfigPath('redis'),
         fileType: 'yaml',
         schema: {
           fields: {
-            host: { type: 'string', label: 'Redis 地址', default: '127.0.0.1', component: 'Input' },
-            port: { type: 'number', label: 'Redis 端口', min: 1, max: 65535, default: 6379, component: 'InputNumber' },
-            username: { type: 'string', label: '用户名', default: '', component: 'Input' },
-            password: { type: 'string', label: '密码', default: '', component: 'InputPassword' },
-            db: { type: 'number', label: '数据库索引', min: 0, default: 0, component: 'InputNumber' }
+            host: { type: 'string', label: 'Redis 地址', description: 'Redis 实例的主机名或 IP，一般为 127.0.0.1 或容器名', default: '127.0.0.1', component: 'Input' },
+            port: { type: 'number', label: 'Redis 端口', description: 'Redis 监听端口，默认 6379', min: 1, max: 65535, default: 6379, component: 'InputNumber' },
+            username: { type: 'string', label: '用户名', description: 'ACL 或云 Redis 的用户名，单机无认证可留空', default: '', component: 'Input' },
+            password: { type: 'string', label: '密码', description: 'Redis 密码，留空表示无密码；生产环境建议设置', default: '', component: 'InputPassword' },
+            db: { type: 'number', label: '数据库索引', description: '逻辑库序号 0–15，不同值相当于不同命名空间', min: 0, default: 0, component: 'InputNumber' }
           }
         }
       },
@@ -1188,14 +1193,14 @@ export default class SystemConfig extends ConfigBase {
       db: {
         name: 'db',
         displayName: '数据库配置',
-        description: 'Sequelize 配置（对应 default_config/db.yaml）',
+        description: 'Sequelize 连接：dialect（如 sqlite/mysql）、SQLite 文件路径或连接串、是否输出 SQL 日志（全局配置，不随端口变化）',
         filePath: getConfigPath('db'),
         fileType: 'yaml',
         schema: {
           fields: {
-            dialect: { type: 'string', label: '数据库类型', description: 'mysql, postgres, sqlite, db2, mariadb, mssql', default: 'sqlite', component: 'Input' },
-            storage: { type: 'string', label: 'SQLite 文件路径', default: 'data/db/data.db', component: 'Input' },
-            logging: { type: 'boolean', label: '是否输出 SQL 日志', default: false, component: 'Switch' }
+            dialect: { type: 'string', label: '数据库类型', description: '支持：mysql、postgres、sqlite、db2、mariadb、mssql', default: 'sqlite', component: 'Input' },
+            storage: { type: 'string', label: 'SQLite 文件路径', description: 'dialect 为 sqlite 时使用的本地文件路径，相对项目根', default: 'data/db/data.db', component: 'Input' },
+            logging: { type: 'boolean', label: '是否输出 SQL 日志', description: '为 true 时在控制台打印执行的 SQL，便于调试', default: false, component: 'Switch' }
           }
         }
       },
@@ -1203,7 +1208,7 @@ export default class SystemConfig extends ConfigBase {
       aistream: {
         name: 'aistream',
         displayName: '工作流系统配置',
-        description: 'AI工作流系统配置，仅负责选择工厂运营商，详细配置位于各自的工厂配置文件中',
+        description: 'AI 工作流总开关与全局参数；LLM/ASR/TTS 运营商选择与详细配置在 data/server_bots/{port}/*_llm.yaml 等工厂配置中（全局配置，不随端口变化）',
         filePath: getConfigPath('aistream'),
         fileType: 'yaml',
         schema: {
@@ -1211,23 +1216,27 @@ export default class SystemConfig extends ConfigBase {
             enabled: {
               type: 'boolean',
               label: '启用工作流',
+              description: '关闭后将禁用基于 AIStream 的工作流（含 Web 控制台与聊天中的 AI 能力）；其他模块仍可读本配置',
               default: true,
               component: 'Switch'
             },
             streamDir: {
               type: 'string',
-              label: '工作流目录（兼容保留，实际从各插件 stream/ 加载）',
+              label: '工作流目录',
+              description: '兼容保留；实际工作流从各插件的 stream/ 目录加载',
               default: 'plugins/stream',
               component: 'Input'
             },
             global: {
               type: 'object',
               label: '全局设置',
+              description: '工作流引擎的全局超时、并发与调试开关',
               component: 'SubForm',
               fields: {
                 maxTimeout: {
                   type: 'number',
                   label: '最大执行超时（毫秒）',
+                  description: '单条工作流运行超过此时长将中止',
                   min: 1000,
                   default: 30000,
                   component: 'InputNumber'
@@ -1235,12 +1244,14 @@ export default class SystemConfig extends ConfigBase {
                 debug: {
                   type: 'boolean',
                   label: '调试日志',
+                  description: '是否输出工作流执行过程的调试日志',
                   default: false,
                   component: 'Switch'
                 },
                 maxConcurrent: {
                   type: 'number',
                   label: '并发执行限制',
+                  description: '同一时刻允许运行的工作流实例数量上限',
                   min: 1,
                   default: 5,
                   component: 'InputNumber'
@@ -1250,6 +1261,7 @@ export default class SystemConfig extends ConfigBase {
             cache: {
               type: 'object',
               label: '缓存设置',
+              description: '工作流结果或中间缓存的 TTL 与条数上限',
               component: 'SubForm',
               fields: {
                 enabled: {
@@ -1260,8 +1272,8 @@ export default class SystemConfig extends ConfigBase {
                 },
                 ttl: {
                   type: 'number',
-                  label: '缓存过期时间',
-                  description: '缓存过期时间（秒）',
+                  label: '缓存过期时间（秒）',
+                  description: '缓存条目过期时间',
                   min: 1,
                   default: 300,
                   component: 'InputNumber'
@@ -1269,6 +1281,7 @@ export default class SystemConfig extends ConfigBase {
                 maxSize: {
                   type: 'number',
                   label: '最大缓存条数',
+                  description: '缓存中最多保留的条目数',
                   min: 1,
                   default: 100,
                   component: 'InputNumber'
@@ -1278,15 +1291,15 @@ export default class SystemConfig extends ConfigBase {
             llm: {
               type: 'object',
               label: 'LLM工厂运营商选择',
-              description: '详细配置位于 data/server_bots/{port}/*_llm.yaml；兼容厂商由 openai_compat_llm.providers 注册，其 key 也可作为 Provider 使用。',
+              description: '详细配置位于 data/server_bots/{port}/*_llm.yaml；兼容厂商由 openai_compat_llm 等 providers 注册，其 key 也可作为 Provider 使用。',
               component: 'SubForm',
               fields: {
                 Provider: {
                   type: 'string',
                   label: 'LLM运营商',
-                  enum: ['gptgod', 'volcengine', 'xiaomimimo', 'openai', 'openai_compat', 'gemini', 'anthropic', 'azure_openai'],
+                  description: '可填写内置 provider（gptgod/volcengine/openai/gemini/...）或兼容工厂中定义的自定义 key',
                   default: 'gptgod',
-                  component: 'Select'
+                  component: 'Input'
                 },
                 timeout: {
                   type: 'number',
@@ -1502,7 +1515,7 @@ export default class SystemConfig extends ConfigBase {
       monitor: {
         name: 'monitor',
         displayName: '系统监控配置',
-        description: '系统监控相关配置，包括浏览器、内存、CPU等资源监控',
+        description: '资源监控与优化：浏览器实例、内存/CPU 阈值、泄漏检测、磁盘与网络优化、严重时自动重启等（全局配置，不随端口变化）',
         filePath: getConfigPath('monitor'),
         fileType: 'yaml',
         schema: {
@@ -1510,13 +1523,14 @@ export default class SystemConfig extends ConfigBase {
             enabled: {
               type: 'boolean',
               label: '监控总开关',
+              description: '关闭后不进行浏览器/内存/CPU 等周期性检查',
               default: true,
               component: 'Switch'
             },
             interval: {
               type: 'number',
-              label: '监控检查间隔',
-              description: '监控检查间隔（毫秒）',
+              label: '监控检查间隔（毫秒）',
+              description: '周期性执行资源检查的间隔',
               min: 1000,
               default: 120000,
               component: 'InputNumber'
@@ -1524,6 +1538,7 @@ export default class SystemConfig extends ConfigBase {
             browser: {
               type: 'object',
               label: '浏览器进程监控',
+              description: 'Puppeteer/Playwright 等浏览器实例的数量与内存阈值，超限时回收旧实例',
               component: 'SubForm',
               fields: {
                 enabled: {
@@ -1535,6 +1550,7 @@ export default class SystemConfig extends ConfigBase {
                 maxInstances: {
                   type: 'number',
                   label: '最大浏览器实例数',
+                  description: '允许同时存在的浏览器实例上限',
                   min: 1,
                   default: 5,
                   component: 'InputNumber'
@@ -1542,7 +1558,7 @@ export default class SystemConfig extends ConfigBase {
                 memoryThreshold: {
                   type: 'number',
                   label: '内存阈值（%）',
-                  description: '内存阈值（%）触发清理',
+                  description: '单实例内存占用超过此比例时触发清理',
                   min: 0,
                   max: 100,
                   default: 90,
@@ -1551,6 +1567,7 @@ export default class SystemConfig extends ConfigBase {
                 reserveNewest: {
                   type: 'boolean',
                   label: '保留最新实例',
+                  description: '清理时是否优先保留最近创建的实例',
                   default: true,
                   component: 'Switch'
                 }
@@ -1559,6 +1576,7 @@ export default class SystemConfig extends ConfigBase {
             memory: {
               type: 'object',
               label: '系统内存监控',
+              description: '系统与 Node 堆内存阈值、GC 间隔、泄漏检测',
               component: 'SubForm',
               fields: {
                 enabled: {
@@ -1629,18 +1647,20 @@ export default class SystemConfig extends ConfigBase {
             },
             cpu: {
               type: 'object',
-              label: 'CPU监控',
+              label: 'CPU 监控',
+              description: 'CPU 使用率超过阈值且持续一定时间后触发告警或优化',
               component: 'SubForm',
               fields: {
                 enabled: {
                   type: 'boolean',
-                  label: '启用CPU监控',
+                  label: '启用 CPU 监控',
                   default: true,
                   component: 'Switch'
                 },
                 threshold: {
                   type: 'number',
-                  label: 'CPU使用率阈值（%）',
+                  label: 'CPU 使用率阈值（%）',
+                  description: '超过此比例视为高负载',
                   min: 0,
                   max: 100,
                   default: 90,
@@ -1648,7 +1668,8 @@ export default class SystemConfig extends ConfigBase {
                 },
                 checkDuration: {
                   type: 'number',
-                  label: 'CPU检查持续时间（毫秒）',
+                  label: 'CPU 检查持续时间（毫秒）',
+                  description: '需持续超过阈值多久才触发',
                   min: 1000,
                   default: 30000,
                   component: 'InputNumber'
@@ -1658,6 +1679,7 @@ export default class SystemConfig extends ConfigBase {
             optimize: {
               type: 'object',
               label: '优化策略',
+              description: '激进清理、资源严重不足时是否自动重启及重启阈值',
               component: 'SubForm',
               fields: {
                 aggressive: {
@@ -1687,6 +1709,7 @@ export default class SystemConfig extends ConfigBase {
             report: {
               type: 'object',
               label: '报告配置',
+              description: '是否定期输出监控汇总及输出间隔',
               component: 'SubForm',
               fields: {
                 enabled: {
@@ -1698,6 +1721,7 @@ export default class SystemConfig extends ConfigBase {
                 interval: {
                   type: 'number',
                   label: '报告间隔（毫秒）',
+                  description: '每隔多久输出一次监控报告',
                   min: 1000,
                   default: 3600000,
                   component: 'InputNumber'
@@ -1707,6 +1731,7 @@ export default class SystemConfig extends ConfigBase {
             disk: {
               type: 'object',
               label: '磁盘优化',
+              description: '临时文件与日志的清理策略及保留时长',
               component: 'SubForm',
               fields: {
                 enabled: {
@@ -1834,7 +1859,7 @@ export default class SystemConfig extends ConfigBase {
       renderer: {
         name: 'renderer',
         displayName: '渲染器配置',
-        description: 'Puppeteer/Playwright 配置（data/server_bots/{port}/renderers/{type}/config.yaml）',
+        description: 'Puppeteer 与 Playwright 截图/渲染参数：无头模式、超时、视口、启动参数等；按端口存储于 data/server_bots/{port}/renderers/{puppeteer|playwright}/config.yaml',
         // 多文件配置由 multiFile.getFilePath/getDefaultFilePath 决定，避免使用 placeholder 路径造成困惑
         filePath: '',
         fileType: 'yaml',

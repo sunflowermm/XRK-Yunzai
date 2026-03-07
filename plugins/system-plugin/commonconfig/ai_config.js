@@ -1,7 +1,8 @@
 /**
- * AI 助手配置（data/ai/config.yaml）
- * 供配置管理 API 与前端编辑使用，与 plugin/ai.js 读取的为同一文件。
- * 注册键名：system-plugin_ai_config（由 loader 按 插件名_文件名 规则生成）。
+ * AI 助手配置（与 XRK-AGT 文档精细度对齐）
+ *
+ * 配置文件：data/ai/config.yaml（与 plugin/ai 读取同一文件）
+ * 注册键：system-plugin_ai_config。控制触发条件（前缀/白名单群与用户）、人设系统提示、随机触发冷却与概率、合并到 chat 的副工作流（如 memory、tools、database）。
  */
 import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
 import path from 'path';
@@ -13,7 +14,7 @@ export default class AIConfig extends ConfigBase {
     super({
       name: 'ai_config',
       displayName: 'AI 助手配置',
-      description: 'XRK-AI 助手的触发条件、人设与合并工作流（data/ai/config.yaml）',
+      description: 'AI 助手触发策略与人设：前缀、白名单群/用户、随机触发冷却与概率、合并工作流列表（memory/tools/database 等）',
       filePath: 'data/ai/config.yaml',
       fileType: 'yaml',
       schema: {

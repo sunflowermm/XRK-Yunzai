@@ -2,22 +2,22 @@ import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
 import { getServerConfigPath } from '../../../lib/config/config-constants.js';
 
 /**
- * OpenAI 官方 LLM 工厂配置管理（文本）
- * 配置文件：data/server_bots/{port}/openai_llm.yaml
+ * OpenAI 官方 LLM 工厂配置（与 XRK-AGT 对齐）
  *
- * 配置使用规范字段：model、maxTokens、topP、presencePenalty、frequencyPenalty 等。
+ * 配置文件：data/server_bots/{port}/openai_llm.yaml
+ * 官方 Chat Completions：baseUrl、apiKey、model、maxTokens、topP、presencePenalty、frequencyPenalty 等；支持 MCP 工具调用与流式。
  */
 export default class OpenAILLMConfig extends ConfigBase {
   constructor() {
     super({
       name: 'openai_llm',
       displayName: 'OpenAI LLM 工厂配置（官方）',
-      description: 'OpenAI Chat Completions 配置（文本），支持 MCP 工具调用',
+      description: 'OpenAI 官方 Chat Completions：API 地址与密钥、模型、生成长度与采样参数；支持工具调用与流式；关闭后不会被选为默认 provider',
       filePath: (c) => getServerConfigPath(c?._port ?? 8086, 'openai_llm'),
       fileType: 'yaml',
       schema: {
         fields: {
-          enabled: { type: 'boolean', label: '启用', default: true, component: 'Switch' },
+          enabled: { type: 'boolean', label: '启用', description: '关闭后不会被选为默认 provider', default: true, component: 'Switch' },
           baseUrl: {
             type: 'string',
             label: 'API 基础地址',
@@ -39,7 +39,7 @@ export default class OpenAILLMConfig extends ConfigBase {
             default: '/chat/completions',
             component: 'Input'
           },
-          model: { type: 'string', label: '模型', default: 'gpt-4', component: 'Input' },
+          model: { type: 'string', label: '模型', description: '如 gpt-4、gpt-4o、gpt-4o-mini', default: 'gpt-4', component: 'Input' },
           temperature: {
             type: 'number',
             label: '温度（temperature）',
@@ -49,7 +49,7 @@ export default class OpenAILLMConfig extends ConfigBase {
             default: 0.7,
             component: 'InputNumber'
           },
-          maxTokens: { type: 'number', label: '最大 Tokens', min: 1, default: 4000, component: 'InputNumber' },
+          maxTokens: { type: 'number', label: '最大 Tokens', description: '单次回答最大 token 数', min: 1, default: 4000, component: 'InputNumber' },
           topP: {
             type: 'number',
             label: 'Top P（top_p）',
@@ -77,7 +77,7 @@ export default class OpenAILLMConfig extends ConfigBase {
             default: 0,
             component: 'InputNumber'
           },
-          timeout: { type: 'number', label: '超时(ms)', min: 1000, default: 60000, component: 'InputNumber' },
+          timeout: { type: 'number', label: '超时(ms)', description: '单次 API 请求超时时间', min: 1000, default: 60000, component: 'InputNumber' },
           enableTools: {
             type: 'boolean',
             label: '启用工具调用（MCP）',
@@ -132,11 +132,12 @@ export default class OpenAILLMConfig extends ConfigBase {
           proxy: {
             type: 'object',
             label: '代理',
+            description: '仅影响本机到 OpenAI 的 HTTP 出口',
             component: 'SubForm',
             fields: {
-              enabled: { type: 'boolean', label: '启用', default: false, component: 'Switch' },
-              http: { type: 'string', label: 'HTTP 代理', default: '', component: 'Input' },
-              https: { type: 'string', label: 'HTTPS 代理', default: '', component: 'Input' }
+              enabled: { type: 'boolean', label: '启用代理', description: '是否使用代理访问 OpenAI', default: false, component: 'Switch' },
+              http: { type: 'string', label: 'HTTP 代理', description: '如 http://127.0.0.1:7890', default: '', component: 'Input' },
+              https: { type: 'string', label: 'HTTPS 代理', description: '如 http://127.0.0.1:7890', default: '', component: 'Input' }
             }
           }
         }

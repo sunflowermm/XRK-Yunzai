@@ -2,16 +2,17 @@ import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
 import { getServerConfigPath } from '../../../lib/config/config-constants.js';
 
 /**
- * 小米 MiMo LLM 工厂配置管理
- * 管理小米 MiMo 大语言模型（仅文本）相关配置
- * 支持前端编辑，配置文件位于 data/server_bots/{port}/xiaomimimo_llm.yaml
+ * 小米 MiMo LLM 工厂配置（与 XRK-AGT 对齐）
+ *
+ * 配置文件：data/server_bots/{port}/xiaomimimo_llm.yaml
+ * 小米 MiMo 大语言模型（OpenAI 兼容 API）：baseUrl、apiKey、model、temperature/maxTokens 等；仅文本，支持 MCP 工具与流式。
  */
 export default class XiaomiMiMoLLMConfig extends ConfigBase {
   constructor() {
     super({
       name: 'xiaomimimo_llm',
       displayName: '小米 MiMo LLM 工厂配置',
-      description: '小米 MiMo 大语言模型配置（仅文本，无识图逻辑）',
+      description: '小米 MiMo 大语言模型（OpenAI 兼容）：API 地址与认证、模型、生成长度与采样参数；关闭后不会被选为默认 provider',
       filePath: (c) => getServerConfigPath(c?._port ?? 8086, 'xiaomimimo_llm'),
       fileType: 'yaml',
       schema: {

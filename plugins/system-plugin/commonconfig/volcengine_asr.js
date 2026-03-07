@@ -2,16 +2,17 @@ import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
 import { getServerConfigPath } from '../../../lib/config/config-constants.js';
 
 /**
- * 火山引擎 ASR 工厂配置管理
- * 管理火山引擎语音识别（ASR）相关配置
- * 支持前端编辑，配置文件位于 data/server_bots/{port}/volcengine_asr.yaml
+ * 火山引擎 ASR 工厂配置（与 XRK-AGT 对齐）
+ *
+ * 配置文件：data/server_bots/{port}/volcengine_asr.yaml
+ * 管理语音识别：WebSocket 地址、App Key/Access Token、资源 ID、ITN/标点/说话人分离、结果类型与缓冲参数等。
  */
 export default class VolcengineASRConfig extends ConfigBase {
   constructor() {
     super({
       name: 'volcengine_asr',
       displayName: '火山引擎 ASR 工厂配置',
-      description: '火山引擎语音转文本（ASR）配置',
+      description: '火山引擎语音转文本（ASR）：连接地址与认证、逆文本标准化/标点/说话人分离、加速文本与持久连接等',
       filePath: (c) => getServerConfigPath(c?._port ?? 8086, 'volcengine_asr'),
       fileType: 'yaml',
       schema: {

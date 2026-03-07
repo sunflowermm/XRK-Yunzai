@@ -2,17 +2,18 @@ import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
 import { getServerConfigPath } from '../../../lib/config/config-constants.js';
 
 /**
- * 火山引擎 LLM 工厂配置管理（文本）
- * 管理火山引擎大语言模型（LLM 文本聊天）相关配置
- * 识图配置已经拆分到 volcengine_vision.yaml / volcengine_vision.js
- * 支持前端编辑，配置文件位于 data/server_bots/{port}/volcengine_llm.yaml
+ * 火山引擎 LLM 工厂配置（与 XRK-AGT 对齐）
+ *
+ * 配置文件：data/server_bots/{port}/volcengine_llm.yaml
+ * 管理豆包大语言模型文本聊天：API 地址、密钥、模型/推理接入点、temperature、maxTokens 等；
+ * 识图能力由豆包多模态接口承担，不在此单独配置。
  */
 export default class VolcengineLLMConfig extends ConfigBase {
   constructor() {
     super({
       name: 'volcengine_llm',
       displayName: '火山引擎 LLM 工厂配置（文本）',
-      description: '火山引擎豆包大语言模型文本聊天配置',
+      description: '火山引擎豆包文本聊天：baseUrl、apiKey、model（模型名或推理接入点 ID）、temperature/maxTokens/topP 等；关闭后不会被选为默认 provider',
       filePath: (c) => getServerConfigPath(c?._port ?? 8086, 'volcengine_llm'),
       fileType: 'yaml',
       schema: {
@@ -164,7 +165,7 @@ export default class VolcengineLLMConfig extends ConfigBase {
             component: 'SubForm',
             default: { enabled: false, url: '' },
             fields: {
-              enabled: { type: 'boolean', label: '启用代理', default: false, component: 'Switch' },
+              enabled: { type: 'boolean', label: '启用代理', description: '是否使用代理访问火山 API', default: false, component: 'Switch' },
               url: { type: 'string', label: '代理地址', description: '如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080', default: '', component: 'Input' }
             }
           }
