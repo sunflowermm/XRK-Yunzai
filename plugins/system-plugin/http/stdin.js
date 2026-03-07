@@ -1,6 +1,6 @@
-import fs from "fs";
 import path from "path";
 import { fileURLToPath } from 'url';
+import { FileUtils } from '../../../lib/utils/file-utils.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -38,8 +38,8 @@ export default {
             bot_id: 'stdin',
             status: 'online',
             uptime: process.uptime(),
-            temp_files: fs.existsSync(tempDir) ? fs.readdirSync(tempDir).length : 0,
-            media_files: fs.existsSync(mediaDir) ? fs.readdirSync(mediaDir).length : 0,
+            temp_files: FileUtils.existsSync(tempDir) ? FileUtils.readDirSync(tempDir).length : 0,
+            media_files: FileUtils.existsSync(mediaDir) ? FileUtils.readDirSync(mediaDir).length : 0,
             base_url: Bot.getServerUrl ? Bot.getServerUrl() : `http://localhost:${Bot.httpPort || 3000}`,
             timestamp: Date.now()
           }

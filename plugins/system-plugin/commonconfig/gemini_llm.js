@@ -1,4 +1,5 @@
 import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
+import { getServerConfigPath } from '../../../lib/config/config-constants.js';
 
 /**
  * Gemini 官方 LLM 工厂配置管理（文本）
@@ -14,10 +15,7 @@ export default class GeminiLLMConfig extends ConfigBase {
       name: 'gemini_llm',
       displayName: 'Gemini LLM 工厂配置（官方）',
       description: 'Google Generative Language API 配置（文本）',
-      filePath: (cfg) => {
-        const port = cfg?._port ?? 8086;
-        return port ? `data/server_bots/${port}/gemini_llm.yaml` : `config/default_config/gemini_llm.yaml`;
-      },
+      filePath: (c) => getServerConfigPath(c?._port ?? 8086, 'gemini_llm'),
       fileType: 'yaml',
       schema: {
         fields: {

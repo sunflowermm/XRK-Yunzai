@@ -1,4 +1,5 @@
 import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
+import { getServerConfigPath } from '../../../lib/config/config-constants.js';
 
 /**
  * 火山引擎 TTS 工厂配置管理
@@ -11,10 +12,7 @@ export default class VolcengineTTSConfig extends ConfigBase {
       name: 'volcengine_tts',
       displayName: '火山引擎 TTS 工厂配置',
       description: '火山引擎文本转语音（TTS）配置',
-      filePath: (cfg) => {
-        const port = cfg?._port ?? 8086;
-        return port ? `data/server_bots/${port}/volcengine_tts.yaml` : `config/default_config/volcengine_tts.yaml`;
-      },
+      filePath: (c) => getServerConfigPath(c?._port ?? 8086, 'volcengine_tts'),
       fileType: 'yaml',
       schema: {
         fields: {

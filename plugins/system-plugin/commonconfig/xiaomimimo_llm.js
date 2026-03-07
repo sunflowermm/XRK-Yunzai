@@ -1,4 +1,5 @@
 import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
+import { getServerConfigPath } from '../../../lib/config/config-constants.js';
 
 /**
  * 小米 MiMo LLM 工厂配置管理
@@ -11,10 +12,7 @@ export default class XiaomiMiMoLLMConfig extends ConfigBase {
       name: 'xiaomimimo_llm',
       displayName: '小米 MiMo LLM 工厂配置',
       description: '小米 MiMo 大语言模型配置（仅文本，无识图逻辑）',
-      filePath: (cfg) => {
-        const port = cfg?._port ?? 8086;
-        return port ? `data/server_bots/${port}/xiaomimimo_llm.yaml` : `config/default_config/xiaomimimo_llm.yaml`;
-      },
+      filePath: (c) => getServerConfigPath(c?._port ?? 8086, 'xiaomimimo_llm'),
       fileType: 'yaml',
       schema: {
         fields: {

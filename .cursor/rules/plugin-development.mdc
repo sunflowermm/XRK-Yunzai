@@ -1,0 +1,23 @@
+---
+description: 插件开发规范
+globs: plugins/**/*.js
+alwaysApply: false
+---
+
+# 插件开发
+
+## 基类与结构
+
+- 继承 `plugin`（`lib/plugins/plugin.js`）
+- 构造函数传入 `{ name, dsc, event, priority, rule }`
+- 消息处理：`async fnc(e)`，通过 `e.reply()` 回复
+
+## 配置与文件
+
+- 使用 `FileUtils.existsSync`、`FileUtils.readFile`、`FileUtils.writeFile`，不用 `fs` 直接操作
+- 需要端口配置时用 `cfg`（`lib/config/config.js`）或 `makeConfig`（`lib/plugins/config.js`）
+
+## 工作流调用
+
+- `this.getStream(name)` 获取工作流
+- `stream.execute(e, question, config)` 执行对话

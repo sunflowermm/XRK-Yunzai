@@ -390,6 +390,13 @@ class App {
     
     themeToggle.addEventListener('click', () => this.toggleTheme());
     
+    const apiKeyForm = $('#apiKeyForm');
+    if (apiKeyForm) {
+      apiKeyForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        this.saveApiKey();
+      });
+    }
     saveApiKeyBtn.addEventListener('click', () => this.saveApiKey());
     apiKey.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {

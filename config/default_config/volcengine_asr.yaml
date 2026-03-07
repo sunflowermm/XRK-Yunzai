@@ -1,0 +1,40 @@
+# ============================================
+# 火山引擎 ASR 配置（随端口变化）
+# ============================================
+# 豆包语音识别（ASR），大模型异步接口。
+# 位置：data/server_bots/{port}/volcengine_asr.yaml
+
+provider: "volcengine"
+enabled: true
+
+wsUrl: "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
+appKey: ""
+accessKey: ""
+resourceId: "volc.bigasr.sauc.duration"
+
+format: "pcm"
+codec: "raw"
+sampleRate: 16000
+bits: 16
+channel: 1
+modelName: "bigmodel"
+
+enableItn: true
+enablePunc: true
+enableDdc: false
+showUtterances: true
+enableAccelerateText: true
+resultType: "full"
+
+accelerateScore: 15
+persistentWs: true
+idleCloseMs: 6000
+endWindowSize: 350
+forceToSpeechTime: 500
+maxAudioBufferSize: 30
+asrFinalTextWaitMs: 1200
+
+wsPingIntervalMs: 30000
+wsPongTimeoutMs: 10000
+wsReconnectDelayMs: 2000
+wsMaxReconnectAttempts: 5

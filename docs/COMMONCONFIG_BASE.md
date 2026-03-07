@@ -82,6 +82,20 @@
 
 遵循 schema 约束即可获得一致的类型、校验与编辑体验。
 
+## 与 XRK-AGT 对齐说明
+
+XRK-Yunzai 的 CommonConfig 与加载器在设计上对齐 **XRK-AGT** 的 `core/system-Core/commonconfig` 与 `src/infrastructure/commonconfig`，便于双端配置与前端 xrk 控制台复用同一套约定。
+
+| 能力 | XRK-AGT | XRK-Yunzai |
+|------|---------|------------|
+| 配置来源 | `paths.getCoreSubDirs('commonconfig')`，即各 **core** 下的 commonconfig 目录 | `plugins/<插件名>/commonconfig`，即各 **插件** 下的 commonconfig 目录 |
+| 键名 | 文件名即 key（如 `openai_llm`） | `插件名_文件名`，system-plugin 的 `system.js` 特例为 `system` |
+| ConfigBase | `#infrastructure/commonconfig/commonconfig.js`，支持动态 filePath、多文件、默认模板回退 | `lib/commonconfig/commonconfig.js`，同样支持动态路径、multiFile、**读时默认模板回退**（`config/default_config/<name>.yaml`） |
+| Loader.getList() | 仅当 `typeof config.getStructure === 'function'` 时入列 | 已对齐：同样仅入列带 getStructure 的配置 |
+| 工厂配置 | LLM/ASR/TTS 等从 `global.cfg[configKey]` 或 CommonConfig 合并；兼容厂商通过 `openai_compat_llm.providers` 等 8 个 compat 工厂注册 | 已对齐：`cfg.getLLMConfig(provider)` 与 `getFactoryConfig(configKey)` 分别服务内置与兼容工厂；兼容厂商通过 `*_compat_llm.yaml` 的 `providers` 数组注册，与 AGT 一致 |
+
+**学习与迁移**：若从 AGT 拷贝或参考 commonconfig 模块，注意将 `#infrastructure/commonconfig/commonconfig.js` 改为 `../../../lib/commonconfig/commonconfig.js`；`filePath` 动态函数中可用 `cfg?._port ?? 8086` 得到端口。Compat 工厂（openai_compat_llm、openai_responses_compat_llm、newapi_compat_llm、cherryin_compat_llm、ollama_compat_llm、gemini_compat_llm、anthropic_compat_llm、azure_openai_compat_llm）均已提供 commonconfig 与 `config/default_config/*.yaml`，schema 使用 `providers` 数组，与 AGT 一致。
+
 ## 配置文件存放与加载
 
 | 目录 | key 格式 | 说明 |
@@ -91,3 +105,18 @@
 须导出 `default`（类或对象）。  
 **实现**：`ConfigLoader`（`lib/commonconfig/loader.js`）在 `load()` 时扫描上述目录，`watch()` 仅对已加载目录做热重载。  
 **设计说明**：配置与插件绑定，便于按插件热重载与权限隔离；键名带插件前缀避免跨插件同名冲突。
+
+### Compat 工厂与系统配置清单（与 AGT 对齐）
+
+| 配置名 | 说明 | default_config |
+|--------|------|----------------|
+| openai_compat_llm | OpenAI Chat 协议兼容（多运营商 providers 数组） | openai_compat_llm.yaml |
+| openai_responses_compat_llm | OpenAI Responses 协议 | openai_responses_compat_llm.yaml |
+| newapi_compat_llm | New API 协议 | newapi_compat_llm.yaml |
+| cherryin_compat_llm | CherryIN 协议 | cherryin_compat_llm.yaml |
+| ollama_compat_llm | Ollama /api/chat 协议 | ollama_compat_llm.yaml |
+| gemini_compat_llm | Gemini Generate Content 协议 | gemini_compat_llm.yaml |
+| anthropic_compat_llm | Anthropic Messages 协议 | anthropic_compat_llm.yaml |
+| azure_openai_compat_llm | Azure OpenAI Chat Completions 协议 | azure_openai_compat_llm.yaml |
+| volcengine_asr | 火山引擎 ASR | volcengine_asr.yaml |
+| volcengine_tts | 火山引擎 TTS | volcengine_tts.yaml |

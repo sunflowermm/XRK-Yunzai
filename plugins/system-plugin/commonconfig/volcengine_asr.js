@@ -1,4 +1,5 @@
 import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
+import { getServerConfigPath } from '../../../lib/config/config-constants.js';
 
 /**
  * 火山引擎 ASR 工厂配置管理
@@ -11,10 +12,7 @@ export default class VolcengineASRConfig extends ConfigBase {
       name: 'volcengine_asr',
       displayName: '火山引擎 ASR 工厂配置',
       description: '火山引擎语音转文本（ASR）配置',
-      filePath: (cfg) => {
-        const port = cfg?._port ?? 8086;
-        return port ? `data/server_bots/${port}/volcengine_asr.yaml` : `config/default_config/volcengine_asr.yaml`;
-      },
+      filePath: (c) => getServerConfigPath(c?._port ?? 8086, 'volcengine_asr'),
       fileType: 'yaml',
       schema: {
         fields: {

@@ -6,6 +6,7 @@ import path from "path";
 import { ulid } from "ulid";
 import crypto from 'crypto';
 import BotUtil from "../../../lib/util.js";
+import { FileUtils } from "../../../lib/utils/file-utils.js";
 
 const tempDir = path.join(process.cwd(), "www", "stdin");
 const mediaDir = path.join(process.cwd(), "www", "media");
@@ -18,8 +19,8 @@ function runTempCleanup() {
   try {
     const now = Date.now();
     for (const dir of [tempDir, mediaDir]) {
-      if (typeof dir !== "string" || !fs.existsSync(dir)) continue;
-      const files = fs.readdirSync(dir);
+      if (typeof dir !== "string" || !FileUtils.existsSync(dir)) continue;
+      const files = FileUtils.readDirSync(dir);
       for (const file of files) {
         const filePath = path.join(dir, file);
         try {
@@ -127,7 +128,7 @@ export class StdinHandler {
         fileName = `${ulid()}.${fileExt}`;
       } else if (typeof filePath === 'string') {
         // 检查文件是否存在
-        if (fs.existsSync(filePath)) {
+        if (FileUtils.existsSync(filePath)) {
           buffer = await fs.promises.readFile(filePath);
           fileName = path.basename(filePath);
           fileExt = path.extname(fileName).slice(1) || 'file';
@@ -359,7 +360,7 @@ export class StdinHandler {
         mimeType = (fileInfo.type && fileInfo.type.mime) || 'application/octet-stream';
         
         // 如果没有获取到buffer，尝试读取本地文件
-        if (!buffer && typeof item.path === "string" && item.path !== "" && fs.existsSync(item.path)) {
+        if (!buffer && typeof item.path === "string" && item.path !== "" && FileUtils.existsSync(item.path)) {
           buffer = await fs.promises.readFile(item.path);
           fileName = fileName || path.basename(item.path);
           fileExt = path.extname(fileName).slice(1) || fileExt;

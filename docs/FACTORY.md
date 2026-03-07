@@ -8,8 +8,8 @@
 
 - **统一接口**：所有 LLM 提供商通过同一套 API 创建与使用。
 - **易扩展**：新提供商只需 `registerProvider(name, factoryFn)`。
-- **配置**：从 `cfg.getLLMConfig(provider)` 读取，支持 CommonConfig/YAML。
-- **动态选择**：运行时通过 `createClient({ provider })` 指定提供商；未传 `provider` 时使用**第一个启用的**提供商（无「默认运营商」配置项）。
+- **配置**：内置提供商从 `cfg.getLLMConfig(provider)` 读取；兼容厂商由配置驱动（如 `openai_compat_llm.providers`）。
+- **动态选择**：运行时通过 `createClient({ provider })` 或 `resolveProvider(input)` 指定；未传时默认来自 **aistream.llm.Provider**（与 XRK-AGT 一致）。
 
 ---
 
@@ -17,20 +17,21 @@
 
 ```
 LLMFactory (静态类)
-├── providers (Map): gptgod / volcengine / openai / gemini / anthropic / azure_openai / openai_compat / xiaomimimo
-└── registerProvider / listProviders / hasProvider / getProviderConfig / getDefaultProvider / createClient
+├── builtinProviders (Map): gptgod / volcengine / xiaomimimo / openai / gemini / anthropic / azure_openai
+├── compatFactories: openai_compat_llm / openai_responses_compat_llm / newapi_compat_llm / cherryin_compat_llm / ollama_compat_llm / gemini_compat_llm / anthropic_compat_llm / azure_openai_compat_llm（配置中 providers[] 注册为独立 key）
+└── registerProvider / listProviders / hasProvider / resolveProvider / getProviderConfig / getDefaultProvider(deprecated) / createClient
 ```
 
 | 提供商 | 说明 |
 |--------|------|
-| `gptgod` | GPTGod，支持识图 |
+| `gptgod` | GPTGod，支持识图（Yunzai 特有） |
 | `volcengine` | 火山引擎豆包 |
 | `xiaomimimo` | 小米 MiMo（仅文本） |
 | `openai` | OpenAI Chat Completions |
 | `gemini` | Google Generative Language |
-| `openai_compat` | OpenAI 兼容，可自定义 baseUrl/认证 |
 | `anthropic` | Claude Messages API |
 | `azure_openai` | Azure OpenAI（deployment + api-version） |
+| 兼容厂商 | 由 `openai_compat_llm.providers` 等配置注册，每项 `key` 作为独立 provider |
 
 ---
 
@@ -38,12 +39,13 @@ LLMFactory (静态类)
 
 | 方法 | 说明 |
 |------|------|
-| `registerProvider(name, factoryFn)` | 注册提供商；factoryFn(config) 返回客户端实例 |
-| `listProviders()` | 返回已注册名称数组 |
-| `hasProvider(name)` | 是否存在该提供商 |
-| `getProviderConfig(provider)` | 从 cfg.getLLMConfig(provider) 取配置，失败返回 {} |
-| `getDefaultProvider()` | 第一个 enabled 的提供商，否则 `'gptgod'` |
-| `createClient(config?)` | 创建客户端。config 可含 provider/baseUrl/apiKey/model/temperature/maxTokens/timeout 等；合并优先级：**传入 config > 配置文件 > 默认值**。提供商不存在时抛错。 |
+| `registerProvider(name, factoryFn)` | 注册内置提供商；factoryFn(config) 返回客户端实例 |
+| `listProviders()` | 内置 + 兼容工厂配置中的 key（如 openai_compat_llm.providers[].key） |
+| `hasProvider(name)` | 是否存在该提供商（内置或兼容） |
+| `resolveProvider(input?, options?)` | 从 input.provider/model/llm/profile/defaultProvider 或 aistream.llm.Provider 解析出最终 provider |
+| `getProviderConfig(provider)` | 内置用 cfg.getLLMConfig；兼容用对应 compat 工厂的 defaults + entry，含 protocol/factoryType/_clientClass |
+| `getDefaultProvider()` | **已废弃**，请用 `resolveProvider({})`；仍保留兼容调用 |
+| `createClient(config?)` | 先 resolveProvider(config)，再创建客户端。合并优先级：**传入 config > 提供商配置**；未指定 provider 时依赖 aistream.llm.Provider。 |
 
 ---
 
@@ -75,7 +77,7 @@ return await client.chat(messages, apiConfig);
 
 ## 最佳实践与常见问题
 
-- **选择**：开发可用 gptgod/openai_compat；生产按需选稳定提供商。
+- **选择**：开发可用 gptgod 或配置 `openai_compat_llm.providers` 中的 key；生产按需选稳定提供商。
 - **配置**：集中用配置文件，敏感信息勿提交版本控制。
 - **错误**：捕获「不支持的LLM提供商」时可回退 `createClient()` 使用默认。
 - **扩展**：客户端需实现 `chat`/`chatStream`，配置字段兼容 baseUrl/apiKey/model 等。
@@ -83,13 +85,22 @@ return await client.chat(messages, apiConfig);
 **Q: 如何切换？** → `createClient({ provider: 'gemini' })`  
 **Q: 如何添加？** → 实现客户端类 + `registerProvider`  
 **Q: 配置从哪读？** → `cfg.getLLMConfig(provider)`，见上配置来源  
-**Q: 默认提供商？** → 无配置项；未传 model/provider 时用第一个启用的，否则兜底 gptgod  
+**Q: 默认提供商？** → 由 `aistream.yaml` 中 `llm.Provider` 决定（默认 `gptgod`）；未配置时 createClient 会抛错提示配置 llm.Provider。  
 
 ---
 
 ## 相关文档
 
 - [WORKFLOW_BASE_CLASS.md](./WORKFLOW_BASE_CLASS.md) - 工作流内使用工厂
-- [COMMONCONFIG_BASE.md](./COMMONCONFIG_BASE.md) - 配置管理
+- [COMMONCONFIG_BASE.md](./COMMONCONFIG_BASE.md) - 配置管理（含与 XRK-AGT 对齐说明）
 - [CORE_OBJECTS.md](./CORE_OBJECTS.md) - cfg 与配置读取
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - 工厂在架构中的位置
+
+### 与 XRK-AGT 工厂对齐说明
+
+- **XRK-Yunzai** 已对齐 AGT：
+  - **兼容性工厂**：通过 `compatFactories`（如 `openai_compat_llm`）从配置的 `providers[]` 注册厂商，`listProviders()` 合并内置与兼容 key。
+  - **resolveProvider**：支持 `input.provider/model/llm/profile/defaultProvider` 及 `aistream.llm.Provider` 解析默认。
+  - **getProviderConfig**：内置用 `cfg.getLLMConfig(provider)`，兼容用工厂 defaults + entry，返回含 `protocol`、`factoryType`、`_clientClass` 的配置。
+  - **createClient**：先 resolveProvider，再按 builtin 或 compat 的 _clientClass 实例化；合并配置时过滤 `undefined`，避免覆盖 provider 默认。
+- 当前已实现与 AGT 一致的 8 个兼容工厂：openai_compat_llm、openai_responses_compat_llm、newapi_compat_llm、cherryin_compat_llm、ollama_compat_llm、gemini_compat_llm、anthropic_compat_llm、azure_openai_compat_llm；配置方式为在对应 `*_compat_llm.yaml` 中配置 `providers` 数组，每项 `key` 作为独立 provider。

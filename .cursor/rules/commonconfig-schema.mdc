@@ -1,0 +1,23 @@
+---
+description: CommonConfig 配置 schema 规范
+globs: "**/commonconfig/**/*.js"
+alwaysApply: false
+---
+
+# CommonConfig Schema
+
+## 结构
+
+- `configFiles`：键为配置名，值为 `{ filePath, schema }`
+- `filePath`：函数 `(cfg) => path` 或字符串，可用 `getServerConfigPath(port, name)`
+- `schema.fields`：字段定义，含 `type`、`label`、`default`、`required`
+
+## 类型
+
+- `string`、`number`、`boolean`、`object`、`array`
+- 对象嵌套：`fields` 子 schema；数组：`itemType`、`itemSchema`
+
+## 工具
+
+- `config-utils.js`：`deepMergeConfig`、`applyDefaults`、`cleanConfigData`、`convertValueType`
+- 使用 `ObjectUtils.isPlainObject`、`ObjectUtils.clone`，不重复实现

@@ -1,4 +1,5 @@
 import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
+import { getServerConfigPath } from '../../../lib/config/config-constants.js';
 
 /**
  * Azure OpenAI 官方 LLM 工厂配置管理（文本）
@@ -10,10 +11,7 @@ export default class AzureOpenAILLMConfig extends ConfigBase {
       name: 'azure_openai_llm',
       displayName: 'Azure OpenAI LLM 工厂配置（官方）',
       description: 'Azure OpenAI Chat Completions 配置（deployment + api-version）',
-      filePath: (cfg) => {
-        const port = cfg?._port ?? 8086;
-        return port ? `data/server_bots/${port}/azure_openai_llm.yaml` : `config/default_config/azure_openai_llm.yaml`;
-      },
+      filePath: (c) => getServerConfigPath(c?._port ?? 8086, 'azure_openai_llm'),
       fileType: 'yaml',
       schema: {
         fields: {

@@ -2,84 +2,16 @@ import cfg from '../../../lib/config/config.js';
 import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
 import { transformMessagesWithVision } from '../../../lib/utils/llm/message-transform.js';
 import { MCPToolAdapter } from '../../../lib/utils/llm/mcp-tool-adapter.js';
+import { parseMultipartData } from '../../../lib/utils/multipart-parser.js';
 import BotUtil from '../../../lib/util.js';
 
 /**
- * 解析 multipart/form-data
+ * POST /api/v3/chat/completions
+ * OpenAI 兼容的对话补全接口：支持流式、多模态、MCP 工具（与 XRK-AGT 对齐）
+ *
+ * 请求体：messages（必填）、model/provider/llm/profile、stream、temperature、max_tokens 等；
+ * 支持 multipart/form-data 图片上传；可选 workflow: { workflows?, streams? } 限定 MCP 工具作用域。
  */
-async function parseMultipartData(req) {
-  return new Promise((resolve, reject) => {
-    const contentType = req.headers['content-type'] || '';
-    const boundaryMatch = contentType.match(/boundary=([^;]+)/);
-    if (!boundaryMatch) {
-      reject(new Error('No boundary found'));
-      return;
-    }
-    const boundary = boundaryMatch[1];
-
-    let data = Buffer.alloc(0);
-    const files = [];
-    const fields = {};
-
-    req.on('data', chunk => {
-      data = Buffer.concat([data, chunk]);
-    });
-
-    req.on('end', () => {
-      try {
-        const parts = data.toString('binary').split(`--${boundary}`);
-        
-        for (const part of parts) {
-          if (!part.trim() || part.trim() === '--') continue;
-          
-          if (part.includes('Content-Disposition: form-data')) {
-            const nameMatch = part.match(/name="([^"]+)"/);
-            const filenameMatch = part.match(/filename="([^"]+)"/);
-            
-            if (filenameMatch) {
-              // 文件字段
-              const filename = filenameMatch[1];
-              const contentTypeMatch = part.match(/Content-Type: ([^\r\n]+)/);
-              const contentType = contentTypeMatch ? contentTypeMatch[1].trim() : 'application/octet-stream';
-              
-              const headerEndIndex = part.indexOf('\r\n\r\n');
-              if (headerEndIndex !== -1) {
-                const fileStart = headerEndIndex + 4;
-                const fileEnd = part.lastIndexOf('\r\n');
-                const fileContent = Buffer.from(part.substring(fileStart, fileEnd), 'binary');
-                
-                files.push({
-                  fieldname: nameMatch ? nameMatch[1] : 'file',
-                  originalname: filename,
-                  mimetype: contentType,
-                  buffer: fileContent,
-                  size: fileContent.length
-                });
-              }
-            } else if (nameMatch) {
-              // 普通字段
-              const fieldName = nameMatch[1];
-              const headerEndIndex = part.indexOf('\r\n\r\n');
-              if (headerEndIndex !== -1) {
-                const fieldStart = headerEndIndex + 4;
-                const fieldEnd = part.lastIndexOf('\r\n');
-                const fieldBuf = Buffer.from(part.substring(fieldStart, fieldEnd), 'binary');
-                fields[fieldName] = fieldBuf.toString('utf8');
-              }
-            }
-          }
-        }
-        
-        resolve({ files, fields });
-      } catch (e) {
-        reject(e);
-      }
-    });
-
-    req.on('error', reject);
-  });
-}
-
 function pickFirst(obj, keys) {
   for (const k of keys) {
     if (obj != null && Object.hasOwn(obj, k) && obj[k] != null) return obj[k];
@@ -125,19 +57,6 @@ function estimateTokens(text) {
   return Math.ceil((text || '').length / 4);
 }
 
-/**
- * POST /api/v3/chat/completions
- * OpenAI 兼容的对话补全接口：支持流式、多模态、MCP 工具。
- *
- * 请求体：messages（必填）、model（provider）、stream、apiKey、temperature、max_tokens 等；
- * 可选 workflow: { workflows?, streams? } 传入 overrides.streams 以限定 MCP 工具作用域。
- *
- * 流式响应（stream=true）：
- * - 每块 data: 为 JSON，含 choices[0].delta.content（文本增量）；
- * - 当 LLM 执行 tool_calls 后，会追加一块含 mcp_tools 的 chunk（{ name, arguments, result }[]），
- *   前端可据此在对话中展示工具卡片。
- * - 结束块含 finish_reason: 'stop' 或 usage，最后一行 data: [DONE]。
- */
 async function handleChatCompletionsV3(req, res, Bot) {
   const contentType = req.headers['content-type'] || '';
   const body = req.body || {};
@@ -219,10 +138,21 @@ async function handleChatCompletionsV3(req, res, Bot) {
   }
 
   const streamFlag = Boolean(pickFirst(body, ['stream']));
-  const bodyModel = (pickFirst(body, ['model']) || '').toString().trim().toLowerCase();
-  const provider = (bodyModel && LLMFactory.hasProvider(bodyModel))
-    ? bodyModel
-    : LLMFactory.getDefaultProvider();
+  const provider = LLMFactory.resolveProvider({
+    model: pickFirst(body, ['model']),
+    provider: pickFirst(body, ['provider']),
+    llm: pickFirst(body, ['llm']),
+    profile: pickFirst(body, ['profile']),
+    defaultProvider: LLMFactory.getDefaultProvider()
+  });
+
+  if (!provider) {
+    return res.status(400).json({
+      success: false,
+      message: '未指定有效的LLM提供商：请检查 aistream 的 llm.Provider 是否已配置，或在请求中传入 model/provider。'
+    });
+  }
+
   const base = LLMFactory.getProviderConfig(provider);
   const llmConfig = { provider, ...base };
   BotUtil.makeLog('debug', `[AI] 运营商=${provider}, stream=${streamFlag}, messages=${messages?.length ?? 0}`, 'HTTP');
@@ -400,10 +330,11 @@ async function handleChatCompletionsV3(req, res, Bot) {
 
 async function handleModels(req, res, Bot) {
   const providers = LLMFactory.listProviders();
+  const defaultProvider = LLMFactory.getDefaultProvider();
   const format = (req.query.format || '').toLowerCase();
 
   if (format === 'openai' || req.path === '/api/v3/models') {
-    const list = providers.length ? providers : [];
+    const list = providers.length ? providers : (defaultProvider ? [defaultProvider] : []);
     const now = Math.floor(Date.now() / 1000);
     return res.json({
       object: 'list',

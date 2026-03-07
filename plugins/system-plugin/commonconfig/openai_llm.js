@@ -1,4 +1,5 @@
 import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
+import { getServerConfigPath } from '../../../lib/config/config-constants.js';
 
 /**
  * OpenAI 官方 LLM 工厂配置管理（文本）
@@ -12,10 +13,7 @@ export default class OpenAILLMConfig extends ConfigBase {
       name: 'openai_llm',
       displayName: 'OpenAI LLM 工厂配置（官方）',
       description: 'OpenAI Chat Completions 配置（文本），支持 MCP 工具调用',
-      filePath: (cfg) => {
-        const port = cfg?._port ?? 8086;
-        return port ? `data/server_bots/${port}/openai_llm.yaml` : `config/default_config/openai_llm.yaml`;
-      },
+      filePath: (c) => getServerConfigPath(c?._port ?? 8086, 'openai_llm'),
       fileType: 'yaml',
       schema: {
         fields: {

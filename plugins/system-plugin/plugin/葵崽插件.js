@@ -1,6 +1,7 @@
-import fs from 'fs'
 import path from 'path'
 import { spawn, execSync, exec } from 'child_process'
+import BotUtil from '../../../lib/util.js'
+import { FileUtils } from '../../../lib/utils/file-utils.js'
 import { promisify } from 'util'
 import common from '../../../lib/common/common.js'
 
@@ -50,8 +51,8 @@ export class example2 extends plugin {
 
   async processRepo(pluginsPath, repo) {
     const repoPath = path.join(pluginsPath, repo.name)
-    if (!fs.existsSync(repoPath)) return await this.cloneRepo(pluginsPath, repo)
-    const isComplete = repo.requiredFiles.every(f => fs.existsSync(path.join(repoPath, f)))
+    if (!FileUtils.existsSync(repoPath)) return await this.cloneRepo(pluginsPath, repo)
+    const isComplete = repo.requiredFiles.every(f => FileUtils.existsSync(path.join(repoPath, f)))
     if (!isComplete) {
       logger.info(`[XRK] ${repo.name} 目录不完整，重新克隆...`)
       await this.removeDirectory(repoPath)
@@ -145,7 +146,7 @@ export class example2 extends plugin {
 
   async removeDirectory(dirPath) {
     try {
-      if (fs.existsSync(dirPath)) await fs.promises.rm(dirPath, { recursive: true, force: true })
+      if (FileUtils.existsSync(dirPath)) await BotUtil.rm(dirPath)
     } catch {
       const cmd = process.platform === 'win32' ? `rmdir /s /q "${dirPath}"` : `rm -rf "${dirPath}"`
       try {

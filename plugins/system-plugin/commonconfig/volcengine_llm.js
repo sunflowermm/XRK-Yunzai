@@ -1,4 +1,5 @@
 import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
+import { getServerConfigPath } from '../../../lib/config/config-constants.js';
 
 /**
  * 火山引擎 LLM 工厂配置管理（文本）
@@ -12,10 +13,7 @@ export default class VolcengineLLMConfig extends ConfigBase {
       name: 'volcengine_llm',
       displayName: '火山引擎 LLM 工厂配置（文本）',
       description: '火山引擎豆包大语言模型文本聊天配置',
-      filePath: (cfg) => {
-        const port = cfg?._port ?? 8086;
-        return port ? `data/server_bots/${port}/volcengine_llm.yaml` : `config/default_config/volcengine_llm.yaml`;
-      },
+      filePath: (c) => getServerConfigPath(c?._port ?? 8086, 'volcengine_llm'),
       fileType: 'yaml',
       schema: {
         fields: {

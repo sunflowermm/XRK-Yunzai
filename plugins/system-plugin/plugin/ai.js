@@ -1,8 +1,8 @@
 // XRK AI助手插件 - 调用 chat 工作流；需合并时在配置里写 mergeStreams，写哪个合并哪个
 
 import path from 'path';
-import fs from 'fs';
 import BotUtil from '../../../lib/util.js';
+import { FileUtils } from '../../../lib/utils/file-utils.js';
 
 const CONFIG_PATH = path.join(process.cwd(), 'data/ai/config.yaml');
 const CHAT_MERGED_NAME = 'chat-merged';
@@ -78,7 +78,7 @@ export class XRKAIAssistant extends plugin {
 
   async initConfig() {
     try {
-      if (!fs.existsSync(CONFIG_PATH)) {
+      if (!FileUtils.existsSync(CONFIG_PATH)) {
         const configDir = path.dirname(CONFIG_PATH);
         await BotUtil.mkdir(configDir);
         const defaultConfig = {
@@ -96,7 +96,7 @@ export class XRKAIAssistant extends plugin {
           lineWidth: 0,
           minContentWidth: 0
         });
-        await fs.promises.writeFile(CONFIG_PATH, content, 'utf8');
+        await FileUtils.writeFile(CONFIG_PATH, content, 'utf8');
         logger.info(`├─ 📄 配置文件已生成: ${CONFIG_PATH}`);
       }
     } catch (error) {
@@ -106,10 +106,10 @@ export class XRKAIAssistant extends plugin {
 
   async loadConfig() {
     try {
-      if (fs.existsSync(CONFIG_PATH)) {
+      if (FileUtils.existsSync(CONFIG_PATH)) {
         const yaml = (await import('yaml')).default;
-        const content = await fs.promises.readFile(CONFIG_PATH, 'utf8');
-        return yaml.parse(content) || {};
+        const content = await FileUtils.readFile(CONFIG_PATH, 'utf8');
+        return content ? yaml.parse(content) || {} : {};
       }
     } catch (error) {
       logger.error(`加载配置文件失败: ${error.message}`);

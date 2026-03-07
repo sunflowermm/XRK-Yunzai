@@ -5,6 +5,7 @@ import { spawn, spawnSync } from 'child_process';
 import inquirer from 'inquirer';
 import chalk from 'chalk';
 import cfg from './lib/config/config.js';
+import { DEFAULT_CONFIG_DIR, SERVER_BOTS_DIR, LOGS_DIR, PM2_CONFIG_DIR } from './lib/config/config-constants.js';
 
 if (process.platform === 'win32') {
   try {
@@ -26,13 +27,12 @@ if (entry && path.basename(entry) === 'start.js') {
 let globalSignalHandler = null;
 
 const PATHS = {
-  LOGS: './logs',
+  LOGS: `./${LOGS_DIR}`,
   DATA: './data',
   CONFIG: './config',
-  DEFAULT_CONFIG: './config/default_config',
-  SERVER_BOTS: './data/server_bots',
-  PM2_CONFIG: './config/pm2',
-  RESOURCE_USAGE: './resources'
+  DEFAULT_CONFIG: `./${DEFAULT_CONFIG_DIR}`,
+  SERVER_BOTS: `./${SERVER_BOTS_DIR}`,
+  PM2_CONFIG: `./${PM2_CONFIG_DIR}`
 };
 
 const CONFIG = {
@@ -390,19 +390,6 @@ class ServerManager extends BaseManager {
     }
   }
 
-  async checkServerHealth(port) {
-    try {
-      const { default: fetch } = await import('node-fetch');
-      const response = await fetch(`http://localhost:${port}/health`, {
-        method: 'GET',
-        timeout: 3000
-      });
-      return response.ok;
-    } catch {
-      return false;
-    }
-  }
-
   async removePortConfig(port) {
     const portDir = path.join(PATHS.SERVER_BOTS, port.toString());
     const pm2ConfigPath = path.join(PATHS.PM2_CONFIG, `pm2_server_${port}.json`);
@@ -595,10 +582,6 @@ class MenuManager {
         await this.showPM2Menu();
         break;
         
-      case 'system_info':
-        await this.showSystemInfo();
-        break;
-        
       case 'exit':
         console.log(chalk.cyan('\n' + '='.repeat(50)));
         console.log(chalk.cyan.bold('  感谢使用 XRK-Yunzai！'));
@@ -613,35 +596,6 @@ class MenuManager {
     return false;
   }
   
-  async showSystemInfo() {
-    const os = await import('os');
-    const systemInfo = {
-      'Node.js 版本': process.version,
-      '平台': `${os.platform()} ${os.arch()}`,
-      'CPU 核心数': os.cpus().length,
-      '总内存': `${(os.totalmem() / 1024 / 1024 / 1024).toFixed(2)} GB`,
-      '可用内存': `${(os.freemem() / 1024 / 1024 / 1024).toFixed(2)} GB`,
-      '工作目录': process.cwd(),
-      '运行时间': `${(process.uptime() / 60).toFixed(2)} 分钟`
-    };
-    
-    console.log(chalk.cyan('\n' + '='.repeat(50)));
-    console.log(chalk.cyan.bold('  系统信息'));
-    console.log(chalk.cyan('='.repeat(50)));
-    
-    for (const [key, value] of Object.entries(systemInfo)) {
-      console.log(chalk.gray(`  ${key.padEnd(15)}: ${chalk.yellow(value)}`));
-    }
-    
-    console.log(chalk.cyan('='.repeat(50) + '\n'));
-    
-    await inquirer.prompt([{
-      type: 'input',
-      name: 'continue',
-      message: '按 Enter 键返回主菜单...'
-    }]);
-  }
-
   async handleDeletePortConfig() {
     const ports = await this.serverManager.getAvailablePorts();
     if (ports.length === 0) {

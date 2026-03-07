@@ -1,4 +1,5 @@
 import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
+import { getServerConfigPath } from '../../../lib/config/config-constants.js';
 
 /**
  * GPTGod LLM 配置
@@ -9,10 +10,7 @@ export default class GPTGodLLMConfig extends ConfigBase {
       name: 'gptgod_llm',
       displayName: 'GPTGod LLM配置',
       description: 'GPTGod大语言模型配置，支持识图功能',
-      filePath: (cfg) => {
-        const port = cfg?._port ?? 8086;
-        return port ? `data/server_bots/${port}/gptgod_llm.yaml` : `config/default_config/gptgod_llm.yaml`;
-      },
+      filePath: (c) => getServerConfigPath(c?._port ?? 8086, 'gptgod_llm'),
       fileType: 'yaml',
       schema: {
         fields: {

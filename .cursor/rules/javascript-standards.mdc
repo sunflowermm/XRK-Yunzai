@@ -1,0 +1,32 @@
+---
+description: JavaScript 编码规范
+globs: **/*.js
+alwaysApply: false
+---
+
+# JavaScript 规范
+
+## 错误处理
+
+```javascript
+// ❌ 空 catch
+try { await fetchData(); } catch {}
+
+// ✅ 记录并传播
+try {
+  await fetchData();
+} catch (e) {
+  BotUtil.makeLog('error', `操作失败: ${e.message}`, '模块名');
+  throw e;
+}
+```
+
+## 异步与 Promise
+
+- 优先 `async/await`，避免 `.then()` 链
+- 并行无依赖：`Promise.all` 或 `Promise.allSettled`
+
+## 类型与空值
+
+- 使用 `ObjectUtils.isPlainObject`、`ObjectUtils.isArray` 做类型判断
+- 可选链：`cfg?.server?.https?.enabled`

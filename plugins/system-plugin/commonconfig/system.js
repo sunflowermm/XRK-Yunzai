@@ -1,5 +1,6 @@
 import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
 import path from 'path';
+import { getServerConfigPath, SERVER_BOTS_DIR } from '../../../lib/config/config-constants.js';
 
 const paths = { root: process.cwd(), renderers: path.join(process.cwd(), 'renderers') };
 
@@ -7,6 +8,10 @@ const paths = { root: process.cwd(), renderers: path.join(process.cwd(), 'render
  * 系统配置管理
  * 与 lib/config/config.js (cfg) 一致：默认来自 config/default_config，覆盖来自 data/server_bots/{port}。
  * 路径：有端口时 data/server_bots/{port}/{name}.yaml，无端口时 config/default_config/{name}.yaml。
+ *
+ * configFiles 与 config/default_config/*.yaml 一一对应（见 lib/config/config-constants.js SYSTEM_CONFIG_NAMES）。
+ * 各子配置的 schema.fields 应覆盖对应 yaml 的全部顶层字段，以便前端与 API 完整编辑；
+ * 写入时 ConfigBase 会与已有内容合并，保留 yaml 中未在 schema 声明的字段。
  */
 export default class SystemConfig extends ConfigBase {
   constructor() {
@@ -19,11 +24,9 @@ export default class SystemConfig extends ConfigBase {
     });
 
     const getPort = (c) => c?._port ?? 8086;
-    const getConfigPath = (configName) => (c) => {
-      const port = getPort(c);
-      return port ? `data/server_bots/${port}/${configName}.yaml` : `config/default_config/${configName}.yaml`;
-    };
+    const getConfigPath = (configName) => (c) => getServerConfigPath(getPort(c), configName);
 
+    /** 与 default_config 对齐：键名对应 config/default_config/{key}.yaml，schema 需覆盖该 yaml 全部顶层字段 */
     this.configFiles = {
       bot: {
         name: 'bot',
@@ -1275,14 +1278,14 @@ export default class SystemConfig extends ConfigBase {
             llm: {
               type: 'object',
               label: 'LLM工厂运营商选择',
-              description: '详细配置位于 data/server_bots/{port}/*_llm.yaml（如 volcengine_llm / xiaomimimo_llm / openai_llm / openai_compat_llm / gemini_llm / anthropic_llm / azure_openai_llm）',
+              description: '详细配置位于 data/server_bots/{port}/*_llm.yaml；兼容厂商由 openai_compat_llm.providers 注册，其 key 也可作为 Provider 使用。',
               component: 'SubForm',
               fields: {
                 Provider: {
                   type: 'string',
                   label: 'LLM运营商',
-                  enum: ['volcengine', 'xiaomimimo', 'openai', 'openai_compat', 'gemini', 'anthropic', 'azure_openai'],
-                  default: 'volcengine',
+                  enum: ['gptgod', 'volcengine', 'xiaomimimo', 'openai', 'openai_compat', 'gemini', 'anthropic', 'azure_openai'],
+                  default: 'gptgod',
                   component: 'Select'
                 },
                 timeout: {
@@ -1841,7 +1844,7 @@ export default class SystemConfig extends ConfigBase {
             const port = getPort(global.cfg);
             const root = paths.root;
             return port
-              ? path.join(root, `data/server_bots/${port}/renderers/${key}/config.yaml`)
+              ? path.join(root, SERVER_BOTS_DIR, String(port), 'renderers', key, 'config.yaml')
               : path.join(root, 'renderers', key, 'config_default.yaml');
           },
           getDefaultFilePath: (key) => path.join(paths.renderers, key, 'config_default.yaml')

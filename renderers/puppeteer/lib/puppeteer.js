@@ -1,10 +1,10 @@
 import Renderer from "../../../lib/renderer/Renderer.js";
 import os from "node:os";
 import puppeteer from "puppeteer";
-import fs from "node:fs";
 import path from "node:path";
 import cfg from "../../../lib/config/config.js";
 import BotUtil from "../../../lib/util.js";
+import { FileUtils } from "../../../lib/utils/file-utils.js";
 import { cropTopAndBottom } from "../../../lib/renderer/crop.js";
 import { toBuffer, toFileUrl } from "../../../lib/renderer/screenshot-utils.js";
 
@@ -308,7 +308,7 @@ export default class PuppeteerRenderer extends Renderer {
     let directFilePath = null;
     if (!useUrl) {
       const tpl = d.tplFile;
-      if (typeof tpl === "string" && path.isAbsolute(tpl) && fs.existsSync(tpl)) {
+      if (typeof tpl === "string" && path.isAbsolute(tpl) && FileUtils.existsSync(tpl)) {
         directFilePath = path.resolve(tpl);
       } else {
         savePath = this.dealTpl(name, d);
@@ -316,7 +316,7 @@ export default class PuppeteerRenderer extends Renderer {
       }
     }
     const filePath = useUrl ? null : (directFilePath || path.join(process.cwd(), String(savePath).replace(/^\.\/?/, "")));
-    if (!useUrl && (typeof filePath !== "string" || !fs.existsSync(filePath))) {
+    if (!useUrl && (typeof filePath !== "string" || !FileUtils.existsSync(filePath))) {
       BotUtil.makeLog("error", `HTML file does not exist: ${filePath}`, "PuppeteerRenderer");
       return false;
     }

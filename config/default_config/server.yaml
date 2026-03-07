@@ -264,6 +264,22 @@ auth:
     file: "config/server_config/api_key.json"
     # length: 密钥长度（字符数）
     length: 64
+  # uiCookie: 同源前端免认证（与 XRK-AGT 对齐）
+  uiCookie:
+    # enabled: 是否启用同源 Cookie 放行
+    enabled: false
+    # pathPrefix: 仅对此路径前缀设置 Cookie（默认 /xrk）
+    pathPrefix: "/xrk"
+    # name: Cookie 名称
+    name: "xrk_ui"
+    # value: Cookie 值，校验通过则放行
+    value: "1"
+    # allowPublicSameOrigin: 为 true 时，同源请求且携带该 Cookie 可免 API Key
+    allowPublicSameOrigin: false
+    # httpOnly / sameSite / maxAgeMs: 可选，同 res.cookie 参数
+    httpOnly: true
+    sameSite: "lax"
+    maxAgeMs: 86400000
   # whitelist: 无需认证的路径列表，可直接访问
   whitelist:
     - "/"              # 根目录

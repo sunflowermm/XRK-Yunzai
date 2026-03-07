@@ -288,6 +288,13 @@
           ]
         },
         {
+          "id": "v3-models",
+          "method": "GET",
+          "path": "/api/v3/models",
+          "title": "OpenAI 模型列表",
+          "description": "OpenAI 兼容的模型列表接口（与 /api/v3/chat/completions 搭配使用）"
+        },
+        {
           "id": "v3-chat-completions",
           "method": "POST",
           "path": "/api/v3/chat/completions",
@@ -764,6 +771,7 @@
     "ai-models": {
       "format": "openai"
     },
+    "v3-models": {},
     "v3-chat-completions": {
       "apiKey": "demo-key",
       "messages": [

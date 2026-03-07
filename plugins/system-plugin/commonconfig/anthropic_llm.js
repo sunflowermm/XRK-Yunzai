@@ -1,4 +1,5 @@
 import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
+import { getServerConfigPath } from '../../../lib/config/config-constants.js';
 
 /**
  * Anthropic 官方 LLM 工厂配置管理（文本）
@@ -10,10 +11,7 @@ export default class AnthropicLLMConfig extends ConfigBase {
       name: 'anthropic_llm',
       displayName: 'Anthropic LLM 工厂配置（官方）',
       description: 'Claude / Messages API 配置（文本）',
-      filePath: (cfg) => {
-        const port = cfg?._port ?? 8086;
-        return port ? `data/server_bots/${port}/anthropic_llm.yaml` : `config/default_config/anthropic_llm.yaml`;
-      },
+      filePath: (c) => getServerConfigPath(c?._port ?? 8086, 'anthropic_llm'),
       fileType: 'yaml',
       schema: {
         fields: {

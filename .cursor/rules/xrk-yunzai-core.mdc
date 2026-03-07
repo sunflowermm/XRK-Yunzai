@@ -1,0 +1,24 @@
+---
+description: XRK-Yunzai 核心约定与架构规范
+alwaysApply: true
+---
+
+# XRK-Yunzai 核心规范
+
+## 工具与路径
+
+- **文件操作**：统一使用 `FileUtils`（`lib/utils/file-utils.js`），禁止直接使用 `fs.existsSync`、`fs.readdirSync`
+- **对象操作**：使用 `ObjectUtils`（`lib/utils/object-utils.js`）做类型判断、合并、克隆
+- **路径常量**：从 `lib/config/config-constants.js` 引入 `DEFAULT_CONFIG_DIR`、`SERVER_BOTS_DIR`、`LOGS_DIR`、`getServerConfigPath`
+- **BotUtil**：`mkdir`、`readFile`、`fileExists` 已委托 FileUtils，优先用 FileUtils 做底层操作
+
+## 配置与端口
+
+- 端口级配置：`data/server_bots/<port>/`，由 `cfg.ensurePortConfigs(port)` 初始化
+- 默认配置：`config/default_config/*.yaml`
+- 获取配置路径：`getServerConfigPath(port, configName)` 返回 `data/server_bots/<port>/<configName>.yaml` 或默认路径
+
+## 模块导入
+
+- 使用 ES Modules：`import` / `export`，无 `require`
+- 工具统一入口：`import { FileUtils, ObjectUtils } from './lib/utils/index.js'`

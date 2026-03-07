@@ -1,0 +1,6 @@
+############################################
+# OpenAI Responses 协议兼容 LLM 工厂
+############################################
+# 协议：OpenAI Responses API (/v1/responses)
+
+providers: []

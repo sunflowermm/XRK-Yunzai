@@ -8,6 +8,7 @@ import path from 'path';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { BASE_DIRS } from './lib/base-dirs.js';
+import { LOGS_DIR } from './lib/config/config-constants.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -140,9 +141,68 @@ class DependencyManager {
       }
     }
   }
+
+  /**
+   * 检查 plugins、renderers 下各子目录的 www（及一层子目录）中
+   * 同时存在 package.json 与 sign.json 的前端依赖，与 AGT 逻辑对齐
+   */
+  async ensureFrontendDependencies(rootDir = process.cwd()) {
+    const baseDirs = ['plugins', 'renderers'];
+    for (const base of baseDirs) {
+      const basePath = path.join(rootDir, base);
+      let entries;
+      try {
+        entries = await fs.readdir(basePath, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+        const wwwDir = path.join(basePath, entry.name, 'www');
+        let wwwStat;
+        try {
+          wwwStat = await fs.stat(wwwDir);
+        } catch {
+          continue;
+        }
+        if (!wwwStat.isDirectory()) continue;
+
+        const candidateDirs = [wwwDir];
+        try {
+          const subEntries = await fs.readdir(wwwDir, { withFileTypes: true });
+          for (const sub of subEntries) {
+            if (sub.isDirectory()) candidateDirs.push(path.join(wwwDir, sub.name));
+          }
+        } catch {}
+
+        for (const dir of candidateDirs) {
+          const pkgPath = path.join(dir, 'package.json');
+          const signPath = path.join(dir, 'sign.json');
+          let hasPkg = false;
+          let hasSign = false;
+          try {
+            await fs.access(pkgPath);
+            hasPkg = true;
+          } catch {}
+          try {
+            await fs.access(signPath);
+            hasSign = true;
+          } catch {}
+          if (!hasPkg || !hasSign) continue;
+
+          try {
+            await this.checkAndInstall(pkgPath, path.join(dir, 'node_modules'));
+          } catch (e) {
+            const rel = path.relative(rootDir, dir) || dir;
+            await this.logger.warning(`${rel}: ${e.message}`);
+          }
+        }
+      }
+    }
+  }
 }
 
-const BOOTSTRAP_LOG = path.join('./logs', 'bootstrap.log');
+const BOOTSTRAP_LOG = path.join(LOGS_DIR, 'bootstrap.log');
 
 class Bootstrap {
   constructor() {
@@ -158,6 +218,7 @@ class Bootstrap {
       path.join(root, 'node_modules')
     );
     await this.dependencyManager.ensurePluginDependencies(root);
+    await this.dependencyManager.ensureFrontendDependencies(root);
   }
 
   async run() {

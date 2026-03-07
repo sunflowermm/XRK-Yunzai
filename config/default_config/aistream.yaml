@@ -44,3 +44,8 @@ mcp:
     selected: []
     # servers: 远程 MCP 服务器列表；stdio 用 command+args 启动子进程，HTTP 用 url+transport
     servers: []
+# ----------------------------------------
+# LLM 默认提供商（与 XRK-AGT 一致：由 aistream.llm.Provider 决定）
+# ----------------------------------------
+llm:
+  Provider: gptgod
