@@ -3,10 +3,18 @@
  * 使用 Bot.ConfigManager（与 global.ConfigManager 一致）提供配置读写
  */
 import BotUtil from '../../../lib/util.js';
+import cfg from '../../../lib/config/config.js';
 import { cleanConfigData, flattenStructure, flattenData, unflattenData } from '../../../lib/commonconfig/config-utils.js';
 
 function getConfigManager(Bot) {
   return Bot?.ConfigManager ?? global.ConfigManager;
+}
+
+/** 配置保存后清除 cfg 缓存，确保 LLMFactory 等读取到最新 providers 子配置 */
+function invalidateCfgCache(configName) {
+  try {
+    if (cfg?.clearConfig) cfg.clearConfig(configName);
+  } catch (_) {}
 }
 
 export default {
@@ -212,6 +220,8 @@ export default {
             }
           }
 
+          invalidateCfgCache(configName);
+
           res.json({
             success: result,
             message: '配置已保存'
@@ -248,6 +258,8 @@ export default {
           }
 
           const result = await config.merge(data, { deep, backup, validate });
+
+          invalidateCfgCache(name);
 
           res.json({
             success: result,
