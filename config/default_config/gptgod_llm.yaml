@@ -1,42 +1,43 @@
 # ========================================
 # GPTGod LLM 配置
 # ========================================
-# GPTGod 大语言模型，支持识图，OpenAI 兼容
+# GPTGod 大语言模型，OpenAI 兼容，支持识图与 tools
 # 工厂类：GPTGodLLMClient
 # 接口：https://api.gptgod.online/v1
 # 配置文件实际路径：data/server_bots/{port}/gptgod_llm.yaml
 # ----------------------------------------
 # 基础
 # ----------------------------------------
-# enabled: 是否启用该提供商
 enabled: true
-# baseUrl: API 基础地址
 baseUrl: "https://api.gptgod.online/v1"
-# apiKey: GPTGod API Key（必填）
+path: "/chat/completions"
 apiKey: ""
-# model: 模型名称
 model: "gemini-exp-1114"
-# temperature: 温度 0～2
 temperature: 0.8
-# maxTokens: 最大生成 token 数
 maxTokens: 6000
-# topP: 核采样 0～1
 topP: 0.9
-# presencePenalty: 存在惩罚 -2～2
 presencePenalty: 0.6
-# frequencyPenalty: 频率惩罚 -2～2
 frequencyPenalty: 0.6
-# timeout: 单次请求超时（毫秒）
+stop: ""
+seed: null
 timeout: 360000
-# enableStream: 是否允许流式输出
-enableStream: true
-# enableTools: 启用后注入 MCP 工具
-enableTools: true
 # ----------------------------------------
-# 代理（可选）
+# 流式与工具
+# ----------------------------------------
+enableStream: true
+enableTools: true
+toolChoice: "auto"
+parallelToolCalls: true
+maxToolRounds: 20
+# ----------------------------------------
+# 高级（可选）
+# ----------------------------------------
+# headers: {}   # 额外请求头
+# extraBody: {} # 额外请求体
+# tools: []     # 标准 OpenAI 格式 [{ type: "function", function: { name, description, parameters } }]
+# ----------------------------------------
+# 代理
 # ----------------------------------------
 proxy:
-  # enabled: 是否启用代理
   enabled: false
-  # url: 代理地址
   url: ""
