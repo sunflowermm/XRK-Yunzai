@@ -98,10 +98,10 @@ export default {
           }
 
           let data;
+          const isMultiFile = config.configFiles && typeof config.read === 'function';
           if (keyPath) {
             // 如果有 keyPath，读取指定路径的配置值
-            if (configName === 'system' && typeof config.read === 'function') {
-              // SystemConfig 的特殊处理：keyPath 是子配置名称
+            if (isMultiFile) {
               try {
                 data = await config.read(keyPath);
               } catch (subError) {
@@ -116,12 +116,11 @@ export default {
             }
           } else {
             // 没有 keyPath，读取完整配置
-            if (configName === 'system' && typeof config.read === 'function') {
-              // SystemConfig 的特殊处理：无参数时返回配置列表
+            if (isMultiFile) {
               try {
                 data = await config.read();
               } catch (error) {
-                BotUtil.makeLog('error', `读取 system 配置列表失败: ${error.message}`, 'ConfigAPI', error);
+                BotUtil.makeLog('error', `读取多文件配置列表失败 [${configName}]: ${error.message}`, 'ConfigAPI', error);
                 throw error;
               }
             } else if (typeof config.read === 'function') {
@@ -187,10 +186,10 @@ export default {
           const cleanedData = cleanConfigData(data, config);
 
           let result;
+          const isMultiFile = config.configFiles && typeof config.write === 'function';
           if (keyPath) {
             // 如果有 keyPath，使用 set 方法设置指定路径的值
-            if (configName === 'system' && typeof config.write === 'function') {
-              // SystemConfig 的特殊处理：keyPath 是子配置名称
+            if (isMultiFile) {
               try {
                 result = await config.write(keyPath, cleanedData, { backup, validate, silent: true });
               } catch (subError) {
@@ -204,8 +203,8 @@ export default {
             }
           } else {
             // 没有 keyPath，写入完整配置
-            if (configName === 'system') {
-              throw new Error('SystemConfig 需要指定子配置名称（使用 path 参数）');
+            if (isMultiFile) {
+              throw new Error('多文件配置需要指定子配置名称（使用 path 参数）');
             } else if (typeof config.write === 'function') {
               result = await config.write(cleanedData, { backup, validate, silent: true });
             } else {
@@ -526,17 +525,14 @@ export default {
 
         try {
           let schema = null;
-          if (name === 'system' && childPath) {
-            const structure = config.getStructure();
-            const childConfig = structure?.configs?.[childPath];
-            if (childConfig) {
-              schema = (childConfig.schema?.fields && childConfig.schema) || (childConfig.fields && { fields: childConfig.fields }) || null;
-            }
+          const structure = config.getStructure();
+          if (childPath && structure?.configs?.[childPath]) {
+            const childConfig = structure.configs[childPath];
+            schema = (childConfig.schema?.fields && childConfig.schema) || (childConfig.fields && { fields: childConfig.fields }) || null;
             if (!schema) {
               return res.json({ success: true, flat: [], message: `子配置 ${childPath} 不存在或无 schema` });
             }
           } else {
-            const structure = config.getStructure();
             schema = (structure?.schema?.fields && structure.schema) || (structure?.fields && { fields: structure.fields }) || null;
             if (!schema) {
               return res.json({ success: true, flat: [], message: `配置 ${name} 的 schema 不存在` });
@@ -567,9 +563,9 @@ export default {
 
         try {
           let data;
-          if (name === 'system') {
+          if (config.configFiles) {
             if (!childPath) {
-              return res.status(400).json({ success: false, message: 'SystemConfig 需要指定子配置路径' });
+              return res.status(400).json({ success: false, message: '多文件配置需要指定子配置路径（path 参数）' });
             }
             data = typeof config.read === 'function' ? await config.read(childPath) : {};
           } else {
@@ -608,18 +604,24 @@ export default {
             });
           }
 
+          if (config.configFiles && !childPath) {
+            return res.status(400).json({
+              success: false,
+              message: '多文件配置需要指定 path 参数'
+            });
+          }
+
           // 将扁平化数据还原为嵌套对象
           const data = unflattenData(flat);
           
           // 获取 schema 用于数据清理
           let schema = null;
-          if (name === 'system' && childPath) {
-            const structure = config.getStructure();
-            const childConfig = structure.configs && structure.configs[childPath];
-            schema = childConfig && childConfig.schema || { fields: childConfig && childConfig.fields || {} };
+          const structure = config.getStructure();
+          if (config.configFiles && childPath && structure?.configs?.[childPath]) {
+            const childConfig = structure.configs[childPath];
+            schema = childConfig?.schema || { fields: childConfig?.fields || {} };
           } else {
-            const structure = config.getStructure();
-            schema = structure.schema || { fields: structure.fields || {} };
+            schema = structure?.schema || { fields: structure?.fields || {} };
           }
           
           // 清理数据
@@ -631,7 +633,7 @@ export default {
             try {
               // 读取现有配置
               let existingData = {};
-              if (name === 'system' && childPath) {
+              if (config.configFiles && childPath) {
                 if (typeof config.read === 'function') {
                   existingData = await config.read(childPath) || {};
                 }
@@ -650,13 +652,13 @@ export default {
 
           // 写入配置
           let result;
-          if (name === 'system' && childPath) {
+          if (config.configFiles && childPath) {
             if (typeof config.write === 'function') {
               result = await config.write(childPath, finalData, { backup, validate });
             } else {
               return res.status(400).json({
                 success: false,
-                message: 'SystemConfig 需要指定子配置路径'
+                message: '多文件配置需要指定子配置路径'
               });
             }
           } else {

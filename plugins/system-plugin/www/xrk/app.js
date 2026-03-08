@@ -28,6 +28,7 @@ function initLazyLoad(selector = 'img[data-src]') {
 }
 
 const CHAT_HISTORY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 持久化缓存仅保留一周
+const CHAT_HISTORY_MAX_ITEMS = 200; // 单模式最多保留条数，与 XRK-AGT 一致，避免聊天记录无限拉长
 
 class App {
   static CHAT_MODE = Object.freeze({ EVENT: 'event', AI: 'ai', VOICE: 'voice' });
@@ -567,6 +568,9 @@ class App {
 
   navigateTo(page) {
     this.currentPage = page;
+    try {
+      document.body.dataset.page = page;
+    } catch {}
     
     const navItems = $$('.nav-item');
     navItems.forEach(item => {
@@ -2341,7 +2345,7 @@ class App {
       localStorage.removeItem(key);
       return [];
     }
-    return data
+    const list = data
       .filter(m => m != null && (m.role || m.segments || m.type === 'chat-record' || (m.type === 'record' && m.messages)))
       .map(m => {
         if (m.segments && Array.isArray(m.segments)) {
@@ -2352,12 +2356,23 @@ class App {
         return m;
       })
       .filter(Boolean);
+    return list.slice(-CHAT_HISTORY_MAX_ITEMS);
   }
 
   _saveChatHistory() {
-    const MAX_HISTORY = 200;
     const history = this._getCurrentChatHistory();
-    let data = history.slice(-MAX_HISTORY).map(m => {
+    if (!Array.isArray(history)) return;
+    // 与 XRK-AGT 一致：限制内存与 DOM 条数，避免单会话内聊天记录无限拉长
+    const excess = history.length - CHAT_HISTORY_MAX_ITEMS;
+    if (excess > 0) {
+      history.splice(0, excess);
+      const box = document.getElementById('chatMessages');
+      if (box) {
+        const messages = box.querySelectorAll('.chat-message');
+        for (let i = 0; i < excess && i < messages.length; i++) messages[i].remove();
+      }
+    }
+    let data = history.slice(-CHAT_HISTORY_MAX_ITEMS).map(m => {
         if (!m || !m.segments) return m;
         const sanitized = this._sanitizeSegments(m.segments);
         if (sanitized.length === 0 && !m.text) return null;
@@ -4652,7 +4667,7 @@ class App {
           <div class="config-name">${title}</div>
           <p class="config-desc">${desc}</p>
           </div>
-        ${cfg.name === 'system' ? '<span class="config-tag">多文件</span>' : ''}
+        ${(cfg.configs && Object.keys(cfg.configs).length > 1) ? '<span class="config-tag">多文件</span>' : ''}
           </div>
     `;
     }).join('');
@@ -4680,7 +4695,7 @@ class App {
     this._configState.jsonText = '';
     this._configState.jsonDirty = false;
 
-    if (config.name === 'system' && !child) {
+    if (config.configs && Object.keys(config.configs).length > 1 && !child) {
       this.renderSystemConfigChooser(config);
       return;
     }
@@ -4699,7 +4714,7 @@ class App {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 48px; height: 48px; margin: 0 auto 12px; opacity: 0.3;">
             <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
           </svg>
-          <p>SystemConfig 未定义子配置</p>
+          <p>未定义子配置</p>
         </div>
       `;
       return;
@@ -4719,14 +4734,14 @@ class App {
               <div class="config-subcard-title">${this.escapeHtml(meta.displayName || key)}</div>
               <p class="config-subcard-desc">${this.escapeHtml(meta.description ?? '')}</p>
           </div>
-            <span class="config-tag">${this.escapeHtml(`system/${key}`)}</span>
+            <span class="config-tag">${this.escapeHtml(`${config.name}/${key}`)}</span>
           </div>
         `).join('')}
       </div>
     `;
     
     main.querySelectorAll('.config-subcard').forEach(card => {
-      card.addEventListener('click', () => this.selectConfig('system', card.dataset.child));
+      card.addEventListener('click', () => this.selectConfig(config.name, card.dataset.child));
     });
   }
 
@@ -4797,9 +4812,8 @@ class App {
 
   extractActiveSchema(structure, name, child) {
     if (!structure) return null;
-    if (name === 'system') {
-      if (!child) return null;
-      const target = structure.configs?.[child];
+    if (structure.configs && child) {
+      const target = structure.configs[child];
       return target?.schema ?? { fields: target?.fields ?? {} };
     }
     return structure.schema ?? { fields: structure.fields ?? {} };
@@ -4887,7 +4901,7 @@ class App {
           </button>
         </div>
       </div>
-      ${selected.name === 'system' && selectedChild ? this.renderSystemPathBadge(selectedChild) : ''}
+      ${selected.configs && selectedChild ? this.renderSystemPathBadge(selectedChild) : ''}
       <div class="config-panel" id="configFormWrapper" style="${mode === 'json' ? 'display:none' : ''}">
         ${this.renderConfigFieldGroups()}
       </div>
