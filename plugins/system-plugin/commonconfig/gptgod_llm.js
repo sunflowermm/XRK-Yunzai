@@ -107,13 +107,6 @@ export default class GPTGodLLMConfig extends ConfigBase {
             default: '',
             component: 'Input'
           },
-          seed: {
-            type: 'number',
-            label: '随机种子',
-            description: '可复现输出（部分模型支持）',
-            default: null,
-            component: 'InputNumber'
-          },
           timeout: {
             type: 'number',
             label: '请求超时',

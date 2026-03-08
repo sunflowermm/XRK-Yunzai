@@ -19,7 +19,6 @@ topP: 0.9
 presencePenalty: 0.6
 frequencyPenalty: 0.6
 stop: ""
-seed: null
 timeout: 360000
 # ----------------------------------------
 # 流式与工具
