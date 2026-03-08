@@ -213,6 +213,9 @@ async function handleChatCompletionsV3(req, res, Bot) {
     }
   }
   if (workflowStreams?.length) overrides.streams = workflowStreams;
+  // 默认视为“外部工具透传”模式：不在本地执行 MCP 工具，只把 tools/参数传给上游模型；
+  // 若显式通过 workflow 声明了 streams，则认为调用方希望使用本地 MCP 工具能力
+  overrides.mcpToolMode = workflowStreams?.length ? 'execute' : 'passthrough';
   if (streamFlag) {
     if (workflowStreams?.length) BotUtil.makeLog('debug', `[AI] MCP 工具作用域: ${workflowStreams.join(', ')}`, 'HTTP');
     else BotUtil.makeLog('debug', `[AI] 未传 workflow.streams，将按全部工作流注入 MCP 工具（若提供商已开启）`, 'HTTP');
@@ -261,7 +264,11 @@ async function handleChatCompletionsV3(req, res, Bot) {
     let isFirstChunk = true;
 
     const streamCallback = (delta, metadata = {}) => {
-      if (delta && typeof delta === 'string') {
+      const hasTextDelta = typeof delta === 'string' && delta.length > 0;
+      const hasMcpTools = Array.isArray(metadata?.mcp_tools) && metadata.mcp_tools.length > 0;
+      const hasToolCalls = Array.isArray(metadata?.tool_calls) && metadata.tool_calls.length > 0;
+
+      if (hasTextDelta) {
         totalContent += delta;
         const deltaObj = isFirstChunk ? { role: 'assistant', content: delta } : { content: delta };
         const chunkData = {
@@ -271,12 +278,28 @@ async function handleChatCompletionsV3(req, res, Bot) {
           model: modelName,
           choices: [{ index: 0, delta: deltaObj, finish_reason: null }]
         };
-        if (metadata?.mcp_tools?.length) chunkData.mcp_tools = metadata.mcp_tools;
+        if (hasMcpTools) chunkData.mcp_tools = metadata.mcp_tools;
         res.write(`data: ${JSON.stringify(chunkData)}\n\n`);
         if (typeof res.flush === 'function') res.flush();
         isFirstChunk = false;
-      } else if (metadata?.mcp_tools?.length) {
+      } else if (hasMcpTools) {
         res.write(`data: ${JSON.stringify({ id, object: 'chat.completion.chunk', created: now, model: modelName, mcp_tools: metadata.mcp_tools })}\n\n`);
+        if (typeof res.flush === 'function') res.flush();
+      }
+
+      if (hasToolCalls) {
+        const chunkData = {
+          id,
+          object: 'chat.completion.chunk',
+          created: now,
+          model: modelName,
+          choices: [{
+            index: 0,
+            delta: { tool_calls: metadata.tool_calls },
+            finish_reason: null
+          }]
+        };
+        res.write(`data: ${JSON.stringify(chunkData)}\n\n`);
         if (typeof res.flush === 'function') res.flush();
       }
     };
