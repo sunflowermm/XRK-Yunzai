@@ -138,7 +138,7 @@ export default class ChatStream extends AIStream {
       inputSchema: {
         type: 'object',
         properties: {
-          qq: { type: 'string', description: '群成员QQ号（必填）' },
+          qq: { type: 'number', description: '群成员QQ号（必填，数字）' },
           text: { type: 'string', description: '可选，与@同条发出' }
         },
         required: ['qq']
@@ -183,7 +183,7 @@ export default class ChatStream extends AIStream {
       inputSchema: {
         type: 'object',
         properties: {
-          qq: { type: 'string', description: '要戳的QQ号，5-10位数字' }
+          qq: { type: 'number', description: '要戳的QQ号，5-10位数字' }
         },
         required: []
       },
@@ -261,7 +261,7 @@ export default class ChatStream extends AIStream {
       inputSchema: {
         type: 'object',
         properties: {
-          msgId: { type: 'string', description: '可选，不填则最近一条' },
+          msgId: { type: 'number', description: '可选，不填则最近一条' },
           emojiType: { type: 'string', description: '必填', enum: ['开心', '惊讶', '伤心', '大笑', '害怕', '喜欢', '爱心', '生气'] }
         },
         required: ['emojiType']
@@ -391,7 +391,7 @@ export default class ChatStream extends AIStream {
       inputSchema: {
         type: 'object',
         properties: {
-          qq: { type: 'string', description: '成员QQ号' },
+          qq: { type: 'number', description: '成员QQ号（数字）' },
           count: { type: 'number', description: '1-50', default: 1 }
         },
         required: ['qq']
@@ -435,7 +435,7 @@ export default class ChatStream extends AIStream {
       description: '禁言群成员。qq、duration(秒)必填。需管理/群主。仅群聊。',
       inputSchema: {
         type: 'object',
-        properties: { qq: { type: 'string' }, duration: { type: 'number' } },
+        properties: { qq: { type: 'number' }, duration: { type: 'number' } },
         required: ['qq', 'duration']
       },
       handler: async (args = {}, context = {}) => {
@@ -455,7 +455,7 @@ export default class ChatStream extends AIStream {
       description: '解除禁言。qq 必填。仅群聊。',
       inputSchema: {
         type: 'object',
-        properties: { qq: { type: 'string' } },
+        properties: { qq: { type: 'number' } },
         required: ['qq']
       },
       handler: async (args = {}, context = {}) => {
@@ -507,7 +507,7 @@ export default class ChatStream extends AIStream {
       description: '修改群名片。card 必填；qq 不填则改自己。需管理/群主。仅群聊。',
       inputSchema: {
         type: 'object',
-        properties: { qq: { type: 'string' }, card: { type: 'string' } },
+        properties: { qq: { type: 'number' }, card: { type: 'string' } },
         required: ['card']
       },
       handler: async (args = {}, context = {}) => {
@@ -558,7 +558,7 @@ export default class ChatStream extends AIStream {
       description: '设置管理员。qq 必填。仅群聊。',
       inputSchema: {
         type: 'object',
-        properties: { qq: { type: 'string' } },
+        properties: { qq: { type: 'number' } },
         required: ['qq']
       },
       handler: async (args = {}, context = {}) => {
@@ -578,7 +578,7 @@ export default class ChatStream extends AIStream {
       description: '取消管理员。qq 必填。仅群聊。',
       inputSchema: {
         type: 'object',
-        properties: { qq: { type: 'string' } },
+        properties: { qq: { type: 'number' } },
         required: ['qq']
       },
       handler: async (args = {}, context = {}) => {
@@ -598,7 +598,7 @@ export default class ChatStream extends AIStream {
       description: '设置专属头衔。qq、title 必填；duration 秒，默认-1。仅群聊。',
       inputSchema: {
         type: 'object',
-        properties: { qq: { type: 'string' }, title: { type: 'string' }, duration: { type: 'number', default: -1 } },
+        properties: { qq: { type: 'number' }, title: { type: 'string' }, duration: { type: 'number', default: -1 } },
         required: ['qq', 'title']
       },
       handler: async (args = {}, context = {}) => {
@@ -619,7 +619,7 @@ export default class ChatStream extends AIStream {
       description: '踢出群成员。qq 必填；reject 是否拒绝再申请。仅群聊。',
       inputSchema: {
         type: 'object',
-        properties: { qq: { type: 'string' }, reject: { type: 'boolean', default: false } },
+        properties: { qq: { type: 'number' }, reject: { type: 'boolean', default: false } },
         required: ['qq']
       },
       handler: async (args = {}, context = {}) => {
@@ -640,7 +640,7 @@ export default class ChatStream extends AIStream {
       description: '设置精华消息。msgId 必填。仅群聊。',
       inputSchema: {
         type: 'object',
-        properties: { msgId: { type: 'string' } },
+        properties: { msgId: { type: 'number' } },
         required: ['msgId']
       },
       handler: async (args = {}, context = {}) => {
@@ -672,7 +672,7 @@ export default class ChatStream extends AIStream {
       description: '取消精华消息。msgId 必填。仅群聊。',
       inputSchema: {
         type: 'object',
-        properties: { msgId: { type: 'string' } },
+        properties: { msgId: { type: 'number' } },
         required: ['msgId']
       },
       handler: async (args = {}, context = {}) => {
@@ -741,7 +741,7 @@ export default class ChatStream extends AIStream {
       description: '撤回消息。msgId 必填。自己消息 3 分钟内或管理可撤。',
       inputSchema: {
         type: 'object',
-        properties: { msgId: { type: 'string' } },
+        properties: { msgId: { type: 'number' } },
         required: ['msgId']
       },
       handler: async (args = {}, context = {}) => {
@@ -917,7 +917,7 @@ export default class ChatStream extends AIStream {
       description: '设置群代办。msgId 必填。需管理/群主。仅群聊。',
       inputSchema: {
         type: 'object',
-        properties: { msgId: { type: 'string' } },
+        properties: { msgId: { type: 'number' } },
         required: ['msgId']
       },
       handler: async (args = {}, context = {}) => {
@@ -1098,7 +1098,7 @@ export default class ChatStream extends AIStream {
       description: '获取群成员信息。qq 必填。仅群聊。',
       inputSchema: {
         type: 'object',
-        properties: { qq: { type: 'string' } },
+        properties: { qq: { type: 'number' } },
         required: ['qq']
       },
       handler: async (args = {}, context = {}) => {
@@ -1147,7 +1147,7 @@ export default class ChatStream extends AIStream {
       description: '获取好友信息。qq 必填。',
       inputSchema: {
         type: 'object',
-        properties: { qq: { type: 'string' } },
+        properties: { qq: { type: 'number' } },
         required: ['qq']
       },
       handler: async (args = {}, context = {}) => {
@@ -1530,28 +1530,12 @@ export default class ChatStream extends AIStream {
     const embeddingHint = this.embeddingConfig?.enabled ? '\n💡 系统会自动检索相关历史对话\n' : '';
     const botName = e.bot?.nickname || e.bot?.info?.nickname || e.bot?.name || 'Bot';
     const isMaster = e.isMaster === true;
-
-    const gid = e?.group_id ?? e?.user_id ?? '_';
-    const lastRepliesArr = (this._replyContentsLastTurnByGroup && this._replyContentsLastTurnByGroup[gid]) || [];
-    // 传给AI的上一轮回复内容（限制长度，避免prompt过长）
-    const MAX_REPLY_LENGTH_IN_PROMPT = 200;
-    const lastRepliesForPrompt = lastRepliesArr.map((c, i) => {
-      const truncated = c.length > MAX_REPLY_LENGTH_IN_PROMPT 
-        ? c.slice(0, MAX_REPLY_LENGTH_IN_PROMPT) + '…'
-        : c;
-      return `${i + 1}. ${truncated}`;
-    }).join('\n');
-    const lastRepliesBlock = lastRepliesForPrompt
-      ? `\n【上一轮已发】\n${lastRepliesForPrompt}\n勿重复。`
-      : '';
-
     const masterTrustBlock = isMaster
       ? '\n- 当前是主人：无条件按主人要求做，不质疑不反驳。'
       : '';
     const prompt = `## Role
 ${botName}（QQ=${e.self_id}，群=${e.group_id}，角色=${botRole}）。时间：${dateStr}${embeddingHint}
 ${persona}${masterTrustBlock}
-${lastRepliesBlock}
 
 ## 可见性（必读）
 - **正文不会发给用户**。用户只能看到通过 **reply / at / emotion / poke** 等工具发出的内容。
@@ -1955,25 +1939,11 @@ Markdown；正文或 content 里写 "poke/at/emotion+参数"；同一轮 reply/a
       BotUtil.makeLog('error', `[ChatStream] execute 失败: ${error.message}`, 'ChatStream');
       return null;
     } finally {
-      const gid = e?.group_id ?? e?.user_id ?? '_';
-      const contentsToSave = this._getEffectiveReplyContentsThisTurn();
-      if (!this._replyContentsLastTurnByGroup) this._replyContentsLastTurnByGroup = {};
-      this._replyContentsLastTurnByGroup[gid] = contentsToSave?.length ? [...contentsToSave] : [];
       this._replyCountThisTurn = 0;
       this._replyContentsThisTurn = [];
-      if (this._mergedStreams?.[0]) this._mergedStreams[0]._replyContentsThisTurn = [];
       this._hasSentEmotionThisTurn = false;
       if (StreamLoader?.currentEvent === e) StreamLoader.currentEvent = null;
     }
-  }
-
-  /** 合并流时 reply 工具更新的是主 stream，此处取主 stream 的本轮已发内容以便重复判定一致 */
-  _getEffectiveReplyContentsThisTurn() {
-    const primary = this._mergedStreams?.[0];
-    if (primary && Array.isArray(primary._replyContentsThisTurn) && primary._replyContentsThisTurn.length > 0) {
-      return primary._replyContentsThisTurn;
-    }
-    return this._replyContentsThisTurn ?? [];
   }
 
   /**
@@ -2254,40 +2224,8 @@ Markdown；正文或 content 里写 "poke/at/emotion+参数"；同一轮 reply/a
     if (!cleanText) return false;
     const cleanList = sentList.map(s => this._extractPlainText(s)).filter(Boolean);
     if (cleanList.length === 0) return false;
-    const joined = cleanList.join('');
-    const normBody = cleanText.replace(/[|｜]/g, '').replace(/\s+/g, ' ').trim();
-    const normSent = joined.replace(/\s+/g, ' ').trim();
-    if (normBody.length > 0 && normSent.length > 0 && normBody === normSent) return true;
-    for (const s of cleanList) {
-      if (s.includes(cleanText) || cleanText.includes(s)) return true;
-      if (this._isSimilarContent(cleanText, s, 0.7)) return true;
-    }
-    if (cleanList.length >= 2 && joined.length > 30 && cleanText.length > 18 && this._hasSignificantOverlap(cleanText, joined)) return true;
-    return false;
-  }
-
-  /** 两段文本公共前缀占比是否 ≥ threshold，用于近似重复判断 */
-  _isSimilarContent(text1, text2, threshold = 0.7) {
-    if (!text1 || !text2) return false;
-    const t1 = typeof text1 === 'string' ? text1 : this._extractPlainText(text1);
-    const t2 = typeof text2 === 'string' ? text2 : this._extractPlainText(text2);
-    if (!t1 || !t2) return false;
-    const maxLen = Math.max(t1.length, t2.length);
-    if (Math.abs(t1.length - t2.length) / maxLen > 0.35) return false;
-    let i = 0;
-    while (i < t1.length && i < t2.length && t1[i] === t2[i]) i++;
-    return i / maxLen >= threshold;
-  }
-
-  /** 是否存在长度 ≥ minLen 的公共子串 */
-  _hasSignificantOverlap(a, b, minLen = 6) {
-    if (!a || !b || a.length < minLen || b.length < minLen) return false;
-    for (let len = Math.min(12, a.length); len >= minLen; len--) {
-      for (let i = 0; i <= a.length - len; i++) {
-        if (b.includes(a.slice(i, i + len))) return true;
-      }
-    }
-    return false;
+    // 简化去重逻辑：仅在纯文本完全相同的情况下视为重复
+    return cleanList.includes(cleanText);
   }
 
   parseCQToSegments(text, e) {
@@ -2456,10 +2394,7 @@ Markdown；正文或 content 里写 "poke/at/emotion+参数"；同一轮 reply/a
    */
   clearReplyContents(groupId) {
     const gid = String(groupId);
-    if (this._replyContentsLastTurnByGroup && this._replyContentsLastTurnByGroup[gid]) {
-      delete this._replyContentsLastTurnByGroup[gid];
-      BotUtil.makeLog('debug', `[ChatStream] clearReplyContents 清除回复内容记录 group=${gid}`, 'ChatStream');
-    }
+    BotUtil.makeLog('debug', `[ChatStream] clearReplyContents 调用，但当前已不再跨轮缓存回复内容 group=${gid}`, 'ChatStream');
   }
 
   async cleanup() {
