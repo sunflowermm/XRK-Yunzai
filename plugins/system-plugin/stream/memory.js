@@ -136,6 +136,7 @@ export default class MemoryStream extends AIStream {
       content,
       userId,
       scene,
+      groupId: context?.e?.group_id ?? null,
       timestamp: Date.now(),
       createdAt: new Date().toISOString()
     };
@@ -165,10 +166,34 @@ export default class MemoryStream extends AIStream {
       return [];
     }
     const kw = (keyword || '').toLowerCase();
-    return list
-      .filter(m => (m.userId === userId || !userId) && (m.scene === scene || !scene))
-      .filter(m => (m.content || '').toLowerCase().includes(kw))
-      .slice(0, 10);
+    const groupId = context?.e?.group_id ?? null;
+
+    const scored = list
+      .filter(m => (m.userId === userId || !userId))
+      .filter(m => (m.scene === scene || !scene))
+      .map(m => {
+        const text = (m.content || '').toLowerCase();
+        let score = 0;
+        if (kw) {
+          if (text === kw) score = 100;
+          else if (text.includes(kw)) score = 80 + Math.min(20, kw.length);
+          else {
+            const set = new Set(text);
+            let overlap = 0;
+            for (const ch of kw) if (set.has(ch)) overlap++;
+            score = (overlap / Math.max(1, kw.length)) * 60;
+          }
+        }
+        // 区域记忆（同群）优先于全局/其它场景
+        if (groupId && m.groupId && String(m.groupId) === String(groupId)) {
+          score += 15;
+        }
+        return { m, score };
+      })
+      .sort((a, b) => b.score - a.score || (b.m.timestamp - a.m.timestamp))
+      .map(x => x.m);
+
+    return scored.slice(0, 50);
   }
 
   async listMemories(context) {
@@ -182,9 +207,17 @@ export default class MemoryStream extends AIStream {
     } catch {
       return [];
     }
+    const groupId = context?.e?.group_id ?? null;
     return list
       .filter(m => (m.userId === userId || !userId) && (m.scene === scene || !scene))
-      .slice(0, 50);
+      .sort((a, b) => {
+        const aScoped = groupId && a.groupId && String(a.groupId) === String(groupId);
+        const bScoped = groupId && b.groupId && String(b.groupId) === String(groupId);
+        if (aScoped && !bScoped) return -1;
+        if (!aScoped && bScoped) return 1;
+        return (b.timestamp || 0) - (a.timestamp || 0);
+      })
+      .slice(0, 100);
   }
 
   async deleteMemory(id, context) {
@@ -211,7 +244,9 @@ export default class MemoryStream extends AIStream {
       '· 用户说“记住/记一下/别忘了”或提到偏好、约定、重要信息时，使用 save_memory 保存。',
       '· 回答“你记得吗/之前记过什么”或需要回忆时，先用 query_memory 按关键词查，再结合结果回复。',
       '· 用户问“我有哪些记忆”时用 list_memories；要删除某条记忆时用 delete_memory 并传入该条 id。',
-      '记忆按用户与场景（群/私聊）隔离，只读写当前用户在当前场景下的记忆。'
+      '记忆按用户与场景（群/私聊）隔离，同时区分全局记忆与区域记忆：',
+      '· 区域记忆：在群聊中保存的记忆仅绑定当前群（groupId），更适合记录本群相关的梗与约定。',
+      '· 全局记忆：在私聊中保存的记忆不绑定群，可在所有场景中被引用，例如主人称呼、口味偏好等。'
     ].join('\n');
   }
 
