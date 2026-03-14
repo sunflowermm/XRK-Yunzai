@@ -151,13 +151,6 @@ export default class ChatStream extends AIStream {
         if (!qq) return { success: false, error: 'QQ号不能为空' };
 
         const text = String(args.text ?? '').trim();
-        // 与 reply 一致：本轮已发过相同或相似 @ 内容则不再发送，防止重复
-        const pendingContent = text ? `@${qq} ${text}` : `@${qq}`;
-        const replyContents = this._getEffectiveReplyContentsThisTurn();
-        if (replyContents.length > 0 && this._shouldSkipBodyAsRedundant(pendingContent, replyContents)) {
-          BotUtil.makeLog('debug', `[ChatStream] at 工具跳过重复发送 qq=${qq} textLen=${text.length}`, 'ChatStream');
-          return { success: true, raw: '上述内容本轮已发过，未重复发送。无话可说则空返回。' };
-        }
         return this._wrapHandler(async () => {
           const seg = global.segment || segment;
           if (text) {
@@ -166,9 +159,6 @@ export default class ChatStream extends AIStream {
             await context.e.reply([seg.at(qq)]);
           }
           const sentContent = text ? `@${qq} ${text}` : `@${qq}`;
-          if (!Array.isArray(this._replyContentsThisTurn)) this._replyContentsThisTurn = [];
-          this._replyContentsThisTurn.push(sentContent);
-          this._replyCountThisTurn = (this._replyCountThisTurn || 0) + 1;
           this.recordAIResponse(context.e, sentContent);
           const gid = context.e?.group_id;
           const detail = gid ? `你已在群 ${gid} @了 ${qq}${text ? ' 并发送：' + text : ''}` : `你已@了 ${qq}${text ? ' 并发送：' + text : ''}`;
@@ -218,7 +208,7 @@ export default class ChatStream extends AIStream {
       inputSchema: {
         type: 'object',
         properties: {
-          messageId: { type: 'string', description: '可选，引用该消息ID' },
+          messageId: { type: 'number', description: '可选，引用该消息ID（数字）' },
           content: { type: 'string', description: '必填。支持|分句、[开心]等、[CQ:at,qq=]、[回复:id]' }
         },
         required: ['content']
@@ -234,12 +224,6 @@ export default class ChatStream extends AIStream {
           let filteredContent = this.filterMarkdown(content);
           if (filteredContent !== content) {
             BotUtil.makeLog('debug', `[ChatStream] reply 工具过滤Markdown beforeLen=${content.length} afterLen=${filteredContent.length}`, 'ChatStream');
-          }
-          // 底层防护：本轮已发过相同或相似内容则不再发送，避免重复刷屏
-          const replyContents = this._getEffectiveReplyContentsThisTurn();
-          if (replyContents.length > 0 && this._shouldSkipBodyAsRedundant(filteredContent, replyContents)) {
-            BotUtil.makeLog('debug', `[ChatStream] reply 工具跳过重复发送 contentLen=${filteredContent.length}`, 'ChatStream');
-            return { success: true, raw: '上述内容本轮已发过，未重复发送。无话可说则空返回。' };
           }
           const { totalSent, allSentContent } = await this._processAndSendTextProtocol(e, filteredContent, {
             messageId: args.messageId,
@@ -374,10 +358,6 @@ export default class ChatStream extends AIStream {
           // 记录到历史
           const sentText = text || '';
           this.recordAIResponse(e, sentText || '');
-          // 更新回复内容记录
-          if (!Array.isArray(this._replyContentsThisTurn)) this._replyContentsThisTurn = [];
-          this._replyContentsThisTurn.push(sentText || `[${t}]`);
-          this._replyCountThisTurn = (this._replyCountThisTurn || 0) + 1;
           const where = e.group_id ? `群 ${e.group_id}` : `用户 ${e.user_id}(私聊)`;
           const part = sentText ? `表情包(${t})及文字：${sentText}` : `表情包(${t})`;
           return { success: true, raw: `你已在${where}发送${part}。无话可说则空返回。` };
@@ -1912,8 +1892,6 @@ Markdown；正文或 content 里写 "poke/at/emotion+参数"；同一轮 reply/a
       }
 
       if (StreamLoader) StreamLoader.currentEvent = e || null;
-      this._replyCountThisTurn = 0;
-      this._replyContentsThisTurn = [];
       this._hasSentEmotionThisTurn = false; // 跟踪本轮是否已发送表情包
 
       BotUtil.makeLog('debug', `[ChatStream] execute 调用 callAI messagesLen=${messages?.length ?? 0}`, 'ChatStream');
@@ -1939,8 +1917,6 @@ Markdown；正文或 content 里写 "poke/at/emotion+参数"；同一轮 reply/a
       BotUtil.makeLog('error', `[ChatStream] execute 失败: ${error.message}`, 'ChatStream');
       return null;
     } finally {
-      this._replyCountThisTurn = 0;
-      this._replyContentsThisTurn = [];
       this._hasSentEmotionThisTurn = false;
       if (StreamLoader?.currentEvent === e) StreamLoader.currentEvent = null;
     }
@@ -2043,13 +2019,6 @@ Markdown；正文或 content 里写 "poke/at/emotion+参数"；同一轮 reply/a
       if (i < messages.length - 1) {
         await BotUtil.sleep(randomRange(800, 1500));
       }
-    }
-
-    // 更新回复计数和内容记录
-    if (updateReplyContents) {
-      const n = (this._replyCountThisTurn = (this._replyCountThisTurn || 0) + totalSent);
-      if (!Array.isArray(this._replyContentsThisTurn)) this._replyContentsThisTurn = [];
-      this._replyContentsThisTurn.push(...allSentContent);
     }
 
     return { totalSent, allSentContent };
@@ -2212,20 +2181,6 @@ Markdown；正文或 content 里写 "poke/at/emotion+参数"；同一轮 reply/a
       // 非 JSON，不视为无内容响应
     }
     return false;
-  }
-
-  /**
-   * 正文是否与本轮已发内容重复，应跳过发送（避免用户看到重复）
-   * 规则：1) 正文去分句符后与已发拼接串完全一致 2) 与任一条包含/被包含或前缀相似 3) 已发≥2条且与拼接串有较长公共子串
-   */
-  _shouldSkipBodyAsRedundant(text, sentList) {
-    if (!text || !Array.isArray(sentList) || sentList.length === 0) return false;
-    const cleanText = this._extractPlainText(text);
-    if (!cleanText) return false;
-    const cleanList = sentList.map(s => this._extractPlainText(s)).filter(Boolean);
-    if (cleanList.length === 0) return false;
-    // 简化去重逻辑：仅在纯文本完全相同的情况下视为重复
-    return cleanList.includes(cleanText);
   }
 
   parseCQToSegments(text, e) {
