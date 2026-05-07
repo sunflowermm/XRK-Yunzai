@@ -1,6 +1,6 @@
 # 设备协议与引用（Device / Reply）
 
-> 设备 HTTP/WebSocket 业务层：`plugins/system-plugin/http/device.js`。与 XRK-AGT 协议对齐。
+> 设备 HTTP/WebSocket 业务层：`plugins/system-plugin/http/device.js`。
 
 ---
 

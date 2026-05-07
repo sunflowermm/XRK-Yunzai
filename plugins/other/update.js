@@ -1,6 +1,5 @@
 import { createRequire } from 'module'
 import lodash from 'lodash'
-import fs from 'node:fs'
 import { FileUtils } from '../../lib/utils/file-utils.js'
 import { Restart } from './restart.js'
 import common from '../../lib/common/common.js'
@@ -9,6 +8,9 @@ const require = createRequire(import.meta.url)
 const { exec, execSync } = require('child_process')
 
 let uping = false
+
+/** git pull 等长时间命令的超时（毫秒），超时后 kill 子进程并释放「更新中」锁，避免永久卡住 */
+const GIT_UPDATE_TIMEOUT_MS = 600000
 
 export class update extends plugin {
   constructor() {
@@ -63,19 +65,24 @@ export class update extends plugin {
     const plugin = this.getPlugin()
     if (plugin === false) return false
 
-    /** 执行更新逻辑 */
-    if (plugin === '') {
-      /** 更新主程序并自动更新XRK插件 */
-      await this.updateMainAndXRK()
-    } else {
-      /** 更新指定插件 */
-      await this.runUpdate(plugin)
-      this.updatedPlugins.add(plugin)
-    }
+    uping = true
+    try {
+      /** 执行更新逻辑 */
+      if (plugin === '') {
+        /** 更新主程序并自动更新XRK插件 */
+        await this.updateMainAndXRK()
+      } else {
+        /** 更新指定插件 */
+        await this.runUpdate(plugin)
+        this.updatedPlugins.add(plugin)
+      }
 
-    /** 检查是否需要重启 */
-    if (this.isUp) {
-      setTimeout(() => this.restart(), 2000)
+      /** 检查是否需要重启 */
+      if (this.isUp) {
+        setTimeout(() => this.restart(), 2000)
+      }
+    } finally {
+      uping = false
     }
   }
 
@@ -170,13 +177,16 @@ export class update extends plugin {
   }
 
   /**
-   * 异步执行shell命令
+   * 异步执行 shell 命令（带超时，避免 git 挂起导致全局「更新中」死锁）
    * @param {string} cmd - 命令
+   * @param {Object} [opts]
+   * @param {number} [opts.timeoutMs] - 超时毫秒数
    * @returns {Promise<Object>} 执行结果
    */
-  async execSync(cmd) {
+  async execGitAsync(cmd, opts = {}) {
+    const timeout = opts.timeoutMs ?? GIT_UPDATE_TIMEOUT_MS
     return new Promise((resolve) => {
-      exec(cmd, { windowsHide: true }, (error, stdout, stderr) => {
+      exec(cmd, { windowsHide: true, timeout, killSignal: 'SIGTERM' }, (error, stdout, stderr) => {
         resolve({ error, stdout, stderr })
       })
     })
@@ -208,15 +218,22 @@ export class update extends plugin {
     const targetName = plugin || this.typeName
     logger.mark(`${this.e.logFnc} 开始${type}：${targetName}`)
     await this.reply(`开始${type} ${targetName}`)
-    
-    uping = true
-    const ret = await this.execSync(cm)
-    uping = false
 
-    /** 处理更新错误 */
+    const ret = await this.execGitAsync(cm, { timeoutMs: GIT_UPDATE_TIMEOUT_MS })
+
+    /** 处理更新错误（含 exec 超时杀进程） */
     if (ret.error) {
       logger.mark(`${this.e.logFnc} 更新失败：${targetName}`)
-      this.gitErr(ret.error, ret.stdout)
+      const err = ret.error
+      const timedOut =
+        err.killed === true ||
+        err.code === 'ETIMEDOUT' ||
+        /timed out|timeout/i.test(String(err.message || ''))
+      if (timedOut) {
+        await this.reply(`更新失败！\n命令执行超时（超过 ${Math.round(GIT_UPDATE_TIMEOUT_MS / 60000)} 分钟已中止），请检查网络或稍后重试`)
+        return false
+      }
+      this.gitErr(err, ret.stdout)
       return false
     }
 
@@ -317,47 +334,65 @@ export class update extends plugin {
    * @returns {Promise<void>}
    */
   async updateAll() {
-    const dirs = fs.readdirSync('./plugins/')
+    if (!this.e.isMaster) return false
+    if (uping) return this.reply('已有命令更新中..请勿重复操作')
+
+    const dirs = FileUtils.readDirSync('./plugins/')
     const originalReply = this.reply
-    
+
     /** 清空已更新记录 */
     this.updatedPlugins.clear()
 
     /** 判断是否静默更新 */
     const isSilent = /^#静默全部(强制)?更新$/.test(this.e.msg)
     if (isSilent) {
+      this.messages = []
       await this.reply(`开始执行静默全部更新，请稍等...`)
       this.reply = (message) => {
         this.messages.push(message)
       }
     }
 
-    /** 更新主程序 */
-    await this.runUpdate()
-    this.updatedPlugins.add('main')
+    uping = true
+    try {
+      /** 更新主程序 */
+      await this.runUpdate()
+      this.updatedPlugins.add('main')
 
-    /** 更新所有插件 */
-    for (let plu of dirs) {
-      /** 跳过已更新的插件 */
-      if (this.updatedPlugins.has(plu)) continue
-      
-      plu = this.getPlugin(plu)
-      if (plu === false) continue
-      
-      await common.sleep(1500)
-      await this.runUpdate(plu)
-      this.updatedPlugins.add(plu)
-    }
+      /** 更新所有插件 */
+      for (let plu of dirs) {
+        /** 跳过已更新的插件 */
+        if (this.updatedPlugins.has(plu)) continue
 
-    /** 发送静默更新结果 */
-    if (isSilent) {
-      this.reply = originalReply
-      await this.reply(await common.makeForwardMsg(this.e, this.messages))
-    }
+        plu = this.getPlugin(plu)
+        if (plu === false) continue
 
-    /** 检查是否需要重启 */
-    if (this.isUp) {
-      setTimeout(() => this.restart(), 2000)
+        await common.sleep(1500)
+        await this.runUpdate(plu)
+        this.updatedPlugins.add(plu)
+      }
+
+      /** 检查是否需要重启 */
+      if (this.isUp) {
+        setTimeout(() => this.restart(), 2000)
+      }
+    } catch (error) {
+      logger.error(`[更新] 全部更新异常: ${error?.message || error}`, error)
+      try {
+        if (!isSilent) {
+          await originalReply.call(this, `全部更新过程中出错: ${error?.message || error}`)
+        } else {
+          this.messages.push(`全部更新过程中出错: ${error?.message || error}`)
+        }
+      } catch (_) {}
+    } finally {
+      uping = false
+      if (isSilent) {
+        this.reply = originalReply
+        if (this.messages.length > 0) {
+          await this.reply(await common.makeForwardMsg(this.e, this.messages))
+        }
+      }
     }
   }
 

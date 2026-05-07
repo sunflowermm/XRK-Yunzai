@@ -260,7 +260,7 @@ PluginsLoader.setupReply(e)  // 设置回复方法
 | `cfg.redis` | `Object` | Redis 连接配置 |
 | `cfg.llm` | `Object` | 所有LLM提供商配置对象 |
 | `cfg.aistream` | `Object` | AI工作流配置对象 |
-| `cfg.getLLMConfig(provider)` | `Function` | 获取指定LLM提供商配置 |
+| `cfg.getLLMConfig(provider)` | `Function` | 获取指定 LLM 提供商配置（内部优先 `LLMFactory.getProviderConfig`，返回对象已去掉 `_clientClass`） |
 | `cfg.masterQQ` | `Array` | 主人QQ号数组，插件常用于权限判断 |
 | `cfg.getGroup(groupId)` | `Function` | 返回群配置（默认 + 群自定义） |
 | `cfg.setConfig(name, data)` | `Function` | 保存配置并触发文件监听器 |

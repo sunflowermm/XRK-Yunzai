@@ -142,8 +142,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
     model: pickFirst(body, ['model']),
     provider: pickFirst(body, ['provider']),
     llm: pickFirst(body, ['llm']),
-    profile: pickFirst(body, ['profile']),
-    defaultProvider: LLMFactory.getDefaultProvider()
+    profile: pickFirst(body, ['profile'])
   });
 
   if (!provider) {
@@ -353,7 +352,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
 
 async function handleModels(req, res, Bot) {
   const providers = LLMFactory.listProviders();
-  const defaultProvider = LLMFactory.getDefaultProvider();
+  const defaultProvider = LLMFactory.resolveProvider({}) || 'gptgod';
   const format = (req.query.format || '').toLowerCase();
 
   if (format === 'openai' || req.path === '/api/v3/models') {

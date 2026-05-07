@@ -1,106 +1,42 @@
-# 工厂模式文档（LLM）
+# 工厂：LLM（`lib/factory/llm/LLMFactory.js`）
 
-> XRK-Yunzai 中 LLM 客户端统一创建与扩展入口。**文件**: `lib/factory/llm/LLMFactory.js`
+## 作用
 
----
+- 按 **provider**（内置或 compat 注册的 `providers[].key`）创建统一接口的客户端（`chat` / `chatStream`）。
+- 扩展：`LLMFactory.registerProvider(name, (config) => new MyClient(config))`。
 
-## 概述
-
-- **统一接口**：所有 LLM 提供商通过同一套 API 创建与使用。
-- **易扩展**：新提供商只需 `registerProvider(name, factoryFn)`。
-- **配置**：内置提供商从 `cfg.getLLMConfig(provider)` 读取；兼容厂商由配置驱动（如 `openai_compat_llm.providers`）。
-- **动态选择**：运行时通过 `createClient({ provider })` 或 `resolveProvider(input)` 指定；未传时默认来自 **aistream.llm.Provider**（与 XRK-AGT 一致）。
-
----
-
-## 架构与提供商
+## 结构
 
 ```
-LLMFactory (静态类)
-├── builtinProviders (Map): gptgod / volcengine / xiaomimimo / openai / gemini / anthropic / azure_openai
-├── compatFactories: openai_compat_llm / openai_responses_compat_llm / newapi_compat_llm / cherryin_compat_llm / ollama_compat_llm / gemini_compat_llm / anthropic_compat_llm / azure_openai_compat_llm（配置中 providers[] 注册为独立 key）
-└── registerProvider / listProviders / hasProvider / resolveProvider / getProviderConfig / getDefaultProvider(deprecated) / createClient
+LLMFactory
+├── builtinProviders: gptgod / volcengine / xiaomimimo / openai / gemini / anthropic / azure_openai
+├── compatFactories: openai_compat_llm、openai_responses_compat_llm、newapi_compat_llm、cherryin_compat_llm（后二者共用 OpenAIPathCompatLLMClient）、ollama、gemini、anthropic、azure_openai 兼容等
+└── registerProvider / listProviders / hasProvider / resolveProvider / getProviderConfig / createClient
 ```
 
-| 提供商 | 说明 |
-|--------|------|
-| `gptgod` | GPTGod，支持识图（Yunzai 特有） |
-| `volcengine` | 火山引擎豆包 |
-| `xiaomimimo` | 小米 MiMo（仅文本） |
-| `openai` | OpenAI Chat Completions |
-| `gemini` | Google Generative Language |
-| `anthropic` | Claude Messages API |
-| `azure_openai` | Azure OpenAI（deployment + api-version） |
-| 兼容厂商 | 由 `openai_compat_llm.providers` 等配置注册，每项 `key` 作为独立 provider |
+| API | 说明 |
+|-----|------|
+| `resolveProvider(input?, options?)` | 从 `input.provider/model/llm/profile` 或 `aistream.llm.Provider` 等解析出 provider 名。 |
+| `getProviderConfig(name)` | 内置：合并 `cfg` 中对应 `*_llm`；兼容：合并 yaml defaults + `providers[]` 条目，含 `protocol`、`factoryType`、`_clientClass`（仅供工厂内部）。对外读取可用 **`cfg.getLLMConfig(name)`**（会去掉 `_clientClass`）。 |
+| `createClient(config?)` | `resolveProvider(config)` → 内置 `new X(config)` 或 compat `new ClientClass(merged)`；合并时丢弃传入字段值为 `undefined` 的项，避免覆盖默认。 |
 
----
-
-## 核心 API
-
-| 方法 | 说明 |
-|------|------|
-| `registerProvider(name, factoryFn)` | 注册内置提供商；factoryFn(config) 返回客户端实例 |
-| `listProviders()` | 内置 + 兼容工厂配置中的 key（如 openai_compat_llm.providers[].key） |
-| `hasProvider(name)` | 是否存在该提供商（内置或兼容） |
-| `resolveProvider(input?, options?)` | 从 input.provider/model/llm/profile/defaultProvider 或 aistream.llm.Provider 解析出最终 provider |
-| `getProviderConfig(provider)` | 内置用 cfg.getLLMConfig；兼容用对应 compat 工厂的 defaults + entry，含 protocol/factoryType/_clientClass |
-| `getDefaultProvider()` | **已废弃**，请用 `resolveProvider({})`；仍保留兼容调用 |
-| `createClient(config?)` | 先 resolveProvider(config)，再创建客户端。合并优先级：**传入 config > 提供商配置**；未指定 provider 时依赖 aistream.llm.Provider。 |
-
----
-
-## 使用示例
+## 使用
 
 ```javascript
 import LLMFactory from '../../lib/factory/llm/LLMFactory.js';
 
-// 默认提供商
-const client1 = LLMFactory.createClient();
-
-// 指定提供商 / 覆盖配置
-const client2 = LLMFactory.createClient({ provider: 'openai', model: 'gpt-4' });
-
-// 工作流中
-const client = LLMFactory.createClient({ provider: apiConfig.provider || 'openai', ...apiConfig });
-return await client.chat(messages, apiConfig);
+// 依赖全局已加载 cfg（含 aistream.llm.Provider）
+const client = LLMFactory.createClient({ provider: 'openai', model: 'gpt-4o' });
+await client.chat(messages, { stream: false, temperature: 0.7 });
 ```
 
-**自定义提供商**：实现 `chat(messages[, overrides])`、`chatStream(messages, onDelta[, overrides])`，再 `LLMFactory.registerProvider('my-llm', (config) => new MyLLMClient(config))`。
+自定义提供商：实现 `chat` / `chatStream`（及项目约定的 overrides），再 `registerProvider`。
 
----
+## 配置
 
-## 配置集成
+- 默认 YAML：`config/default_config/*.yaml`；表单与 schema：`plugins/*/commonconfig/`。
+- 详见 [CONFIG_PRIORITY.md](./CONFIG_PRIORITY.md)、[COMMONCONFIG_BASE.md](./COMMONCONFIG_BASE.md)。
 
-配置来源：`plugins/*/commonconfig/*_llm.js`（CommonConfig 仅从插件目录加载）、`config/default_config/*.yaml`。详见 [CONFIG_PRIORITY.md](./CONFIG_PRIORITY.md)、[COMMONCONFIG_BASE.md](./COMMONCONFIG_BASE.md)。
+## 相关
 
----
-
-## 最佳实践与常见问题
-
-- **选择**：开发可用 gptgod 或配置 `openai_compat_llm.providers` 中的 key；生产按需选稳定提供商。
-- **配置**：集中用配置文件，敏感信息勿提交版本控制。
-- **错误**：捕获「不支持的LLM提供商」时可回退 `createClient()` 使用默认。
-- **扩展**：客户端需实现 `chat`/`chatStream`，配置字段兼容 baseUrl/apiKey/model 等。
-
-**Q: 如何切换？** → `createClient({ provider: 'gemini' })`  
-**Q: 如何添加？** → 实现客户端类 + `registerProvider`  
-**Q: 配置从哪读？** → `cfg.getLLMConfig(provider)`，见上配置来源  
-**Q: 默认提供商？** → 由 `aistream.yaml` 中 `llm.Provider` 决定（默认 `gptgod`）；未配置时 createClient 会抛错提示配置 llm.Provider。  
-
----
-
-## 相关文档
-
-- [WORKFLOW_BASE_CLASS.md](./WORKFLOW_BASE_CLASS.md) - 工作流内使用工厂
-- [COMMONCONFIG_BASE.md](./COMMONCONFIG_BASE.md) - 配置管理（含与 XRK-AGT 对齐说明）
-- [CORE_OBJECTS.md](./CORE_OBJECTS.md) - cfg 与配置读取
-- [ARCHITECTURE.md](./ARCHITECTURE.md) - 工厂在架构中的位置
-
-### 与 XRK-AGT 工厂对齐说明
-
-- **XRK-Yunzai** 已对齐 AGT：
-  - **兼容性工厂**：通过 `compatFactories`（如 `openai_compat_llm`）从配置的 `providers[]` 注册厂商，`listProviders()` 合并内置与兼容 key。
-  - **resolveProvider**：支持 `input.provider/model/llm/profile/defaultProvider` 及 `aistream.llm.Provider` 解析默认。
-  - **getProviderConfig**：内置用 `cfg.getLLMConfig(provider)`，兼容用工厂 defaults + entry，返回含 `protocol`、`factoryType`、`_clientClass` 的配置。
-  - **createClient**：先 resolveProvider，再按 builtin 或 compat 的 _clientClass 实例化；合并配置时过滤 `undefined`，避免覆盖 provider 默认。
-- 当前已实现与 AGT 一致的 8 个兼容工厂：openai_compat_llm、openai_responses_compat_llm、newapi_compat_llm、cherryin_compat_llm、ollama_compat_llm、gemini_compat_llm、anthropic_compat_llm、azure_openai_compat_llm；配置方式为在对应 `*_compat_llm.yaml` 中配置 `providers` 数组，每项 `key` 作为独立 provider。
+- [WORKFLOW_BASE_CLASS.md](./WORKFLOW_BASE_CLASS.md)、[reference/WORKFLOWS.md](./reference/WORKFLOWS.md)（工作流内如何传 `apiConfig`）

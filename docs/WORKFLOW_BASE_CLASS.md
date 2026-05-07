@@ -26,7 +26,6 @@ plugins/<插件根>/stream/
 
 ```javascript
 import AIStream from '../../lib/aistream/aistream.js';
-import cfg from '../../lib/config/config.js';
 
 export default class MyWorkflow extends AIStream {
   constructor() {
@@ -36,11 +35,11 @@ export default class MyWorkflow extends AIStream {
       version: '1.0.0',                // 版本号
       author: 'YourName',              // 作者
       priority: 100,                   // 优先级（数字越小优先级越高）
-      config: {                        // AI配置（可选，会与aistream配置和LLM提供商配置合并）
+      config: {                        // 传入 callAI 的 apiConfig 会与全局/提供商配置按字段合并
         enabled: true,                 // 是否启用
         baseUrl: '',                   // API基础URL
         apiKey: '',                    // API密钥
-        chatModel: 'deepseek-r1-0528', // 模型名称
+        model: 'deepseek-r1-0528',     // 模型名称
         temperature: 0.7,              // 温度参数
         maxTokens: 2000,               // 最大token数
         topP: 0.9,                     // top_p采样
@@ -80,7 +79,7 @@ export default class MyWorkflow extends AIStream {
 | `enabled` | `boolean` | `true` | 是否启用工作流 |
 | `baseUrl` | `string` | `''` | API基础URL |
 | `apiKey` | `string` | `''` | API密钥 |
-| `chatModel` | `string` | `'deepseek-r1-0528'` | 聊天模型名称 |
+| `model` | `string` | `'deepseek-r1-0528'` | 模型名称（与 `chatModel` 二选一即可，`resolveLLMConfig` 会统一解析） |
 | `temperature` | `number` | `0.8` | 温度参数（0-2） |
 | `maxTokens` | `number` | `6000` | 最大token数 |
 | `topP` | `number` | `0.9` | top_p采样（0-1） |
@@ -97,26 +96,24 @@ export default class MyWorkflow extends AIStream {
 | `similarityThreshold` | `number` | `0.6` | 相似度阈值（0-1），低于此值将被丢弃 |
 | `cacheExpiry` | `number` | `86400` | Redis 中历史对话缓存过期时间（秒） |
 
-## 参数优先级
+## 参数优先级（LLM 相关）
 
-**execute 传入 > 构造函数 config > aistream/LLM 提供商配置 > 默认值**
-
-合并顺序：`finalConfig = { ...this.config, ...cfg.aistream, ...cfg.getLLMConfig(provider), ...config }`。详见 [CONFIG_PRIORITY.md](./CONFIG_PRIORITY.md)。
+按 **字段** 合并，见 [CONFIG_PRIORITY.md](./CONFIG_PRIORITY.md)。要点：基类 **`execute`** 调用 **`callAI(messages, config)`**，第三参数 `config` 即 **`resolveLLMConfig` 的 `apiConfig`**；全局 `aistream.llm` 与 `LLMFactory.getProviderConfig` 在 **`resolveLLMConfig`** 内参与各字段的 `pick`，而非在 `execute` 里先拼成一个大对象。
 
 ## 核心方法
 
 - **buildSystemPrompt(context)**：子类实现，返回系统提示字符串。
 - **buildChatContext(e, question)**：子类实现，返回 `[{ role, content }]` 消息数组。
-- **execute(e, question, config)**：合并 config → 构建上下文 → `callAI`；参数 `e` 事件对象、`question` 字符串或对象、`config` 可选；返回字符串或 null。详见 [reference/WORKFLOWS.md](./reference/WORKFLOWS.md)。
+- **execute(e, question, config)**：构建上下文 → **`callAI(messages, config ?? {})`** → 解析功能时间线等；返回字符串或 `null`。详见 [reference/WORKFLOWS.md](./reference/WORKFLOWS.md)。
 
 ## 记忆系统
 
-`this.getMemorySystem()` 获取记忆系统；`this.buildMemorySummary(e)` 构建摘要（场景隔离）；`memorySystem.remember({ ownerId, scene, layer, content, ... })` / `forget(...)`。详见 [WORKFLOWS.md](./reference/WORKFLOWS.md)。
+`this.getMemorySystem()`；`this.buildMemorySummary(e)`；`remember` / `forget`。详见 [reference/WORKFLOWS.md](./reference/WORKFLOWS.md)。
 
 ## AI 调用
 
-- **callAI(messages, apiConfig)**：内部合并 `this.config` 与 apiConfig，调用 LLM 返回回复文本。
-- **callAIStream(messages, apiConfig, onDelta)**：流式输出，每段增量回调 `onDelta(delta)`。
+- **callAI(messages, apiConfig)**：`resolveLLMConfig` → `LLMFactory.createClient` → `client.chat`。
+- **callAIStream(messages, apiConfig, onDelta)**：同上，流式；`enableStream === false` 时走非流式再一次性回调。
 
 ## 功能管理
 
@@ -132,12 +129,12 @@ export default class MyWorkflow extends AIStream {
 
 ## 完整示例
 
-> **注意**: 以下示例中，假设已导入必要的模块：
-> - `import AIStream from '../../lib/aistream/aistream.js'`
-> - `import cfg from '../../lib/config/config.js'`
-> - `import fs from 'fs/promises'`
+> **注意**：业务中写文件请用 `FileUtils`（`lib/utils/file-utils.js`），勿在插件中直接使用 `fs`。
 
 ```javascript
+import { FileUtils } from '../../lib/utils/file-utils.js';
+import AIStream from '../../lib/aistream/aistream.js';
+
 export default class FileWorkflow extends AIStream {
   constructor() {
     super({
@@ -176,7 +173,7 @@ export default class FileWorkflow extends AIStream {
       },
       handler: async (params, context) => {
         try {
-          await fs.writeFile(params.fileName, params.content, 'utf8');
+          await FileUtils.writeFile(params.fileName, params.content, 'utf8');
           return { type: 'text', content: `文件 ${params.fileName} 已创建` };
         } catch (error) {
           return { type: 'text', content: `创建失败: ${error.message}` };
@@ -202,30 +199,23 @@ ${this.buildFunctionsPrompt()}`;
   }
 
   async execute(e, question, config) {
-    const provider = config.provider || this.config.provider || 'gptgod';
-    const finalConfig = { 
-      ...this.config, 
-      ...cfg.aistream,
-      ...cfg.getLLMConfig(provider),
-      ...config 
-    };
-    const messages = await this.buildChatContext(e, question);
-    const response = await this.callAI(messages, finalConfig);
-    
+    const userConfig = config || {};
+    const finalConfig = { ...this.config, ...userConfig };
+    const context = { e, question, config: finalConfig };
+    const baseMessages = await this.buildChatContext(e, question);
+    const messages = await this.buildEnhancedContext(e, question, baseMessages);
+    const response = await this.callAI(messages, userConfig);
     if (!response) return null;
-    
-    const { timeline, cleanText } = this.parseFunctions(response, { e, question, config: finalConfig });
+    const { timeline, cleanText } = this.parseFunctions(response, context);
     const actionTimeline = timeline?.length ? timeline : [{ type: 'text', content: cleanText || response }];
-    const result = await this.runActionTimeline(actionTimeline, { e, question, config: finalConfig });
-    
-    return result;
+    return await this.runActionTimeline(actionTimeline, context);
   }
 }
 ```
 
 ## 最佳实践
 
-1. **参数合并**：在execute中使用 `{ ...this.config, ...cfg.aistream, ...cfg.getLLMConfig(provider), ...config }` 确保优先级
+1. **参数合并**：需要覆盖模型/密钥时在 `execute` 第三参数或 `callAI` 第二参数传入；详见 [CONFIG_PRIORITY.md](./CONFIG_PRIORITY.md)
 2. **记忆系统**：在 `buildChatContext` 中使用 `buildMemorySummary` 增强上下文
 3. **功能注册**：在 `init` 方法中注册功能，而不是构造函数
 4. **错误处理**：所有异步操作都要有错误处理
@@ -258,16 +248,13 @@ aistream:
 A: 不能。每个工作流独立执行，AI只能看到当前工作流的功能。如果需要多个功能，使用 `WorkflowManager.runMultiple()` 并行调用多个工作流，每个工作流处理自己的部分。
 
 **Q: 参数优先级如何确定？**
-A: execute传入参数 > 构造函数config > aistream配置/LLM提供商配置 > 默认值。在execute中使用 `{ ...this.config, ...cfg.aistream, ...cfg.getLLMConfig(provider), ...config }` 合并。
+A: 见 [CONFIG_PRIORITY.md](./CONFIG_PRIORITY.md)（按字段 `pick`，不是整对象覆盖）。
 
 **Q: 如何访问记忆系统？**
 A: 使用 `this.getMemorySystem()` 或 `this.buildMemorySummary(e)`。所有工作流自动获得记忆系统。
 
 **Q: 功能函数如何工作？**
 A: AI在回复中使用特定格式（如`[创建文件:test.txt:内容]`），系统解析后执行对应handler，返回结果会合并到最终回复中。
-
-**Q: 同时调用多个工作流时，AI能看到所有功能吗？**
-A: 不能。每个工作流独立执行，AI只能看到当前工作流的功能。这是模块化设计的核心：每个工作流专注自己的功能，通过组合实现复杂需求。
 
 **Q: 工作流如何被加载？**
 A: 工作流由 `lib/aistream/loader.js` 自动扫描 `plugins/<插件根>/stream/` 目录并加载。确保文件导出默认类并继承 `AIStream`。

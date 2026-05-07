@@ -18,7 +18,7 @@
 
 | 方法 | 说明 |
 |------|------|
-| `constructor(options)` | 合并 cfg.aistream + getLLMConfig，初始化 MemorySystem、函数开关、BM25 配置 |
+| `constructor(options)` | 合并 `options.config` 与基类默认 `this.config`；初始化 MemorySystem、BM25、函数 Map 等（不在此读取 `cfg`） |
 | `init()` | 一次性初始化：函数 Map、记忆（若启用） |
 | `initEmbedding()` | 初始化 LightweightSimilarity（扩展点） |
 
@@ -49,9 +49,9 @@
 
 | 方法 | 说明 |
 |------|------|
-| `callAI(messages, apiConfig?)` | 非流式 Chat Completions，返回 content |
-| `callAIStream(messages, apiConfig?, onDelta)` | 流式，增量传 onDelta |
-| `execute(e, question, config?)` | 合并配置→上下文→callAI→preprocessResponse→parseFunctions→runActionTimeline→存储记忆/索引 |
+| `callAI(messages, apiConfig?)` | `resolveLLMConfig` → `LLMFactory.createClient` → `client.chat`；返回字符串或 `null`（部分客户端可返回带 `content` 的对象，基类会取 `content`） |
+| `callAIStream(messages, apiConfig?, onDelta)` | 同上；`enableStream === false` 时退化为 `callAI` 后一次性回调 |
+| `execute(e, question, config?)` | `callAI(messages, config)`；上下文对象里的 `config` 为 `{ ...this.config, ...config }`，与 LLM 解析用的 `apiConfig` 均为传入的第三参数 |
 | `preprocessResponse(response, context)` | 默认原样返回；子类可重写 |
 | `process(e, question, apiConfig?)` | try/catch 包裹 execute |
 
