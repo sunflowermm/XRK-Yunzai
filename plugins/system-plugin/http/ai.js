@@ -1,6 +1,6 @@
 import cfg from '../../../lib/config/config.js';
 import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
-import { transformMessagesWithVision } from '../../../lib/utils/llm/message-transform.js';
+import { transformOpenAIStyleVisionMessages } from '../../../lib/utils/llm/message-transform.js';
 import { MCPToolAdapter } from '../../../lib/utils/llm/mcp-tool-adapter.js';
 import { parseMultipartData } from '../../../lib/utils/multipart-parser.js';
 import BotUtil from '../../../lib/util.js';
@@ -166,7 +166,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
   const client = LLMFactory.createClient(llmConfig);
   BotUtil.makeLog('debug', `[AI] 客户端已创建: provider=${provider}`, 'HTTP');
 
-  const transformedMessages = await transformMessagesWithVision(messages, llmConfig, { mode: 'openai' });
+  const transformedMessages = await transformOpenAIStyleVisionMessages(messages, llmConfig);
   
   // 构建 overrides（规范键名，与 openai-chat-utils/buildOpenAIChatCompletionsBody 一致）
   const overrides = {};
