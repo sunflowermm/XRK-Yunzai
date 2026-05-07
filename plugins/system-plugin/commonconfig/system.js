@@ -1309,6 +1309,48 @@ export default class SystemConfig extends ConfigBase {
                   default: 360000,
                   component: 'InputNumber'
                 },
+                temperature: {
+                  type: 'number',
+                  label: '默认 temperature',
+                  description: '全局默认采样温度，工作流/单次请求/各 *_llm 可覆盖',
+                  min: 0,
+                  max: 2,
+                  default: 0.8,
+                  component: 'InputNumber'
+                },
+                maxTokens: {
+                  type: 'number',
+                  label: '默认 max_tokens',
+                  description: '全局默认最大输出 token',
+                  min: 1,
+                  default: 6000,
+                  component: 'InputNumber'
+                },
+                topP: {
+                  type: 'number',
+                  label: '默认 top_p',
+                  description: '全局默认核采样',
+                  min: 0,
+                  max: 1,
+                  default: 0.9,
+                  component: 'InputNumber'
+                },
+                presencePenalty: {
+                  type: 'number',
+                  label: '默认 presence_penalty',
+                  min: -2,
+                  max: 2,
+                  default: 0.6,
+                  component: 'InputNumber'
+                },
+                frequencyPenalty: {
+                  type: 'number',
+                  label: '默认 frequency_penalty',
+                  min: -2,
+                  max: 2,
+                  default: 0.6,
+                  component: 'InputNumber'
+                },
                 retry: {
                   type: 'object',
                   label: '重试配置',

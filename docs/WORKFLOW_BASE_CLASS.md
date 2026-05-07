@@ -39,7 +39,7 @@ export default class MyWorkflow extends AIStream {
         enabled: true,                 // 是否启用
         baseUrl: '',                   // API基础URL
         apiKey: '',                    // API密钥
-        model: 'deepseek-r1-0528',     // 模型名称
+        // model 不写则使用当前 LLM 提供商（如 openai_compat providers）里配置的模型
         temperature: 0.7,              // 温度参数
         maxTokens: 2000,               // 最大token数
         topP: 0.9,                     // top_p采样
@@ -77,15 +77,13 @@ export default class MyWorkflow extends AIStream {
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `enabled` | `boolean` | `true` | 是否启用工作流 |
-| `baseUrl` | `string` | `''` | API基础URL |
-| `apiKey` | `string` | `''` | API密钥 |
-| `model` | `string` | `'deepseek-r1-0528'` | 模型名称（与 `chatModel` 二选一即可，`resolveLLMConfig` 会统一解析） |
-| `temperature` | `number` | `0.8` | 温度参数（0-2） |
-| `maxTokens` | `number` | `6000` | 最大token数 |
-| `topP` | `number` | `0.9` | top_p采样（0-1） |
-| `presencePenalty` | `number` | `0.6` | 存在惩罚（-2到2） |
-| `frequencyPenalty` | `number` | `0.6` | 频率惩罚（-2到2） |
-| `timeout` | `number` | `30000` | 超时时间（毫秒） |
+| `model` / `chatModel` | `string` | （无） | 不写则用提供商 yaml；与 XRK-AGT 一致，基类不设 `baseUrl`/`apiKey`/`timeout`（由 `openai_compat` 等 providers 与 `aistream.llm` 提供） |
+| `temperature` | `number` | `0.8` | 可被提供商与 `aistream.llm.temperature` 覆盖（见 `resolveLLMConfig`） |
+| `maxTokens` | `number` | `6000` | 同上 |
+| `topP` | `number` | `0.9` | 同上 |
+| `presencePenalty` | `number` | `0.6` | 同上 |
+| `frequencyPenalty` | `number` | `0.6` | 同上 |
+| `enableStream` / `toolChoice` / `parallelToolCalls` / `maxToolRounds` / `headers` / `extraBody` / `proxy` 等 | — | — | 可在工作流 `config` 中写；`resolveLLMConfig` 会与提供商条目合并（与 `openai_compat_llm` schema 对齐） |
 
 **embedding 对象字段（BM25）**
 

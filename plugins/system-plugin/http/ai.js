@@ -7,7 +7,7 @@ import BotUtil from '../../../lib/util.js';
 
 /**
  * POST /api/v3/chat/completions
- * OpenAI 兼容的对话补全接口：支持流式、多模态、MCP 工具（与 XRK-AGT 对齐）
+ * OpenAI 兼容的对话补全接口：支持流式、多模态、MCP 工具
  *
  * 请求体：messages（必填）、model/provider/llm/profile、stream、temperature、max_tokens 等；
  * 支持 multipart/form-data 图片上传；可选 workflow: { workflows?, streams? } 限定 MCP 工具作用域。
@@ -352,7 +352,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
 
 async function handleModels(req, res, Bot) {
   const providers = LLMFactory.listProviders();
-  const defaultProvider = LLMFactory.resolveProvider({}) || 'gptgod';
+  const defaultProvider = LLMFactory.resolveProvider({}) ?? LLMFactory.firstBuiltinProviderKey();
   const format = (req.query.format || '').toLowerCase();
 
   if (format === 'openai' || req.path === '/api/v3/models') {

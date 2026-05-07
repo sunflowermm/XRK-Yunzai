@@ -35,6 +35,7 @@ await client.chat(messages, { stream: false, temperature: 0.7 });
 ## 配置
 
 - 默认 YAML：`config/default_config/*.yaml`；表单与 schema：`plugins/*/commonconfig/`。
+- **默认内置 provider**：未配置 `aistream.llm.Provider` 时，由 `LLMFactory.js` 内部 `resolveDefaultProvider()` 取 **`builtinProviders` Map 按插入顺序的第一个 key**（对外 `LLMFactory.firstBuiltinProviderKey()`）；不在 config 层维护枚举。`cfg._getBuiltinLlmFallback` 使用 `LLMFactory.listBuiltinProviderKeys()`。
 - 详见 [CONFIG_PRIORITY.md](./CONFIG_PRIORITY.md)、[COMMONCONFIG_BASE.md](./COMMONCONFIG_BASE.md)。
 
 ## 相关

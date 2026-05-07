@@ -17,6 +17,12 @@ cache:
 llm:
   Provider: gptgod
   timeout: 360000
+  # 全局默认生成参数（单次请求 / 工作流 config / 各 *_llm.yaml 提供商可覆盖）
+  temperature: 0.8
+  maxTokens: 6000
+  topP: 0.9
+  presencePenalty: 0.6
+  frequencyPenalty: 0.6
   retry:
     enabled: true
     maxAttempts: 3

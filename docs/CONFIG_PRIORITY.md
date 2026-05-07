@@ -4,7 +4,7 @@
 
 与 **单次 LLM 请求**相关的字段，在 `AIStream.resolveLLMConfig(apiConfig)` 中按 **字段** 选择来源（不是整对象一层层覆盖）。同一字段的常见优先级为：
 
-**`apiConfig`（含 `execute` 第三参数传入的 config） > `this.config`（工作流构造函数里的 `config`）> 提供商默认（`LLMFactory.getProviderConfig(provider)`）> `cfg.aistream.llm` 中对应项（如 `Provider`、`timeout`）**
+**`apiConfig`（含 `execute` 第三参数传入的 config） > `this.config`（工作流构造函数里的 `config`）> 提供商默认（`LLMFactory.getProviderConfig(provider)`）> `cfg.aistream.llm`**（`aistream.yaml`：含 `Provider`、`timeout`、`temperature`、`maxTokens`、`retry` 等）**；请求超时还会在以上皆无时参照 `cfg.aistream.global.maxTimeout`**
 
 其中 `provider` 本身由 `apiConfig.provider` → `this.config.provider` → `aistream.llm.Provider` → `LLMFactory.resolveProvider({})` 解析。
 
@@ -25,6 +25,9 @@
 | `frequencyPenalty` / `frequency_penalty` | frequency_penalty |
 | `apiKey` / `api_key` | 密钥 |
 | `enableTools` / `enable_tools` | 是否启用工具链 |
+| `enableStream` / `enable_stream` | 是否流式（`false` 时 `callAIStream` 退化为 `callAI`） |
+| `tool_choice` / `toolChoice`、`parallel_tool_calls` / `parallelToolCalls` | OpenAI 协议透传 |
+| `headers`、`extraBody`、`proxy` | 浅合并（与 `openai_compat_llm` providers schema 一致） |
 
 ## 示例
 
