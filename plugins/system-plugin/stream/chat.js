@@ -3,6 +3,8 @@ import fs from 'fs';
 import AIStream from '../../../lib/aistream/aistream.js';
 import BotUtil from '../../../lib/util.js';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
+import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
+import { prepareOpenAIChatVisionMessages } from '../../../lib/utils/llm/image-utils.js';
 import { loadFilteredMemoriesForEvent, scoreMemoryForQuery } from '../../../lib/aistream/memory-file-context.js';
 
 const EMOTIONS_DIR = path.join(process.cwd(), 'resources/aiimages');
@@ -819,16 +821,13 @@ export default class ChatStream extends AIStream {
             BotUtil.makeLog('debug', `获取群信息ex成功: ${JSON.stringify(info)}`, 'ChatStream');
             const raw = this._queryToolRawDetail('群扩展信息', info, context.e);
             const result = { success: true, data: info, raw };
-            this.recordToolCallResult(context.e, 'getGroupInfoEx', result);
             return result;
           }
           const result = { success: false, error: 'API不可用' };
-          this.recordToolCallResult(context.e, 'getGroupInfoEx', result);
           return result;
         }, 0).catch(error => {
           BotUtil.makeLog('warn', `获取群信息ex失败: ${error.message}`, 'ChatStream');
           const result = { success: false, error: error.message };
-          this.recordToolCallResult(context.e, 'getGroupInfoEx', result);
           return result;
         });
       },
@@ -849,16 +848,13 @@ export default class ChatStream extends AIStream {
             BotUtil.makeLog('debug', `@全体成员剩余次数: ${JSON.stringify(remain)}`, 'ChatStream');
             const raw = this._queryToolRawDetail('@全体剩余次数', remain, context.e);
             const result = { success: true, data: remain, raw };
-            this.recordToolCallResult(context.e, 'getAtAllRemain', result);
             return result;
           }
           const result = { success: false, error: 'API不可用' };
-          this.recordToolCallResult(context.e, 'getAtAllRemain', result);
           return result;
         }, 0).catch(error => {
           BotUtil.makeLog('warn', `获取@全体剩余次数失败: ${error.message}`, 'ChatStream');
           const result = { success: false, error: error.message };
-          this.recordToolCallResult(context.e, 'getAtAllRemain', result);
           return result;
         });
       },
@@ -879,16 +875,13 @@ export default class ChatStream extends AIStream {
             BotUtil.makeLog('debug', `群禁言列表: ${JSON.stringify(banList)}`, 'ChatStream');
             const raw = this._queryToolRawDetail('禁言列表', banList, context.e);
             const result = { success: true, data: banList, raw };
-            this.recordToolCallResult(context.e, 'getBanList', result);
             return result;
           }
           const result = { success: false, error: 'API不可用' };
-          this.recordToolCallResult(context.e, 'getBanList', result);
           return result;
         }, 0).catch(error => {
           BotUtil.makeLog('warn', `获取禁言列表失败: ${error.message}`, 'ChatStream');
           const result = { success: false, error: error.message };
-          this.recordToolCallResult(context.e, 'getBanList', result);
           return result;
         });
       },
@@ -960,11 +953,9 @@ export default class ChatStream extends AIStream {
 
           const raw = this._queryToolRaw(`好友列表（共 ${friends.length} 人）`, { friends });
           const result = { success: true, data: { friends }, raw };
-          this.recordToolCallResult(context.e, 'getFriendList', result);
           return result;
         } catch (error) {
           const result = { success: false, error: error.message };
-          this.recordToolCallResult(context.e, 'getFriendList', result);
           return result;
         }
       },
@@ -1030,7 +1021,6 @@ export default class ChatStream extends AIStream {
 
           const raw = this._queryToolRawDetail('群成员列表', { members }, context.e);
           const result = { success: true, data: { members }, raw };
-          this.recordToolCallResult(context.e, 'getGroupMembers', result);
           return result;
         } catch (error) {
           return { success: false, error: error.message };
@@ -1067,7 +1057,6 @@ export default class ChatStream extends AIStream {
 
           const raw = this._queryToolRawDetail('群基础信息', info, e);
           const result = { success: true, data: info, raw };
-          this.recordToolCallResult(context.e, 'getGroupInfo', result);
           return result;
         } catch (error) {
           return { success: false, error: error.message };
@@ -1116,7 +1105,6 @@ export default class ChatStream extends AIStream {
 
           const raw = this._queryToolRawDetail(`成员 ${qq} 的信息`, info, e);
           const result = { success: true, data: info, raw };
-          this.recordToolCallResult(context.e, 'getMemberInfo', { ...result, qq });
           return result;
         } catch (error) {
           return { success: false, error: error.message };
@@ -1159,7 +1147,6 @@ export default class ChatStream extends AIStream {
 
           const raw = this._queryToolRaw(`好友 ${qq} 的信息`, info);
           const result = { success: true, data: info, raw };
-          this.recordToolCallResult(context.e, 'getFriendInfo', { ...result, qq });
           return result;
         } catch (error) {
           return { success: false, error: error.message };
@@ -1252,7 +1239,6 @@ export default class ChatStream extends AIStream {
             };
           const raw = this._queryToolRaw(`消息 ${msgId} 的图片URL列表（共 ${images.length} 张）`, data);
           const result = { success: true, data, raw };
-          this.recordToolCallResult(context.e, 'getMessageImages', result);
           BotUtil.makeLog('debug', `[ChatStream] getMessageImages 成功获取消息图片 messageId=${msgId} imageCount=${images.length} images=${images.join(',')}`, 'ChatStream');
           return result;
         } catch (error) {
@@ -1315,7 +1301,6 @@ export default class ChatStream extends AIStream {
             };
           const raw = this._queryToolRaw('该图片的识别结果', data);
           const result = { success: true, data, raw };
-          this.recordToolCallResult(context.e, 'recognizeImage', result);
           BotUtil.makeLog('debug', `[ChatStream] recognizeImage 成功识别图片 imageUrl=${imageUrl} descriptionLen=${recognitionResult.trim().length}`, 'ChatStream');
           return result;
         } catch (error) {
@@ -1680,11 +1665,16 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
     // 提取图片（统一提取逻辑）
     const { images, replyImages } = await this._extractImagesFromEvent(e);
 
-    // 若无图片，则仍然用纯文本，兼容旧逻辑
+    const triggerFlags = {
+      isGlobalTrigger: !!question?.isGlobalTrigger,
+      debugDumpFullPrompt: !!question?.debugDumpFullPrompt
+    };
+
+    // 若无图片，则仍然用纯文本；附带触发标记供 mergeMessageHistory 使用（勿仅靠纯字符串否则丢失）
     if (images.length === 0 && replyImages.length === 0) {
       messages.push({
         role: 'user',
-        content: text
+        content: { text, ...triggerFlags }
       });
     } else {
       messages.push({
@@ -1692,12 +1682,12 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
         content: {
           text: text || '',
           images,
-          replyImages
+          replyImages,
+          ...triggerFlags
         }
       });
     }
 
-    BotUtil.makeLog('debug', `[ChatStream] buildChatContext 完成 messagesLen=${messages.length} hasImages=${images.length} hasReplyImages=${replyImages.length} textLen=${(text || '').length}`, 'ChatStream');
     return messages;
   }
 
@@ -1738,7 +1728,6 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
       enhanced.unshift({ role: 'system', content: memText });
     }
 
-    BotUtil.makeLog('debug', `[ChatStream] buildEnhancedContext 已并入 system memLen=${memText.length}`, 'ChatStream');
     return enhanced;
   }
 
@@ -1808,11 +1797,6 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
         const limited = merged.length > 50 ? merged.slice(-50) : merged;
         ChatStream.messageHistory.set(groupId, limited);
 
-        BotUtil.makeLog(
-          'debug',
-          `[ChatStream] syncHistoryFromAdapter group=${groupId} 原有=${history.length} 新增=${newMessages.length} 合并后=${limited.length}`,
-          'ChatStream'
-        );
       }
     } catch (error) {
       BotUtil.makeLog(
@@ -1843,7 +1827,8 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
   _formatHistoryMessage(msg) {
     const msgId = msg.message_id || msg.real_id || '未知';
     const imageTag = msg.hasImage ? '[含图片]' : '';
-    const toolTag = msg.isTool ? '[系统操作]' : '';
+    const toolLabel = msg.isTool && msg.toolName ? String(msg.toolName) : '';
+    const toolTag = msg.isTool ? (toolLabel ? `[工具·${toolLabel}]` : '[工具]') : '';
     const tags = [imageTag, toolTag].filter(Boolean).join(' ');
     if (msg.isBot) {
       const content = this._normalizeMessageText((msg.message || '').replace(/\n/g, ' '));
@@ -1858,45 +1843,47 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
   async mergeMessageHistory(messages, e) {
     if (!e?.isGroup || messages.length < 2) return messages;
 
-    // 同步历史记录（仅在群聊中）
     await this.syncHistoryFromAdapter(e);
 
     const userMessage = messages[messages.length - 1];
     const isGlobalTrigger = userMessage.content?.isGlobalTrigger || false;
+    const debugDumpFullPrompt = userMessage.content?.debugDumpFullPrompt || false;
     const history = ChatStream.messageHistory.get(e.group_id) || [];
-    
+    const historyLimit = debugDumpFullPrompt ? 50 : (isGlobalTrigger ? 15 : 10);
+    const historyHeader = debugDumpFullPrompt
+      ? `[群聊记录·调试导出·内存最近至多${historyLimit}条·含工具结果摘要]`
+      : '[群聊记录]';
+
     const mergedMessages = [messages[0]];
     const currentMsgId = e.message_id || e.real_id || e.messageId || e.id || e.source?.id || '未知';
     const currentUserNickname = e.sender?.card || e.sender?.nickname || e.user?.name || '用户';
-    const currentContent = typeof userMessage.content === 'string' 
-      ? userMessage.content 
+    const currentContent = typeof userMessage.content === 'string'
+      ? userMessage.content
       : (userMessage.content?.text ?? '');
 
-    // 过滤掉当前消息，避免重复
-    const filteredHistory = history.filter(msg => 
+    const filteredHistory = history.filter(msg =>
       String(msg.message_id) !== String(currentMsgId)
     );
+    const recentMessages = filteredHistory.slice(-historyLimit);
 
-    if (isGlobalTrigger) {
-      const recentMessages = filteredHistory.slice(-15);
-      if (recentMessages.length > 0) {
-        mergedMessages.push({
-          role: 'user',
-          content: `[群聊记录]\n${recentMessages.map(msg => this._formatHistoryMessage(msg)).join('\n')}\n\n你闲来无事点开群聊，看到上面这些发言。请像正常在群里聊天一样：对当前气氛或你关心的某条发言自然接话，可以多聊一两句（接话、吐槽、表情包语气等），不必只回一句很尬的总结；也不要试图解决问题或逐条回复。`
-        });
-      }
-    } else {
-      const recentMessages = filteredHistory.slice(-10);
-      if (recentMessages.length > 0) {
-        mergedMessages.push({
-          role: 'user',
-          content: `[群聊记录]\n${recentMessages.map(msg => this._formatHistoryMessage(msg)).join('\n')}`
-        });
-      }
-      if (currentMsgId !== '未知' && currentContent) {
+    if (recentMessages.length > 0) {
+      const historyText = `${historyHeader}\n${recentMessages.map(msg => this._formatHistoryMessage(msg)).join('\n')}`;
+      mergedMessages.push({
+        role: 'user',
+        content: isGlobalTrigger
+          ? `${historyText}\n\n你闲来无事点开群聊，看到上面这些发言。请像正常在群里聊天一样：对当前气氛或你关心的某条发言自然接话，可以多聊一两句（接话、吐槽、表情包语气等），不必只回一句很尬的总结；也不要试图解决问题或逐条回复。`
+          : historyText
+      });
+    }
+
+    if (!isGlobalTrigger) {
+      const showCurrentLine =
+        currentMsgId !== '未知' && (Boolean(currentContent) || debugDumpFullPrompt);
+      const lineBody = currentContent || '(本条无正文：调试口令已剥离或仅图片等)';
+      if (showCurrentLine) {
         if (typeof userMessage.content === 'object' && userMessage.content !== null) {
           const content = userMessage.content;
-          const baseText = content.text || content.content || currentContent;
+          const baseText = content.text || content.content || lineBody;
           mergedMessages.push({
             role: 'user',
             content: {
@@ -1908,7 +1895,7 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
         } else {
           mergedMessages.push({
             role: 'user',
-            content: `[当前消息]\n${currentUserNickname}(${e.user_id})[ID:${currentMsgId}]: ${currentContent}`
+            content: `[当前消息]\n${currentUserNickname}(${e.user_id})[ID:${currentMsgId}]: ${currentContent || lineBody}`
           });
         }
       } else if (currentContent) {
@@ -1927,20 +1914,57 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
         }
       }
     }
-    const roles = mergedMessages.map(m => m.role).join(',');
-    BotUtil.makeLog('debug', `[ChatStream] mergeMessageHistory mergedLen=${mergedMessages.length} historyLen=${history.length} roles=[${roles}]`, 'ChatStream');
     return mergedMessages;
   }
 
+  /**
+   * 除去用户 content 上的内部标记，避免进入真实 API 请求体。
+   */
+  static stripInternalMessageFlags(messages) {
+    if (!Array.isArray(messages)) return messages;
+    return messages.map((msg) => {
+      if (msg.role !== 'user' || msg.content == null || typeof msg.content !== 'object' || Array.isArray(msg.content)) {
+        return msg;
+      }
+      if (msg.content.debugDumpFullPrompt === undefined && msg.content.isGlobalTrigger === undefined) {
+        return msg;
+      }
+      const { debugDumpFullPrompt: _d, isGlobalTrigger: _g, ...content } = msg.content;
+      return { ...msg, content };
+    });
+  }
+
+  /**
+   * 调试：在请求 LLM 前将首轮 POST 请求体（及组装 messages）写入 data/ai_llm_request_*.json。
+   */
+  async callAI(messages, apiConfig = {}) {
+    const { debugDumpFullPrompt, _debugDumpEvent: dumpEvent, ...rest } = apiConfig;
+    const forApi = ChatStream.stripInternalMessageFlags(messages);
+
+    if (debugDumpFullPrompt && dumpEvent && Array.isArray(forApi) && forApi.length > 0) {
+      try {
+        const r = await ChatStream.dumpLlmRequestSnapshot(this, dumpEvent, forApi, rest);
+        BotUtil.makeLog(
+          r.success ? 'info' : 'warn',
+          r.success
+            ? `[ChatStream] 已导出 LLM 请求体: ${r.path}`
+            : `[ChatStream] 请求体导出失败: ${r.error || '未知'}`,
+          'ChatStream'
+        );
+      } catch (err) {
+        BotUtil.makeLog('error', `[ChatStream] 请求体导出异常: ${err?.message}`, 'ChatStream');
+      }
+    }
+
+    return super.callAI(forApi, rest);
+  }
+
   async execute(e, messages, config) {
-    const StreamLoader = Bot.StreamLoader;
-    const groupId = e?.group_id ?? e?.user_id;
     let debugDumpFullPrompt = false;
     if (!Array.isArray(messages) && messages && typeof messages === 'object') {
       debugDumpFullPrompt = !!messages.debugDumpFullPrompt;
     }
 
-    BotUtil.makeLog('debug', `[ChatStream] execute 开始 group=${groupId} isArray=${Array.isArray(messages)} len=${messages?.length ?? 0}`, 'ChatStream');
     try {
       // 记录当前消息（统一记录逻辑）
       if (e) this.recordMessage(e);
@@ -1954,42 +1978,19 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
       const query = Array.isArray(messages) ? this.extractQueryFromMessages(messages) : messages;
       messages = await this.buildEnhancedContext(e, query, messages);
 
-      BotUtil.makeLog('debug', `[ChatStream] execute 上下文构建完成 messagesLen=${messages?.length ?? 0} query=${typeof query === 'string' ? query : (query?.content ?? query?.text ?? '')}`, 'ChatStream');
+      if (Bot.StreamLoader) Bot.StreamLoader.currentEvent = e || null;
+      this._hasSentEmotionThisTurn = false;
 
-      if (StreamLoader) StreamLoader.currentEvent = e || null;
-      this._hasSentEmotionThisTurn = false; // 跟踪本轮是否已发送表情包
-
-      if (debugDumpFullPrompt) {
-        try {
-          const r = await ChatStream.dumpFullLlmContextToData(e, this.name, messages);
-          BotUtil.makeLog(
-            r.success ? 'info' : 'warn',
-            r.success
-              ? `[ChatStream] 已写入完整 AI 上下文: ${r.path}`
-              : `[ChatStream] 写入完整 AI 上下文失败: ${r.error || '未知'}`,
-            'ChatStream'
-          );
-        } catch (err) {
-          BotUtil.makeLog('error', `[ChatStream] 导出完整上下文异常: ${err?.message}`, 'ChatStream');
-        }
-      }
-
-      BotUtil.makeLog('debug', `[ChatStream] execute 调用 callAI messagesLen=${messages?.length ?? 0}`, 'ChatStream');
-      const response = await this.callAI(messages, config);
+      const response = await this.callAI(messages, {
+        ...config,
+        debugDumpFullPrompt,
+        _debugDumpEvent: e
+      });
       let text = (response ?? '').toString().trim();
-      BotUtil.makeLog('debug', `[ChatStream] execute callAI 返回 responseLen=${(response ?? '').length} textLen=${text.length}`, 'ChatStream');
-      
+
       // 过滤Markdown格式，转换为纯文本
       if (text) {
-        const beforeFilter = text;
         text = this.filterMarkdown(text);
-        if (beforeFilter !== text) {
-          BotUtil.makeLog('debug', `[ChatStream] execute 过滤Markdown beforeLen=${beforeFilter.length} afterLen=${text.length}`, 'ChatStream');
-        }
-      }
-      // 正文不发给用户，仅作内部总结；用户只能看到 reply/at/emotion 等工具发出的内容
-      if (text && this._isNoContentResponse(text)) {
-        BotUtil.makeLog('debug', `[ChatStream] execute 忽略无内容响应 text=${text}`, 'ChatStream');
       }
       if (!response) return null;
       return text || '';
@@ -1998,7 +1999,7 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
       return null;
     } finally {
       this._hasSentEmotionThisTurn = false;
-      if (StreamLoader?.currentEvent === e) StreamLoader.currentEvent = null;
+      if (Bot.StreamLoader?.currentEvent === e) Bot.StreamLoader.currentEvent = null;
     }
   }
 
@@ -2225,26 +2226,6 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
     return clean.trim();
   }
 
-  /**
-   * 是否为上游返回的无内容/占位 JSON，不应作为正文发给用户
-   * 例如 {"content": null}、{"content":null}、{"text":null} 等
-   */
-  _isNoContentResponse(text) {
-    if (!text || typeof text !== 'string') return false;
-    const t = text.trim();
-    if (t.length > 120) return false;
-    try {
-      const o = JSON.parse(t);
-      if (o && typeof o === 'object') {
-        if (o.content == null && Object.keys(o).length <= 2) return true;
-        if (o.text == null && Object.keys(o).length <= 2) return true;
-      }
-    } catch {
-      // 非 JSON，不视为无内容响应
-    }
-    return false;
-  }
-
   parseCQToSegments(text, e) {
     const segments = [];
     let replyId = null;
@@ -2316,21 +2297,13 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
   async sendMessages(e, cleanText) {
     if (!cleanText || !cleanText.trim() || !e?.reply) return;
 
-    BotUtil.makeLog('debug', `[ChatStream] sendMessages 入口 cleanTextLen=${cleanText.length} cleanText=${cleanText}`, 'ChatStream');
+    const filteredText = this.filterMarkdown(cleanText);
 
-    // 过滤Markdown格式
-    let filteredText = this.filterMarkdown(cleanText);
-    if (filteredText !== cleanText) {
-      BotUtil.makeLog('debug', `[ChatStream] sendMessages 过滤Markdown beforeLen=${cleanText.length} afterLen=${filteredText.length}`, 'ChatStream');
-    }
-
-    // ⚠️ 使用统一的文本协议处理和发送方法
-    const result = await this._processAndSendTextProtocol(e, filteredText, {
+    await this._processAndSendTextProtocol(e, filteredText, {
       messageId: null,
       recordToHistory: true,
       updateReplyContents: true
     });
-    BotUtil.makeLog('debug', `[ChatStream] sendMessages 完成 totalSent=${result.totalSent} allSentContent=${result.allSentContent.join('|')}`, 'ChatStream');
   }
 
   cleanupCache() {
@@ -2345,32 +2318,146 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
     }
   }
 
+  /** 导出 JSON 中的 LLM 配置副本脱敏（与真实内存对象分离） */
+  static _redactLlmConfigForDump(cfg) {
+    if (!cfg || typeof cfg !== 'object') return cfg;
+    let clone;
+    try {
+      clone = typeof structuredClone === 'function' ? structuredClone(cfg) : JSON.parse(JSON.stringify(cfg));
+    } catch {
+      return { _note: '配置无法完整克隆，已省略' };
+    }
+    const mask = (o) => {
+      if (!o || typeof o !== 'object') return;
+      for (const k of Object.keys(o)) {
+        const lk = k.toLowerCase();
+        const v = o[k];
+        if (typeof v === 'string' && v.length > 0) {
+          const sensitive =
+            lk === 'apikey' ||
+            lk === 'api_key' ||
+            lk === 'authorization' ||
+            lk.endsWith('_token') ||
+            lk === 'access_token' ||
+            lk === 'refresh_token' ||
+            lk.includes('secret') ||
+            lk.includes('password');
+          if (sensitive) {
+            o[k] = '***';
+          }
+        } else if (v && typeof v === 'object' && !Array.isArray(v)) {
+          mask(v);
+        }
+      }
+    };
+    mask(clone);
+    return clone;
+  }
+
   /**
-   * 将本轮已组装的 LLM messages 写入 data/（调试用，与 clearConversation 同为静态工具）
+   * 与 lib/aistream/aistream.js `callAI` 首轮一致：`resolveLLMConfig` + `{ stream:false, streams }` 再 `buildBody`。
+   */
+  static async _buildRound1RequestBody(client, ctor, messagesAssembled, overrides, timeoutMs) {
+    const openAiVisionFirst = new Set([
+      'OpenAICompatibleLLMClient',
+      'OpenAILLMClient',
+      'AzureOpenAICompatibleLLMClient'
+    ]);
+
+    if (ctor === 'OllamaCompatibleLLMClient' && typeof client.transformMessages === 'function' && typeof client.toOllamaMessages === 'function') {
+      const t = await client.transformMessages(messagesAssembled);
+      const ollamaMsgs = await client.toOllamaMessages(t);
+      return client.buildBody(ollamaMsgs, overrides, false);
+    }
+    if (openAiVisionFirst.has(ctor)) {
+      const prepared = await prepareOpenAIChatVisionMessages(messagesAssembled, client.config, { timeoutMs });
+      return client.buildBody(prepared, overrides);
+    }
+    if (ctor === 'OpenAIResponsesCompatibleLLMClient') {
+      const transformed = await prepareOpenAIChatVisionMessages(messagesAssembled, client.config, { timeoutMs });
+      const input = transformed.map((m) => ({
+        role: m.role || 'user',
+        content: Array.isArray(m.content)
+          ? m.content.map((part) => {
+              if (part?.type === 'text') return { type: 'input_text', text: String(part.text || '') };
+              if (part?.type === 'image_url' && part.image_url?.url) {
+                return { type: 'input_image', image_url: String(part.image_url.url) };
+              }
+              return part;
+            })
+          : typeof m.content === 'string'
+            ? [{ type: 'input_text', text: m.content }]
+            : [{ type: 'input_text', text: m.content?.text || '' }]
+      }));
+      return client.buildBody(input, overrides, { stream: false });
+    }
+    if (typeof client.transformMessages === 'function') {
+      const prepared = await client.transformMessages(messagesAssembled);
+      return client.buildBody(prepared, overrides);
+    }
+    const prepared = await prepareOpenAIChatVisionMessages(messagesAssembled, client.config, { timeoutMs });
+    return client.buildBody(prepared, overrides);
+  }
+
+  /**
+   * 导出与真实 API 首轮 POST 一致的 `request_body`，并附带脱敏后的合并配置（与线上一致）。
    * @returns {Promise<{ success: boolean, path?: string, error?: string }>}
    */
-  static async dumpFullLlmContextToData(e, streamName, messages) {
+  static async dumpLlmRequestSnapshot(stream, e, messagesAssembled, apiConfigRest) {
     const result = { success: false };
     try {
+      const resolved = stream.resolveLLMConfig(apiConfigRest || {});
+      const client = LLMFactory.createClient(resolved);
+      const toolStreamNames = stream._getToolStreamNames();
+      const overrides = { ...resolved, stream: false, streams: toolStreamNames };
+      const timeoutMs = client.timeout ?? client._timeout ?? 360000;
+      const ctor = client.constructor?.name || '';
+
+      let requestBody = null;
+      let requestBodyError = null;
+
+      if (typeof client.buildBody === 'function' && client.config) {
+        try {
+          requestBody = await ChatStream._buildRound1RequestBody(client, ctor, messagesAssembled, overrides, timeoutMs);
+        } catch (prepErr) {
+          requestBodyError = prepErr.message;
+          BotUtil.makeLog('warn', `[ChatStream] request_body 构建失败，仅写入 messages_assembled: ${prepErr.message}`, 'ChatStream');
+        }
+      }
+
       const payload = {
         at: new Date().toISOString(),
-        stream: streamName,
+        workflow: stream.name,
+        client_class: ctor,
         group_id: e?.group_id ?? null,
         user_id: e?.user_id ?? null,
-        messages: (messages || []).map(m => ({ role: m.role, content: m.content }))
+        endpoint: typeof client.endpoint === 'string' ? client.endpoint : null,
+        llm_resolved: ChatStream._redactLlmConfigForDump(resolved),
+        call_overrides: ChatStream._redactLlmConfigForDump(overrides),
+        messages_assembled: messagesAssembled,
+        ...(requestBody != null ? { request_body: requestBody } : {}),
+        ...(requestBodyError ? { request_body_error: requestBodyError } : {})
       };
-      const fpath = path.join(process.cwd(), 'data', `ai_full_prompt_${Date.now()}.json`);
-      const ok = await FileUtils.writeFile(fpath, JSON.stringify(payload, null, 2), 'utf8');
+
+      let bodyText;
+      try {
+        bodyText = JSON.stringify(payload, null, 2);
+      } catch (serErr) {
+        payload.messages_assembled = `[序列化失败: ${serErr.message}]`;
+        bodyText = JSON.stringify(payload, null, 2);
+      }
+
+      const fpath = path.join(process.cwd(), 'data', `ai_llm_request_${Date.now()}.json`);
+      const ok = await FileUtils.writeFile(fpath, bodyText, 'utf8');
       if (!ok) {
         result.error = 'writeFile 失败';
-        BotUtil.makeLog('warn', `[ChatStream] dumpFullLlmContextToData 写入失败 path=${fpath}`, 'ChatStream');
         return result;
       }
       result.success = true;
       result.path = fpath;
     } catch (error) {
       result.error = error.message;
-      BotUtil.makeLog('error', `[ChatStream] dumpFullLlmContextToData 失败: ${error.message}`, 'ChatStream');
+      BotUtil.makeLog('error', `[ChatStream] dumpLlmRequestSnapshot 失败: ${error.message}`, 'ChatStream');
     }
     return result;
   }
