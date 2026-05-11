@@ -208,7 +208,7 @@ export default class ChatStream extends AIStream {
     });
 
     this.registerMCPTool('reply', {
-      description: '发送消息到当前会话，用户可见。想让用户看见必须调用此工具。content 支持 | 分句、[开心]等表情、[CQ:at,qq=]、[回复:消息ID]、[图片内容:描述]。',
+      description: '发送消息到当前会话，用户可见。content 用纯文本 + 文本协议（| 分句、[开心]、[CQ:at]、[回复:id]、[图片内容:]）；勿 Markdown；若全是 Markdown 壳则无法发出。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -222,12 +222,13 @@ export default class ChatStream extends AIStream {
         if (!e?.reply) return { success: false, error: '当前环境无法发送消息' };
         const content = String(args.content ?? '').trim();
         if (!content) return { success: false, error: 'content 不能为空' };
-        BotUtil.makeLog('debug', `[ChatStream] reply 工具调用 group=${e?.group_id} messageId=${args.messageId ?? '无'} contentLen=${content.length} content=${content}`, 'ChatStream');
         return this._wrapHandler(async () => {
-          // 过滤Markdown格式
-          let filteredContent = this.filterMarkdown(content);
-          if (filteredContent !== content) {
-            BotUtil.makeLog('debug', `[ChatStream] reply 工具过滤Markdown beforeLen=${content.length} afterLen=${filteredContent.length}`, 'ChatStream');
+          const filteredContent = this.stripMarkdownForOutgoing(content);
+          if (!filteredContent) {
+            return {
+              success: false,
+              error: '清理 Markdown 后无可发送正文（请勿用标题/代码块/表格等作为主要回复），请用纯文本并遵守文本协议再调用 reply'
+            };
           }
           const { totalSent, allSentContent } = await this._processAndSendTextProtocol(e, filteredContent, {
             messageId: args.messageId,
@@ -235,7 +236,6 @@ export default class ChatStream extends AIStream {
             updateReplyContents: true
           });
           const lines = allSentContent.map((c, i) => `${i + 1}. ${c}`).join('\n');
-          BotUtil.makeLog('debug', `[ChatStream] reply 已发送 ${totalSent}条 content=${content}`, 'ChatStream');
           const where = e.group_id ? `群 ${e.group_id}` : `用户 ${e.user_id}(私聊)`;
           const detail = `你已在${where}发送以下内容（共${totalSent}条）：\n${lines}`;
           return { success: true, raw: `${detail}。无话可说则空返回。` };
@@ -1561,7 +1561,9 @@ export default class ChatStream extends AIStream {
 
   async buildSystemPrompt(context) {
     const { e, question } = context;
-    const persona = question?.persona || '你是本群助手：正常对话、简洁有用，不刻意卖萌或固定口头禅。';
+    const persona =
+      question?.persona ||
+      '你是群里一起聊天的伙伴：像真人一样接话——听得懂玩笑和气氛，该正经说清、该闲聊就短打，别像客服稿或说明书。';
     const botRole = question?.botRole || this.getBotRole(e);
     const dateStr = question?.dateStr || new Date().toLocaleString('zh-CN');
     const retrievalNote = this.embeddingConfig?.enabled ? '｜已启用相关历史检索' : '';
@@ -1583,14 +1585,24 @@ export default class ChatStream extends AIStream {
       '- 群聊记录格式：昵称(QQ)[消息ID]；「【我】」为你已发内容，勿复读。',
       '- 下文「文件记忆」「会话记忆」为摘要，可引用，勿整段照搬。',
       '',
-      '## reply 的 content',
-      '- `|` / `｜` 分句；表情 [开心][惊讶][伤心][大笑][害怕][生气]（每轮至多一处）；[回复:消息ID]；[CQ:at,qq=QQ]；[图片内容:描述]（对用户不展示）。勿 Markdown；勿在 content 里写伪工具调用。',
+      '## 说话方式（人性化）',
+      '- 同时看「群聊记录」与「当前消息」：谁在什么语境下说话（玩笑、吐槽、求助），你就用什么口吻接，别自说自话。',
+      '- 有人 @ 你、点名或明确问你，优先对准那句话答；否则可以顺着话题插一句，不必强行总结全文。',
+      '- 少用汇报腔（「综上所述」「三点如下」）、少用万能客服句（「很高兴为您服务」）；长短跟话题走，能说人话别说套话。',
+      '- 人设与记忆当底色自然带出来，不要像在读清单。',
+      '',
+      '## 文本协议（reply 的 content）',
+      '- 分句：`|` 或 `｜` 分段发送。',
+      '- 表情：`[开心][惊讶][伤心][大笑][害怕][生气]`（每轮至多一处）。引用：`[回复:消息ID]`。@人：`[CQ:at,qq=QQ]`。仅记录：`[图片内容:描述]`。',
+      '- **勿写 Markdown**（#标题、**粗体**、代码块、表格等）。用户可见内容会先剥离 Markdown；若剥完后没有可读正文则该条不会发出。',
+      '- 勿在 content 里伪造「工具名+括号参数」式的伪调用。',
       '',
       '## 工具',
       '- 具体名称与参数以接口下发的 tools 为准；含对外发送、群资料与成员、图片、群管与表情回应等。',
       '',
       '## 约束',
-      '- 勿 Markdown；勿在正文里手写 poke/at 调用语法；勿无必要刷屏复读（用户明确要求除外）。'
+      '- 勿 Markdown；勿在正文里手写 poke/at 调用语法；勿无必要刷屏复读（用户明确要求除外）。',
+      '- 勿依赖固定开场白或复读上一句自己的回复；用户可见的话一律走 reply，语气要像群里真人。'
     ];
     return lines.join('\n');
   }
@@ -1868,7 +1880,7 @@ export default class ChatStream extends AIStream {
       mergedMessages.push({
         role: 'user',
         content: isGlobalTrigger
-          ? `${historyText}\n\n请根据上文气氛自然接话一两句（可吐槽、玩梗），不必全文总结或逐条回复。`
+          ? `${historyText}\n\n请像群里真人一样接一两句：对准气氛或某条发言，可吐槽玩梗；勿全文总结、勿逐条点评。`
           : historyText
       });
     }
@@ -1993,9 +2005,8 @@ export default class ChatStream extends AIStream {
       });
       let text = (response ?? '').toString().trim();
 
-      // 过滤Markdown格式，转换为纯文本
       if (text) {
-        text = this.filterMarkdown(text);
+        text = this.stripMarkdownForOutgoing(text);
       }
       if (!response) return null;
       return text || '';
@@ -2143,91 +2154,79 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 过滤Markdown格式，转换为纯文本（保留文本协议标记）
-   * @param {string} text - 原始文本
-   * @returns {string} - 过滤后的纯文本
+   * 用户可见路径：先保护文本协议片段，再剥离 Markdown，不把 MD 语法发到 QQ。
+   * 围栏代码块整段丢弃（不把代码块当正文发出）；其余语法尽量还原成可读纯文本。
    */
-  filterMarkdown(text) {
-    if (!text || typeof text !== 'string') return text;
-    let clean = text;
+  stripMarkdownForOutgoing(text) {
+    if (!text || typeof text !== 'string') return '';
+    const { masked, tokens } = ChatStream._protectProtocolMarkers(text);
+    const stripped = ChatStream._stripMarkdownCore(masked);
+    return ChatStream._restoreProtocolMarkers(stripped, tokens).trim();
+  }
 
-    // 移除代码块：```语言\n内容\n```
-    clean = clean.replace(/```[\s\S]*?```/g, (match) => {
-      // 提取代码块内容，保留换行但移除标记
-      const content = match.replace(/```[\w]*\n?/g, '').replace(/```/g, '');
-      return content.trim();
+  /** 协议片段占位，避免被 Markdown 规则误伤（含表情、[CQ]、[回复]、[图片内容:]） */
+  static _protectProtocolMarkers(text) {
+    const tokens = [];
+    const re =
+      /(\[(?:开心|惊讶|伤心|大笑|害怕|生气)\]|(?:\[图片内容:[^\]]+\])|(?:\[回复:(?:ID:)?\d+\])|(?:\[CQ:[^\]]+\]))/g;
+    const masked = text.replace(re, (full) => {
+      const i = tokens.length;
+      tokens.push(full);
+      return `\uE000PRT${i}\uE001`;
     });
+    return { masked, tokens };
+  }
 
-    // 移除行内代码：`代码`
+  static _restoreProtocolMarkers(text, tokens) {
+    let out = text;
+    for (let i = 0; i < tokens.length; i++) {
+      out = out.split(`\uE000PRT${i}\uE001`).join(tokens[i]);
+    }
+    return out;
+  }
+
+  /** 对已无协议占位的内容剥离 Markdown（不在此处恢复占位符） */
+  static _stripMarkdownCore(clean) {
+    if (!clean || typeof clean !== 'string') return '';
+
+    // 围栏代码块：整段不发出（避免把 Markdown 代码抄到群里）
+    clean = clean.replace(/```[\s\S]*?```/g, '');
+
     clean = clean.replace(/`([^`]+)`/g, '$1');
-
-    // 移除粗体：**文本** 或 __文本__
     clean = clean.replace(/\*\*([^*]+)\*\*/g, '$1');
     clean = clean.replace(/__([^_]+)__/g, '$1');
-
-    // 移除斜体：*文本* 或 _文本_（但保留表情标记如 [开心]）
     clean = clean.replace(/(?<!\*)\*([^*\[]+?)\*(?!\*)/g, '$1');
     clean = clean.replace(/(?<!_)_([^_[]+?)_(?!_)/g, '$1');
-
-    // 移除删除线：~~文本~~
     clean = clean.replace(/~~([^~]+)~~/g, '$1');
-
-    // 移除链接：[文本](URL) 或 [文本][引用]
     clean = clean.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
     clean = clean.replace(/\[([^\]]+)\]\[[^\]]+\]/g, '$1');
-
-    // 移除图片：![alt](URL)
     clean = clean.replace(/!\[([^\]]*)\]\([^\)]+\)/g, '');
-
-    // 移除标题标记：# ## ### 等（保留文本）
     clean = clean.replace(/^#{1,6}\s+(.+)$/gm, '$1');
-
-    // 移除引用标记：> 文本
     clean = clean.replace(/^>\s+(.+)$/gm, '$1');
-
-    // 移除列表标记：- * + 或 1. 2. 等（保留文本）
     clean = clean.replace(/^[\s]*[-*+]\s+(.+)$/gm, '$1');
     clean = clean.replace(/^[\s]*\d+\.\s+(.+)$/gm, '$1');
-
-    // 移除水平线：--- 或 ***
     clean = clean.replace(/^[-*]{3,}$/gm, '');
 
-    // 移除表格标记：仅匹配整行表格格式（行首有半角|且行内有多个半角|），避免误删分句用的|和全角｜
-    // 分句协议为 句子1|句子2（半角|，无空格，不在行首）
-    // 全角｜用于内容分隔（如天气信息），不应被处理
-    // 表格一般为 | 列1 | 列2 |（行首有半角|，有空格）
-    // 策略：只处理行首有半角|且该行包含至少2个半角|的情况（真正的表格行）
-    // ⚠️ 重要：正则表达式中的 \| 只匹配半角|（U+007C），不会匹配全角｜（U+FF5C）
-    clean = clean.split('\n').map(line => {
-      // 检查是否为表格行：行首有半角|且该行包含至少2个半角|
-      // 注意：只匹配半角|（U+007C），不匹配全角｜（U+FF5C）
-      const trimmedLine = line.trim();
-      // 只统计半角|的数量，不统计全角｜（全角｜不会被 \| 匹配）
-      const pipeCount = (line.match(/\|/g) || []).length;
-      // 只检查行首是否为半角|，不检查全角｜
-      if (trimmedLine.startsWith('|') && pipeCount >= 2) {
-        // 这是表格行，提取所有单元格内容，用单个空格连接
-        // 只匹配半角|，不匹配全角｜（正则 \| 只匹配半角|）
-        const cells = [];
-        const regex = /\|\s*([^|]*?)\s*\|/g; // 只匹配半角|（U+007C），不匹配全角｜（U+FF5C）
-        let match;
-        while ((match = regex.exec(trimmedLine)) !== null) {
-          cells.push(match[1].trim());
+    clean = clean
+      .split('\n')
+      .map((line) => {
+        const trimmedLine = line.trim();
+        const pipeCount = (line.match(/\|/g) || []).length;
+        if (trimmedLine.startsWith('|') && pipeCount >= 2) {
+          const cells = [];
+          const regex = /\|\s*([^|]*?)\s*\|/g;
+          let match;
+          while ((match = regex.exec(trimmedLine)) !== null) {
+            cells.push(match[1].trim());
+          }
+          return cells.join(' ');
         }
-        return cells.join(' ');
-      }
-      // 不是表格行，保留原样（包括分句用的半角|和内容分隔用的全角｜）
-      return line;
-    }).join('\n');
-    // 移除表格分隔行（只匹配半角|，如 |---|---|）
+        return line;
+      })
+      .join('\n');
     clean = clean.replace(/^\|\s*[-:\s|]+\s*\|$/gm, '');
-
-    // 清理多余的空行（保留单个换行）
     clean = clean.replace(/\n{3,}/g, '\n\n');
-
-    // 清理行首行尾空白
-    clean = clean.split('\n').map(line => line.trim()).join('\n');
-
+    clean = clean.split('\n').map((line) => line.trim()).join('\n');
     return clean.trim();
   }
 
@@ -2302,7 +2301,8 @@ export default class ChatStream extends AIStream {
   async sendMessages(e, cleanText) {
     if (!cleanText || !cleanText.trim() || !e?.reply) return;
 
-    const filteredText = this.filterMarkdown(cleanText);
+    const filteredText = this.stripMarkdownForOutgoing(cleanText);
+    if (!filteredText) return;
 
     await this._processAndSendTextProtocol(e, filteredText, {
       messageId: null,
