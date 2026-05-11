@@ -217,7 +217,8 @@ export class XRKAIAssistant extends plugin {
       // 调试导出：勿走「随机撸猫」群合并分支，便于对照真实 messages
       const isGlobalTrigger = isRandom && !debugDumpFullPrompt;
       BotUtil.makeLog('debug', `[XRK-AI] 消息内容 isRandom=${isRandom} isGlobalTrigger=${isGlobalTrigger} len=${text?.length ?? 0} debugDump=${!!debugDumpFullPrompt}`, 'XRK-AI');
-      if (!isGlobalTrigger && !text) {
+      // 仅调试口令、剥离后无正文时也必须走 stream（否则会跳过 execute 里的 dumpFullLlmContextToData）
+      if (!debugDumpFullPrompt && !isGlobalTrigger && !text) {
         const img = stream.getRandomEmotionImage?.('惊讶');
         if (img) await e.reply(segment.image(img));
         await BotUtil.sleep(300);
