@@ -45,7 +45,9 @@ export default class ChatStream extends AIStream {
         maxTokens: 6000,
         topP: 0.9,
         presencePenalty: 0.6,
-        frequencyPenalty: 0.6
+        frequencyPenalty: 0.6,
+        /** 多工具同轮时顺序执行，降低「reply 与远程 MCP 抢跑」导致的重复铺垫 */
+        parallel_tool_calls: false
       },
       embedding: { enabled: false }
     });
@@ -1600,6 +1602,12 @@ export default class ChatStream extends AIStream {
       '## 工具',
       '- 具体名称与参数以接口下发的 tools 为准；含对外发送、群资料与成员、图片、群管与表情回应等。',
       '',
+      '## 外部工具（占卜 / 远程 MCP）',
+      '- **先工具后发言**：需要远程 MCP（占卜、数据库等）时，**本轮应先只调用工具**，看到返回后再用 reply；**禁止在同一轮里既 reply「帮你占卜」「三牌阵」等铺垫又调占卜**，否则用户会先收到重复空话且牌面未到。',
+      '- **一问一局**：同一话题占卜类工具 **只调用一次**，除非用户明确要求再来一局。',
+      '- **结果忠实**：解读必须与工具返回文本中的 **牌名、阵位、正/逆位** 一致，只可翻译成口语；**禁止凭空虚构另一副牌或与其它轮次结果混用**。',
+      '- **少废话**：勿用多条 reply 重复同一寓意（如反复「勉为其难帮你占卜」「就选三牌阵」）；铺垫一句即可。不要用markdown输出',
+      '',
       '## 约束',
       '- 勿 Markdown；勿在正文里手写 poke/at 调用语法；勿无必要刷屏复读（用户明确要求除外）。',
       '- 勿依赖固定开场白或复读上一句自己的回复；用户可见的话一律走 reply，语气要像群里真人。'
@@ -2031,7 +2039,6 @@ export default class ChatStream extends AIStream {
 
     // 分句：半角 | 与全角 ｜ 均作为分隔符，每条单独发送
     const messages = content.split(/[|｜]/).map(m => m.trim()).filter(Boolean);
-    BotUtil.makeLog('debug', `[ChatStream] _processAndSendTextProtocol 分句 contentLen=${content.length} messagesCount=${messages.length}`, 'ChatStream');
     if (messages.length === 0) {
       return { totalSent: 0, allSentContent: [] };
     }
@@ -2083,8 +2090,6 @@ export default class ChatStream extends AIStream {
         ? segments.map(s => s.type === 'text' ? s.text : '').join('') 
         : msg;
       
-      BotUtil.makeLog('debug', `[ChatStream] _processAndSendTextProtocol 发送第${i + 1}/${messages.length}条消息 msgLen=${msg.length} sentContentLen=${sentContent.length} msg=${msg}`, 'ChatStream');
-      
       if (finalReplyId) {
         const replySegment = seg.reply(finalReplyId);
         await e.reply(segments.length > 0 ? [replySegment, ...segments] : [replySegment, ' ']);
@@ -2107,10 +2112,6 @@ export default class ChatStream extends AIStream {
         allSentContent.push(sentContent || msg);
       }
       totalSent++;
-
-      if (imageContent) {
-        BotUtil.makeLog('debug', `[ChatStream] _processAndSendTextProtocol 提取图片内容标记: ${imageContent}`, 'ChatStream');
-      }
 
       // ⚠️ 重要：多条消息之间延迟，避免发送过快
       if (i < messages.length - 1) {
