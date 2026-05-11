@@ -1439,7 +1439,7 @@ export default class ChatStream extends AIStream {
         .map(m => ({ m, score: scoreMemoryForQuery(m, query, e) }))
         .sort((a, b) => b.score - a.score || (b.m.timestamp - a.m.timestamp));
       const top = scored.slice(0, 40).map((x, i) => `${i + 1}. ${x.m.content}`).join('\n');
-      blocks.push(`【长期记忆·文件】\n${top}`);
+      blocks.push(`【文件记忆】\n${top}`);
     }
     let redisSummary = '';
     try {
@@ -1448,7 +1448,7 @@ export default class ChatStream extends AIStream {
       BotUtil.makeLog('debug', `[ChatStream] buildMemorySummary 失败: ${err?.message}`, 'ChatStream');
     }
     if (redisSummary?.trim()) {
-      blocks.push(`【长期记忆·会话层】\n${redisSummary.trim()}`);
+      blocks.push(`【会话记忆】\n${redisSummary.trim()}`);
     }
     if (!blocks.length) return null;
     return blocks.join('\n\n');
@@ -1561,41 +1561,38 @@ export default class ChatStream extends AIStream {
 
   async buildSystemPrompt(context) {
     const { e, question } = context;
-    const persona = question?.persona || '你是本群聊天助手，正常聊天、解决问题，不刻意卖萌或复读固定话术。';
+    const persona = question?.persona || '你是本群助手：正常对话、简洁有用，不刻意卖萌或固定口头禅。';
     const botRole = question?.botRole || this.getBotRole(e);
     const dateStr = question?.dateStr || new Date().toLocaleString('zh-CN');
-    const embeddingHint = this.embeddingConfig?.enabled ? '\n💡 系统会自动检索相关历史对话\n' : '';
+    const retrievalNote = this.embeddingConfig?.enabled ? '｜已启用相关历史检索' : '';
     const botName = e.bot?.nickname || e.bot?.info?.nickname || e.bot?.name || 'Bot';
     const isMaster = e.isMaster === true;
-    const masterTrustBlock = isMaster
-      ? '\n- 当前是主人：无条件按主人要求做，不质疑不反驳。'
-      : '';
-    const prompt = `## Role
-${botName}（QQ=${e.self_id}，群=${e.group_id}，角色=${botRole}）。时间：${dateStr}${embeddingHint}
-${persona}${masterTrustBlock}
+    const masterNote = isMaster ? '\n主人指令优先、少反驳。' : '';
 
-## 可见性（必读）
-- **正文不会发给用户**。用户只能看到通过 **reply / at / emotion / poke** 等工具发出的内容。
-- 想让用户看见任何话，必须调用 **reply**（或 at/emotion 发图+文）。调用完工具后可以输出总结或推理，**用户看不见**，仅作你内部用。
-
-## Context
-- 聊天记录「昵称(QQ号)」；@、at、戳一戳用 QQ 号。群聊里【我】即你已发，勿对同条消息复读。
-- 系统提示末尾「【长期记忆·…」块为你为当前用户保存的长期记忆（文件持久化 + 可选 Redis 会话层），已按相关度排序；可自然引用，勿机械复读整表。
-- 工具返回「已发内容」即用户已收到；勿再次用 reply/at 发相同或相似内容；无话可说则空返回。
-
-## Task
-可调用工具，可输出正文（用户不可见）。需用户看见的必须用 reply/at/emotion；poke/at/emotion 仅通过工具调用。
-
-## reply 文本协议
-content 支持：|/｜ 分句；[开心]/[惊讶]/[伤心]/[大笑]/[害怕]/[生气]（一轮最多一次）；[回复:消息ID]；[CQ:at,qq=QQ号]；[图片内容:描述]（不展示）。禁止 Markdown；禁止在 content 里写工具名。
-
-## 工具
-发消息（用户可见）：reply、at（群聊）、emotion、poke。查询：getGroupInfo、getGroupMembers、getMemberInfo、getFriendList、getFriendInfo、getAtAllRemain、getBanList、getMessageImages、recognizeImage。群管：mute/unmute、muteAll/unmuteAll、setCard、setGroupName、setAdmin/unsetAdmin、setTitle、kick、setEssence/removeEssence、announce、recall、setGroupTodo。emojiReaction：群消息表情回应。
-
-## 禁止
-Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotion+参数"；无必要的刷屏式重复同一句话（用户明确要求复读除外）。`;
-    BotUtil.makeLog('debug', `[ChatStream] buildSystemPrompt 完成 len=${prompt.length} botRole=${botRole} isMaster=${isMaster}`, 'ChatStream');
-    return prompt;
+    const lines = [
+      `# ${botName}`,
+      `${botName}｜QQ ${e.self_id}｜群 ${e.group_id}｜身份 ${botRole}｜${dateStr}${retrievalNote}`,
+      persona + masterNote,
+      '',
+      '## 可见性与输出',
+      '- 用户仅能看到工具发出的内容（reply / at / emotion / poke 等）；模型直连正文对用户不可见。',
+      '- 要让用户看到的话必须用工具；正文可作内部推理。',
+      '- 工具若表明已送达，勿再用 reply/at 重复实质相同的话。',
+      '',
+      '## 上下文说明',
+      '- 群聊记录格式：昵称(QQ)[消息ID]；「【我】」为你已发内容，勿复读。',
+      '- 下文「文件记忆」「会话记忆」为摘要，可引用，勿整段照搬。',
+      '',
+      '## reply 的 content',
+      '- `|` / `｜` 分句；表情 [开心][惊讶][伤心][大笑][害怕][生气]（每轮至多一处）；[回复:消息ID]；[CQ:at,qq=QQ]；[图片内容:描述]（对用户不展示）。勿 Markdown；勿在 content 里写伪工具调用。',
+      '',
+      '## 工具',
+      '- 具体名称与参数以接口下发的 tools 为准；含对外发送、群资料与成员、图片、群管与表情回应等。',
+      '',
+      '## 约束',
+      '- 勿 Markdown；勿在正文里手写 poke/at 调用语法；勿无必要刷屏复读（用户明确要求除外）。'
+    ];
+    return lines.join('\n');
   }
 
   /**
@@ -1851,7 +1848,7 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
     const history = ChatStream.messageHistory.get(e.group_id) || [];
     const historyLimit = debugDumpFullPrompt ? 50 : (isGlobalTrigger ? 15 : 10);
     const historyHeader = debugDumpFullPrompt
-      ? `[群聊记录·调试导出·内存最近至多${historyLimit}条·含工具结果摘要]`
+      ? `[群聊·最近${historyLimit}条]`
       : '[群聊记录]';
 
     const mergedMessages = [messages[0]];
@@ -1871,7 +1868,7 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
       mergedMessages.push({
         role: 'user',
         content: isGlobalTrigger
-          ? `${historyText}\n\n你闲来无事点开群聊，看到上面这些发言。请像正常在群里聊天一样：对当前气氛或你关心的某条发言自然接话，可以多聊一两句（接话、吐槽、表情包语气等），不必只回一句很尬的总结；也不要试图解决问题或逐条回复。`
+          ? `${historyText}\n\n请根据上文气氛自然接话一两句（可吐槽、玩梗），不必全文总结或逐条回复。`
           : historyText
       });
     }
@@ -1879,7 +1876,15 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
     if (!isGlobalTrigger) {
       const showCurrentLine =
         currentMsgId !== '未知' && (Boolean(currentContent) || debugDumpFullPrompt);
-      const lineBody = currentContent || '(本条无正文：调试口令已剥离或仅图片等)';
+      const hasMedia =
+        typeof userMessage.content === 'object' &&
+        userMessage.content !== null &&
+        (((userMessage.content.images || []).length > 0) ||
+          ((userMessage.content.replyImages || []).length > 0));
+      const lineBody =
+        (currentContent && String(currentContent).trim())
+          ? currentContent
+          : (hasMedia ? '[附图]' : '[无文本]');
       if (showCurrentLine) {
         if (typeof userMessage.content === 'object' && userMessage.content !== null) {
           const content = userMessage.content;
