@@ -6,8 +6,8 @@
 import AIStream from '../../../lib/aistream/aistream.js';
 import BotUtil from '../../../lib/util.js';
 import path from 'path';
-import fs from 'fs/promises';
-import os from 'os';
+import { FileUtils } from '../../../lib/utils/file-utils.js';
+import { filterMemoriesForEvent, getMemoryBaseDir, userMemoryFile } from '../../../lib/aistream/memory-file-context.js';
 
 export default class MemoryStream extends AIStream {
   constructor() {
@@ -20,13 +20,13 @@ export default class MemoryStream extends AIStream {
       config: { enabled: true, temperature: 0.7, maxTokens: 2000 },
       embedding: { enabled: false }
     });
-    this.memoryDir = path.join(os.homedir(), '.xrk', 'memory');
+    this.memoryDir = getMemoryBaseDir();
     this.memories = new Map();
   }
 
   async init() {
     await super.init();
-    await fs.mkdir(this.memoryDir, { recursive: true });
+    await FileUtils.ensureDir(this.memoryDir);
     this.registerAllFunctions();
     await this.loadMemories();
   }
@@ -109,18 +109,24 @@ export default class MemoryStream extends AIStream {
   }
 
   _userFile(userId) {
-    return path.join(this.memoryDir, `user_${String(userId).replace(/[^a-zA-Z0-9_-]/g, '_')}.json`);
+    return userMemoryFile(userId);
   }
 
   async loadMemories() {
     try {
-      const files = await fs.readdir(this.memoryDir);
+      const files = FileUtils.readDirSync(this.memoryDir);
       for (const file of files) {
         if (!file.endsWith('.json')) continue;
         const fullPath = path.join(this.memoryDir, file);
-        const data = await fs.readFile(fullPath, 'utf8');
-        const list = JSON.parse(data);
-        for (const m of list) this.memories.set(String(m.id), m);
+        try {
+          const data = await FileUtils.readFile(fullPath);
+          if (!data) continue;
+          const list = JSON.parse(data);
+          if (!Array.isArray(list)) continue;
+          for (const m of list) this.memories.set(String(m.id), m);
+        } catch {
+          // 单文件损坏不影响其它
+        }
       }
     } catch {
       // ignore
@@ -144,23 +150,23 @@ export default class MemoryStream extends AIStream {
     const userFile = this._userFile(userId);
     let list = [];
     try {
-      const data = await fs.readFile(userFile, 'utf8');
-      list = JSON.parse(data);
+      const data = await FileUtils.readFile(userFile);
+      if (data) list = JSON.parse(data);
     } catch {
       // new file
     }
     list.unshift(memory);
-    await fs.writeFile(userFile, JSON.stringify(list, null, 2), 'utf8');
+    await FileUtils.writeFile(userFile, JSON.stringify(list, null, 2));
     return memoryId;
   }
 
   async queryMemories(keyword, context) {
     const userId = this.getUserId(context);
-    const scene = this.getScene(context);
     const userFile = this._userFile(userId);
     let list = [];
     try {
-      const data = await fs.readFile(userFile, 'utf8');
+      const data = await FileUtils.readFile(userFile);
+      if (!data) return [];
       list = JSON.parse(data);
     } catch {
       return [];
@@ -170,7 +176,7 @@ export default class MemoryStream extends AIStream {
 
     const scored = list
       .filter(m => (m.userId === userId || !userId))
-      .filter(m => (m.scene === scene || !scene))
+      .filter(m => filterMemoriesForEvent(m, context?.e))
       .map(m => {
         const text = (m.content || '').toLowerCase();
         let score = 0;
@@ -198,18 +204,18 @@ export default class MemoryStream extends AIStream {
 
   async listMemories(context) {
     const userId = this.getUserId(context);
-    const scene = this.getScene(context);
     const userFile = this._userFile(userId);
     let list = [];
     try {
-      const data = await fs.readFile(userFile, 'utf8');
+      const data = await FileUtils.readFile(userFile);
+      if (!data) return [];
       list = JSON.parse(data);
     } catch {
       return [];
     }
     const groupId = context?.e?.group_id ?? null;
     return list
-      .filter(m => (m.userId === userId || !userId) && (m.scene === scene || !scene))
+      .filter(m => (m.userId === userId || !userId) && filterMemoriesForEvent(m, context?.e))
       .sort((a, b) => {
         const aScoped = groupId && a.groupId && String(a.groupId) === String(groupId);
         const bScoped = groupId && b.groupId && String(b.groupId) === String(groupId);
@@ -225,7 +231,8 @@ export default class MemoryStream extends AIStream {
     const userFile = this._userFile(userId);
     let list = [];
     try {
-      const data = await fs.readFile(userFile, 'utf8');
+      const data = await FileUtils.readFile(userFile);
+      if (!data) return false;
       list = JSON.parse(data);
     } catch {
       return false;
@@ -233,7 +240,7 @@ export default class MemoryStream extends AIStream {
     const before = list.length;
     list = list.filter(m => String(m.id) !== String(id));
     if (list.length === before) return false;
-    await fs.writeFile(userFile, JSON.stringify(list, null, 2), 'utf8');
+    await FileUtils.writeFile(userFile, JSON.stringify(list, null, 2));
     this.memories.delete(String(id));
     return true;
   }

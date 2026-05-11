@@ -3,10 +3,26 @@
 import path from 'path';
 import BotUtil from '../../../lib/util.js';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
+import ChatStream from '../stream/chat.js';
 
 const CONFIG_PATH = path.join(process.cwd(), 'data/ai/config.yaml');
 const CHAT_MERGED_NAME = 'chat-merged';
 const cooldownState = new Map();
+
+/** 调试：消息中含此片段则导出本轮完整 messages 到 data/，并剥离后再送模型 */
+const AI_FULL_PROMPT_DUMP_REGEX = /#XRK完整AI上下文#/;
+
+function stripAiFullPromptDumpMark(raw) {
+  if (raw == null || typeof raw !== 'string') {
+    return { text: '', debugDumpFullPrompt: false };
+  }
+  const debugDumpFullPrompt = AI_FULL_PROMPT_DUMP_REGEX.test(raw);
+  const text = raw
+    .replace(AI_FULL_PROMPT_DUMP_REGEX, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return { text, debugDumpFullPrompt };
+}
 
 export class XRKAIAssistant extends plugin {
   constructor() {
@@ -17,6 +33,12 @@ export class XRKAIAssistant extends plugin {
       priority: 99999,
       rule: [{ reg: '.*', fnc: 'handleMessage', log: false }]
     });
+  }
+
+  /** 当前配置下的 chat / chat-merged 工作流实例 */
+  _resolveChatStream() {
+    const name = this.config?.mergeStreams?.length ? CHAT_MERGED_NAME : 'chat';
+    return this.getStream(name) ?? this.getStream('chat');
   }
 
   async init() {
@@ -128,35 +150,17 @@ export class XRKAIAssistant extends plugin {
           await e.reply('仅主人可以清空对话哦～');
           return true;
         }
-        // 主人可以清除对话
-        const ChatStream = (await import('../stream/chat.js')).default;
         const groupId = e.group_id || e.user_id;
         BotUtil.makeLog('info', `[XRK-AI] 检测到清除对话指令 group=${groupId} user=${e.user_id}`, 'XRK-AI');
         
         try {
           const result = await ChatStream.clearConversation(groupId, { clearEmbedding: true });
-          
-          // 清除所有相关实例的回复内容记录
-          const streamName = this.config?.mergeStreams?.length ? CHAT_MERGED_NAME : 'chat';
-          const stream = this.getStream(streamName) ?? this.getStream('chat');
-          if (stream && typeof stream.clearReplyContents === 'function') {
-            stream.clearReplyContents(groupId);
-          }
-          
-          // 如果使用了合并工作流，也清除主工作流的记录
-          if (streamName === CHAT_MERGED_NAME) {
-            const mainStream = this.getStream('chat');
-            if (mainStream && typeof mainStream.clearReplyContents === 'function') {
-              mainStream.clearReplyContents(groupId);
-            }
-          }
-          
+
           if (result.success) {
             const clearedItems = [];
             if (result.cleared.history) clearedItems.push('聊天记录');
             if (result.cleared.embedding) clearedItems.push('语义记忆');
-            if (result.cleared.replyContents) clearedItems.push('回复记录');
-            
+
             await e.reply(`✅ 对话已重置！已清除：${clearedItems.join('、') || '无'}`);
             BotUtil.makeLog('info', `[XRK-AI] 清除对话成功 group=${groupId} cleared=${JSON.stringify(result.cleared)}`, 'XRK-AI');
           } else {
@@ -174,18 +178,17 @@ export class XRKAIAssistant extends plugin {
       if (!trigger) return false;
 
       if (!this.config) this.config = await this.loadConfig();
-      const streamName = this.config.mergeStreams?.length ? CHAT_MERGED_NAME : 'chat';
-      const stream = this.getStream(streamName) ?? this.getStream('chat');
+      const stream = this._resolveChatStream();
       if (!stream) {
         logger.error('[XRK-AI] chat 工作流未加载');
         return false;
       }
-      BotUtil.makeLog('debug', `[XRK-AI] 使用工作流 stream=${streamName} name=${stream?.name}`, 'XRK-AI');
+      BotUtil.makeLog('debug', `[XRK-AI] 使用工作流 name=${stream?.name}`, 'XRK-AI');
 
       const isRandom = !e.atBot && !(this.config.prefix && e.msg?.startsWith(this.config.prefix));
-      const { content } = await this.processMessageContent(e);
-      BotUtil.makeLog('debug', `[XRK-AI] 消息内容 isRandom=${isRandom} contentLen=${content?.length ?? 0} content=${content ?? ''}`, 'XRK-AI');
-      if (!isRandom && !content) {
+      const { text, debugDumpFullPrompt } = await this.processMessageContent(e);
+      BotUtil.makeLog('debug', `[XRK-AI] 消息内容 isRandom=${isRandom} len=${text?.length ?? 0} debugDump=${!!debugDumpFullPrompt}`, 'XRK-AI');
+      if (!isRandom && !text) {
         const img = stream.getRandomEmotionImage?.('惊讶');
         if (img) await e.reply(segment.image(img));
         await BotUtil.sleep(300);
@@ -193,19 +196,22 @@ export class XRKAIAssistant extends plugin {
         return true;
       }
 
-      const text = content ?? '';
       BotUtil.makeLog('debug', `[XRK-AI] 调用 stream.process personaLen=${(this.config.persona ?? '').length}`, 'XRK-AI');
-      await stream.process(e, {
-        content: text,
-        text,
-        persona: this.config.persona ?? '',
-        isGlobalTrigger: isRandom
-      }, {});
+      await stream.process(
+        e,
+        {
+          content: text,
+          text,
+          persona: this.config.persona ?? '',
+          isGlobalTrigger: isRandom,
+          debugDumpFullPrompt: !!debugDumpFullPrompt
+        },
+        {}
+      );
       BotUtil.makeLog('debug', `[XRK-AI] stream.process 完成`, 'XRK-AI');
       return true;
     } catch (err) {
-      logger.error(`[XRK-AI] 消息处理错误: ${err.message}`);
-      BotUtil.makeLog('error', `[XRK-AI] handleMessage 异常: ${err.message}`, 'XRK-AI');
+      BotUtil.makeLog('error', `[XRK-AI] handleMessage: ${err.message}`, 'XRK-AI');
       return false;
     }
   }
@@ -266,8 +272,9 @@ export class XRKAIAssistant extends plugin {
     const fallback = e.msg || '';
     const message = e.message;
     if (!Array.isArray(message)) {
-      BotUtil.makeLog('debug', `[XRK-AI] processMessageContent 非数组消息 使用 fallback len=${fallback.length}`, 'XRK-AI');
-      return { content: fallback, text: fallback };
+      BotUtil.makeLog('debug', `[XRK-AI] processMessageContent 非数组 len=${String(fallback).length}`, 'XRK-AI');
+      const { text, debugDumpFullPrompt } = stripAiFullPromptDumpMark(String(fallback));
+      return { text, debugDumpFullPrompt };
     }
 
     try {
@@ -288,31 +295,29 @@ export class XRKAIAssistant extends plugin {
         if (seg.type === 'text') content += seg.text || '';
         else if (seg.type === 'at') {
           const qq = seg.qq ?? seg.user_id ?? seg.data?.qq ?? seg.data?.user_id;
-          BotUtil.makeLog('debug', `[XRK-AI] processMessageContent at seg raw: qq=${seg.qq} user_id=${seg.user_id} data.qq=${seg.data?.qq} data.user_id=${seg.data?.user_id} => 提取qq=${qq}`, 'XRK-AI');
           if (qq != null && String(qq).trim() !== '' && String(qq) !== String(e.self_id)) {
-            let namePart = '';
+            let namePart = String(qq);
             try {
               const info = await e.group?.pickMember(qq)?.getInfo();
               const card = (info?.card ?? '').trim();
               const nickname = (info?.nickname ?? '').trim();
               if (card || nickname) namePart = (card || nickname) + '(' + qq + ')';
-              else namePart = String(qq);
-              BotUtil.makeLog('debug', `[XRK-AI] processMessageContent at qq=${qq} card=${card || '(空)'} nickname=${nickname || '(空)'} => @${namePart}`, 'XRK-AI');
-            } catch (err) {
-              namePart = String(qq);
-              BotUtil.makeLog('debug', `[XRK-AI] processMessageContent at qq=${qq} getInfo异常 => @${namePart}`, 'XRK-AI');
+            } catch {
+              /* 使用 QQ 字面量 */
             }
             content += `@${namePart} `;
           }
         } else if (seg.type === 'image') content += '[图片] ';
       }
       if (this.config.prefix) content = content.replace(new RegExp(`^${this.config.prefix}`), '');
-      const text = content.trim();
-      BotUtil.makeLog('debug', `[XRK-AI] processMessageContent 完成 segs=${message.length} textLen=${text.length}`, 'XRK-AI');
-      return { content: text, text };
+      const trimmed = content.trim();
+      const { text, debugDumpFullPrompt } = stripAiFullPromptDumpMark(trimmed);
+      BotUtil.makeLog('debug', `[XRK-AI] processMessageContent segs=${message.length} len=${text.length}`, 'XRK-AI');
+      return { text, debugDumpFullPrompt };
     } catch (err) {
-      logger.error(`[XRK-AI] 处理消息内容失败: ${err.message}`);
-      return { content: fallback, text: fallback };
+      BotUtil.makeLog('error', `[XRK-AI] processMessageContent: ${err.message}`, 'XRK-AI');
+      const { text, debugDumpFullPrompt } = stripAiFullPromptDumpMark(String(fallback));
+      return { text, debugDumpFullPrompt };
     }
   }
 }

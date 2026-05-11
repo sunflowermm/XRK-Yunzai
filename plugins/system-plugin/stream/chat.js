@@ -2,8 +2,8 @@ import path from 'path';
 import fs from 'fs';
 import AIStream from '../../../lib/aistream/aistream.js';
 import BotUtil from '../../../lib/util.js';
-import os from 'os';
-import fsPromises from 'fs/promises';
+import { FileUtils } from '../../../lib/utils/file-utils.js';
+import { loadFilteredMemoriesForEvent, scoreMemoryForQuery } from '../../../lib/aistream/memory-file-context.js';
 
 const EMOTIONS_DIR = path.join(process.cwd(), 'resources/aiimages');
 const EMOTION_TYPES = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
@@ -47,7 +47,6 @@ export default class ChatStream extends AIStream {
       },
       embedding: { enabled: false }
     });
-    this.memoryDir = path.join(os.homedir(), '.xrk', 'memory');
   }
 
   /**
@@ -1447,66 +1446,27 @@ export default class ChatStream extends AIStream {
     }
   }
 
-  /** 记忆相关工具函数（与 MemoryStream 使用同一目录结构） */
-  _getMemoryUserId(e) {
-    return e?.user_id || e?.user?.id || 'default';
-  }
-
-  _getMemoryScene(e) {
-    return e?.group_id ? 'group' : (e?.user_id ? 'private' : 'default');
-  }
-
-  _memoryUserFile(userId) {
-    return path.join(this.memoryDir, `user_${String(userId).replace(/[^a-zA-Z0-9_-]/g, '_')}.json`);
-  }
-
-  async _loadUserMemories(e) {
-    const userId = this._getMemoryUserId(e);
-    const scene = this._getMemoryScene(e);
-    const file = this._memoryUserFile(userId);
-    try {
-      const data = await fsPromises.readFile(file, 'utf8');
-      const list = JSON.parse(data);
-      return Array.isArray(list)
-        ? list.filter(m => (m.userId === userId || !userId) && (m.scene === scene || !scene))
-        : [];
-    } catch {
-      return [];
-    }
-  }
-
-  _fuzzyScoreMemory(m, query, e) {
-    const kw = (query || '').toLowerCase();
-    if (!kw) return 0;
-    const text = (m.content || '').toLowerCase();
-    if (!text) return 0;
-    if (text === kw) return 100;
-    if (text.includes(kw)) return 80 + Math.min(20, kw.length);
-    const set = new Set(text);
-    let overlap = 0;
-    for (const ch of kw) if (set.has(ch)) overlap++;
-    let score = (overlap / Math.max(1, kw.length)) * 60;
-    // 区域记忆（同群）略微加权
-    const gid = e?.group_id ?? null;
-    if (gid && m.groupId && String(m.groupId) === String(gid)) {
-      score += 15;
-    }
-    return score;
-  }
-
   async _buildMemoryContext(e, query) {
-    const list = await this._loadUserMemories(e);
-    if (!list.length) return null;
-
-    const scored = list
-      .map(m => ({ m, score: this._fuzzyScoreMemory(m, query, e) }))
-      .sort((a, b) => b.score - a.score || (b.m.timestamp - a.m.timestamp));
-
-    const top = scored.slice(0, 30).map((x, i) =>
-      `${i + 1}. ${x.m.content}`
-    ).join('\n');
-
-    return `[长期记忆]\n${top}`;
+    const blocks = [];
+    const list = await loadFilteredMemoriesForEvent(e);
+    if (list.length) {
+      const scored = list
+        .map(m => ({ m, score: scoreMemoryForQuery(m, query, e) }))
+        .sort((a, b) => b.score - a.score || (b.m.timestamp - a.m.timestamp));
+      const top = scored.slice(0, 40).map((x, i) => `${i + 1}. ${x.m.content}`).join('\n');
+      blocks.push(`【长期记忆·文件】\n${top}`);
+    }
+    let redisSummary = '';
+    try {
+      redisSummary = await this.buildMemorySummary(e);
+    } catch (err) {
+      BotUtil.makeLog('debug', `[ChatStream] buildMemorySummary 失败: ${err?.message}`, 'ChatStream');
+    }
+    if (redisSummary?.trim()) {
+      blocks.push(`【长期记忆·会话层】\n${redisSummary.trim()}`);
+    }
+    if (!blocks.length) return null;
+    return blocks.join('\n\n');
   }
 
   /**
@@ -1635,7 +1595,7 @@ ${persona}${masterTrustBlock}
 
 ## Context
 - 聊天记录「昵称(QQ号)」；@、at、戳一戳用 QQ 号。群聊里【我】即你已发，勿对同条消息复读。
-- 若上下文中出现「[长期记忆]」，其中每一行都是你为当前用户在当前场景（群/私聊）保存的记忆，已按当前问题的大致相关度排好序；你可以自然引用其中内容，让人格与回复更连贯有趣，但不要机械逐条朗读或复述整个列表。
+- 系统提示末尾「【长期记忆·…」块为你为当前用户保存的长期记忆（文件持久化 + 可选 Redis 会话层），已按相关度排序；可自然引用，勿机械复读整表。
 - 工具返回「已发内容」即用户已收到；勿再次用 reply/at 发相同或相似内容；无话可说则空返回。
 
 ## Task
@@ -1766,22 +1726,20 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
     const memText = await this._buildMemoryContext(e, query);
     if (!memText) return baseMessages;
 
-    const result = [];
-    let inserted = false;
-    for (let i = 0; i < baseMessages.length; i++) {
-      const msg = baseMessages[i];
-      result.push(msg);
-      if (!inserted && msg.role === 'system') {
-        result.push({ role: 'user', content: memText });
-        inserted = true;
-      }
-    }
-    if (!inserted) {
-      result.unshift({ role: 'user', content: memText });
+    const enhanced = [...baseMessages];
+    const head = enhanced[0];
+    if (head?.role === 'system') {
+      const cur = head.content;
+      const merged = typeof cur === 'string'
+        ? `${cur}\n\n${memText}`
+        : `${typeof cur === 'object' && cur != null ? JSON.stringify(cur) : String(cur)}\n\n${memText}`;
+      enhanced[0] = { ...head, content: merged };
+    } else {
+      enhanced.unshift({ role: 'system', content: memText });
     }
 
-    BotUtil.makeLog('debug', `[ChatStream] buildEnhancedContext with memory memLen=${memText.length}`, 'ChatStream');
-    return result;
+    BotUtil.makeLog('debug', `[ChatStream] buildEnhancedContext 已并入 system memLen=${memText.length}`, 'ChatStream');
+    return enhanced;
   }
 
   async syncHistoryFromAdapter(e) {
@@ -1970,62 +1928,56 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
       }
     }
     const roles = mergedMessages.map(m => m.role).join(',');
-    const firstContent = mergedMessages[0]?.content;
-    const lastContent = mergedMessages[mergedMessages.length - 1]?.content;
-    const firstContentStr = typeof firstContent === 'string' ? firstContent : (firstContent?.text ?? '');
-    const lastContentStr = typeof lastContent === 'string' ? lastContent : (lastContent?.text ?? '');
-    BotUtil.makeLog('debug', `[ChatStream] mergeMessageHistory 完成 mergedLen=${mergedMessages.length} historyLen=${history.length} roles=[${roles}]`, 'ChatStream');
-    BotUtil.makeLog('debug', `[ChatStream] mergeMessageHistory 首条 contentLen=${firstContentStr.length} content=${firstContentStr}`, 'ChatStream');
-    BotUtil.makeLog('debug', `[ChatStream] mergeMessageHistory 末条 contentLen=${lastContentStr.length} content=${lastContentStr}`, 'ChatStream');
+    BotUtil.makeLog('debug', `[ChatStream] mergeMessageHistory mergedLen=${mergedMessages.length} historyLen=${history.length} roles=[${roles}]`, 'ChatStream');
     return mergedMessages;
   }
 
   async execute(e, messages, config) {
     const StreamLoader = Bot.StreamLoader;
     const groupId = e?.group_id ?? e?.user_id;
+    let debugDumpFullPrompt = false;
+    if (!Array.isArray(messages) && messages && typeof messages === 'object') {
+      debugDumpFullPrompt = !!messages.debugDumpFullPrompt;
+    }
+
     BotUtil.makeLog('debug', `[ChatStream] execute 开始 group=${groupId} isArray=${Array.isArray(messages)} len=${messages?.length ?? 0}`, 'ChatStream');
     try {
       // 记录当前消息（统一记录逻辑）
       if (e) this.recordMessage(e);
-      
-      // 构建聊天上下文（如果未提供）
+
       if (!Array.isArray(messages)) {
         messages = await this.buildChatContext(e, messages);
       }
-      
-      // 合并历史记录（统一合并逻辑）
+
       messages = await this.mergeMessageHistory(messages, e);
-      
-      // 构建增强上下文（语义检索）
+
       const query = Array.isArray(messages) ? this.extractQueryFromMessages(messages) : messages;
       messages = await this.buildEnhancedContext(e, query, messages);
-      
-      BotUtil.makeLog('debug', `[ChatStream] execute 上下文构建完成 messagesLen=${messages?.length ?? 0} query=${typeof query === 'string' ? query : (query?.content ?? query?.text ?? '')}`, 'ChatStream');
 
-      // 记录历史聊天记录（喂给 AI 的内容）
-      if (Array.isArray(messages) && messages.length > 0) {
-        const historyPreview = messages.map((msg, idx) => {
-          const role = msg.role || 'unknown';
-          let content = '';
-          if (typeof msg.content === 'string') {
-            content = msg.content.length > 200 ? msg.content.slice(0, 200) + '…' : msg.content;
-          } else if (msg.content?.text) {
-            content = msg.content.text.length > 200 ? msg.content.text.slice(0, 200) + '…' : msg.content.text;
-          } else {
-            content = '[非文本内容]';
-          }
-          return `  [${idx + 1}] ${role}: ${content.replace(/\n/g, '\\n')}`;
-        }).join('\n');
-        BotUtil.makeLog('info', `[ChatStream] 历史聊天记录（喂给 AI）:\n${historyPreview}`, 'ChatStream');
-      }
+      BotUtil.makeLog('debug', `[ChatStream] execute 上下文构建完成 messagesLen=${messages?.length ?? 0} query=${typeof query === 'string' ? query : (query?.content ?? query?.text ?? '')}`, 'ChatStream');
 
       if (StreamLoader) StreamLoader.currentEvent = e || null;
       this._hasSentEmotionThisTurn = false; // 跟踪本轮是否已发送表情包
 
+      if (debugDumpFullPrompt) {
+        try {
+          const r = await ChatStream.dumpFullLlmContextToData(e, this.name, messages);
+          BotUtil.makeLog(
+            r.success ? 'info' : 'warn',
+            r.success
+              ? `[ChatStream] 已写入完整 AI 上下文: ${r.path}`
+              : `[ChatStream] 写入完整 AI 上下文失败: ${r.error || '未知'}`,
+            'ChatStream'
+          );
+        } catch (err) {
+          BotUtil.makeLog('error', `[ChatStream] 导出完整上下文异常: ${err?.message}`, 'ChatStream');
+        }
+      }
+
       BotUtil.makeLog('debug', `[ChatStream] execute 调用 callAI messagesLen=${messages?.length ?? 0}`, 'ChatStream');
       const response = await this.callAI(messages, config);
       let text = (response ?? '').toString().trim();
-      BotUtil.makeLog('debug', `[ChatStream] execute callAI 返回 responseLen=${(response ?? '').length} textLen=${text.length} text=${text}`, 'ChatStream');
+      BotUtil.makeLog('debug', `[ChatStream] execute callAI 返回 responseLen=${(response ?? '').length} textLen=${text.length}`, 'ChatStream');
       
       // 过滤Markdown格式，转换为纯文本
       if (text) {
@@ -2394,6 +2346,36 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
   }
 
   /**
+   * 将本轮已组装的 LLM messages 写入 data/（调试用，与 clearConversation 同为静态工具）
+   * @returns {Promise<{ success: boolean, path?: string, error?: string }>}
+   */
+  static async dumpFullLlmContextToData(e, streamName, messages) {
+    const result = { success: false };
+    try {
+      const payload = {
+        at: new Date().toISOString(),
+        stream: streamName,
+        group_id: e?.group_id ?? null,
+        user_id: e?.user_id ?? null,
+        messages: (messages || []).map(m => ({ role: m.role, content: m.content }))
+      };
+      const fpath = path.join(process.cwd(), 'data', `ai_full_prompt_${Date.now()}.json`);
+      const ok = await FileUtils.writeFile(fpath, JSON.stringify(payload, null, 2), 'utf8');
+      if (!ok) {
+        result.error = 'writeFile 失败';
+        BotUtil.makeLog('warn', `[ChatStream] dumpFullLlmContextToData 写入失败 path=${fpath}`, 'ChatStream');
+        return result;
+      }
+      result.success = true;
+      result.path = fpath;
+    } catch (error) {
+      result.error = error.message;
+      BotUtil.makeLog('error', `[ChatStream] dumpFullLlmContextToData 失败: ${error.message}`, 'ChatStream');
+    }
+    return result;
+  }
+
+  /**
    * 清除指定群组/用户的完整对话记录
    * @param {string|number} groupId - 群组ID或用户ID
    * @param {Object} options - 选项
@@ -2407,8 +2389,7 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
       success: true,
       cleared: {
         history: false,
-        embedding: false,
-        replyContents: false
+        embedding: false
       }
     };
 
@@ -2441,9 +2422,6 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
         }
       }
 
-      // 清除上一轮回复内容（需要从实例中清除）
-      // 注意：这是实例属性，需要通过实例访问，这里记录到日志
-      result.cleared.replyContents = true;
       BotUtil.makeLog('debug', `[ChatStream] clearConversation 完成 group=${gid} cleared=${JSON.stringify(result.cleared)}`, 'ChatStream');
     } catch (error) {
       result.success = false;
@@ -2451,15 +2429,6 @@ Markdown，不要写markdown！！！；正文或 content 里写 "poke/at/emotio
     }
 
     return result;
-  }
-
-  /**
-   * 实例方法：清除当前实例的回复内容记录
-   * @param {string|number} groupId - 群组ID或用户ID
-   */
-  clearReplyContents(groupId) {
-    const gid = String(groupId);
-    BotUtil.makeLog('debug', `[ChatStream] clearReplyContents 调用，但当前已不再跨轮缓存回复内容 group=${gid}`, 'ChatStream');
   }
 
   async cleanup() {
