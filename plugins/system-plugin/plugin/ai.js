@@ -9,19 +9,24 @@ const CONFIG_PATH = path.join(process.cwd(), 'data/ai/config.yaml');
 const CHAT_MERGED_NAME = 'chat-merged';
 const cooldownState = new Map();
 
-/** 调试：消息中含此片段则导出本轮完整 messages 到 data/，并剥离后再送模型 */
-const AI_FULL_PROMPT_DUMP_REGEX = /#XRK完整AI上下文#/;
+/** 调试：消息中含此口令则导出本轮完整 messages 到 data/；剥离后再送模型（与「清空对话」同在 handleMessage 早判） */
+const AI_FULL_PROMPT_DUMP_REGEX = /#?XRK完整AI上下文/;
 
 function stripAiFullPromptDumpMark(raw) {
-  if (raw == null || typeof raw !== 'string') {
-    return { text: '', debugDumpFullPrompt: false };
-  }
-  const debugDumpFullPrompt = AI_FULL_PROMPT_DUMP_REGEX.test(raw);
-  const text = raw
+  if (raw == null || typeof raw !== 'string') return '';
+  return raw
     .replace(AI_FULL_PROMPT_DUMP_REGEX, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
-  return { text, debugDumpFullPrompt };
+}
+
+/** 与触发判定一致：优先 e.msg，否则拼 message 段文本（避免仅靠随机概率时嗅不到口令） */
+function rawMessageTextForAiTrigger(e) {
+  if (e?.msg != null && String(e.msg).trim() !== '') {
+    return String(e.msg);
+  }
+  if (!Array.isArray(e?.message)) return '';
+  return e.message.map(seg => (seg?.type === 'text' ? (seg.text || '') : '')).join('');
 }
 
 export class XRKAIAssistant extends plugin {
@@ -139,6 +144,17 @@ export class XRKAIAssistant extends plugin {
     return {};
   }
 
+  /** 当前配置下是否允许在本群/本会话触发 AI（与 shouldTrigger 白名单一致） */
+  isInAiWhitelist(e) {
+    if (!this.config) return false;
+    if (e.isGroup) {
+      const groupId = String(e.group_id);
+      return this.config.groups?.some(g => String(g) === groupId) || false;
+    }
+    const userId = String(e.user_id);
+    return this.config.users?.some(u => String(u) === userId) || false;
+  }
+
   async handleMessage(e) {
     try {
       // 清空对话指令：严格“四字全匹配”，避免包含触发误判
@@ -173,11 +189,22 @@ export class XRKAIAssistant extends plugin {
         return true;
       }
 
-      const trigger = await this.shouldTriggerAI(e);
-      BotUtil.makeLog('debug', `[XRK-AI] handleMessage 触发检查 group=${e.group_id} user=${e.user_id} atBot=${e.atBot} trigger=${trigger}`, 'XRK-AI');
+      if (!this.config) this.config = await this.loadConfig();
+
+      const rawForDump = rawMessageTextForAiTrigger(e);
+      const debugDumpFullPrompt = AI_FULL_PROMPT_DUMP_REGEX.test(rawForDump);
+      if (debugDumpFullPrompt && !this.isInAiWhitelist(e)) {
+        BotUtil.makeLog('debug', `[XRK-AI] 调试口令 dump context 非白名单 group=${e.group_id}`, 'XRK-AI');
+        return false;
+      }
+
+      let trigger = true;
+      if (!debugDumpFullPrompt) {
+        trigger = await this.shouldTriggerAI(e);
+        BotUtil.makeLog('debug', `[XRK-AI] handleMessage 触发检查 group=${e.group_id} user=${e.user_id} atBot=${e.atBot} trigger=${trigger}`, 'XRK-AI');
+      }
       if (!trigger) return false;
 
-      if (!this.config) this.config = await this.loadConfig();
       const stream = this._resolveChatStream();
       if (!stream) {
         logger.error('[XRK-AI] chat 工作流未加载');
@@ -186,9 +213,11 @@ export class XRKAIAssistant extends plugin {
       BotUtil.makeLog('debug', `[XRK-AI] 使用工作流 name=${stream?.name}`, 'XRK-AI');
 
       const isRandom = !e.atBot && !(this.config.prefix && e.msg?.startsWith(this.config.prefix));
-      const { text, debugDumpFullPrompt } = await this.processMessageContent(e);
-      BotUtil.makeLog('debug', `[XRK-AI] 消息内容 isRandom=${isRandom} len=${text?.length ?? 0} debugDump=${!!debugDumpFullPrompt}`, 'XRK-AI');
-      if (!isRandom && !text) {
+      const text = await this.processMessageContent(e);
+      // 调试导出：勿走「随机撸猫」群合并分支，便于对照真实 messages
+      const isGlobalTrigger = isRandom && !debugDumpFullPrompt;
+      BotUtil.makeLog('debug', `[XRK-AI] 消息内容 isRandom=${isRandom} isGlobalTrigger=${isGlobalTrigger} len=${text?.length ?? 0} debugDump=${!!debugDumpFullPrompt}`, 'XRK-AI');
+      if (!isGlobalTrigger && !text) {
         const img = stream.getRandomEmotionImage?.('惊讶');
         if (img) await e.reply(segment.image(img));
         await BotUtil.sleep(300);
@@ -203,7 +232,7 @@ export class XRKAIAssistant extends plugin {
           content: text,
           text,
           persona: this.config.persona ?? '',
-          isGlobalTrigger: isRandom,
+          isGlobalTrigger,
           debugDumpFullPrompt: !!debugDumpFullPrompt
         },
         {}
@@ -219,22 +248,13 @@ export class XRKAIAssistant extends plugin {
   async shouldTriggerAI(e) {
     if (!this.config) this.config = await this.loadConfig();
 
-    const isInWhitelist = () => {
-      if (e.isGroup) {
-        const groupId = String(e.group_id);
-        return this.config.groups?.some(g => String(g) === groupId) || false;
-      }
-      const userId = String(e.user_id);
-      return this.config.users?.some(u => String(u) === userId) || false;
-    };
-
     if (e.atBot) {
-      const ok = isInWhitelist();
+      const ok = this.isInAiWhitelist(e);
       BotUtil.makeLog('debug', `[XRK-AI] shouldTrigger atBot 白名单=${ok}`, 'XRK-AI');
       return ok;
     }
     if (this.config.prefix && e.msg?.startsWith(this.config.prefix)) {
-      const ok = isInWhitelist();
+      const ok = this.isInAiWhitelist(e);
       BotUtil.makeLog('debug', `[XRK-AI] shouldTrigger prefix 白名单=${ok}`, 'XRK-AI');
       return ok;
     }
@@ -243,7 +263,7 @@ export class XRKAIAssistant extends plugin {
       BotUtil.makeLog('debug', '[XRK-AI] shouldTrigger 非群聊 不触发', 'XRK-AI');
       return false;
     }
-    if (!isInWhitelist()) {
+    if (!this.isInAiWhitelist(e)) {
       BotUtil.makeLog('debug', `[XRK-AI] shouldTrigger 不在白名单 group=${e.group_id}`, 'XRK-AI');
       return false;
     }
@@ -273,8 +293,7 @@ export class XRKAIAssistant extends plugin {
     const message = e.message;
     if (!Array.isArray(message)) {
       BotUtil.makeLog('debug', `[XRK-AI] processMessageContent 非数组 len=${String(fallback).length}`, 'XRK-AI');
-      const { text, debugDumpFullPrompt } = stripAiFullPromptDumpMark(String(fallback));
-      return { text, debugDumpFullPrompt };
+      return stripAiFullPromptDumpMark(String(fallback));
     }
 
     try {
@@ -311,13 +330,12 @@ export class XRKAIAssistant extends plugin {
       }
       if (this.config.prefix) content = content.replace(new RegExp(`^${this.config.prefix}`), '');
       const trimmed = content.trim();
-      const { text, debugDumpFullPrompt } = stripAiFullPromptDumpMark(trimmed);
+      const text = stripAiFullPromptDumpMark(trimmed);
       BotUtil.makeLog('debug', `[XRK-AI] processMessageContent segs=${message.length} len=${text.length}`, 'XRK-AI');
-      return { text, debugDumpFullPrompt };
+      return text;
     } catch (err) {
       BotUtil.makeLog('error', `[XRK-AI] processMessageContent: ${err.message}`, 'XRK-AI');
-      const { text, debugDumpFullPrompt } = stripAiFullPromptDumpMark(String(fallback));
-      return { text, debugDumpFullPrompt };
+      return stripAiFullPromptDumpMark(String(fallback));
     }
   }
 }
