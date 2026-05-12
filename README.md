@@ -20,7 +20,7 @@
 
 | 分类 | 能力 |
 |------|------|
-| 模块化工作流 | Chat / Device / File 等工作流并行、串行、管线化执行；内置记忆、推理、润色与语义检索。 |
+| 模块化工作流 | Chat / Device / File 等工作流并行、串行、管线化执行；内置记忆、推理与润色。 |
 | 统一对象 | `Bot`、事件 `e`、`logger`、`cfg`、`segment` 与全局 `redis` 客户端开箱即用，协议与设备场景一致。 |
 | 现代 HTTP 栈 | Express + WebSocket + 反向代理 + HTTPS/HTTP2 + CORS + 限流 + 静态资源热重载。 |
 | 插件生态 | 热重载、权限/优先级、上下文管理、多账号发送、转发消息、工作流调用。 |
@@ -35,8 +35,8 @@
 |------|------|------|
 | 运行时 | Node.js 24+、pnpm 9+ | ESM + 顶级 await，pnpm workspaces 管理插件依赖。 |
 | Web 服务 | Express 4、`ws`、`http-proxy-middleware` | HTTP/WS、一体化代理、Helmet 安全头、独立速率限制器。 |
-| 数据缓存 | Redis 5+（官方 client） | 记忆系统、会话缓存、API 限流、工作流语义检索索引、跨进程通信。 |
-| 语义能力 | `node-fetch` + 第三方 LLM API | Chat Completions、流式输出、BM25 语义检索（轻量级，无外部依赖）。 |
+| 数据缓存 | Redis 5+（官方 client） | 记忆系统、会话缓存、API 限流、跨进程通信。 |
+| 语义能力 | `node-fetch` + 第三方 LLM API | Chat Completions、流式输出。 |
 | 渲染与自动化 | Puppeteer / Playwright | 图像渲染、设备工作流截图、Web 控制台。 |
 | 配置管理 | YAML + chokidar | 多端口隔离配置、热更新、默认值自动回写。 |
 
@@ -52,7 +52,7 @@
 - **`cfg`**：多层配置读取器，支持默认配置 + 端口隔离目录 + 热监听。
 - **`segment`**：OneBot 消息片段构造器（图片、语音、转发等）。
 - **`redis`**：由 `lib/config/redis.js` 初始化的全局客户端，职责包含：
-  - AI 记忆：`ai:memory:*` / `ai:embedding:*`
+  - AI 记忆：`ai:memory:*`
   - 速率限制 / 缓存 / 会话锁
   - 状态持久化（如工作流上下文）
 

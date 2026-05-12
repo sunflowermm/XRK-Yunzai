@@ -63,13 +63,11 @@ Redis 连接策略：
 | `lib/aistream/aistream.js` | AI 工作流基架，封装 Chat Completion、功能解析、上下文增强。 |
 | Memory System | Redis ZSet + JSON 存储长短期记忆，按场景隔离。 |
 | Workflow Manager | 注册/串行/并行执行工作流，带超时控制。 |
-| BM25 相似度 | 轻量 BM25 语义检索，无外部向量引擎依赖。 |
 | `node-fetch` | 统一对外 HTTP 请求，支持 Abort 超时。 |
 
 设计亮点：
 - 工作流执行 pipeline：`buildChatContext → buildEnhancedContext → callAI → parseFunctions → runActionTimeline`。
 - 函数调用解析器可由工作流自定义 `registerFunction`、`parser`、`handler`。
-- 使用 BM25 基于 Redis 中的历史对话做轻量级语义检索，无需下载模型或调用外部 Embedding 服务。
 
 ---
 

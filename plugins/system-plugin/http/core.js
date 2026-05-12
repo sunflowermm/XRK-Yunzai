@@ -444,21 +444,17 @@ export default {
 
           let workflows = { stats: {}, items: [], total: 0 };
           try {
-            const stats = Bot.StreamLoader?.getStats?.() ?? null;
             const allStreams = Bot.StreamLoader?.getAllStreams?.() ?? [];
             const enabledStreams = allStreams.filter(s => s.config && s.config.enabled !== false);
             workflows = {
               stats: {
                 total: allStreams.length,
-                enabled: enabledStreams.length,
-                embeddingReady: stats?.embedding?.ready ?? 0,
-                provider: stats?.embedding?.provider || 'bm25'
+                enabled: enabledStreams.length
               },
               items: allStreams.map(s => ({
                 name: s.name || 'unknown',
                 description: s.description || '',
-                enabled: s.config && s.config.enabled !== false,
-                embeddingReady: s.embeddingConfig?.enabled === true
+                enabled: s.config && s.config.enabled !== false
               })),
               total: allStreams.length
             };

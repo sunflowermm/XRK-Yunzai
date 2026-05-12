@@ -6,29 +6,18 @@
 
 ## 1. AIStream（工作流基架）
 
-### LightweightSimilarity
-
-| 方法 | 说明 |
-|------|------|
-| `tokenize(text)` | 字符串拆为字符与双字符数组 |
-| `calculateIDF(documents)` | 基于文档计算 IDF |
-| `score(query, document)` | BM25 得分，轻量语义检索 |
-
 ### 构造与初始化
 
 | 方法 | 说明 |
 |------|------|
-| `constructor(options)` | 合并 `options.config` 与基类默认 `this.config`；初始化 MemorySystem、BM25、函数 Map 等（不在此读取 `cfg`） |
+| `constructor(options)` | 合并 `options.config` 与基类默认 `this.config`；初始化 MemorySystem、函数 Map 等（不在此读取 `cfg`） |
 | `init()` | 一次性初始化：函数 Map、记忆（若启用） |
-| `initEmbedding()` | 初始化 LightweightSimilarity（扩展点） |
 
-### 记忆与检索
+### 上下文增强（可选）
 
 | 方法 | 说明 |
 |------|------|
-| `storeMessageWithEmbedding(groupId, message)` | 启用时写入 Redis `ai:embedding:${name}:${groupId}`（对话+元数据） |
-| `retrieveRelevantContexts(groupId, query)` | 从 Redis 读历史并按相似度排序 |
-| `buildEnhancedContext(e, question, baseMessages)` | 将检索结果注入系统 prompt |
+| `buildEnhancedContext(e, question, baseMessages)` | 基类默认原样返回 `baseMessages`；子类可重写以注入记忆摘要等 |
 
 ### 功能注册与解析
 
@@ -59,7 +48,7 @@
 
 | 方法 | 说明 |
 |------|------|
-| `getInfo()` | 返回 name/description/version/embedding 状态/函数列表 |
+| `getInfo()` | 返回 name/description/version/函数列表等 |
 | `getMemorySystem()` | 返回 MemorySystem 实例 |
 | `buildMemorySummary(e, options?)` | 调用 MemorySystem.buildSummary |
 | `cleanup()` | 清理内部状态（重载/关闭时） |

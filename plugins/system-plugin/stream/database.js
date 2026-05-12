@@ -17,8 +17,7 @@ export default class DatabaseStream extends AIStream {
       version: '2.0.0',
       author: 'XRK',
       priority: 1,
-      config: { enabled: true, temperature: 0.7, maxTokens: 2000 },
-      embedding: { enabled: false }
+      config: { enabled: true, temperature: 0.7, maxTokens: 2000 }
     });
     this.dbDir = path.join(os.homedir(), '.xrk', 'knowledge');
     this.databases = new Map();

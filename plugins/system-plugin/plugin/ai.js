@@ -33,7 +33,7 @@ export class XRKAIAssistant extends plugin {
   constructor() {
     super({
       name: 'XRK-AI助手',
-      dsc: '智能AI助手，支持群管理、识图、语义检索',
+      dsc: '智能AI助手，支持群管理、识图与记忆',
       event: 'message',
       priority: 99999,
       rule: [{ reg: '.*', fnc: 'handleMessage', log: false }]
@@ -170,12 +170,11 @@ export class XRKAIAssistant extends plugin {
         BotUtil.makeLog('info', `[XRK-AI] 检测到清除对话指令 group=${groupId} user=${e.user_id}`, 'XRK-AI');
         
         try {
-          const result = await ChatStream.clearConversation(groupId, { clearEmbedding: true });
+          const result = await ChatStream.clearConversation(groupId);
 
           if (result.success) {
             const clearedItems = [];
             if (result.cleared.history) clearedItems.push('聊天记录');
-            if (result.cleared.embedding) clearedItems.push('语义记忆');
 
             await e.reply(`✅ 对话已重置！已清除：${clearedItems.join('、') || '无'}`);
             BotUtil.makeLog('info', `[XRK-AI] 清除对话成功 group=${groupId} cleared=${JSON.stringify(result.cleared)}`, 'XRK-AI');

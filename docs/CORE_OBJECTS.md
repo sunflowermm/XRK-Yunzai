@@ -319,10 +319,9 @@ await e.reply(msg);
 Redis 客户端提供高性能的缓存和存储服务，在整个技术栈中扮演以下角色：
 
 1. **AI 记忆系统**: 存储长短期记忆（使用 ZSet + JSON）
-2. **语义检索索引**: 存储历史对话文本，供 BM25 相似度检索使用
-3. **速率限制**: 存储 API 调用频率限制数据
-4. **会话锁**: 防止并发执行同一会话
-5. **消息缓存**: 缓存历史消息，支持消息检索
+2. **速率限制**: 存储 API 调用频率限制数据
+3. **会话锁**: 防止并发执行同一会话
+4. **消息缓存**: 缓存历史消息，支持消息检索
 
 ### 6.2 技术特性
 
@@ -349,7 +348,7 @@ await redisInit();
 | 操作类型 | 方法示例 | 用途 |
 |---------|---------|------|
 | **字符串** | `redis.set()`, `redis.get()`, `redis.setEx()` | 速率限制、API Key 缓存 |
-| **列表** | `redis.lPush()`, `redis.lRange()`, `redis.lTrim()` | 工作流语义检索索引、消息缓存 |
+| **列表** | `redis.lPush()`, `redis.lRange()`, `redis.lTrim()` | 消息缓存、队列类数据 |
 | **有序集合** | `redis.zAdd()`, `redis.zRange()`, `redis.zRemRangeByScore()` | Memory System 长短期记忆 |
 | **哈希** | `redis.hSet()`, `redis.hGet()`, `redis.hGetAll()` | 存储结构化数据 |
 | **过期** | `redis.expire()`, `redis.ttl()` | 设置过期时间 |

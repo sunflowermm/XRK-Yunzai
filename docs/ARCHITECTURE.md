@@ -76,7 +76,7 @@ graph TB
 - **Redis**: `redisInit()`、`global.redis`；AI 记忆、限流、会话锁。详见 [CONFIG_AND_REDIS.md](./reference/CONFIG_AND_REDIS.md)。
 - **logger** (`lib/config/log.js`): Pino、多级别、轮转与清理。详见 [LOGGER.md](./reference/LOGGER.md)。
 - **plugin** (`lib/plugins/plugin.js`): 工作流调用、上下文、规则匹配。详见 [PLUGIN_BASE_CLASS.md](./PLUGIN_BASE_CLASS.md)、[PLUGINS.md](./reference/PLUGINS.md)。
-- **AIStream** (`lib/aistream/aistream.js`): 对话、记忆、BM25、函数调用。详见 [WORKFLOW_BASE_CLASS.md](./WORKFLOW_BASE_CLASS.md)、[WORKFLOWS.md](./reference/WORKFLOWS.md)。
+- **AIStream** (`lib/aistream/aistream.js`): 对话、记忆、函数调用。详见 [WORKFLOW_BASE_CLASS.md](./WORKFLOW_BASE_CLASS.md)、[WORKFLOWS.md](./reference/WORKFLOWS.md)。
 
 ---
 

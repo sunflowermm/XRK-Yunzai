@@ -17,8 +17,7 @@ export default class MemoryStream extends AIStream {
       version: '1.0.5',
       author: 'XRK',
       priority: 1,
-      config: { enabled: true, temperature: 0.7, maxTokens: 2000 },
-      embedding: { enabled: false }
+      config: { enabled: true, temperature: 0.7, maxTokens: 2000 }
     });
     this.memoryDir = getMemoryBaseDir();
     this.memories = new Map();

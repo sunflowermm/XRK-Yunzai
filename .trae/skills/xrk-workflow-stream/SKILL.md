@@ -18,7 +18,7 @@ description: 在 XRK-Yunzai 中开发或修改 AI 工作流时使用；涉及 pl
 ## 执行
 
 - `stream.execute(e, question, config)`：`e` 为消息事件，`question` 为用户输入。
-- 上下文与记忆：使用 `buildChatContext`、`buildEnhancedContext` 及 Memory 相关能力。
+- 上下文与记忆：使用 `buildChatContext`、可选重写 `buildEnhancedContext`（如注入记忆摘要）及 Memory 相关能力。
 
 ## 非流式 LLM 与 MCP `*.reply`
 

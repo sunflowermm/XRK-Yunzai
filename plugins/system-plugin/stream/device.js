@@ -20,8 +20,7 @@ export default class DeviceStream extends AIStream {
         topP: 0.9,
         presencePenalty: 0.3,
         frequencyPenalty: 0.3
-      },
-      embedding: { enabled: false }
+      }
     });
   }
 

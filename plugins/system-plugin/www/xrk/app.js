@@ -960,22 +960,12 @@ class App {
     
     const enabled = stats.enabled ?? workflowData.enabled ?? 0;
     const totalCount = total;
-    const embeddingReady = stats.embeddingReady ?? workflowData.embeddingReady ?? 0;
-    const provider = stats.provider ?? workflowData.provider ?? '默认';
     
     box.innerHTML = `
       <div style="display:flex;gap:24px;flex-wrap:wrap;justify-content:center">
         <div style="text-align:center;min-width:0;flex:1 1 auto">
           <div style="font-size:22px;font-weight:700;color:var(--primary);margin-bottom:6px">${enabled}/${totalCount}</div>
           <div style="font-size:12px;color:var(--text-muted);line-height:1.4">启用 / 总数</div>
-        </div>
-        <div style="text-align:center;min-width:0;flex:1 1 auto">
-          <div style="font-size:22px;font-weight:700;color:var(--success);margin-bottom:6px">${embeddingReady}</div>
-          <div style="font-size:12px;color:var(--text-muted);line-height:1.4">Embedding 就绪</div>
-        </div>
-        <div style="text-align:center;min-width:0;flex:1 1 auto">
-          <div style="font-size:22px;font-weight:700;color:var(--warning);margin-bottom:6px">${this.escapeHtml(provider)}</div>
-          <div style="font-size:12px;color:var(--text-muted);line-height:1.4">Embedding Provider</div>
         </div>
       </div>
       ${items.length ? `
@@ -5118,7 +5108,6 @@ class App {
       'llm': 'LLM 大语言模型',
       'defaults': '默认参数',
       'profiles': '模型档位',
-      'embedding': 'Embedding 向量检索',
       'drawing': '绘图模型',
       'tts': 'TTS 语音合成',
       'asr': 'ASR 语音识别',

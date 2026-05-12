@@ -47,13 +47,7 @@ export default class MyWorkflow extends AIStream {
         frequencyPenalty: 0.6,         // 频率惩罚
         timeout: 30000                 // 超时时间（毫秒）
       },
-      functionToggles: {},              // 功能开关（可选）
-      embedding: {                     // 轻量语义检索配置（可选，基于 BM25）
-        enabled: false,                // 是否启用语义检索
-        maxContexts: 5,                // 最大上下文数量
-        similarityThreshold: 0.6,      // 相似度阈值
-        cacheExpiry: 86400             // 缓存过期时间（秒）
-      }
+      functionToggles: {}              // 功能开关（可选）
     });
   }
 }
@@ -70,7 +64,6 @@ export default class MyWorkflow extends AIStream {
 | `priority` | `number` | 否 | `100` | 优先级，数字越小优先级越高 |
 | `config` | `object` | 否 | 见下方 | AI配置对象 |
 | `functionToggles` | `object` | 否 | `{}` | 功能开关，用于控制注册的功能是否启用 |
-| `embedding` | `object` | 否 | 见下方 | 语义检索（BM25）配置对象 |
 
 **config 对象字段：**
 
@@ -84,15 +77,6 @@ export default class MyWorkflow extends AIStream {
 | `presencePenalty` | `number` | `0.6` | 同上 |
 | `frequencyPenalty` | `number` | `0.6` | 同上 |
 | `enableStream` / `toolChoice` / `parallelToolCalls` / `maxToolRounds` / `headers` / `extraBody` / `proxy` 等 | — | — | 可在工作流 `config` 中写；`resolveLLMConfig` 会与提供商条目合并（与 `openai_compat_llm` schema 对齐） |
-
-**embedding 对象字段（BM25）**
-
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `enabled` | `boolean` | `false` | 是否启用语义检索 |
-| `maxContexts` | `number` | `5` | 最大返回的历史上下文数量 |
-| `similarityThreshold` | `number` | `0.6` | 相似度阈值（0-1），低于此值将被丢弃 |
-| `cacheExpiry` | `number` | `86400` | Redis 中历史对话缓存过期时间（秒） |
 
 ## 参数优先级（LLM 相关）
 

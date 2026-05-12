@@ -50,8 +50,7 @@ export default class ChatStream extends AIStream {
         parallel_tool_calls: false,
         /** 未调 `*.reply` 时转发最后一轮正文；已调则不再 send（见 `unpackFactoryChatRaw` / `packNonStreamReturn`） */
         forwardAssistantText: true
-      },
-      embedding: { enabled: false }
+      }
     });
   }
 
@@ -1330,7 +1329,6 @@ export default class ChatStream extends AIStream {
     try {
       const groupId = e.group_id || e.groupId || null;
       const userId = e.user_id || e.userId || e.user?.id || null;
-      const historyKey = groupId || `private_${userId}`;
 
       let message = '';
       if (e.message && Array.isArray(e.message)) {
@@ -1389,9 +1387,6 @@ export default class ChatStream extends AIStream {
         }
       }
 
-      if (this.embeddingConfig?.enabled && message && message.length > 5) {
-        this.storeMessageWithEmbedding(historyKey, msgData).catch(() => {});
-      }
       BotUtil.makeLog('debug', `[ChatStream] recordMessage group=${groupId} userId=${userId} msgLen=${(message || '').length} messageId=${messageId}`, 'ChatStream');
     } catch (err) {
       BotUtil.makeLog('debug', `[ChatStream] recordMessage 异常: ${err?.message}`, 'ChatStream');
@@ -1428,9 +1423,6 @@ export default class ChatStream extends AIStream {
       const history = ChatStream.messageHistory.get(e.group_id) || [];
       history.push(msgData);
       if (history.length > 50) ChatStream.messageHistory.set(e.group_id, history.slice(-50));
-    }
-    if (this.embeddingConfig?.enabled) {
-      this.storeMessageWithEmbedding(e.group_id || `private_${e.user_id}`, msgData).catch(() => {});
     }
     if (imageContent) {
       BotUtil.makeLog('debug', `[ChatStream] recordAIResponse 提取图片内容标记: ${imageContent}`, 'ChatStream');
@@ -1572,14 +1564,13 @@ export default class ChatStream extends AIStream {
       '你是群里一起聊天的伙伴：像真人一样接话——听得懂玩笑和气氛，该正经说清、该闲聊就短打，别像客服稿或说明书。';
     const botRole = question?.botRole || this.getBotRole(e);
     const dateStr = question?.dateStr || new Date().toLocaleString('zh-CN');
-    const retrievalNote = this.embeddingConfig?.enabled ? '｜已启用相关历史检索' : '';
     const botName = e.bot?.nickname || e.bot?.info?.nickname || e.bot?.name || 'Bot';
     const isMaster = e.isMaster === true;
     const masterNote = isMaster ? '\n主人指令优先、少反驳。' : '';
 
     const lines = [
       `# ${botName}`,
-      `${botName}｜QQ ${e.self_id}｜群 ${e.group_id}｜身份 ${botRole}｜${dateStr}${retrievalNote}`,
+      `${botName}｜QQ ${e.self_id}｜群 ${e.group_id}｜身份 ${botRole}｜${dateStr}`,
       persona + masterNote,
       '',
       '## 可见性与输出',
@@ -2482,18 +2473,14 @@ export default class ChatStream extends AIStream {
   /**
    * 清除指定群组/用户的完整对话记录
    * @param {string|number} groupId - 群组ID或用户ID
-   * @param {Object} options - 选项
-   * @param {boolean} options.clearEmbedding - 是否清除embedding记忆（默认true）
    * @returns {Promise<Object>} 清除结果
    */
-  static async clearConversation(groupId, options = {}) {
-    const { clearEmbedding = true } = options;
+  static async clearConversation(groupId) {
     const gid = String(groupId);
     const result = {
       success: true,
       cleared: {
-        history: false,
-        embedding: false
+        history: false
       }
     };
 
@@ -2503,27 +2490,6 @@ export default class ChatStream extends AIStream {
         ChatStream.messageHistory.delete(gid);
         result.cleared.history = true;
         BotUtil.makeLog('debug', `[ChatStream] clearConversation 清除聊天记录 group=${gid}`, 'ChatStream');
-      }
-
-      // 清除embedding记忆
-      if (clearEmbedding) {
-        try {
-          const redis = global.redis || null;
-          if (redis) {
-            const embeddingKey = `ai:embedding:chat:${gid}`;
-            const deleted = await redis.del(embeddingKey).catch(() => 0);
-            if (deleted > 0) {
-              result.cleared.embedding = true;
-              BotUtil.makeLog('debug', `[ChatStream] clearConversation 清除embedding记忆 group=${gid} key=${embeddingKey}`, 'ChatStream');
-            } else {
-              BotUtil.makeLog('debug', `[ChatStream] clearConversation embedding键不存在或已清除 group=${gid} key=${embeddingKey}`, 'ChatStream');
-            }
-          } else {
-            BotUtil.makeLog('debug', `[ChatStream] clearConversation Redis不可用，跳过embedding清除 group=${gid}`, 'ChatStream');
-          }
-        } catch (err) {
-          BotUtil.makeLog('debug', `[ChatStream] clearConversation 清除embedding失败: ${err?.message}`, 'ChatStream');
-        }
       }
 
       BotUtil.makeLog('debug', `[ChatStream] clearConversation 完成 group=${gid} cleared=${JSON.stringify(result.cleared)}`, 'ChatStream');
