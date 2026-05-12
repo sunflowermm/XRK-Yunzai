@@ -49,8 +49,8 @@ export default class ChatStream extends AIStream {
         /** 多工具同轮时顺序执行，降低「reply 与远程 MCP 抢跑」导致的重复铺垫 */
         parallel_tool_calls: false,
         /**
-         * LLM 最后一轮若只产出 assistant 正文、未再调 reply，仍按文本协议发到群内（否则 ai.js 不使用 execute 返回值，用户看不见）。
-         * 若模型已在 reply 里发完全文且末尾 assistant 为空，callAI 多为 null，不会重复发。
+         * LLM 最后一轮若只产出 assistant 正文、且本轮未调用 reply 工具，则按文本协议发到群内。
+         * 若已调用 `*.reply` 发消息，则由 AIStream 标记 `usedReplyTool`，此处不再二次 sendMessages，避免与工具重复。
          */
         forwardAssistantText: true
       },
@@ -2025,8 +2025,8 @@ export default class ChatStream extends AIStream {
         text = this.stripMarkdownForOutgoing(text);
       }
 
-      /** OpenAI chat() 在工具轮结束后返回的是最后一轮 assistant.content（日志里的「返回正文」）；插件从不自动使用该返回值，故在此可选转发 */
-      if (this.config.forwardAssistantText !== false && text && e?.reply) {
+      const skipForward = this._lastCallAIUsedReplyTool === true;
+      if (this.config.forwardAssistantText !== false && text && e?.reply && !skipForward) {
         await this.sendMessages(e, text);
       }
 
