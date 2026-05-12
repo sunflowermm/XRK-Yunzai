@@ -102,7 +102,7 @@ export default class MyWorkflow extends AIStream {
 
 - **buildSystemPrompt(context)**：子类实现，返回系统提示字符串。
 - **buildChatContext(e, question)**：子类实现，返回 `[{ role, content }]` 消息数组。
-- **execute(e, question, config)**：构建上下文 → **`callAI(messages, config ?? {})`** → 解析功能时间线等；返回字符串或 `null`。详见 [reference/WORKFLOWS.md](./reference/WORKFLOWS.md)。
+- **execute(e, question, config)**：构建上下文 → **`callAI(messages, config ?? {})`** → 解析功能时间线等；返回字符串或 `null`（`callAI` 自身返回 `{ text, usedReplyTool }`，基类 `execute` 取 `text` 参与解析）。详见 [reference/WORKFLOWS.md](./reference/WORKFLOWS.md)。
 
 ## 记忆系统
 
@@ -110,7 +110,7 @@ export default class MyWorkflow extends AIStream {
 
 ## AI 调用
 
-- **callAI(messages, apiConfig)**：`resolveLLMConfig` → `LLMFactory.createClient` → `client.chat`。
+- **callAI(messages, apiConfig)**：`resolveLLMConfig` → `LLMFactory.createClient` → `client.chat`；返回 **`{ text, usedReplyTool } | null`**（`usedReplyTool` 表示本轮已通过 MCP `*.reply` 发往会话，ChatStream 等据此避免重复 `sendMessages`）。工厂 `chat()` 的 pack/unpack 见 `lib/utils/llm/llm-nonstream-reply.js`。
 - **callAIStream(messages, apiConfig, onDelta)**：同上，流式；`enableStream === false` 时走非流式再一次性回调。
 
 ## 功能管理
@@ -202,8 +202,9 @@ ${this.buildFunctionsPrompt()}`;
     const context = { e, question, config: finalConfig };
     const baseMessages = await this.buildChatContext(e, question);
     const messages = await this.buildEnhancedContext(e, question, baseMessages);
-    const response = await this.callAI(messages, userConfig);
-    if (!response) return null;
+    const r = await this.callAI(messages, userConfig);
+    if (r == null) return null;
+    const response = r.text;
     const { timeline, cleanText } = this.parseFunctions(response, context);
     const actionTimeline = timeline?.length ? timeline : [{ type: 'text', content: cleanText || response }];
     return await this.runActionTimeline(actionTimeline, context);

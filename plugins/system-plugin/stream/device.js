@@ -59,8 +59,9 @@ ${persona}
   async execute(deviceId, question, apiConfig, persona = '') {
     try {
       const messages = await this.buildChatContext(null, { text: question, persona });
-      const response = await this.callAI(messages, apiConfig);
-      if (!response) return null;
+      const llm = await this.callAI(messages, apiConfig);
+      if (llm == null) return null;
+      const response = llm.text;
       const { emotion, cleanText } = this.parseEmotion(response);
       return { text: cleanText || '', emotion };
     } catch (err) {

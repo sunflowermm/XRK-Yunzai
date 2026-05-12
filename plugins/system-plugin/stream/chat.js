@@ -48,10 +48,7 @@ export default class ChatStream extends AIStream {
         frequencyPenalty: 0.6,
         /** 多工具同轮时顺序执行，降低「reply 与远程 MCP 抢跑」导致的重复铺垫 */
         parallel_tool_calls: false,
-        /**
-         * LLM 最后一轮若只产出 assistant 正文、且本轮未调用 reply 工具，则按文本协议发到群内。
-         * 若已调用 `*.reply` 发消息，则由 AIStream 标记 `usedReplyTool`，此处不再二次 sendMessages，避免与工具重复。
-         */
+        /** 未调 `*.reply` 时转发最后一轮正文；已调则不再 send（见 `unpackFactoryChatRaw` / `packNonStreamReturn`） */
         forwardAssistantText: true
       },
       embedding: { enabled: false }
@@ -1295,11 +1292,13 @@ export default class ChatStream extends AIStream {
 
           // 调用AI识别（使用当前工作流的配置）
           const config = this.resolveLLMConfig({});
-          const recognitionResult = await this.callAI(recognitionMessages, config);
+          const llm = await this.callAI(recognitionMessages, config);
 
-          if (!recognitionResult || !recognitionResult.trim()) {
+          if (llm == null || !String(llm.text ?? '').trim()) {
             return { success: false, error: 'AI识别失败，未返回结果' };
           }
+
+          const recognitionResult = llm.text.trim();
 
           const data = {
               imageUrl,
@@ -2013,20 +2012,19 @@ export default class ChatStream extends AIStream {
       if (Bot.StreamLoader) Bot.StreamLoader.currentEvent = e || null;
       this._hasSentEmotionThisTurn = false;
 
-      const response = await this.callAI(messages, {
+      const llm = await this.callAI(messages, {
         ...config,
         debugDumpFullPrompt,
         _debugDumpEvent: e
       });
-      if (response == null) return null;
+      if (llm == null) return null;
 
-      let text = String(response).trim();
+      let text = String(llm.text ?? '').trim();
       if (text) {
         text = this.stripMarkdownForOutgoing(text);
       }
 
-      const skipForward = this._lastCallAIUsedReplyTool === true;
-      if (this.config.forwardAssistantText !== false && text && e?.reply && !skipForward) {
+      if (this.config.forwardAssistantText !== false && text && e?.reply && !llm.usedReplyTool) {
         await this.sendMessages(e, text);
       }
 

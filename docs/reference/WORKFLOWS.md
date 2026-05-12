@@ -49,7 +49,7 @@
 
 | 方法 | 说明 |
 |------|------|
-| `callAI(messages, apiConfig?)` | `resolveLLMConfig` → `LLMFactory.createClient` → `client.chat`；返回字符串或 `null`（部分客户端可返回带 `content` 的对象，基类会取 `content`） |
+| `callAI(messages, apiConfig?)` | `resolveLLMConfig` → `LLMFactory.createClient` → `client.chat`；基类返回 **`{ text, usedReplyTool }` 或 `null`**（`unpackFactoryChatRaw` 解析各工厂返回值） |
 | `callAIStream(messages, apiConfig?, onDelta)` | 同上；`enableStream === false` 时退化为 `callAI` 后一次性回调 |
 | `execute(e, question, config?)` | `callAI(messages, config)`；上下文对象里的 `config` 为 `{ ...this.config, ...config }`，与 LLM 解析用的 `apiConfig` 均为传入的第三参数 |
 | `preprocessResponse(response, context)` | 默认原样返回；子类可重写 |
