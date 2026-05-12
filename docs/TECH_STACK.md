@@ -44,7 +44,7 @@
 
 | 技术 | 描述 |
 |------|------|
-| Redis 5+ | 单实例即可；用于 AI 记忆、Embedding、速率限制、会话锁。 |
+| Redis 5+ | 单实例即可；用于 AI 记忆、速率限制、会话锁。 |
 | `redis` 官方客户端 | RESP3、连接池计算（根据 CPU/内存）、自动健康检查。 |
 | YAML 配置 | `config/default_config/*.yaml` + `data/server_bots/<port>/`，支持 chokidar 热更新。 |
 | 内存缓存 | `BotUtil.getMap()` 生成带 TTL 的 Map，用于 IP 缓存、API key 等。 |

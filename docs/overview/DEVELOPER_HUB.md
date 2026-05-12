@@ -61,7 +61,7 @@ flowchart TB
 | 🎯 **核心对象** | [`CORE_OBJECTS.md`](../CORE_OBJECTS.md) | `Bot` / 事件 `e` / `logger` / `cfg` / `segment` / `redis` |
 | 🏗️ **技术架构** | [`ARCHITECTURE.md`](../ARCHITECTURE.md) | 系统架构、核心对象作用、数据流、技术栈依赖关系 |
 | 🤖 **Bot API** | [`reference/BOT.md`](../reference/BOT.md) | 生命周期、HTTP/HTTPS/代理、好友/群、消息工具、WS |
-| ⚡ **工作流** | [`reference/WORKFLOWS.md`](../reference/WORKFLOWS.md) | `AIStream` 全部方法、Embedding、MemorySystem、WorkflowManager |
+| ⚡ **工作流** | [`reference/WORKFLOWS.md`](../reference/WORKFLOWS.md) | `AIStream` 全部方法、MemorySystem、WorkflowManager |
 | 🔌 **插件基类** | [`reference/PLUGINS.md`](../reference/PLUGINS.md) | 构造、规则、上下文管理、工作流调用、渲染 |
 | 🌐 **HTTP 基类** | [`reference/HTTP.md`](../reference/HTTP.md) | REST/WS 注册、middleware、热重载 |
 | ⚙️ **配置/Redis** | [`reference/CONFIG_AND_REDIS.md`](../reference/CONFIG_AND_REDIS.md) | `cfg` getters、watcher、Redis 初始化/事件 |

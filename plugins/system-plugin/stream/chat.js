@@ -5,8 +5,6 @@ import BotUtil from '../../../lib/util.js';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
 import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
 import { prepareOpenAIChatVisionMessages } from '../../../lib/utils/llm/image-utils.js';
-import { loadFilteredMemoriesForEvent, scoreMemoryForQuery } from '../../../lib/aistream/memory-file-context.js';
-
 const EMOTIONS_DIR = path.join(process.cwd(), 'resources/aiimages');
 const EMOTION_TYPES = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
 
@@ -1429,27 +1427,15 @@ export default class ChatStream extends AIStream {
     }
   }
 
-  async _buildMemoryContext(e, query) {
-    const blocks = [];
-    const list = await loadFilteredMemoriesForEvent(e);
-    if (list.length) {
-      const scored = list
-        .map(m => ({ m, score: scoreMemoryForQuery(m, query, e) }))
-        .sort((a, b) => b.score - a.score || (b.m.timestamp - a.m.timestamp));
-      const top = scored.slice(0, 40).map((x, i) => `${i + 1}. ${x.m.content}`).join('\n');
-      blocks.push(`【文件记忆】\n${top}`);
-    }
-    let redisSummary = '';
+  async _buildMemoryContext(e) {
     try {
-      redisSummary = await this.buildMemorySummary(e);
+      const redisSummary = await this.buildMemorySummary(e);
+      if (!redisSummary?.trim()) return null;
+      return `【会话记忆】\n${redisSummary.trim()}`;
     } catch (err) {
       BotUtil.makeLog('debug', `[ChatStream] buildMemorySummary 失败: ${err?.message}`, 'ChatStream');
+      return null;
     }
-    if (redisSummary?.trim()) {
-      blocks.push(`【会话记忆】\n${redisSummary.trim()}`);
-    }
-    if (!blocks.length) return null;
-    return blocks.join('\n\n');
   }
 
   /**
@@ -1720,14 +1706,14 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 构建增强上下文：在基础 messages 上追加长期记忆块
+   * 构建增强上下文：在基础 messages 上追加 Redis 会话记忆摘要（若有）
    */
   async buildEnhancedContext(e, query, messages) {
     const baseMessages = typeof super.buildEnhancedContext === 'function'
       ? await super.buildEnhancedContext(e, query, messages)
       : messages;
 
-    const memText = await this._buildMemoryContext(e, query);
+    const memText = await this._buildMemoryContext(e);
     if (!memText) return baseMessages;
 
     const enhanced = [...baseMessages];

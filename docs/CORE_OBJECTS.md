@@ -372,7 +372,7 @@ Redis 连接参数来自 `cfg.redis`，包括：
 
 > **详细 API**: 完整的 Redis 客户端说明请查阅 [`docs/reference/CONFIG_AND_REDIS.md`](./reference/CONFIG_AND_REDIS.md#2-redis-libconfigredisjs)
 
-> **注意**: 当 Redis 不可用时，Memory System、Embedding 会自动降级，但建议保持在线以启用全部能力。
+> **注意**: 当 Redis 不可用时，Memory System 会自动降级，但建议保持在线以启用全部能力。
 
 ---
 
