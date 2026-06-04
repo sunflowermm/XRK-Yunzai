@@ -259,11 +259,6 @@ export const configPageMethods = {
     `;
   },
 
-  /** @deprecated 使用 renderMultiFileConfigChooser */
-  renderSystemConfigChooser(config) {
-    return this.renderMultiFileConfigChooser(config);
-  },
-
   async loadSelectedConfigDetail() {
     if (!this._configState?.selected) return;
     const main = document.getElementById('configMain');
@@ -345,11 +340,10 @@ export const configPageMethods = {
     return data.structure;
   },
 
-  extractActiveSchema(structure, name, child) {
+  extractActiveSchema(structure, _name, child) {
     if (!structure) return null;
-    if (name === 'system') {
-      if (!child) return null;
-      const target = structure.configs?.[child];
+    if (child && structure.configs?.[child]) {
+      const target = structure.configs[child];
       return target?.schema ?? { fields: target?.fields ?? {} };
     }
     return structure.schema ?? { fields: structure.fields ?? {} };
@@ -360,11 +354,16 @@ export const configPageMethods = {
     for (const [key, fieldSchema] of Object.entries(schema.fields)) {
       const path = prefix ? `${prefix}.${key}` : key;
       if (fieldSchema.type === 'array' && fieldSchema.itemType === 'object') {
-        const subFields = fieldSchema.itemSchema?.fields ?? fieldSchema.fields ?? {};
-        map[path] = subFields;
-      }
-      if ((fieldSchema.type === 'object' || fieldSchema.type === 'map') && fieldSchema.fields) {
-        this.buildArraySchemaIndex(fieldSchema, path, map);
+        const itemFields = fieldSchema.itemSchema?.fields ?? fieldSchema.fields ?? {};
+        map[path] = itemFields;
+        for (const [subKey, sub] of Object.entries(itemFields)) {
+          if (sub.type === 'array' && sub.itemType === 'object') {
+            const nested = sub.itemSchema?.fields ?? sub.fields ?? {};
+            map[`${path}[].${subKey}`] = nested;
+          }
+        }
+      } else if ((fieldSchema.type === 'object' || fieldSchema.type === 'map') && fieldSchema.fields) {
+        this.buildArraySchemaIndex({ fields: fieldSchema.fields }, path, map);
       }
     }
     return map;
@@ -744,8 +743,9 @@ export const configPageMethods = {
 
   renderFieldTree(tree) {
     return Object.entries(tree).map(([groupKey, group]) => {
-      const groupLabel = this.formatGroupLabel(groupKey);
-      const groupDesc = group.fields[0]?.meta?.groupDesc ?? '';
+      const sole = group.fields.length === 1 ? group.fields[0] : null;
+      const groupLabel = sole?.displayName || sole?.meta?.label || this.formatGroupLabel(groupKey);
+      const groupDesc = sole?.description || sole?.meta?.description || sole?.meta?.groupDesc || '';
       const totalFields = group.fields.length + Object.values(group.subGroups).reduce((sum, sg) => sum + sg.fields.length, 0);
       
       // 渲染子分组（SubForm），子分组内的字段也需要按分组显示
@@ -1093,7 +1093,7 @@ export const configPageMethods = {
 
   renderArrayObjectControl(field, items = [], meta = {}) {
     const subFields = this._configState.arraySchemaMap[field.path] ?? meta.itemSchema?.fields ?? meta.fields ?? {};
-    const itemLabel = meta.itemLabel ?? '条目';
+    const itemLabel = meta.label ?? field.displayName ?? meta.itemLabel ?? '条目';
     const fullItems = Array.isArray(items) && items.length > 0 ? items : 
       (this.getNestedValue(this._configState?.rawObject ?? {}, field.path) ?? []);
     const body = fullItems.length
@@ -1141,7 +1141,29 @@ export const configPageMethods = {
       const isSubForm = component === 'subform';
       const hasChildFields = schema.fields && Object.keys(schema.fields).length > 0;
       const isNestedObject = (schema.type === 'object' || schema.type === 'map') && hasChildFields;
-      
+      const isNestedArray =
+        schema.type === 'array' &&
+        (schema.itemType === 'object' || String(schema.component ?? '').toLowerCase() === 'arrayform');
+
+      if (isNestedArray) {
+        const nestedPath = `${parentPath}.${index}.${relPath}`;
+        const nestedItems = this.getNestedValue(this._configState?.rawObject ?? {}, nestedPath) ?? [];
+        const nestedField = {
+          path: nestedPath,
+          type: 'array<object>',
+          displayName: schema.label || key,
+          meta: schema,
+          component: schema.component
+        };
+        return `
+          <div class="array-object-subgroup">
+            <div class="array-object-subgroup-title">${this.escapeHtml(schema.label || key)}</div>
+            ${schema.description ? `<p class="config-field-hint">${this.escapeHtml(schema.description)}</p>` : ''}
+            ${this.renderArrayObjectControl(nestedField, nestedItems, schema)}
+          </div>
+        `;
+      }
+
       // SubForm / 嵌套对象 且 定义了子字段：展开显示子字段
       // 如果 SubForm 的 fields 为空（如 headers/extraBody 这种“自由对象”），不走这里，直接渲染为一个控件。
       if ((isSubForm || isNestedObject) && hasChildFields) {

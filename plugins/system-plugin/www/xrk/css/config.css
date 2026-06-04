@@ -667,6 +667,17 @@
 .array-object-card-body {
   display: grid;
   gap: 12px;
+  min-height: 0;
+}
+
+.array-object-field {
+  min-width: 0;
+}
+
+.array-object-field .form-input,
+.array-object-field textarea.form-input {
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .array-object-field label {
