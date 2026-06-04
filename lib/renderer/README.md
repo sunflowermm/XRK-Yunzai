@@ -15,14 +15,24 @@
     - `fullPage`：是否整页截图。
     - `waitUntil`：页面加载策略（如 `domcontentloaded`、`networkidle2`）。
     - `imageWaitTimeout`：等待页面内图片加载的毫秒数。
-    - `delayBeforeScreenshot`：截屏前延迟毫秒数（常用于 fullPage 等待滚动/动画）。
+    - `fontWaitTimeout`：等待 `document.fonts.ready` 的毫秒数。
+    - `delayBeforeScreenshot`：截屏前延迟毫秒数（fullPage / clip / selector / pageEvaluateBeforeScreenshot 时生效）。
     - `imgType`：输出图片类型（如 `png`、`jpeg`）。
     - `quality`：输出质量（如 jpeg 时有效）。
     - `omitBackground`：是否透明底。
     - `path`：若需落盘时的文件路径。
-    - `clip`：裁剪区域 `{ x, y, width, height }`（与 fullPage 二选一，像素值）。
-    - `cropTopPercent`、`cropBottomPercent`：仅在与 `fullPage: true` 同时使用时有效；传入 0–1 之间的数表示裁掉顶部/底部的比例，不传则不裁；可只传其一或同时传，两者之和须小于 1。
+    - `clip`：裁剪区域 `{ x, y, width, height }`（像素值；与 fullPage 互斥）。
+    - `selector`：单个 CSS 选择器，对该元素截图。
+    - `pageStyle`：注入 `<style>` 内容。
+    - `pageEvaluate`：页面加载后执行的脚本字符串。
+    - `pageEvaluateBeforeScreenshot`：截图前执行的脚本；若返回 `{ x, y, width, height }` 则按该区域截图。
+    - `waitForFunctionList` / `waitForFunctionAfterList`：pageEvaluate 前后执行的 waitForFunction 表达式。
+    - `waitForSelectorList`：截图前等待的选择器列表。
+    - `resourceRewrite`：请求重写规则 `{ match, type?, toUrl?, toFile?, contentType? }[]`。
+    - `blockResourceTypes`：要拦截的资源类型（如 `media`）。
+    - `cropTopPercent`、`cropBottomPercent`：仅在与 `fullPage: true` 同时使用时有效；传入 0–1 之间的数表示裁掉顶部/底部的比例。
     - `multiPage`：是否分页截图（多张）。
     - `pageGotoParams`：透传的页面 goto 选项。
-  - 插件传入所需参数即可得到对应截屏结果，底层不做具体数值或默认裁剪。
+  - 业务插件自行组装上述参数；底层不包含任何站点/插件专用逻辑。
+  - 已废弃：`clipSelectors`、`pageEvaluateClip`、单值 `waitForFunction` / `waitForSelectorExtra`（请用 `*List` 形式）。
 - **列表**：需要渲染器列表时，import 加载器后使用 `RendererLoader.listRenderers()`、`RendererLoader.hasRenderer(name)`。

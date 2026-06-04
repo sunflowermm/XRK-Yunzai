@@ -6,7 +6,7 @@ import cfg from "../../../lib/config/config.js";
 import BotUtil from "../../../lib/util.js";
 import { FileUtils } from "../../../lib/utils/file-utils.js";
 import { cropTopAndBottom } from "../../../lib/renderer/crop.js";
-import { toBuffer, toFileUrl } from "../../../lib/renderer/screenshot-utils.js";
+import { toBuffer, toFileUrl, isScreenshotClip, toStringList } from "../../../lib/renderer/screenshot-utils.js";
 
 export default class PuppeteerRenderer extends Renderer {
   constructor(config = {}) {
@@ -51,7 +51,6 @@ export default class PuppeteerRenderer extends Renderer {
     // 不在此处注册 SIGINT/SIGTERM，由 lib/config/loader.js 统一处理；进程退出时 exit 事件会触发 cleanup
   }
 
-  /** 将 cfg 默认值与调用参数合并，保持 data 优先级最高 */
   normalizeScreenshotData(data = {}) {
     const rendererCfg = cfg.renderer?.puppeteer || {};
     const viewport = rendererCfg.viewport || {};
@@ -59,30 +58,20 @@ export default class PuppeteerRenderer extends Renderer {
       width: viewport.width ?? 1280,
       height: viewport.height ?? 720,
       deviceScaleFactor: viewport.deviceScaleFactor ?? 1,
-
-      // 页面加载/等待策略
       waitUntil: rendererCfg.waitUntil ?? "domcontentloaded",
       imageWaitTimeout: rendererCfg.imageWaitTimeout ?? 800,
       fontWaitTimeout: rendererCfg.fontWaitTimeout ?? 800,
       waitImages: rendererCfg.waitImages ?? true,
       waitFonts: rendererCfg.waitFonts ?? true,
-
-      // 输出
       imgType: rendererCfg.imgType ?? "jpeg",
       quality: rendererCfg.quality ?? 85,
       omitBackground: rendererCfg.omitBackground ?? false,
-
-      // 资源拦截（默认仅拦截 media，不拦截 font）
       blockResourceTypes: rendererCfg.blockResourceTypes ?? ["media"],
-      // 资源重写（用于把在线字体/图标映射到本地文件，避免服务器无外网）
       resourceRewrite: rendererCfg.resourceRewrite ?? [],
-
-      // 其它
       delayBeforeScreenshot: rendererCfg.delayBeforeScreenshot,
       delayBeforeScreenshotUrl: rendererCfg.delayBeforeScreenshotUrl,
       delayBeforeScreenshotFile: rendererCfg.delayBeforeScreenshotFile,
       pageGotoParams: rendererCfg.pageGotoParams,
-
       ...data,
     };
   }
@@ -135,22 +124,199 @@ export default class PuppeteerRenderer extends Renderer {
   readCacheFile(filePath) {
     const abs = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
     if (this._fileCache.has(abs)) return this._fileCache.get(abs);
-    try {
-      const buf = fs.readFileSync(abs);
-      this._fileCache.set(abs, buf);
-      return buf;
-    } catch {
-      return null;
-    }
+    const buf = FileUtils.readFileSync(abs, null);
+    if (buf) this._fileCache.set(abs, buf);
+    return buf;
   }
 
-  /** 计算要拦截的资源类型 */
   getBlockResourceTypes(d) {
     const rendererCfg = cfg.renderer?.puppeteer || {};
     const types = Array.isArray(d.blockResourceTypes)
       ? d.blockResourceTypes
       : (Array.isArray(rendererCfg.blockResourceTypes) ? rendererCfg.blockResourceTypes : ["media"]);
     return Array.from(new Set(types.filter(t => typeof t === "string" && t)));
+  }
+
+  async setupRequestRoute(page, d, name) {
+    const blockTypes = this.getBlockResourceTypes(d);
+    const rewriteRules = this.getResourceRewriteRules(d);
+    if (blockTypes.length === 0 && rewriteRules.length === 0) return;
+    await page.setRequestInterception(true);
+    page.on("request", async (request) => {
+      const reqUrl = request.url();
+      for (const rule of rewriteRules) {
+        if (!this.matchRewrite(rule, reqUrl)) continue;
+        try {
+          if (rule.toUrl) return await request.continue({ url: rule.toUrl });
+          if (rule.toFile) {
+            const buf = this.readCacheFile(rule.toFile);
+            if (buf) {
+              return await request.respond({
+                status: 200,
+                contentType: rule.contentType || this.guessContentType(rule.toFile),
+                body: buf,
+              });
+            }
+          }
+        } catch (e) {
+          BotUtil.makeLog("debug", `[${name}] rewrite failed: ${e?.message || e}`, "PuppeteerRenderer");
+        }
+      }
+      if (blockTypes.includes(request.resourceType())) request.abort();
+      else request.continue();
+    });
+  }
+
+  selectorTimeout(d) {
+    return Number.isFinite(d.selectorTimeout) ? d.selectorTimeout : 15000;
+  }
+
+  async waitForExprs(page, exprs, timeout) {
+    for (const fn of toStringList(exprs)) {
+      await page.waitForFunction(fn, { timeout }).catch(() => {});
+    }
+  }
+
+  async waitForSels(page, sels, timeout) {
+    for (const sel of toStringList(sels)) {
+      await page.waitForSelector(sel, { timeout }).catch(() => {});
+    }
+  }
+
+  async waitImagesLoaded(page, ms) {
+    if (!(ms > 0)) return;
+    await page.evaluate((waitMs) => new Promise(resolve => {
+      const timeout = setTimeout(resolve, waitMs);
+      const images = Array.from(document.querySelectorAll("img"));
+      if (images.length === 0) { clearTimeout(timeout); return resolve(); }
+      let loaded = 0;
+      const done = () => { loaded++; if (loaded === images.length) { clearTimeout(timeout); resolve(); } };
+      images.forEach(img => img.complete ? done() : (img.onload = img.onerror = done));
+    }), ms);
+  }
+
+  async waitFontsReady(page, ms) {
+    if (!(ms > 0)) return;
+    await page.evaluate((waitMs) => new Promise((resolve) => {
+      if (!document.fonts?.ready) return resolve();
+      const timeout = setTimeout(resolve, waitMs);
+      document.fonts.ready
+        .then(() => { clearTimeout(timeout); resolve(); })
+        .catch(() => { clearTimeout(timeout); resolve(); });
+    }), ms);
+  }
+
+  buildScreenshotOpts(d) {
+    const imgType = String(d.imgType ?? "jpeg").toLowerCase();
+    const opts = {
+      type: imgType === "png" ? "png" : "jpeg",
+      omitBackground: d.omitBackground ?? false,
+      quality: d.quality ?? 85,
+    };
+    if (opts.type === "png") delete opts.quality;
+    if (d.path) opts.path = d.path;
+    return opts;
+  }
+
+  async evalBeforeScreenshot(page, script, name) {
+    if (typeof script !== "string" || !script.trim()) return null;
+    try {
+      const result = await page.evaluate(script);
+      return isScreenshotClip(result) ? result : null;
+    } catch (e) {
+      BotUtil.makeLog("debug", `[${name}] pageEvaluateBeforeScreenshot: ${e?.message || e}`, "PuppeteerRenderer");
+      return null;
+    }
+  }
+
+  async captureScreenshot(page, d, name, start, useUrl, pageHeight) {
+    const screenshotOpts = this.buildScreenshotOpts(d);
+    const fullPage = d.fullPage === true || (useUrl && d.fullPage !== false);
+    const hasSelector = typeof d.selector === "string" && d.selector.trim();
+    const staticClip = isScreenshotClip(d.clip) ? d.clip : null;
+    const hasPreShot = staticClip || hasSelector || (typeof d.pageEvaluateBeforeScreenshot === "string" && d.pageEvaluateBeforeScreenshot.trim());
+    const defaultDelay = useUrl ? (d.delayBeforeScreenshotUrl ?? 1500) : (d.delayBeforeScreenshotFile ?? 0);
+    const delayMs = (fullPage || hasPreShot) ? (d.delayBeforeScreenshot ?? defaultDelay) : 0;
+    if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
+
+    const clip = (await this.evalBeforeScreenshot(page, d.pageEvaluateBeforeScreenshot, name)) || staticClip;
+    const timeout = this.selectorTimeout(d);
+    const scrollTop = async () => {
+      await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+      await new Promise(r => setTimeout(r, 150));
+    };
+
+    if (isScreenshotClip(clip)) {
+      await scrollTop();
+      const buf = toBuffer(await page.screenshot({ ...screenshotOpts, clip }));
+      if (buf) {
+        BotUtil.makeLog("info", `[${name}][${this.renderNum + 1}] clip ${clip.width}x${clip.height} ${Date.now() - start}ms`, "PuppeteerRenderer");
+        return [buf];
+      }
+      return [];
+    }
+    if (hasSelector) {
+      await page.waitForSelector(d.selector, { timeout }).catch(() => {});
+      const el = await page.$(d.selector);
+      if (el) {
+        const buf = toBuffer(await el.screenshot(screenshotOpts));
+        if (buf) {
+          BotUtil.makeLog("info", `[${name}][${this.renderNum + 1}] selector ${Date.now() - start}ms`, "PuppeteerRenderer");
+          return [buf];
+        }
+      }
+      return [];
+    }
+    if (fullPage) {
+      let buf = toBuffer(await page.screenshot({ ...screenshotOpts, fullPage: true }));
+      const cropTop = d.cropTopPercent;
+      const cropBottom = d.cropBottomPercent;
+      if (buf && ((typeof cropTop === "number" && cropTop > 0 && cropTop < 1) || (typeof cropBottom === "number" && cropBottom > 0 && cropBottom < 1))) {
+        const cropped = await cropTopAndBottom(buf, cropTop || 0, cropBottom || 0);
+        if (cropped) buf = cropped;
+      }
+      if (buf) {
+        BotUtil.makeLog("info", `[${name}][${this.renderNum + 1}] fullPage ${(buf.length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PuppeteerRenderer");
+        return [buf];
+      }
+      return [];
+    }
+
+    const body = (await page.$("#container")) || (await page.$("body"));
+    if (!body) throw new Error("No body element found");
+    const boundingBox = await body.boundingBox();
+    if (!boundingBox) {
+      const buf = toBuffer(await page.screenshot({ ...screenshotOpts, fullPage: false }));
+      return buf ? [buf] : [];
+    }
+
+    const num = d.multiPage ? Math.ceil(boundingBox.height / pageHeight) || 1 : 1;
+    if (d.multiPage) screenshotOpts.type = "jpeg";
+    if (num === 1) {
+      const buf = toBuffer(await body.screenshot(screenshotOpts));
+      if (buf) BotUtil.makeLog("info", `[${name}][${this.renderNum + 1}] ${(buf.length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PuppeteerRenderer");
+      return buf ? [buf] : [];
+    }
+
+    const ret = [];
+    await page.setViewport({ width: Math.ceil(boundingBox.width), height: Math.min(pageHeight + 100, 2000) });
+    for (let i = 1; i <= num; i++) {
+      if (i === num && num > 1) {
+        await page.setViewport({
+          width: Math.ceil(boundingBox.width),
+          height: Math.min(parseInt(boundingBox.height) - pageHeight * (num - 1), 2000) || 100,
+        });
+      }
+      if (i !== 1) {
+        await page.evaluate((y) => window.scrollTo(0, y), pageHeight * (i - 1));
+        await new Promise(r => setTimeout(r, 100));
+      }
+      const buf = toBuffer(i === 1 ? await body.screenshot(screenshotOpts) : await page.screenshot(screenshotOpts));
+      if (buf) ret.push(buf);
+      if (i < num && num > 2) await new Promise(r => setTimeout(r, 100));
+    }
+    BotUtil.makeLog("info", `[${name}] multiPage ${num} ${Date.now() - start}ms`, "PuppeteerRenderer");
+    return ret;
   }
 
   async getMac() {
@@ -328,148 +494,45 @@ export default class PuppeteerRenderer extends Renderer {
 
     try {
       page = await this.browser.newPage();
+      await this.setupRequestRoute(page, d, name);
 
-      const blockTypes = this.getBlockResourceTypes(d);
-      const rewriteRules = this.getResourceRewriteRules(d);
-      if (blockTypes.length > 0 || rewriteRules.length > 0) {
-        await page.setRequestInterception(true);
-        page.on("request", async (request) => {
-          const reqUrl = request.url();
-          // 先处理 URL 重写（优先级高于 block），用于离线/内网部署的字体、图标等
-          for (const rule of rewriteRules) {
-            if (!this.matchRewrite(rule, reqUrl)) continue;
-            try {
-              if (rule.toUrl) {
-                return await request.continue({ url: rule.toUrl });
-              }
-              if (rule.toFile) {
-                const buf = this.readCacheFile(rule.toFile);
-                if (buf) {
-                  return await request.respond({
-                    status: 200,
-                    contentType: rule.contentType || this.guessContentType(rule.toFile),
-                    body: buf,
-                  });
-                }
-              }
-            } catch (e) {
-              BotUtil.makeLog("debug", `[${name}] rewrite failed: ${e?.message || e}`, "PuppeteerRenderer");
-            }
-          }
-          const resourceType = request.resourceType();
-          if (blockTypes.includes(resourceType)) request.abort();
-          else request.continue();
-        });
-      }
-
-      const viewportWidth = d.width;
-      const viewportHeight = d.height;
-      const deviceScaleFactor = d.deviceScaleFactor;
       await page.setViewport({
-        width: viewportWidth,
-        height: viewportHeight,
-        deviceScaleFactor,
+        width: d.width,
+        height: d.height,
+        deviceScaleFactor: d.deviceScaleFactor,
       });
 
       const pageGotoParams = Object.assign(
         { timeout: this.puppeteerTimeout, waitUntil: d.waitUntil || "domcontentloaded" },
         d.pageGotoParams || {}
       );
+      await page.goto(useUrl ? d.url : toFileUrl(filePath), pageGotoParams);
 
-      const loadUrl = useUrl ? d.url : toFileUrl(filePath);
-      await page.goto(loadUrl, pageGotoParams);
+      if (typeof d.pageStyle === "string" && d.pageStyle.trim()) {
+        await page.addStyleTag({ content: d.pageStyle }).catch(() => {});
+      }
+
+      const timeout = this.selectorTimeout(d);
+      await this.waitForExprs(page, d.waitForFunctionList, timeout);
+      if (typeof d.pageEvaluate === "string" && d.pageEvaluate.trim()) {
+        try {
+          await page.evaluate(d.pageEvaluate);
+        } catch (e) {
+          BotUtil.makeLog("debug", `[${name}] pageEvaluate: ${e?.message || e}`, "PuppeteerRenderer");
+        }
+      }
+      await this.waitForExprs(page, d.waitForFunctionAfterList, timeout);
+      await this.waitForSels(page, d.waitForSelectorList, timeout);
 
       if (d.waitImages !== false) {
-        const imageWait = Number.isFinite(d.imageWaitTimeout) ? d.imageWaitTimeout : 800;
-        if (imageWait > 0) {
-          await page.evaluate((ms) => new Promise(resolve => {
-            const timeout = setTimeout(resolve, ms);
-            const images = Array.from(document.querySelectorAll("img"));
-            if (images.length === 0) { clearTimeout(timeout); return resolve(); }
-            let loaded = 0;
-            const done = () => { loaded++; if (loaded === images.length) { clearTimeout(timeout); resolve(); } };
-            images.forEach(img => img.complete ? done() : (img.onload = img.onerror = done));
-          }), imageWait);
-        }
+        await this.waitImagesLoaded(page, Number.isFinite(d.imageWaitTimeout) ? d.imageWaitTimeout : 800);
       }
-
       if (d.waitFonts !== false) {
-        const fontWait = Number.isFinite(d.fontWaitTimeout) ? d.fontWaitTimeout : 800;
-        if (fontWait > 0) {
-          await page.evaluate((ms) => new Promise((resolve) => {
-            // 部分环境 document.fonts 不可用，直接跳过
-            if (!document.fonts || !document.fonts.ready) return resolve();
-            const timeout = setTimeout(resolve, ms);
-            document.fonts.ready
-              .then(() => { clearTimeout(timeout); resolve(); })
-              .catch(() => { clearTimeout(timeout); resolve(); });
-          }), fontWait);
-        }
+        await this.waitFontsReady(page, Number.isFinite(d.fontWaitTimeout) ? d.fontWaitTimeout : 800);
       }
 
-      const fullPage = d.fullPage === true || (useUrl && d.fullPage !== false);
-      const imgType = String(d.imgType ?? "jpeg").toLowerCase();
-      const screenshotOpts = {
-        type: imgType === "png" ? "png" : "jpeg",
-        omitBackground: d.omitBackground ?? false,
-        quality: d.quality ?? 85,
-      };
-      if (screenshotOpts.type === "png") delete screenshotOpts.quality;
-      if (d.path) screenshotOpts.path = d.path;
-
-      const defaultDelay = useUrl ? (d.delayBeforeScreenshotUrl ?? 1500) : (d.delayBeforeScreenshotFile ?? 0);
-      const delayMs = fullPage ? (d.delayBeforeScreenshot ?? defaultDelay) : 0;
-      if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
-
-      if (fullPage) {
-        let buf = toBuffer(await page.screenshot({ ...screenshotOpts, fullPage: true }));
-        const cropTop = d.cropTopPercent;
-        const cropBottom = d.cropBottomPercent;
-        if (buf && ((typeof cropTop === "number" && cropTop > 0 && cropTop < 1) || (typeof cropBottom === "number" && cropBottom > 0 && cropBottom < 1))) {
-          const cropped = await cropTopAndBottom(buf, cropTop || 0, cropBottom || 0);
-          if (cropped) buf = cropped;
-        }
-        if (buf) ret.push(buf);
-        this.renderNum++;
-        if (ret[0]) BotUtil.makeLog("info", `[${name}][${this.renderNum}] fullPage ${(ret[0].length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PuppeteerRenderer");
-      } else if (d.clip && typeof d.clip === "object" && ["x", "y", "width", "height"].every(k => Number.isFinite(d.clip[k]))) {
-        const buf = toBuffer(await page.screenshot({ ...screenshotOpts, clip: d.clip }));
-        if (buf) ret.push(buf);
-        this.renderNum++;
-        if (ret.length) BotUtil.makeLog("info", `[${name}][${this.renderNum}] clip ${Date.now() - start}ms`, "PuppeteerRenderer");
-      } else {
-        const body = (await page.$("#container")) || (await page.$("body"));
-        if (!body) throw new Error("No body element found");
-        const boundingBox = await body.boundingBox();
-        if (!boundingBox) {
-          const buf = toBuffer(await page.screenshot({ ...screenshotOpts, fullPage: false }));
-          if (buf) ret.push(buf);
-          this.renderNum++;
-        } else {
-          let num = d.multiPage ? Math.ceil(boundingBox.height / pageHeight) || 1 : 1;
-          if (d.multiPage) screenshotOpts.type = "jpeg";
-        if (num === 1) {
-          const buf = toBuffer(await body.screenshot(screenshotOpts));
-          if (buf) ret.push(buf);
-          this.renderNum++;
-          if (ret[0]) BotUtil.makeLog("info", `[${name}][${this.renderNum}] ${(ret[0].length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PuppeteerRenderer");
-        } else {
-          await page.setViewport({ width: Math.ceil(boundingBox.width), height: Math.min(pageHeight + 100, 2000) });
-          for (let i = 1; i <= num; i++) {
-            if (i === num && num > 1) await page.setViewport({ width: Math.ceil(boundingBox.width), height: Math.min(parseInt(boundingBox.height) - pageHeight * (num - 1), 2000) || 100 });
-            if (i !== 1) {
-              await page.evaluate((y) => window.scrollTo(0, y), pageHeight * (i - 1));
-              await new Promise(r => setTimeout(r, 100));
-            }
-            const buf = toBuffer(i === 1 ? await body.screenshot(screenshotOpts) : await page.screenshot(screenshotOpts));
-            if (buf) ret.push(buf);
-            this.renderNum++;
-            if (i < num && num > 2) await new Promise(r => setTimeout(r, 100));
-          }
-          BotUtil.makeLog("info", `[${name}] multiPage ${num} ${Date.now() - start}ms`, "PuppeteerRenderer");
-        }
-        }
-      }
+      ret = await this.captureScreenshot(page, d, name, start, useUrl, pageHeight);
+      this.renderNum += ret.length;
     } catch (error) {
       BotUtil.makeLog("error", `[${name}] Screenshot failed: ${error.message}`, "PuppeteerRenderer");
       ret = [];
