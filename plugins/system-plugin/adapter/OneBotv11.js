@@ -1523,6 +1523,7 @@ Bot.adapter.push(
         recallMsg: this.recallMsg.bind(this, i),
         getForwardMsg: this.getForwardMsg.bind(this, i),
         sendForwardMsg: this.sendFriendForwardMsg.bind(this, i),
+        makeForwardMsg: msg => Bot.makeForwardMsg(msg),
         sendFile: this.sendFriendFile.bind(this, i),
         sendFileStream: this.sendFriendFileStream.bind(this, i),
         sendAiRecord: (text, character_id, character_name) => 
@@ -1634,6 +1635,7 @@ Bot.adapter.push(
         recallMsg: this.recallMsg.bind(this, i),
         getForwardMsg: this.getForwardMsg.bind(this, i),
         sendForwardMsg: this.sendGroupForwardMsg.bind(this, i),
+        makeForwardMsg: msg => Bot.makeForwardMsg(msg),
         sendFile: (file, name) => this.sendGroupFile(i, file, undefined, name),
         sendFileStream: (file, folder, name) => this.sendGroupFileStream(i, file, folder, name),
         getInfo: this.getGroupInfo.bind(this, i),
