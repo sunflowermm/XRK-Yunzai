@@ -8,7 +8,7 @@
 - **截图**：`renderer.screenshot(name, data)`  
   - `name`：截图标识（saveId）。  
   - `data` 参数组成（均由调用方传入，底层无业务默认值）：
-    - `url`：要打开的 URL（与本地 HTML 二选一）。
+    - `url`：远程 URL（与本地 HTML 二选一；若同时传入 `tplFile`，则 `url` 仅作模板变量，不会用于 `page.goto`）。
     - `tplFile`、`saveId`：本地 HTML 路径；若为绝对路径且文件存在则直接按该路径加载，CSS/图片等相对路径以该文件所在目录为基准。
     - `width`、`height`：视口宽高。
     - `deviceScaleFactor`：设备像素比。

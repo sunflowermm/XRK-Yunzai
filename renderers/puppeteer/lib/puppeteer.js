@@ -302,7 +302,8 @@ export default class PuppeteerRenderer extends Renderer {
       return false;
     }
 
-    const useUrl = d.url && /^https?:\/\//i.test(String(d.url));
+    const wantTpl = Boolean(d.tplFile);
+    const useUrl = !wantTpl && d.url && /^https?:\/\//i.test(String(d.url));
     const pageHeight = d.multiPageHeight ?? 4000;
     let savePath = null;
     let directFilePath = null;
