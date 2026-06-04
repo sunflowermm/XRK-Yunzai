@@ -536,6 +536,12 @@ export default {
         }
 
         try {
+          if (config.configFiles && !childPath) {
+            return res.status(400).json({
+              success: false,
+              message: '多文件配置需要指定子配置路径（path 参数）'
+            });
+          }
           let schema = null;
           const structure = config.getStructure();
           if (childPath && structure?.configs?.[childPath]) {

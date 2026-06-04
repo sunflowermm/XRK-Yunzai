@@ -106,6 +106,27 @@ export function renderConfigPage(app) {
     });
   }
 
+  const mainSection = document.getElementById('configMain');
+  if (mainSection && mainSection.dataset._subcardBound !== '1') {
+    mainSection.dataset._subcardBound = '1';
+    const activateSubcard = (card) => {
+      if (!card || !app._configState) return;
+      const parent = card.dataset.parent;
+      const child = card.dataset.child;
+      if (parent && child) app.selectConfig(parent, child);
+    };
+    mainSection.addEventListener('click', (e) => {
+      activateSubcard(e.target.closest('.config-subcard'));
+    });
+    mainSection.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const card = e.target.closest('.config-subcard');
+      if (!card) return;
+      e.preventDefault();
+      activateSubcard(card);
+    });
+  }
+
   app.loadConfigList();
 }
 

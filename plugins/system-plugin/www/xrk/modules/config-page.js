@@ -9,6 +9,11 @@ function escapeConfigItemSelector(name) {
 }
 
 export const configPageMethods = {
+  /** 与后端 config.configFiles 对应：列表项带 configs 子项 */
+  isMultiFileConfig(cfg) {
+    return Boolean(cfg?.configs && typeof cfg.configs === 'object' && Object.keys(cfg.configs).length > 0);
+  },
+
   setActiveConfigSidebarItem(name) {
     const list = document.getElementById('configList');
     if (!list || !name) return false;
@@ -89,8 +94,8 @@ export const configPageMethods = {
         const target = this._configState.list.find(cfg => cfg.name === restore.name);
         if (target) {
           this._configState.selected = target;
-          if (target.name === 'system' && !restore.child) {
-            this.renderSystemConfigChooser(target);
+          if (this.isMultiFileConfig(target) && !restore.child) {
+            this.renderMultiFileConfigChooser(target);
           } else if (this._configState.pendingSelect) {
             this.selectConfig(restore.name, restore.child || null);
           } else {
@@ -147,7 +152,7 @@ export const configPageMethods = {
     list.innerHTML = filtered.map(cfg => {
       const title = this.escapeHtml(cfg.displayName || cfg.name);
       const desc = this.escapeHtml(cfg.description ?? cfg.filePath ?? '');
-      const pinned = cfg.name === 'system';
+      const multiFile = this.isMultiFileConfig(cfg);
       return `
       <div
         class="config-item ${this._configState.selected?.name === cfg.name ? 'active' : ''}"
@@ -160,7 +165,7 @@ export const configPageMethods = {
           <div class="config-name">${title}</div>
           <p class="config-desc">${desc}</p>
           </div>
-        ${pinned ? '<span class="config-tag">多文件</span>' : ''}
+        ${multiFile ? '<span class="config-tag">多文件</span>' : ''}
           </div>
     `;
     }).join('');
@@ -201,15 +206,15 @@ export const configPageMethods = {
 
     this.setActiveConfigSidebarItem(name);
 
-    if (config.name === 'system' && !child) {
-      this.renderSystemConfigChooser(config);
+    if (this.isMultiFileConfig(config) && !child) {
+      this.renderMultiFileConfigChooser(config);
       return;
     }
-  
+
     this.loadSelectedConfigDetail();
   },
 
-  renderSystemConfigChooser(config) {
+  renderMultiFileConfigChooser(config) {
     const main = document.getElementById('configMain');
     if (!main) return;
   
@@ -220,7 +225,7 @@ export const configPageMethods = {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 48px; height: 48px; margin: 0 auto 12px; opacity: 0.3;">
             <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
           </svg>
-          <p>SystemConfig 未定义子配置</p>
+          <p>未定义子配置</p>
         </div>
       `;
       return;
@@ -237,41 +242,26 @@ export const configPageMethods = {
         ${entries.map(([key, meta]) => `
           <div
             class="config-subcard"
+            data-parent="${this.escapeHtml(config.name)}"
             data-child="${this.escapeHtml(key)}"
             role="button"
             tabindex="0"
-            aria-label="选择系统子配置 system/${this.escapeHtml(key)}"
+            aria-label="选择子配置 ${this.escapeHtml(config.name)}/${this.escapeHtml(key)}"
           >
             <div>
               <div class="config-subcard-title">${this.escapeHtml(meta.displayName || key)}</div>
               <p class="config-subcard-desc">${this.escapeHtml(meta.description ?? '')}</p>
           </div>
-            <span class="config-tag">${this.escapeHtml(`system/${key}`)}</span>
+            <span class="config-tag">${this.escapeHtml(`${config.name}/${key}`)}</span>
           </div>
         `).join('')}
       </div>
     `;
-    
-    if (!main.dataset._systemChooserBound) {
-      main.dataset._systemChooserBound = '1';
-  
-      main.addEventListener('click', (e) => {
-        const card = e.target.closest('.config-subcard');
-        if (!card || !this._configState) return;
-        const child = card.dataset.child;
-        if (child) this.selectConfig('system', child);
-      });
-  
-      main.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        const card = e.target.closest('.config-subcard');
-        if (!card || !this._configState) return;
-        const child = card.dataset.child;
-        if (!child) return;
-        e.preventDefault();
-        this.selectConfig('system', child);
-      });
-    }
+  },
+
+  /** @deprecated 使用 renderMultiFileConfigChooser */
+  renderSystemConfigChooser(config) {
+    return this.renderMultiFileConfigChooser(config);
   },
 
   async loadSelectedConfigDetail() {
@@ -279,6 +269,10 @@ export const configPageMethods = {
     const main = document.getElementById('configMain');
     const { name } = this._configState.selected;
     const child = this._configState.selectedChild;
+    if (this.isMultiFileConfig(this._configState.selected) && !child) {
+      this.renderMultiFileConfigChooser(this._configState.selected);
+      return;
+    }
     const query = child ? `?path=${encodeURIComponent(child)}` : '';
   
     try {
