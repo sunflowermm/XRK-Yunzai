@@ -96,7 +96,7 @@ export default {
         try {
           res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
           res.set('Pragma', 'no-cache');
-          const { allPlugins, totalPlugins, withRules, withTasks, totalLoadTime } = getPluginListAndStats(Bot);
+          const { list, totalPlugins, withRules, withTasks, totalLoadTime } = getPluginListAndStats(Bot);
           res.json({
             success: true,
             summary: {
@@ -106,7 +106,14 @@ export default {
               taskCount: withTasks,
               totalLoadTime
             },
-            plugins: allPlugins.map(p => ({ key: p.key, name: p.name || p.key, priority: p.priority }))
+            plugins: list.map(({ key, name, priority, dsc, rule, task }) => ({
+              key,
+              name,
+              priority,
+              dsc,
+              rule,
+              task
+            }))
           });
         } catch (error) {
           res.status(500).json({ success: false, message: '获取插件摘要失败', error: error.message });

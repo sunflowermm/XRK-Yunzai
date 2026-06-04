@@ -30,8 +30,14 @@
               "label": "包含历史网络数据",
               "type": "select",
               "options": [
-                { "value": "0", "label": "否" },
-                { "value": "1", "label": "是" }
+                {
+                  "value": "0",
+                  "label": "否"
+                },
+                {
+                  "value": "1",
+                  "label": "是"
+                }
               ],
               "defaultValue": "1"
             }
@@ -69,8 +75,14 @@
               "label": "包含设备",
               "type": "select",
               "options": [
-                { "value": "0", "label": "否" },
-                { "value": "1", "label": "是" }
+                {
+                  "value": "0",
+                  "label": "否"
+                },
+                {
+                  "value": "1",
+                  "label": "是"
+                }
               ],
               "defaultValue": "0"
             }
@@ -121,8 +133,14 @@
               "type": "select",
               "required": true,
               "options": [
-                { "value": "shutdown", "label": "关机" },
-                { "value": "startup", "label": "开机" }
+                {
+                  "value": "shutdown",
+                  "label": "关机"
+                },
+                {
+                  "value": "startup",
+                  "label": "开机"
+                }
               ]
             }
           ]
@@ -146,8 +164,14 @@
               "type": "select",
               "required": true,
               "options": [
-                { "value": "private", "label": "私聊" },
-                { "value": "group", "label": "群聊" }
+                {
+                  "value": "private",
+                  "label": "私聊"
+                },
+                {
+                  "value": "group",
+                  "label": "群聊"
+                }
               ]
             },
             {
@@ -197,8 +221,14 @@
               "label": "返回JSON结果",
               "type": "select",
               "options": [
-                { "value": "true", "label": "是（按插件输出结构化返回）" },
-                { "value": "false", "label": "否（仅返回基础执行结果）" }
+                {
+                  "value": "true",
+                  "label": "是（按插件输出结构化返回）"
+                },
+                {
+                  "value": "false",
+                  "label": "否（仅返回基础执行结果）"
+                }
               ],
               "defaultValue": "true"
             }
@@ -281,8 +311,14 @@
               "label": "返回格式",
               "type": "select",
               "options": [
-                { "value": "", "label": "详细格式（默认）" },
-                { "value": "openai", "label": "OpenAI 兼容格式" }
+                {
+                  "value": "",
+                  "label": "详细格式（默认）"
+                },
+                {
+                  "value": "openai",
+                  "label": "OpenAI 兼容格式"
+                }
               ]
             }
           ]
@@ -292,22 +328,15 @@
           "method": "GET",
           "path": "/api/v3/models",
           "title": "OpenAI 模型列表",
-          "description": "OpenAI 兼容的模型列表接口（与 /api/v3/chat/completions 搭配使用）"
+          "description": "OpenAI 兼容的模型列表接口（与 /v3/chat/completions 搭配使用）"
         },
         {
           "id": "v3-chat-completions",
           "method": "POST",
           "path": "/api/v3/chat/completions",
           "title": "OpenAI 兼容接口",
-          "description": "OpenAI Chat Completions 兼容接口",
+          "description": "OpenAI Chat Completions（鉴权用 X-API-Key 请求头；model 为 LLM 提供商名）",
           "bodyParams": [
-            {
-              "name": "apiKey",
-              "label": "访问密钥",
-              "type": "password",
-              "required": true,
-              "placeholder": "访问密钥"
-            },
             {
               "name": "messages",
               "label": "消息列表",
@@ -326,8 +355,14 @@
               "label": "流式输出",
               "type": "select",
               "options": [
-                { "value": "false", "label": "否" },
-                { "value": "true", "label": "是" }
+                {
+                  "value": "false",
+                  "label": "否"
+                },
+                {
+                  "value": "true",
+                  "label": "是"
+                }
               ],
               "defaultValue": "false"
             }
@@ -355,7 +390,7 @@
           "pathParams": {
             "name": {
               "label": "配置名称",
-              "placeholder": "bot"
+              "placeholder": "system"
             }
           }
         },
@@ -364,11 +399,32 @@
           "method": "GET",
           "path": "/api/config/:name/flat-structure",
           "title": "扁平化结构",
-          "description": "获取配置文件的扁平化 Schema 结构",
+          "description": "获取配置文件的扁平化 Schema 结构（Schema）",
           "pathParams": {
             "name": {
               "label": "配置名称",
-              "placeholder": "bot"
+              "placeholder": "system"
+            }
+          },
+          "queryParams": [
+            {
+              "name": "path",
+              "label": "配置路径",
+              "type": "text",
+              "placeholder": "log_level"
+            }
+          ]
+        },
+        {
+          "id": "config-flat",
+          "method": "GET",
+          "path": "/api/config/:name/flat",
+          "title": "扁平化数据",
+          "description": "获取配置文件当前值的扁平化数据",
+          "pathParams": {
+            "name": {
+              "label": "配置名称",
+              "placeholder": "system"
             }
           },
           "queryParams": [
@@ -385,11 +441,11 @@
           "method": "GET",
           "path": "/api/config/:name/read",
           "title": "读取配置",
-          "description": "读取指定配置文件的内容",
+          "description": "读取指定配置文件（或子配置）的内容",
           "pathParams": {
             "name": {
               "label": "配置名称",
-              "placeholder": "bot"
+              "placeholder": "system"
             }
           },
           "queryParams": [
@@ -406,11 +462,11 @@
           "method": "POST",
           "path": "/api/config/:name/write",
           "title": "写入配置",
-          "description": "写入配置到指定文件",
+          "description": "写入配置到指定文件或子配置",
           "pathParams": {
             "name": {
               "label": "配置名称",
-              "placeholder": "bot"
+              "placeholder": "system"
             }
           },
           "bodyParams": [
@@ -432,8 +488,14 @@
               "label": "是否备份",
               "type": "select",
               "options": [
-                { "value": "true", "label": "是" },
-                { "value": "false", "label": "否" }
+                {
+                  "value": "true",
+                  "label": "是"
+                },
+                {
+                  "value": "false",
+                  "label": "否"
+                }
               ],
               "defaultValue": "true"
             }
@@ -444,11 +506,11 @@
           "method": "POST",
           "path": "/api/config/:name/batch-set",
           "title": "批量设置",
-          "description": "批量设置配置项（扁平化格式）",
+          "description": "批量设置配置项（扁平化 path => value）",
           "pathParams": {
             "name": {
               "label": "配置名称",
-              "placeholder": "bot"
+              "placeholder": "system"
             }
           },
           "bodyParams": [
@@ -458,6 +520,197 @@
               "type": "json",
               "required": true,
               "placeholder": "{\"log_level\": \"info\"}"
+            },
+            {
+              "name": "path",
+              "label": "（可选）子配置名称",
+              "type": "text",
+              "placeholder": "log"
+            },
+            {
+              "name": "backup",
+              "label": "是否备份",
+              "type": "select",
+              "options": [
+                {
+                  "value": "true",
+                  "label": "是"
+                },
+                {
+                  "value": "false",
+                  "label": "否"
+                }
+              ],
+              "defaultValue": "true"
+            }
+          ]
+        },
+        {
+          "id": "config-validate",
+          "method": "POST",
+          "path": "/api/config/:name/validate",
+          "title": "校验配置",
+          "description": "根据 Schema 校验配置数据是否有效（不落盘）",
+          "pathParams": {
+            "name": {
+              "label": "配置名称",
+              "placeholder": "system"
+            }
+          },
+          "bodyParams": [
+            {
+              "name": "data",
+              "label": "待校验数据",
+              "type": "json",
+              "required": true,
+              "placeholder": "{\"log_level\": \"debug\"}"
+            }
+          ]
+        },
+        {
+          "id": "config-backup",
+          "method": "POST",
+          "path": "/api/config/:name/backup",
+          "title": "备份配置文件",
+          "description": "为指定配置生成一份备份文件",
+          "pathParams": {
+            "name": {
+              "label": "配置名称",
+              "placeholder": "system"
+            }
+          }
+        },
+        {
+          "id": "config-reset",
+          "method": "POST",
+          "path": "/api/config/:name/reset",
+          "title": "重置为默认值",
+          "description": "将配置重置为默认值（可选是否备份）",
+          "pathParams": {
+            "name": {
+              "label": "配置名称",
+              "placeholder": "system"
+            }
+          },
+          "bodyParams": [
+            {
+              "name": "backup",
+              "label": "是否备份当前值",
+              "type": "select",
+              "options": [
+                {
+                  "value": "true",
+                  "label": "是"
+                },
+                {
+                  "value": "false",
+                  "label": "否"
+                }
+              ],
+              "defaultValue": "true"
+            }
+          ]
+        },
+        {
+          "id": "config-clear-cache",
+          "method": "POST",
+          "path": "/api/config/clear-cache",
+          "title": "清除配置缓存",
+          "description": "清除所有配置文件在内存中的缓存"
+        },
+        {
+          "id": "config-merge",
+          "method": "POST",
+          "path": "/api/config/:name/merge",
+          "title": "合并配置",
+          "description": "深度或浅层合并配置片段（Yunzai）",
+          "pathParams": {
+            "name": {
+              "label": "配置名",
+              "placeholder": "server"
+            }
+          },
+          "bodyParams": [
+            {
+              "name": "data",
+              "label": "合并数据",
+              "type": "json",
+              "required": true
+            }
+          ]
+        },
+        {
+          "id": "config-delete-key",
+          "method": "DELETE",
+          "path": "/api/config/:name/delete",
+          "title": "删除配置项",
+          "description": "按 path 删除单个配置键（Yunzai）",
+          "pathParams": {
+            "name": {
+              "label": "配置名",
+              "placeholder": "server"
+            }
+          },
+          "bodyParams": [
+            {
+              "name": "path",
+              "label": "键路径",
+              "type": "text",
+              "required": true
+            }
+          ]
+        },
+        {
+          "id": "config-array-append",
+          "method": "POST",
+          "path": "/api/config/:name/array/append",
+          "title": "数组追加",
+          "description": "向配置数组追加元素（Yunzai）",
+          "pathParams": {
+            "name": {
+              "label": "配置名",
+              "placeholder": "server"
+            }
+          },
+          "bodyParams": [
+            {
+              "name": "path",
+              "label": "数组路径",
+              "type": "text",
+              "required": true
+            },
+            {
+              "name": "value",
+              "label": "值",
+              "type": "json",
+              "required": true
+            }
+          ]
+        },
+        {
+          "id": "config-array-remove",
+          "method": "POST",
+          "path": "/api/config/:name/array/remove",
+          "title": "数组移除",
+          "description": "从配置数组移除元素（Yunzai）",
+          "pathParams": {
+            "name": {
+              "label": "配置名",
+              "placeholder": "server"
+            }
+          },
+          "bodyParams": [
+            {
+              "name": "path",
+              "label": "数组路径",
+              "type": "text",
+              "required": true
+            },
+            {
+              "name": "index",
+              "label": "索引",
+              "type": "number",
+              "required": true
             }
           ]
         }
@@ -550,6 +803,29 @@
               "defaultValue": "device"
             }
           ]
+        },
+        {
+          "id": "device-tts",
+          "method": "POST",
+          "path": "/api/device/tts",
+          "title": "设备TTS播报",
+          "description": "调用设备 TTS 为指定设备播放一段文字",
+          "bodyParams": [
+            {
+              "name": "device_id",
+              "label": "设备ID",
+              "type": "text",
+              "required": true,
+              "placeholder": "DEVICE_001"
+            },
+            {
+              "name": "text",
+              "label": "播报文本",
+              "type": "textarea",
+              "required": true,
+              "placeholder": "你好，这是一条测试播报"
+            }
+          ]
         }
       ]
     },
@@ -582,8 +858,14 @@
               "label": "下载模式",
               "type": "select",
               "options": [
-                { "value": "false", "label": "预览" },
-                { "value": "true", "label": "下载" }
+                {
+                  "value": "false",
+                  "label": "预览"
+                },
+                {
+                  "value": "true",
+                  "label": "下载"
+                }
               ],
               "defaultValue": "false"
             }
@@ -608,6 +890,52 @@
           "path": "/api/files",
           "title": "文件列表",
           "description": "获取所有已上传的文件列表"
+        },
+        {
+          "id": "file-download",
+          "method": "GET",
+          "path": "/api/file/download/:id",
+          "title": "下载文件",
+          "description": "强制下载已上传文件（Yunzai）",
+          "pathParams": {
+            "id": {
+              "label": "文件ID",
+              "placeholder": "file_id"
+            }
+          }
+        },
+        {
+          "id": "file-preview",
+          "method": "GET",
+          "path": "/api/file/preview/:id",
+          "title": "预览文件",
+          "description": "浏览器内预览图片/媒体（Yunzai）",
+          "pathParams": {
+            "id": {
+              "label": "文件ID",
+              "placeholder": "file_id"
+            }
+          }
+        },
+        {
+          "id": "file-upload-base64",
+          "method": "POST",
+          "path": "/api/file/upload-base64",
+          "title": "Base64 上传",
+          "description": "通过 JSON 上传 Base64 文件（Yunzai）",
+          "bodyParams": [
+            {
+              "name": "data",
+              "label": "Base64 数据",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "name": "filename",
+              "label": "文件名",
+              "type": "text"
+            }
+          ]
         }
       ]
     },
@@ -663,6 +991,26 @@
       "title": "MCP 服务",
       "apis": [
         {
+          "id": "mcp-jsonrpc-post",
+          "method": "POST",
+          "path": "/api/mcp/jsonrpc",
+          "title": "JSON-RPC 调用 (POST)",
+          "description": "通过 HTTP POST 调用 MCP JSON-RPC 接口"
+        },
+        {
+          "id": "mcp-jsonrpc-stream",
+          "method": "POST",
+          "path": "/api/mcp/jsonrpc/:stream",
+          "title": "JSON-RPC 指定流调用",
+          "description": "对指定工作流进行 JSON-RPC 调用",
+          "pathParams": {
+            "stream": {
+              "label": "工作流名称",
+              "placeholder": "chat"
+            }
+          }
+        },
+        {
           "id": "mcp-tools",
           "method": "GET",
           "path": "/api/mcp/tools",
@@ -683,6 +1031,19 @@
           "path": "/api/mcp/tools/streams",
           "title": "工具分组",
           "description": "按工作流分组获取工具列表"
+        },
+        {
+          "id": "mcp-tools-stream-detail",
+          "method": "GET",
+          "path": "/api/mcp/tools/stream/:streamName",
+          "title": "指定工作流工具",
+          "description": "查看某个工作流下可用的工具列表",
+          "pathParams": {
+            "streamName": {
+              "label": "工作流名称",
+              "placeholder": "chat"
+            }
+          }
         },
         {
           "id": "mcp-tools-call",
@@ -707,11 +1068,121 @@
           ]
         },
         {
+          "id": "mcp-tool-detail",
+          "method": "GET",
+          "path": "/api/mcp/tools/:name",
+          "title": "单个工具详情",
+          "description": "查看指定 MCP 工具的描述与入参 Schema",
+          "pathParams": {
+            "name": {
+              "label": "工具名称",
+              "placeholder": "chat.screenshot"
+            }
+          }
+        },
+        {
           "id": "mcp-health",
           "method": "GET",
           "path": "/api/mcp/health",
           "title": "MCP 健康检查",
           "description": "检查 MCP 服务状态"
+        }
+      ]
+    },
+    {
+      "id": "data",
+      "title": "数据文件编辑",
+      "apis": [
+        {
+          "id": "data-read",
+          "method": "GET",
+          "path": "/api/data/read",
+          "title": "读取数据文件",
+          "description": "读取 JSON / YAML / 文本文件内容（带基础元信息）",
+          "queryParams": [
+            {
+              "name": "filePath",
+              "label": "文件路径",
+              "type": "text",
+              "required": true,
+              "placeholder": "plugins/system-plugin/www/xrk/api-config.json"
+            },
+            {
+              "name": "encoding",
+              "label": "编码",
+              "type": "text",
+              "placeholder": "utf8"
+            }
+          ]
+        },
+        {
+          "id": "data-write",
+          "method": "POST",
+          "path": "/api/data/write",
+          "title": "写入数据文件",
+          "description": "写入或合并 JSON / YAML 数据文件（支持 overwrite/merge/append/update）",
+          "bodyParams": [
+            {
+              "name": "filePath",
+              "label": "文件路径",
+              "type": "text",
+              "required": true,
+              "placeholder": "plugins/system-plugin/www/xrk/api-config.json"
+            },
+            {
+              "name": "data",
+              "label": "写入数据",
+              "type": "json",
+              "required": true,
+              "placeholder": "{\"key\": \"value\"}"
+            },
+            {
+              "name": "operation",
+              "label": "写入操作",
+              "type": "select",
+              "options": [
+                {
+                  "value": "overwrite",
+                  "label": "覆盖"
+                },
+                {
+                  "value": "merge",
+                  "label": "深度合并"
+                },
+                {
+                  "value": "append",
+                  "label": "追加数组"
+                },
+                {
+                  "value": "update",
+                  "label": "按 path 更新"
+                }
+              ],
+              "defaultValue": "overwrite"
+            },
+            {
+              "name": "path",
+              "label": "（仅 update 时）目标路径",
+              "type": "text",
+              "placeholder": "apiGroups.0.title"
+            },
+            {
+              "name": "backup",
+              "label": "写入前备份原文件",
+              "type": "select",
+              "options": [
+                {
+                  "value": "true",
+                  "label": "是"
+                },
+                {
+                  "value": "false",
+                  "label": "否"
+                }
+              ],
+              "defaultValue": "true"
+            }
+          ]
         }
       ]
     }
@@ -724,7 +1195,6 @@
     },
     "system-config": {},
     "health-check": {},
-
     "bot-friends": {
       "path_uin": "123456789"
     },
@@ -740,7 +1210,6 @@
       "target_id": "123456789",
       "message": "你好，这是一条测试消息！"
     },
-
     "stdin-command": {
       "command": "#更新",
       "json": true,
@@ -753,7 +1222,10 @@
       "event_type": "message",
       "content": {
         "message": [
-          { "type": "text", "text": "你好" }
+          {
+            "type": "text",
+            "text": "你好"
+          }
         ]
       },
       "user_info": {
@@ -762,7 +1234,6 @@
       }
     },
     "stdin-status": {},
-
     "ai-stream": {
       "prompt": "你好",
       "workflow": "chat",
@@ -773,19 +1244,24 @@
     },
     "v3-models": {},
     "v3-chat-completions": {
-      "apiKey": "demo-key",
       "messages": [
-        { "role": "user", "content": "你好" }
+        {
+          "role": "user",
+          "content": "你好"
+        }
       ],
       "model": "volcengine",
-      "stream": "false"
+      "stream": false
     },
-
     "config-list": {},
     "config-structure": {
       "path_name": "system"
     },
     "config-flat-structure": {
+      "path_name": "system",
+      "path": "log_level"
+    },
+    "config-flat": {
       "path_name": "system",
       "path": "log_level"
     },
@@ -807,7 +1283,20 @@
         "log_level": "info"
       }
     },
-
+    "config-validate": {
+      "path_name": "system",
+      "data": {
+        "log_level": "debug"
+      }
+    },
+    "config-backup": {
+      "path_name": "system"
+    },
+    "config-reset": {
+      "path_name": "system",
+      "backup": "true"
+    },
+    "config-clear-cache": {},
     "device-register": {
       "device_id": "SENSOR_001",
       "device_type": "sensor",
@@ -821,7 +1310,10 @@
       "path_deviceId": "webclient",
       "text": "你好"
     },
-
+    "device-tts": {
+      "device_id": "SENSOR_001",
+      "text": "你好，这是一条测试播报"
+    },
     "file-upload": {},
     "file-get": {
       "path_id": "example-file-id",
@@ -831,7 +1323,6 @@
       "path_id": "example-file-id"
     },
     "file-list": {},
-
     "plugin-list": {},
     "plugin-summary": {},
     "plugin-reload": {
@@ -839,39 +1330,67 @@
     },
     "plugin-tasks": {},
     "plugin-stats": {},
-
+    "mcp-jsonrpc-post": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "rpc.discover"
+    },
+    "mcp-jsonrpc-stream": {
+      "path_stream": "chat",
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "rpc.discover"
+    },
     "mcp-tools": {
       "stream": "chat"
     },
     "mcp-tools-streams": {},
+    "mcp-tools-stream-detail": {
+      "path_streamName": "chat"
+    },
     "mcp-tools-call": {
       "name": "chat.screenshot",
       "arguments": {
         "prompt": "当前屏幕截图"
       }
     },
-    "mcp-health": {}
+    "mcp-tool-detail": {
+      "path_name": "chat.screenshot"
+    },
+    "mcp-health": {},
+    "data-read": {
+      "filePath": "plugins/system-plugin/www/xrk/api-config.json"
+    },
+    "data-write": {
+      "filePath": "plugins/system-plugin/www/xrk/api-config.json",
+      "data": {
+        "demo": true
+      },
+      "operation": "merge",
+      "backup": "true"
+    }
   },
   "quickActions": [
     {
-      "icon": "💬",
+      "icon": "AI",
       "text": "AI 聊天",
       "action": "ai-chat"
     },
     {
-      "icon": "⚙️",
+      "icon": "CFG",
       "text": "配置管理",
       "apiId": "config-list"
     },
     {
-      "icon": "📡",
+      "icon": "DEV",
       "text": "设备管理",
       "apiId": "device-list"
     },
     {
-      "icon": "🧩",
+      "icon": "PLG",
       "text": "插件管理",
       "apiId": "plugin-list"
     }
-  ]
+  ],
+  "_platform": "yunzai"
 }

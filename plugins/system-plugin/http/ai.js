@@ -137,7 +137,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
     }
   }
 
-  const streamFlag = Boolean(pickFirst(body, ['stream']));
+  const streamFlag = toBool(pickFirst(body, ['stream'])) ?? false;
   const provider = LLMFactory.resolveProvider({
     model: pickFirst(body, ['model']),
     provider: pickFirst(body, ['provider']),
@@ -411,6 +411,7 @@ async function handleModels(req, res, Bot) {
     success: true,
     data: {
       enabled: aistreamConfig.enabled !== false,
+      defaultProfile: defaultProvider || '',
       persona: aistreamConfig.persona || '',
       profiles,
       workflows
