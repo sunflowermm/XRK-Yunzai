@@ -1107,7 +1107,7 @@ export default class SystemConfig extends ConfigBase {
                 addLimit: {
                   type: 'number',
                   label: '添加限制',
-                  description: '添加限制：0-无限制 1-仅主人 2-管理员及以上',
+                  description: '添加权限：0-所有人 1-管理员 2-仅主人',
                   enum: [0, 1, 2],
                   default: 0,
                   component: 'Select'
