@@ -8,9 +8,9 @@
 # ----------------------------------------
 default:
   # groupGlobalCD: 群内全局指令冷却（毫秒），0 为无限制
-  groupGlobalCD: 500
+  groupGlobalCD: 50
   # singleCD: 群内单人指令冷却（毫秒）
-  singleCD: 500
+  singleCD: 50
   # onlyReplyAt: 0-否 1-是 2-非主人仅回复@及特定前缀，主人免前缀
   onlyReplyAt: 0
   # botAlias: 机器人别名，用于匹配@或前缀
