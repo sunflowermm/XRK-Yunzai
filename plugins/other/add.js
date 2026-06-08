@@ -777,7 +777,7 @@ export class add extends plugin {
     this.setContext("addContext")
     const groupType = this.isGlobal ? '全局' : '群组'
     const matchType = this.isFuzzy ? '模糊' : '精确'
-    return this.reply(`请发送添加内容，完成后发送#结束添加\n当前添加：${groupType}${matchType}词条【${this.keyWord}】`, true, { at: true })
+    return this.reply(`请发送添加内容（支持文字、图片、聊天记录），完成后发送#结束添加\n当前添加：${groupType}${matchType}词条【${this.keyWord}】`, true, { at: true })
   }
 
   /** 获取群号 */
@@ -888,18 +888,19 @@ export class add extends plugin {
       return true
     }
 
-    const currentMessage = []
-    for (const i of this.e.message) {
-      if (i.url) {
-        i.file = await this.saveFile(i)
-        delete i.url
-        delete i.fid
-      }
-      if (i.type == "at" && i.qq == this.e.self_id) continue
-      currentMessage.push(i)
+    let currentMessage
+    try {
+      currentMessage = await this.normalizeSegmentsForStorage(this.e.message || [])
+    } catch (err) {
+      logger.error(`添加词条内容失败: ${err}`)
+      return this.reply(`添加失败：${err.message || '无法解析该消息（聊天记录可能已过期）'}`)
     }
-    
-    currentMessage.length && contextData.messages.push(currentMessage)
+
+    if (!currentMessage.length) {
+      return this.reply('未能解析消息内容，请重新发送（聊天记录请直接转发给 Bot）')
+    }
+
+    contextData.messages.push(currentMessage)
     
     this.e._addContext = contextData
     this.setContext("addContext")
@@ -936,6 +937,134 @@ export class add extends plugin {
       logger.error(`保存文件失败: ${err}`)
     }
     return data.url
+  }
+
+  /** 获取转发消息节点 */
+  async fetchForwardNodes(forwardId) {
+    const getter = this.e.group?.getForwardMsg || this.e.friend?.getForwardMsg || this.e.getForwardMsg
+    if (!getter) throw new Error('当前环境不支持获取聊天记录')
+    const nodes = await getter(String(forwardId))
+    return this.normalizeForwardNodes(nodes)
+  }
+
+  /** 规范化转发节点为可存储格式 */
+  async normalizeForwardNodes(nodes) {
+    if (!Array.isArray(nodes)) return []
+    const result = []
+    for (const node of nodes) {
+      const message = await this.normalizeSegmentsForStorage(node.message || node.content || [])
+      result.push({
+        message,
+        nickname: node.nickname || node.sender?.nickname || node.name || '匿名',
+        user_id: node.user_id || node.sender?.user_id || node.uin || 80000000,
+        time: node.time || Math.floor(Date.now() / 1000)
+      })
+    }
+    return result
+  }
+
+  /** 添加时将消息段规范化（展开聊天记录、本地化媒体） */
+  async normalizeSegmentsForStorage(segments) {
+    const result = []
+    for (const seg of segments) {
+      if (!seg || typeof seg !== 'object') continue
+      if (seg.type === 'at' && seg.qq == this.e.self_id) continue
+
+      if (seg.type === 'forward') {
+        const forwardId = this.e.message_id || seg.message_id || seg.id || seg.data?.id
+        if (!forwardId) continue
+        const nodes = await this.fetchForwardNodes(forwardId)
+        if (!nodes.length) throw new Error('聊天记录为空或已过期')
+        result.push({ type: 'node', data: nodes })
+        continue
+      }
+
+      if (seg.type === 'node') {
+        const rawNodes = Array.isArray(seg.data) ? seg.data : [seg.data].filter(Boolean)
+        const nodes = []
+        for (const node of rawNodes) {
+          nodes.push({
+            message: await this.normalizeSegmentsForStorage(node.message || node.content || []),
+            nickname: node.nickname || node.name || '匿名',
+            user_id: node.user_id || node.uin || 80000000,
+            time: node.time
+          })
+        }
+        if (nodes.length) result.push({ type: 'node', data: nodes })
+        continue
+      }
+
+      const item = { ...seg }
+      if (item.url && !item.file) {
+        item.file = await this.saveFile(item)
+        delete item.url
+        delete item.fid
+      }
+      result.push(item)
+    }
+    return result
+  }
+
+  /** 解析词条存储的媒体本地路径 */
+  async resolveEntryMediaPath(item) {
+    if (!item?.file) return item?.url || null
+    const localPath = `${this.path}${item.file}`
+    if (await Bot.fsStat(localPath)) return localPath
+    if (await Bot.fsStat(item.file)) return item.file
+    return item?.url || null
+  }
+
+  /** 发送前规范化消息段（解析本地媒体、保留 node 结构） */
+  async prepareMessageForSend(segments) {
+    if (!Array.isArray(segments)) return []
+    const result = []
+    for (const seg of segments) {
+      if (!seg || typeof seg !== 'object') continue
+
+      if (seg.type === 'node' && Array.isArray(seg.data)) {
+        const data = []
+        for (const node of seg.data) {
+          data.push({
+            ...node,
+            message: await this.prepareMessageForSend(node.message || [])
+          })
+        }
+        result.push({ type: 'node', data })
+        continue
+      }
+
+      if (seg.type === 'forward') {
+        logger.warn('[词条] 检测到未展开的 forward 引用，尝试临时获取')
+        try {
+          const forwardId = seg.id || seg.message_id || seg.data?.id
+          if (forwardId) {
+            const nodes = await this.fetchForwardNodes(forwardId)
+            const data = []
+            for (const node of nodes) {
+              data.push({
+                ...node,
+                message: await this.prepareMessageForSend(node.message || [])
+              })
+            }
+            if (data.length) {
+              result.push({ type: 'node', data })
+              continue
+            }
+          }
+        } catch (err) {
+          logger.error(`[词条] 转发消息重发失败: ${err}`)
+        }
+        continue
+      }
+
+      const item = { ...seg }
+      if (item.file) {
+        const localPath = await this.resolveEntryMediaPath(item)
+        if (localPath) item.file = localPath
+      }
+      result.push(item)
+    }
+    return result
   }
 
   /** 获取关键词消息 */
@@ -993,11 +1122,10 @@ export class add extends plugin {
     const msg = messages[lodash.random(0, messages.length - 1)]
     if (lodash.isEmpty(msg)) return false
 
-    const msgToSend = [...msg]
-    for (const i in msgToSend) {
-      if (msgToSend[i].file && await Bot.fsStat(`${this.path}${msgToSend[i].file}`)) {
-        msgToSend[i] = { ...msgToSend[i], file: `${this.path}${msgToSend[i].file}` }
-      }
+    const msgToSend = await this.prepareMessageForSend([...msg])
+    if (!msgToSend.length) {
+      logger.error(`[发送消息] 词条【${this.keyWord}】内容无法发送`)
+      return this.reply('该词条内容无法发送（聊天记录引用可能已失效），请删除后重新添加')
     }
 
     logger.mark(`[发送消息]${this.e.logText}[${this.keyWord}]`)
@@ -1045,15 +1173,19 @@ export class add extends plugin {
     if (!Array.isArray(messages)) return
     
     const files = []
-    const collectFiles = msgs => {
-      for (const msg of msgs) {
-        if (Array.isArray(msg)) {
-          for (const item of msg) item.file && files.push(item.file)
+    const collectFiles = segments => {
+      if (!Array.isArray(segments)) return
+      for (const item of segments) {
+        if (item?.file) files.push(item.file)
+        if (item?.type === 'node' && Array.isArray(item.data)) {
+          for (const node of item.data) collectFiles(node.message)
         }
       }
     }
     
-    Array.isArray(messages[0]) ? collectFiles(messages) : collectFiles([messages])
+    for (const msg of Array.isArray(messages[0]) ? messages : [messages]) {
+      collectFiles(Array.isArray(msg) ? msg : [msg])
+    }
     
     return Promise.allSettled(files.map(file => fs.rm(`${this.path}${file}`).catch(() => {})))
   }
@@ -1139,6 +1271,60 @@ export class add extends plugin {
     return this.reply(`❌ 删除错误：没有找到该${groupType}${matchType}词条`)
   }
 
+  /** 将词条回复内容转为转发消息（图片/视频/语音显示真实媒体） */
+  async buildEntryPreview(content, prefix = '') {
+    const parts = []
+    if (prefix) parts.push(prefix)
+
+    for (const item of content) {
+      if (!item || typeof item !== 'object') continue
+      switch (item.type) {
+        case 'text': {
+          const text = item.text || ''
+          const preview = text.length > 30 ? `${text.substring(0, 30)}...` : text
+          if (preview) parts.push(preview)
+          break
+        }
+        case 'image':
+        case 'video':
+        case 'record': {
+          const filePath = await this.resolveEntryMediaPath(item)
+          if (filePath) {
+            if (item.type === 'image') parts.push(segment.image(filePath))
+            else if (item.type === 'video') parts.push(segment.video(filePath))
+            else parts.push(segment.record(filePath))
+          } else {
+            const labels = { image: '[图片]', video: '[视频]', record: '[语音]' }
+            parts.push(labels[item.type] || `[${item.type}]`)
+          }
+          break
+        }
+        case 'face':
+          parts.push(`[表情:${item.id ?? item.data?.id ?? ''}]`)
+          break
+        case 'node': {
+          const nodes = Array.isArray(item.data) ? item.data : []
+          if (!nodes.length) break
+          const summary = nodes.slice(0, 2).map(n => {
+            const text = (n.message || []).filter(s => s.type === 'text').map(s => s.text || '').join('').slice(0, 15)
+            return `${n.nickname || '匿名'}:${text || '...'}`
+          }).join(' | ')
+          parts.push(`[聊天记录${nodes.length}条${summary ? ` ${summary}` : ''}]`)
+          break
+        }
+        case 'forward':
+          parts.push('[聊天记录(未展开)]')
+          break
+        default:
+          parts.push(`[${item.type}]`)
+      }
+    }
+
+    if (!parts.length) return null
+    if (parts.length === 1 && typeof parts[0] === 'string') return parts[0]
+    return parts
+  }
+
   /** 消息列表 */
   async list() {
     this.isGlobal = this.e.msg.includes("全局")
@@ -1194,18 +1380,9 @@ export class add extends plugin {
       for (let i = 0; i < entry.val.length && i < 3; i++) {
         const content = entry.val[i]
         if (Array.isArray(content)) {
-          const preview = []
-          for (const item of content) {
-            if (item.type === 'text') preview.push(item.text.substring(0, 30) + (item.text.length > 30 ? '...' : ''))
-            else if (item.type === 'image') preview.push('[图片]')
-            else if (item.type === 'face') preview.push(`[表情:${item.id}]`)
-            else preview.push(`[${item.type}]`)
-          }
-          
-          if (preview.length) {
-            const prefix = entry.val.length > 1 ? `   └─ 回复${i + 1}: ` : `   └─ `
-            msg.push(`${prefix}${preview.join('')}`)
-          }
+          const prefix = entry.val.length > 1 ? `   └─ 回复${i + 1}: ` : `   └─ `
+          const previewMsg = await this.buildEntryPreview(content, prefix)
+          if (previewMsg) msg.push(previewMsg)
         }
       }
       
