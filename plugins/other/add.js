@@ -7,6 +7,56 @@ import crypto from "crypto"
 export const messageMap = {}
 export const bannedWordsMap = {}
 
+/** 添加词条上下文超时（秒），展开嵌套聊天记录可能较慢 */
+const ADD_CONTEXT_TIMEOUT = 300
+
+/** 收集 forward 段所有可用的 message_id（兼容 OneBot / NapCat 等字段） */
+function collectForwardIds(seg, contextMessageId) {
+  const ids = []
+  if (contextMessageId != null && contextMessageId !== '') ids.push(String(contextMessageId))
+  if (seg == null) return [...new Set(ids)]
+  if (typeof seg !== 'object') {
+    ids.push(String(seg))
+    return [...new Set(ids)]
+  }
+  for (const k of ['message_id', 'id']) {
+    if (seg[k] != null && seg[k] !== '') ids.push(String(seg[k]))
+  }
+  if (seg.data && typeof seg.data === 'object') {
+    for (const k of ['message_id', 'id']) {
+      if (seg.data[k] != null && seg.data[k] !== '') ids.push(String(seg.data[k]))
+    }
+  }
+  return [...new Set(ids)]
+}
+
+/** 规范化转发节点元信息 */
+function normalizeNodeMeta(node) {
+  return {
+    nickname: node?.nickname || node?.sender?.nickname || node?.name || '匿名',
+    user_id: node?.user_id || node?.sender?.user_id || node?.uin || 80000000,
+    time: node?.time || Math.floor(Date.now() / 1000)
+  }
+}
+
+function getNodeMessages(node) {
+  if (Array.isArray(node?.message)) return node.message
+  if (Array.isArray(node?.content)) return node.content
+  return []
+}
+
+/** 递归收集消息段中的本地媒体文件路径 */
+function collectSegmentFiles(segments, files) {
+  if (!Array.isArray(segments)) return
+  for (const item of segments) {
+    if (!item || typeof item !== 'object') continue
+    if (item.file) files.push(item.file)
+    if (item.type === 'node' && Array.isArray(item.data)) {
+      for (const node of item.data) collectSegmentFiles(getNodeMessages(node), files)
+    }
+  }
+}
+
 export class add extends plugin {
   constructor() {
     super({
@@ -774,7 +824,7 @@ export class add extends plugin {
       messages: []
     }
     
-    this.setContext("addContext")
+    this.setContext("addContext", false, ADD_CONTEXT_TIMEOUT)
     const groupType = this.isGlobal ? '全局' : '群组'
     const matchType = this.isFuzzy ? '模糊' : '精确'
     return this.reply(`请发送添加内容（支持文字、图片、聊天记录），完成后发送#结束添加\n当前添加：${groupType}${matchType}词条【${this.keyWord}】`, true, { at: true })
@@ -890,7 +940,7 @@ export class add extends plugin {
 
     let currentMessage
     try {
-      currentMessage = await this.normalizeSegmentsForStorage(this.e.message || [])
+      currentMessage = await this.transformSegments(this.e.message || [], 'store', { root: true })
     } catch (err) {
       logger.error(`添加词条内容失败: ${err}`)
       return this.reply(`添加失败：${err.message || '无法解析该消息（聊天记录可能已过期）'}`)
@@ -903,7 +953,7 @@ export class add extends plugin {
     contextData.messages.push(currentMessage)
     
     this.e._addContext = contextData
-    this.setContext("addContext")
+    this.setContext("addContext", false, ADD_CONTEXT_TIMEOUT)
     
     const groupType = contextData.isGlobal ? '全局' : '群组'
     const matchType = contextData.isFuzzy ? '模糊' : '精确'
@@ -939,70 +989,95 @@ export class add extends plugin {
     return data.url
   }
 
-  /** 获取转发消息节点 */
-  async fetchForwardNodes(forwardId) {
-    const getter = this.e.group?.getForwardMsg || this.e.friend?.getForwardMsg || this.e.getForwardMsg
+  /** 获取 getForwardMsg（兼容群/私聊/事件直挂） */
+  getForwardGetter() {
+    return this.e.group?.getForwardMsg || this.e.friend?.getForwardMsg || this.e.getForwardMsg
+  }
+
+  /** 拉取并规范化转发节点（底层 adapter 负责嵌套展开，此处做媒体本地化） */
+  async fetchForwardNodes(seg, root = false) {
+    const getter = this.getForwardGetter()
     if (!getter) throw new Error('当前环境不支持获取聊天记录')
-    const nodes = await getter(String(forwardId))
-    return this.normalizeForwardNodes(nodes)
-  }
 
-  /** 规范化转发节点为可存储格式 */
-  async normalizeForwardNodes(nodes) {
-    if (!Array.isArray(nodes)) return []
-    const result = []
-    for (const node of nodes) {
-      const message = await this.normalizeSegmentsForStorage(node.message || node.content || [])
-      result.push({
-        message,
-        nickname: node.nickname || node.sender?.nickname || node.name || '匿名',
-        user_id: node.user_id || node.sender?.user_id || node.uin || 80000000,
-        time: node.time || Math.floor(Date.now() / 1000)
-      })
+    const ids = collectForwardIds(seg, root ? this.e.message_id : null)
+    if (!ids.length) throw new Error('聊天记录 ID 无效')
+
+    let nodes
+    let lastErr
+    // 优先走 adapter 多 ID 回退（OneBotv11 第四参）；旧 adapter 则逐个尝试
+    try {
+      nodes = await getter(ids[0], 0, ids.slice(1))
+    } catch (err) {
+      lastErr = err
+      nodes = undefined
     }
-    return result
+    if (!Array.isArray(nodes) || !nodes.length) {
+      for (const id of ids) {
+        try {
+          nodes = await getter(id)
+          if (Array.isArray(nodes) && nodes.length) break
+        } catch (err) {
+          lastErr = err
+        }
+      }
+    }
+    if (!Array.isArray(nodes) || !nodes.length) {
+      throw lastErr || new Error('聊天记录为空或已过期')
+    }
+
+    return Promise.all(nodes.map(async node => ({
+      ...normalizeNodeMeta(node),
+      message: await this.transformSegments(getNodeMessages(node), 'store', { root: false })
+    })))
   }
 
-  /** 添加时将消息段规范化（展开聊天记录、本地化媒体） */
-  async normalizeSegmentsForStorage(segments) {
-    const result = []
+  /**
+   * 统一消息段变换：store=添加存储（展开 forward、本地化媒体），send=发送前解析路径
+   */
+  async transformSegments(segments, mode = 'store', { root = false } = {}) {
+    if (!Array.isArray(segments)) return []
+    const out = []
+
     for (const seg of segments) {
       if (!seg || typeof seg !== 'object') continue
-      if (seg.type === 'at' && seg.qq == this.e.self_id) continue
+      if (mode === 'store' && seg.type === 'at' && seg.qq == this.e.self_id) continue
 
       if (seg.type === 'forward') {
-        const forwardId = this.e.message_id || seg.message_id || seg.id || seg.data?.id
-        if (!forwardId) continue
-        const nodes = await this.fetchForwardNodes(forwardId)
-        if (!nodes.length) throw new Error('聊天记录为空或已过期')
-        result.push({ type: 'node', data: nodes })
+        if (mode === 'send') logger.warn('[词条] 检测到未展开的 forward，尝试补救')
+        try {
+          const nodes = await this.fetchForwardNodes(seg, root)
+          if (nodes.length) out.push({ type: 'node', data: nodes })
+        } catch (err) {
+          if (mode === 'store') throw err
+          logger.error(`[词条] forward 补救失败: ${err.message}`)
+        }
         continue
       }
 
-      if (seg.type === 'node') {
-        const rawNodes = Array.isArray(seg.data) ? seg.data : [seg.data].filter(Boolean)
-        const nodes = []
-        for (const node of rawNodes) {
-          nodes.push({
-            message: await this.normalizeSegmentsForStorage(node.message || node.content || []),
-            nickname: node.nickname || node.name || '匿名',
-            user_id: node.user_id || node.uin || 80000000,
-            time: node.time
+      if (seg.type === 'node' && Array.isArray(seg.data)) {
+        const data = []
+        for (const node of seg.data) {
+          data.push({
+            ...normalizeNodeMeta(node),
+            message: await this.transformSegments(getNodeMessages(node), mode, { root: false })
           })
         }
-        if (nodes.length) result.push({ type: 'node', data: nodes })
+        if (data.length) out.push({ type: 'node', data })
         continue
       }
 
       const item = { ...seg }
-      if (item.url && !item.file) {
+      if (mode === 'store' && item.url && !item.file) {
         item.file = await this.saveFile(item)
         delete item.url
         delete item.fid
+      } else if (mode === 'send' && item.file) {
+        const localPath = await this.resolveEntryMediaPath(item)
+        if (localPath) item.file = localPath
       }
-      result.push(item)
+      out.push(item)
     }
-    return result
+    return out
   }
 
   /** 解析词条存储的媒体本地路径 */
@@ -1012,59 +1087,6 @@ export class add extends plugin {
     if (await Bot.fsStat(localPath)) return localPath
     if (await Bot.fsStat(item.file)) return item.file
     return item?.url || null
-  }
-
-  /** 发送前规范化消息段（解析本地媒体、保留 node 结构） */
-  async prepareMessageForSend(segments) {
-    if (!Array.isArray(segments)) return []
-    const result = []
-    for (const seg of segments) {
-      if (!seg || typeof seg !== 'object') continue
-
-      if (seg.type === 'node' && Array.isArray(seg.data)) {
-        const data = []
-        for (const node of seg.data) {
-          data.push({
-            ...node,
-            message: await this.prepareMessageForSend(node.message || [])
-          })
-        }
-        result.push({ type: 'node', data })
-        continue
-      }
-
-      if (seg.type === 'forward') {
-        logger.warn('[词条] 检测到未展开的 forward 引用，尝试临时获取')
-        try {
-          const forwardId = seg.id || seg.message_id || seg.data?.id
-          if (forwardId) {
-            const nodes = await this.fetchForwardNodes(forwardId)
-            const data = []
-            for (const node of nodes) {
-              data.push({
-                ...node,
-                message: await this.prepareMessageForSend(node.message || [])
-              })
-            }
-            if (data.length) {
-              result.push({ type: 'node', data })
-              continue
-            }
-          }
-        } catch (err) {
-          logger.error(`[词条] 转发消息重发失败: ${err}`)
-        }
-        continue
-      }
-
-      const item = { ...seg }
-      if (item.file) {
-        const localPath = await this.resolveEntryMediaPath(item)
-        if (localPath) item.file = localPath
-      }
-      result.push(item)
-    }
-    return result
   }
 
   /** 获取关键词消息 */
@@ -1122,7 +1144,7 @@ export class add extends plugin {
     const msg = messages[lodash.random(0, messages.length - 1)]
     if (lodash.isEmpty(msg)) return false
 
-    const msgToSend = await this.prepareMessageForSend([...msg])
+    const msgToSend = await this.transformSegments([...msg], 'send')
     if (!msgToSend.length) {
       logger.error(`[发送消息] 词条【${this.keyWord}】内容无法发送`)
       return this.reply('该词条内容无法发送（聊天记录引用可能已失效），请删除后重新添加')
@@ -1171,22 +1193,12 @@ export class add extends plugin {
   /** 删除文件 */
   async delFile(messages) {
     if (!Array.isArray(messages)) return
-    
+
     const files = []
-    const collectFiles = segments => {
-      if (!Array.isArray(segments)) return
-      for (const item of segments) {
-        if (item?.file) files.push(item.file)
-        if (item?.type === 'node' && Array.isArray(item.data)) {
-          for (const node of item.data) collectFiles(node.message)
-        }
-      }
-    }
-    
     for (const msg of Array.isArray(messages[0]) ? messages : [messages]) {
-      collectFiles(Array.isArray(msg) ? msg : [msg])
+      collectSegmentFiles(Array.isArray(msg) ? msg : [msg], files)
     }
-    
+
     return Promise.allSettled(files.map(file => fs.rm(`${this.path}${file}`).catch(() => {})))
   }
 
@@ -1305,11 +1317,12 @@ export class add extends plugin {
         case 'node': {
           const nodes = Array.isArray(item.data) ? item.data : []
           if (!nodes.length) break
+          const hasNested = nodes.some(n => getNodeMessages(n).some(s => s?.type === 'node' || s?.type === 'forward'))
           const summary = nodes.slice(0, 2).map(n => {
-            const text = (n.message || []).filter(s => s.type === 'text').map(s => s.text || '').join('').slice(0, 15)
+            const text = getNodeMessages(n).filter(s => s.type === 'text').map(s => s.text || '').join('').slice(0, 15)
             return `${n.nickname || '匿名'}:${text || '...'}`
           }).join(' | ')
-          parts.push(`[聊天记录${nodes.length}条${summary ? ` ${summary}` : ''}]`)
+          parts.push(`[聊天记录${nodes.length}条${hasNested ? '(含嵌套)' : ''}${summary ? ` ${summary}` : ''}]`)
           break
         }
         case 'forward':
