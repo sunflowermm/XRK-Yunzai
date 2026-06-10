@@ -171,6 +171,8 @@ desktop.ini
 # Editor files
 .vscode/
 .idea/
+.claude/
+.trae/
 *.swp
 *.swo
 *~

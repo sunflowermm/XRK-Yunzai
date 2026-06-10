@@ -64,10 +64,7 @@ export class XRKAIAssistant extends plugin {
             return;
           }
 
-          // 如果已经合并过就直接返回，避免重复日志
-          const existing = loader.getStream
-            ? loader.getStream(CHAT_MERGED_NAME)
-            : null;
+          const existing = loader.getStream?.(CHAT_MERGED_NAME);
           if (existing) {
             logger.info(`├─ 🔀 合并工作流已存在: ${CHAT_MERGED_NAME}`);
             return;
@@ -90,7 +87,6 @@ export class XRKAIAssistant extends plugin {
         }
       };
 
-      // 延迟执行，确保 StreamLoader 和各工作流已经完成初始化与注册
       setTimeout(doMerge, 0);
     }
 

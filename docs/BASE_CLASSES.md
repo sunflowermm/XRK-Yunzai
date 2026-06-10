@@ -2,6 +2,8 @@
 
 本文档介绍 XRK-Yunzai 项目中的所有基类及其使用方法。
 
+> **开发首选短契约**：[base-classes.md](./base-classes.md)（对齐 XRK-AGT 契约风格，含 constructor/类字段约定）。本文档为详述与关系图。
+
 ## 目录
 
 - [工作流基类 (AIStream)](#工作流基类-aistream)
@@ -78,14 +80,45 @@
 
 **路径**: `lib/listener/listener.js`
 
-事件监听器的基类，用于监听Bot事件。
+事件监听器的基类，统一经 `Bot.PluginsLoader` 走事件链。
 
 ### 核心特性
 
-- **事件监听**: 监听指定的事件
-- **插件集成**: 自动触发插件处理
+- **事件监听**: 监听指定的事件（`event`、`prefix`、`once`）
+- **插件集成**: `execute(e)` 委托 `PluginsLoader.deal(e)`
 
-**使用**: 继承 `EventListener`，实现 `execute(e)`，文件放 `plugins/<插件根>/events/`。
+**使用**: 继承 `EventListener`，文件放 `plugins/<插件根>/events/`。
+
+---
+
+## 工厂基类 (BaseFactory)
+
+**路径**: `lib/factory/BaseFactory.js`
+
+LLM / ASR / TTS 等工厂的提供商注册与创建基类。
+
+### 核心特性
+
+- **registerProvider**: 注册提供商工厂函数
+- **createClient**: 子类实现，按 provider 创建客户端
+- **createDeviceClient**: 设备级 ASR/TTS 等统一入口
+
+**使用**: `LLMFactory`、`ASRFactory`、`TTSFactory` 均继承此类。
+
+---
+
+## 配置基类 (ConfigBase)
+
+**路径**: `lib/commonconfig/commonconfig.js`
+
+CommonConfig 配置文件读写与 schema 校验基类。
+
+### 核心特性
+
+- **read / write**: YAML/JSON 配置读写与缓存
+- **schema**: 构造阶段严格校验默认值与类型
+
+**使用**: CommonConfig 注册项继承或在 `plugins/system-plugin/commonconfig/` 定义 schema。
 
 ---
 
@@ -185,6 +218,9 @@ graph TB
 | HttpApi | `lib/http/http.js` | HTTP API基类 |
 | EventListener | `lib/listener/listener.js` | 事件监听基类 |
 | Renderer | `lib/renderer/Renderer.js` | 渲染器基类 |
+| ConfigBase | `lib/commonconfig/commonconfig.js` | CommonConfig 配置基类 |
+| BaseFactory | `lib/factory/BaseFactory.js` | 工厂基类（LLM/ASR/TTS） |
+| HotReloadBase | `lib/utils/hot-reload-base.js` | 热重载监视基类 |
 | Bot | `lib/bot.js` | Bot主类 |
 
 ---

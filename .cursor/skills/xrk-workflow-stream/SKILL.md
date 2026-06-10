@@ -1,31 +1,47 @@
 ---
 name: xrk-workflow-stream
-description: 在 XRK-Yunzai 中开发或修改 AI 工作流时使用；涉及 plugins/*/stream/ 或 streams/、LLM 调用、记忆与 function calling 时使用。
+description: 在 XRK-Yunzai 中开发或修改 AI 工作流时使用；涉及 plugins/*/stream/、LLM 调用、MCP 工具、记忆与 function calling 时使用。
 ---
 
 # XRK-Yunzai 工作流开发
 
-## 目录与基类
+## 文档与代码
 
-- 工作流定义：`plugins/<插件名>/stream/*.js` 或 `plugins/<插件名>/streams/*.js`。
-- 基类：`lib/aistream/aistream.js` 的 AIStream。
+- 短契约：`docs/base-classes.md`；详述：`docs/WORKFLOW_BASE_CLASS.md`
+- 基类：`lib/aistream/aistream.js`；加载：`lib/aistream/loader.js`
 
-## 注册与加载
+## 结构
 
-- StreamLoader（`lib/aistream/loader.js`）自动扫描 `plugins/*/stream/` 和 `plugins/*/streams/`。
-- 导出格式：`{ name, description, execute, config?, priority? }`。
+```javascript
+import AIStream from '../../lib/aistream/aistream.js';
 
-## 执行
+export default class ChatStream extends AIStream {
+  constructor() {
+    super({ name: 'chat', description: '聊天', priority: 100, config: { temperature: 0.8 } });
+  }
+  async init() {
+    await super.init();
+    this.registerMCPTool('tool', { description, inputSchema, handler });
+    this.registerFunction('fn', { description, prompt, parser, handler, enabled: true });
+  }
+  buildSystemPrompt(context) { return '...'; }
+  async buildChatContext(e, question) { return [...]; }
+}
+```
 
-- `stream.execute(e, question, config)`：`e` 为消息事件，`question` 为用户输入。
-- 上下文与记忆：使用 `buildChatContext`、可选重写 `buildEnhancedContext`（如注入记忆摘要）及 Memory 相关能力。
+## 约定
 
-## 非流式 LLM 与 MCP `*.reply`
+- 路径：**仅** `plugins/<插件名>/stream/*.js`（`StreamLoader` 扫描，不用 `streams/`）。
+- 配置：`data/server_bots/<port>/aistream.yaml`；字段合并见 `CONFIG_PRIORITY.md`。
+- **类字段**存工具 Map；`init()` 注册 MCP/功能，不在 constructor。
+- `callAI` → `{ text, usedReplyTool } | null`；`usedReplyTool` 时避免重复 `sendMessages`。
+- 可选 `async cleanup()` 释放资源。
+- LLM：`LLMFactory.createClient().chat/chatStream`；非流式见 `lib/utils/llm/llm-nonstream-reply.js`。
 
-- `AIStream.callAI` 返回 **`{ text, usedReplyTool } | null`**，不再依赖实例上的隐式标志；`usedReplyTool === true` 表示本轮已通过 MCP `*.reply` 发往会话。
-- 各 LLM 工厂非流式 `chat()` 经 `lib/utils/llm/llm-nonstream-reply.js` 的 `createReplyTrack` / `noteReplyFromModelCalls` / `packNonStreamReturn` 与基类 `unpackFactoryChatRaw` 对齐。
-- Chat 工作流里若已 `*.reply`，`execute` 应依据返回的 `usedReplyTool` 决定是否再 `sendMessages`（见 `plugins/system-plugin/stream/chat.js`）。
+## 插件调用
+
+`plugin.callWorkflow('chat', { question }, { e })` 或 `getStream('chat').execute(e, question, config)`。
 
 ## 参考
 
-- 项目内文档：`docs/WORKFLOW_BASE_CLASS.md`（若存在）、`lib/aistream/README.md`（若存在）；以代码 `lib/aistream/aistream.js`、`lib/aistream/loader.js` 为准。
+- skill `xrk-base-layer`；规则 `xrk-dev-requirements.mdc`

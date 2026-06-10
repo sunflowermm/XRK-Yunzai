@@ -5,29 +5,39 @@ description: 在 XRK-Yunzai 中开发或修改 HTTP API 时使用；涉及 plugi
 
 # XRK-Yunzai HTTP API 开发
 
-## 位置与导出
+## 文档与代码
 
-- 路径：`plugins/<插件名>/http/*.js`。
-- 导出：`export default { name, dsc, routes, ws?, init? }` 或继承 `lib/http/http.js` 的 HttpApi 类。
+- 短契约：`docs/base-classes.md`；详述：`docs/HTTP_API_BASE_CLASS.md`
+- 基类：`lib/http/http.js`；加载：`lib/http/loader.js`
 
-## 路由格式
+## 推荐：对象导出
 
 ```javascript
-routes: [
-  {
+export default {
+  name: 'my-api',
+  dsc: '描述',
+  priority: 100,
+  routes: [{
     method: 'GET',
     path: '/api/example',
     handler: async (req, res, Bot) => {
       res.json({ success: true });
     }
-  }
-]
+  }],
+  ws: { '/ws/example': (conn, req) => {} },
+  init: async (app, Bot) => {}
+};
 ```
 
-## WebSocket
+`ApiLoader` 会包装为 `HttpApi` 实例。亦可 `class extends HttpApi`。
 
-- `ws: { '/path': (conn, req) => {} }` 注册到 Bot 的 WebSocket 层，由 ApiLoader（`lib/http/loader.js`）统一处理。
+## 约定
 
-## 工具与路径
+- 路径：`plugins/<插件名>/http/*.js`。
+- handler 使用注入的 `Bot`（多实例、配置、`getServerUrl` 等）。
+- `priority` 数字越大越优先注册。
+- 文件/日志：`FileUtils`、`BotUtil.makeLog`；配置：`getServerConfigPath`。
 
-- 文件与工具：`FileUtils`、`BotUtil`（`lib/util.js`）；配置路径：`getServerConfigPath`（`lib/config/config-constants.js`）。
+## 参考
+
+- skill `xrk-base-layer`；规则 `xrk-dev-requirements.mdc`

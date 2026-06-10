@@ -11,7 +11,7 @@ alwaysApply: true
 
 ## 目录与放码位置
 
-- **业务**：`plugins/<插件名>/` 下按类型分目录：`plugin/` 或插件根目录的入口、`http/`、`stream/` 或 `streams/`、`commonconfig/`、`www/` 等；由各 Loader 扫描加载。
+- **业务**：`plugins/<插件名>/` 下按类型分目录：插件入口、`http/`、`stream/`、`events/`、`commonconfig/`、`www/` 等；由各 Loader 扫描加载（工作流仅 `stream/`，不扫 `streams/`）。
 - **基础设施**：`lib/` 下为插件基类、HTTP 基类、工作流基类、配置、工具等；入口为 `lib/bot.js`，应用启动为根目录 `app.js` 等。
 - **米游 runtime**：`lib/plugins/runtime.js`、`lib/plugins/loader.js` 与 TRSS-Yunzai 对齐（`e.runtime.getMysApi`、星铁/绝区零前缀）；勿再使用已移除的 Runtime 扩展注册机制。
 
@@ -27,6 +27,12 @@ alwaysApply: true
 - 端口级配置：`data/server_bots/<port>/`，由 `cfg.ensurePortConfigs(port)` 等初始化。
 - 默认配置：`config/default_config/*.yaml`。
 - 获取配置路径：`getServerConfigPath(port, configName)` 返回 `data/server_bots/<port>/<configName>.yaml` 或默认路径。
+
+## 基类开发
+
+- 短契约：`docs/base-classes.md`；详述：`docs/BASE_CLASSES.md`。
+- constructor 不建可变状态（`Map`/缓存用类字段）；详见 `xrk-dev-requirements.mdc`。
+- 全局 `Bot`/`segment`；插件资源释放实现 `destroy()`。
 
 ## 模块与风格
 

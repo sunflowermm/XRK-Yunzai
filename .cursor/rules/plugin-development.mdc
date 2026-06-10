@@ -8,15 +8,23 @@ alwaysApply: false
 
 ## 基类与结构
 
-- 继承 `lib/plugins/plugin.js` 的默认导出（插件基类）。
-- 构造函数传入 `{ name, dsc, event, priority, rule }` 等；消息处理为 `async fnc(e)`，通过 `e.reply()` 回复。
+- 继承 `lib/plugins/plugin.js`；`import plugin from '../../lib/plugins/plugin.js'`。
+- constructor 仅 `super({ name, dsc, event, priority, rule, ... })`；**禁止**在 constructor 内 `new Map()` 等状态容器，用**类字段**。
+- 消息处理 `async fnc(e)`；回复用 `this.reply()` 或 `e.reply()`。
 
-## 文件与配置
+## 全局与工具
 
-- 使用 `FileUtils.existsSync`、`FileUtils.readFile`、`FileUtils.writeFile`，不用 `fs` 直接操作。
-- 需要端口/全局配置时用 `lib/config/config.js` 的 `cfg` 或 `lib/plugins/config.js` 的 `makeConfig`。
+- 使用全局 `Bot`、`segment`；勿 `import Bot`、勿 `import { segment } from 'oicq'`。
+- `FileUtils` / `ObjectUtils`；禁止业务直连 `fs`。
+- 配置：`cfg` 或端口级 YAML；路径 `getServerConfigPath(port, name)`。
 
-## 工作流调用
+## 工作流
 
-- `this.getStream(name)` 获取工作流（来自 `Bot.StreamLoader`）。
-- `stream.execute(e, question, config)` 执行对话；工作流定义在 `plugins/<插件名>/stream/*.js` 或 `streams/*.js`。
+- 优先 `this.callWorkflow(name, params, { e })`、`callWorkflows`、`executeWorkflow`。
+- 低层：`this.getStream(name)` → `stream.execute(e, question, config)`。
+- 定义在 `plugins/<插件名>/stream/*.js`（仅 `stream/`，非 `streams/`）。
+
+## 资源释放
+
+- 持有 chokidar、定时器、长连接：实现 `async destroy()`。
+- 文件监视用 `HotReloadBase`，勿直接 chokidar。

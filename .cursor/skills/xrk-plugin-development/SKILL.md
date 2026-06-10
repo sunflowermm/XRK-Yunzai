@@ -5,10 +5,12 @@ description: 在 XRK-Yunzai 中开发或修改插件时使用；涉及 plugins/ 
 
 # XRK-Yunzai 插件开发
 
-## 快速结构
+## 文档与代码
 
-- 基类：`lib/plugins/plugin.js`。
-- 插件文件放在 `plugins/<插件名>/` 下（入口可为插件根目录或子目录，由加载器扫描约定决定）。
+- 短契约：`docs/base-classes.md`；详述：`docs/PLUGIN_BASE_CLASS.md`
+- 基类：`lib/plugins/plugin.js`；加载：`lib/plugins/loader.js`
+
+## 结构
 
 ```javascript
 import plugin from '../../lib/plugins/plugin.js';
@@ -23,20 +25,30 @@ export default class MyPlugin extends plugin {
       rule: [{ reg: '^#命令$', fnc: 'handleCmd' }]
     });
   }
-
   async handleCmd(e) {
-    await this.reply('回复内容');
+    await this.reply('回复');
   }
 }
 ```
 
-## 关键点
+## 约定（对齐 XRK-AGT，路径为 Yunzai）
 
-- **事件对象 e**：含 `e.bot`、`e.friend`、`e.group`、`e.reply()`、`e.isMaster` 等。
-- **工作流**：`this.getStream('chat')` 获取，`stream.execute(e, question, config)` 执行。
-- **文件**：用 `FileUtils`，不用 `fs` 直接操作。
-- **配置**：`cfg`（`lib/config/config.js`）或 `makeConfig`（`lib/plugins/config.js`）。
+- 路径：`plugins/<插件名>/`（入口由 PluginsLoader 扫描）。
+- **类字段**存状态；constructor 不 `new Map()` / `{}` 缓存。
+- 全局 `Bot`、`segment`；勿 import Bot / oicq segment。
+- 文件：`FileUtils`；配置：`cfg` / `getServerConfigPath`。
+- 资源：chokidar/定时器 → `async destroy()`；监视用 `HotReloadBase`。
+
+## 工作流
+
+- 优先：`this.callWorkflow('chat', { question }, { e })`
+- 并行：`this.callWorkflows([...], sharedParams, { e })`
+- 低层：`this.getStream('chat')?.execute(e, question, config)`
+
+## Rule 匹配
+
+`event` → `reg` → `permission` → `fnc`；返回 `false` 继续下一条。
 
 ## 参考
 
-- 插件基类与加载：`lib/plugins/plugin.js`、`lib/plugins/loader.js`；项目内文档如 `docs/PLUGIN_BASE_CLASS.md`、`docs/reference/PLUGINS.md` 若有则以之为辅，以代码为准。
+- 底层规范：skill `xrk-base-layer`；规则 `xrk-dev-requirements.mdc`

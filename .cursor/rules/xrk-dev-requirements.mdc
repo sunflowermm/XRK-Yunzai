@@ -1,0 +1,36 @@
+---
+description: XRK-Yunzai 开发需求与编码约定（constructor/全局对象/工具）
+alwaysApply: true
+---
+
+# 开发需求与约定
+
+## Constructor 内不要定义易变状态
+
+- **禁止**在 `constructor` 里定义缓存/状态容器（如 `this.cache = new Map()`、`this.xxx = {}`）。
+- **原因**：热加载或多次实例化时 constructor 会重复执行，导致引用错乱。
+- **正确做法**：用**类字段**在声明处初始化（如 `cache = new Map()`），或放在只调用一次的 `init()` / `async init()` 里；constructor 内只做 `super()` 与固定配置。
+
+## 全局对象
+
+- `Bot`、`segment` 由启动与 `PluginsLoader` 挂载全局；业务勿 `import Bot` 或 `new Bot()`。
+- `segment` 勿 `import { segment } from 'oicq'`，直接使用全局 `segment`。
+- 插件基类：新代码 `import plugin from '../../lib/plugins/plugin.js'`；历史代码可用 `global.plugin`。
+
+## 工具与路径（业务 plugins/）
+
+- 文件：`FileUtils`（`lib/utils/file-utils.js`），禁止 `fs.existsSync` / `fs.readdirSync` 等。
+- 对象：`ObjectUtils`（`lib/utils/object-utils.js`）。
+- 配置路径：`getServerConfigPath(port, configName)`（`lib/config/config-constants.js`）。
+- 日志：`BotUtil.makeLog`；禁止空 catch。
+
+## HTTP API
+
+- handler 签名 `(req, res, Bot)`；使用注入的 `Bot` 访问多实例与配置。
+- 推荐对象导出 `{ name, routes, ... }`，由 `ApiLoader` 包装。
+
+## 资源释放
+
+- 插件持有 watcher/定时器：实现 `async destroy()`。
+- 工作流持有连接/缓存：实现 `async cleanup()`。
+- 文件监视：优先 `HotReloadBase`，勿业务层直接 chokidar。
