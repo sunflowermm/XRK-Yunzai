@@ -1,11 +1,11 @@
 // XRK AI助手插件 - 调用 chat 工作流；需合并时在配置里写 mergeStreams，写哪个合并哪个
 
-import path from 'path';
-import BotUtil from '../../../lib/util.js';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
+import BotUtil from '../../../lib/util.js';
+import { resolveProjectPath, DATA_AI_CONFIG_REL } from '../../../lib/config/config-constants.js';
 import ChatStream from '../stream/chat.js';
 
-const CONFIG_PATH = path.join(process.cwd(), 'data/ai/config.yaml');
+const CONFIG_PATH = resolveProjectPath(DATA_AI_CONFIG_REL);
 const CHAT_MERGED_NAME = 'chat-merged';
 const cooldownState = new Map();
 

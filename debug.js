@@ -15,18 +15,23 @@
  * - 自动创建必要目录
  */
 
-import fs from 'fs/promises';
 import Bot from './lib/bot.js';
 import chalk from 'chalk';
 import { BASE_DIRS } from './lib/base-dirs.js';
+import { FileUtils } from './lib/utils/file-utils.js';
+import { resolveProjectPath } from './lib/config/config-constants.js';
 
 const DEFAULT_DEBUG_PORT = 11451;
+const projectRoot = resolveProjectPath();
 
 async function ensureDirectories() {
   for (const dir of BASE_DIRS) {
-    await fs.mkdir(dir, { recursive: true }).catch(err =>
-      console.warn(chalk.yellow(`[WARN] 无法创建目录 ${dir}: ${err.message}`))
-    );
+    const abs = resolveProjectPath(dir.replace(/^\.\//, ''));
+    const ok = await FileUtils.ensureDir(abs).then(() => true).catch((err) => {
+      console.warn(chalk.yellow(`[WARN] 无法创建目录 ${dir}: ${err.message}`));
+      return false;
+    });
+    void ok;
   }
 }
 
@@ -59,7 +64,7 @@ function printBanner(port) {
   console.log(chalk.cyan('='.repeat(50)));
   console.log(chalk.green(`[+] 启动端口: ${chalk.yellow(port)}`));
   console.log(chalk.green(`[+] Node.js 版本: ${chalk.yellow(process.version)}`));
-  console.log(chalk.green(`[+] 工作目录: ${chalk.yellow(process.cwd())}`));
+  console.log(chalk.green(`[+] 工作目录: ${chalk.yellow(projectRoot)}`));
   console.log(chalk.green(`[+] 环境模式: ${chalk.yellow(process.env.NODE_ENV || 'development')}`));
   console.log(chalk.cyan('='.repeat(50)));
 }

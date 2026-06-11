@@ -329,8 +329,10 @@ limits:
   raw: "50mb"
   # text: 文本请求体大小限制
   text: "10mb"
-  # fileSize: 单文件上传大小限制
+  # fileSize: 单文件上传大小限制（multipart 单文件）
   fileSize: "100mb"
+  # multipart: multipart 请求体总大小限制（默认同 raw）
+  multipart: "100mb"
 
 # ----------------------------------------
 #            压缩配置
@@ -351,6 +353,8 @@ logging:
   requests: true
   # errors: 是否记录错误日志
   errors: true
+  # maxErrorDetailsLen: 错误详情 JSON 最大输出长度
+  maxErrorDetailsLen: 1500
   # debug: 是否输出调试日志
   debug: false
   # quiet: 不记录日志的路径列表

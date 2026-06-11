@@ -3,15 +3,13 @@
  * @description 应用程序引导（依赖检查后加载 start.js）
  */
 
-import fs from 'fs/promises';
 import path from 'path';
 import { spawnSync } from 'child_process';
-import { fileURLToPath } from 'url';
 import { BASE_DIRS } from './lib/base-dirs.js';
-import { LOGS_DIR } from './lib/config/config-constants.js';
+import { LOGS_DIR, PLUGINS_DIR, RENDERERS_DIR, APP_ENTRY_REL, resolveProjectPath } from './lib/config/config-constants.js';
+import { FileUtils } from './lib/utils/file-utils.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const projectRoot = resolveProjectPath();
 
 if (process.platform === 'win32') {
   try {
@@ -22,10 +20,10 @@ if (process.platform === 'win32') {
 }
 
 if (process.argv[2] !== 'server' && !process.execArgv.includes('--expose-gc')) {
-  const appPath = process.argv[1] || path.join(__dirname, 'app.js');
+  const appPath = process.argv[1] || resolveProjectPath(APP_ENTRY_REL);
   const result = spawnSync(process.argv[0], ['--expose-gc', ...process.execArgv, appPath, ...process.argv.slice(2)], {
     stdio: 'inherit',
-    cwd: process.cwd()
+    cwd: projectRoot
   });
   process.exit(result.status ?? (result.signal ? 128 + 1 : 1));
 }
@@ -35,8 +33,7 @@ function createBootstrapLogger(logFile, useConsole = true) {
   async function write(message, level = 'INFO') {
     const line = `[${new Date().toISOString()}] [${level}] ${message}\n`;
     try {
-      await fs.mkdir(path.dirname(logFile), { recursive: true });
-      await fs.appendFile(logFile, line, 'utf8');
+      await FileUtils.appendFile(logFile, line, 'utf8');
     } catch {}
     if (useConsole) {
       console.log(`${colors[level] || ''}${message}${colors.RESET}`);
@@ -55,7 +52,7 @@ async function validateEnvironment() {
   if (major < 24) {
     throw new Error(`Node.js 需 v24.0.0+，当前: ${process.version}`);
   }
-  await Promise.all(BASE_DIRS.map(dir => fs.mkdir(dir, { recursive: true }).catch(() => {})));
+  await Promise.all(BASE_DIRS.map(dir => FileUtils.ensureDir(resolveProjectPath(dir.replace(/^\.\//, ''))).catch(() => {})));
 }
 
 class DependencyManager {
@@ -64,26 +61,23 @@ class DependencyManager {
   }
 
   async parsePackageJson(packageJsonPath) {
-    const content = await fs.readFile(packageJsonPath, 'utf-8');
+    const content = await FileUtils.readFile(packageJsonPath, 'utf-8');
+    if (!content) throw new Error(`无法读取 ${packageJsonPath}`);
     return JSON.parse(content);
   }
 
   async getMissingDependencies(depNames, nodeModulesPath) {
     const results = await Promise.all(
       depNames.map(async dep => {
-        try {
-          const st = await fs.stat(path.join(nodeModulesPath, dep));
-          return st.isDirectory();
-        } catch {
-          return false;
-        }
+        const st = await FileUtils.stat(path.join(nodeModulesPath, dep));
+        return st?.isDirectory() === true;
       })
     );
     return depNames.filter((_, i) => !results[i]);
   }
 
-  async installDependencies(missingDeps, cwd = process.cwd()) {
-    const prefix = cwd !== process.cwd() ? `[${path.basename(cwd)}] ` : '';
+  async installDependencies(missingDeps, cwd = projectRoot) {
+    const prefix = cwd !== projectRoot ? `[${path.basename(cwd)}] ` : '';
     await this.logger.warning(`${prefix}发现 ${missingDeps.length} 个缺失依赖，使用 pnpm 安装...`);
     await this.logger.log(`${prefix}正在安装依赖，若出现 DEP0190 警告可忽略，请稍候...`);
     const result = spawnSync('pnpm', ['install'], {
@@ -112,28 +106,21 @@ class DependencyManager {
     }
   }
 
-  async ensurePluginDependencies(rootDir = process.cwd()) {
-    const baseDirs = ['plugins', 'renderers'];
+  async ensurePluginDependencies(rootDir = resolveProjectPath()) {
+    const baseDirs = [PLUGINS_DIR, RENDERERS_DIR];
     const dirs = [];
     for (const base of baseDirs) {
       const dir = path.join(rootDir, base);
-      try {
-        const entries = await fs.readdir(dir, { withFileTypes: true });
-        for (const d of entries) {
-          if (d.isDirectory() && !d.name.startsWith('.')) {
-            dirs.push(path.join(dir, d.name));
-          }
-        }
-      } catch {}
+      const entries = await FileUtils.readDir(dir, { withFileTypes: true });
+      for (const d of entries) {
+        if (!d.isDirectory() || d.name.startsWith('.')) continue;
+        dirs.push(path.join(dir, d.name));
+      }
     }
     for (const d of dirs) {
       const pkgPath = path.join(d, 'package.json');
       const nodeModulesPath = path.join(d, 'node_modules');
-      try {
-        await fs.access(pkgPath);
-      } catch {
-        continue;
-      }
+      if (!(await FileUtils.exists(pkgPath))) continue;
       try {
         await this.checkAndInstall(pkgPath, nodeModulesPath);
       } catch (e) {
@@ -146,48 +133,28 @@ class DependencyManager {
    * 检查 plugins、renderers 下各子目录的 www（及一层子目录）中
    * 同时存在 package.json 与 sign.json 的前端依赖，与 AGT 逻辑对齐
    */
-  async ensureFrontendDependencies(rootDir = process.cwd()) {
-    const baseDirs = ['plugins', 'renderers'];
+  async ensureFrontendDependencies(rootDir = resolveProjectPath()) {
+    const baseDirs = [PLUGINS_DIR, RENDERERS_DIR];
     for (const base of baseDirs) {
       const basePath = path.join(rootDir, base);
-      let entries;
-      try {
-        entries = await fs.readdir(basePath, { withFileTypes: true });
-      } catch {
-        continue;
-      }
+      const entries = await FileUtils.readDir(basePath, { withFileTypes: true });
       for (const entry of entries) {
         if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
         const wwwDir = path.join(basePath, entry.name, 'www');
-        let wwwStat;
-        try {
-          wwwStat = await fs.stat(wwwDir);
-        } catch {
-          continue;
-        }
-        if (!wwwStat.isDirectory()) continue;
+        const wwwStat = await FileUtils.stat(wwwDir);
+        if (!wwwStat?.isDirectory()) continue;
 
         const candidateDirs = [wwwDir];
-        try {
-          const subEntries = await fs.readdir(wwwDir, { withFileTypes: true });
-          for (const sub of subEntries) {
-            if (sub.isDirectory()) candidateDirs.push(path.join(wwwDir, sub.name));
-          }
-        } catch {}
+        const subEntries = await FileUtils.readDir(wwwDir, { withFileTypes: true });
+        for (const sub of subEntries) {
+          if (sub.isDirectory()) candidateDirs.push(path.join(wwwDir, sub.name));
+        }
 
         for (const dir of candidateDirs) {
           const pkgPath = path.join(dir, 'package.json');
           const signPath = path.join(dir, 'sign.json');
-          let hasPkg = false;
-          let hasSign = false;
-          try {
-            await fs.access(pkgPath);
-            hasPkg = true;
-          } catch {}
-          try {
-            await fs.access(signPath);
-            hasSign = true;
-          } catch {}
+          const hasPkg = await FileUtils.exists(pkgPath);
+          const hasSign = await FileUtils.exists(signPath);
           if (!hasPkg || !hasSign) continue;
 
           try {
@@ -202,7 +169,7 @@ class DependencyManager {
   }
 }
 
-const BOOTSTRAP_LOG = path.join(LOGS_DIR, 'bootstrap.log');
+const BOOTSTRAP_LOG = resolveProjectPath(LOGS_DIR, 'bootstrap.log');
 
 class Bootstrap {
   constructor() {
@@ -212,7 +179,7 @@ class Bootstrap {
 
   async initialize() {
     await validateEnvironment();
-    const root = process.cwd();
+    const root = resolveProjectPath();
     await this.dependencyManager.checkAndInstall(
       path.join(root, 'package.json'),
       path.join(root, 'node_modules')

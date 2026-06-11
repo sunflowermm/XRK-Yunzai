@@ -1,8 +1,6 @@
 import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
 import path from 'path';
-import { getServerConfigPath, SERVER_BOTS_DIR } from '../../../lib/config/config-constants.js';
-
-const paths = { root: process.cwd(), renderers: path.join(process.cwd(), 'renderers') };
+import { getServerConfigPath, SERVER_BOTS_DIR, RENDERERS_DIR, DATA_DB_DEFAULT_REL, resolveProjectPath } from '../../../lib/config/config-constants.js';
 
 /**
  * 系统配置管理（与 XRK-AGT 对齐）
@@ -1199,7 +1197,7 @@ export default class SystemConfig extends ConfigBase {
         schema: {
           fields: {
             dialect: { type: 'string', label: '数据库类型', description: '支持：mysql、postgres、sqlite、db2、mariadb、mssql', default: 'sqlite', component: 'Input' },
-            storage: { type: 'string', label: 'SQLite 文件路径', description: 'dialect 为 sqlite 时使用的本地文件路径，相对项目根', default: 'data/db/data.db', component: 'Input' },
+            storage: { type: 'string', label: 'SQLite 文件路径', description: 'dialect 为 sqlite 时使用的本地文件路径，相对项目根', default: DATA_DB_DEFAULT_REL, component: 'Input' },
             logging: { type: 'boolean', label: '是否输出 SQL 日志', description: '为 true 时在控制台打印执行的 SQL，便于调试', default: false, component: 'Switch' }
           }
         }
@@ -1909,12 +1907,11 @@ export default class SystemConfig extends ConfigBase {
           keys: ['puppeteer', 'playwright'],
           getFilePath: (key) => {
             const port = getPort(global.cfg);
-            const root = paths.root;
             return port
-              ? path.join(root, SERVER_BOTS_DIR, String(port), 'renderers', key, 'config.yaml')
-              : path.join(root, 'renderers', key, 'config_default.yaml');
+              ? path.join(resolveProjectPath(SERVER_BOTS_DIR), String(port), 'renderers', key, 'config.yaml')
+              : path.join(resolveProjectPath(RENDERERS_DIR), key, 'config_default.yaml');
           },
-          getDefaultFilePath: (key) => path.join(paths.renderers, key, 'config_default.yaml')
+          getDefaultFilePath: (key) => path.join(resolveProjectPath(RENDERERS_DIR), key, 'config_default.yaml')
         },
         schema: {
           fields: {

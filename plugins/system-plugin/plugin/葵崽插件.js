@@ -4,6 +4,7 @@ import BotUtil from '../../../lib/util.js'
 import { FileUtils } from '../../../lib/utils/file-utils.js'
 import { promisify } from 'util'
 import common from '../../../lib/common/common.js'
+import { PLUGINS_DIR, resolveProjectPath } from '../../../lib/config/config-constants.js'
 
 const execAsync = promisify(exec)
 let updateLogs = []
@@ -27,7 +28,7 @@ export class example2 extends plugin {
   }
 
   async handleXRK() {
-    const pluginsPath = path.join(process.cwd(), 'plugins')
+    const pluginsPath = resolveProjectPath(PLUGINS_DIR)
     const results = []
     updateLogs = []
 

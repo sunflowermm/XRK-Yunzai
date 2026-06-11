@@ -1,7 +1,7 @@
-import fs from 'fs/promises';
 import path from 'path';
 import yaml from 'yaml';
 import BotUtil from '../../../lib/util.js';
+import { FileUtils } from '../../../lib/utils/file-utils.js';
 
 /** 按点号路径更新嵌套对象的值 */
 function updateNestedValue(obj, pathStr, value) {
@@ -47,7 +47,10 @@ export default {
             return res.status(403).json({ success: false, message: '非法路径访问' });
           }
 
-          const content = await fs.readFile(normalizedPath, encoding);
+          const content = await FileUtils.readFile(normalizedPath, encoding);
+          if (content === null) {
+            return res.status(404).json({ success: false, message: '文件不存在' });
+          }
           const ext = path.extname(normalizedPath).toLowerCase();
           let data, fileType;
           if (ext === '.json') {
@@ -65,17 +68,20 @@ export default {
               fileType = 'text';
             }
           }
-          const stats = await fs.stat(normalizedPath);
+          const stats = await FileUtils.stat(normalizedPath);
           res.json({
             success: true,
             data,
-            metadata: { path: normalizedPath, type: fileType, size: stats.size, modified: stats.mtime, created: stats.birthtime }
+            metadata: {
+              path: normalizedPath,
+              type: fileType,
+              size: stats?.size ?? 0,
+              modified: stats?.mtime,
+              created: stats?.birthtime,
+            }
           });
         } catch (error) {
           logger.error('[Data Editor API] 文件读取失败', error);
-          if (error.code === 'ENOENT') {
-            return res.status(404).json({ success: false, message: '文件不存在' });
-          }
           if (error instanceof SyntaxError || error.name === 'YAMLParseError') {
             return res.status(400).json({ success: false, message: '文件格式错误', error: error.message });
           }
@@ -120,23 +126,21 @@ export default {
           const fileFormat = format || (ext === '.json' ? 'json' : 
                             ['.yml', '.yaml'].includes(ext) ? 'yaml' : 'json');
 
-          let fileExists = true;
-          try {
-            await fs.access(normalizedPath);
-          } catch {
-            fileExists = false;
-            if (!createIfNotExist) {
-              return res.status(404).json({ 
-                success: false, 
-                message: '文件不存在且不允许创建' 
-              });
-            }
+          const fileExists = await FileUtils.exists(normalizedPath);
+          if (!fileExists && !createIfNotExist) {
+            return res.status(404).json({ 
+              success: false, 
+              message: '文件不存在且不允许创建' 
+            });
           }
 
           let finalData = data;
 
           if (fileExists && operation !== 'overwrite') {
-            const existingContent = await fs.readFile(normalizedPath, encoding);
+            const existingContent = await FileUtils.readFile(normalizedPath, encoding);
+            if (existingContent === null) {
+              return res.status(404).json({ success: false, message: '文件不存在' });
+            }
             let existingData;
             
             try {
@@ -180,10 +184,8 @@ export default {
           let backupPath = null;
           if (backup && fileExists) {
             backupPath = `${normalizedPath}.backup.${Date.now()}`;
-            await fs.copyFile(normalizedPath, backupPath);
+            await FileUtils.copyFile(normalizedPath, backupPath);
           }
-
-          await BotUtil.mkdir(path.dirname(normalizedPath));
 
           let content;
           if (fileFormat === 'json') {
@@ -197,7 +199,10 @@ export default {
             content = yaml.stringify(finalData, yamlOptions);
           }
 
-          await fs.writeFile(normalizedPath, content, encoding);
+          const ok = await FileUtils.writeFile(normalizedPath, content, encoding);
+          if (!ok) {
+            return res.status(500).json({ success: false, message: '文件写入失败' });
+          }
 
           res.json({ 
             success: true, 

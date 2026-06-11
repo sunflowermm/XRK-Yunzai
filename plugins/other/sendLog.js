@@ -1,9 +1,16 @@
-import fs from "node:fs/promises"
 import path from "node:path"
 import lodash from "lodash"
 import moment from "moment"
+import { FileUtils } from "../../lib/utils/file-utils.js"
+import { LOGS_DIR, resolveProjectPath } from "../../lib/config/config-constants.js"
 
 export class sendLog extends plugin {
+  lineNum = 120
+  maxNum = 1000
+  logDir = resolveProjectPath(LOGS_DIR)
+  maxPerForward = 30
+  maxLineLength = 300
+
   constructor() {
     super({
       name: "发送日志",
@@ -19,12 +26,6 @@ export class sendLog extends plugin {
       ],
     })
 
-    this.lineNum = 120
-    this.maxNum = 1000
-    this.logDir = "logs"
-    this.maxPerForward = 30
-    this.maxLineLength = 300  // 单条日志最大长度
-    
     this.levelConfig = {
       ERROR: { emoji: "❌", color: "red" },
       WARN: { emoji: "⚠️", color: "yellow" },
@@ -229,31 +230,29 @@ export class sendLog extends plugin {
       const currentDate = moment().format("YYYY-MM-DD")
       const todayLogFile = path.join(this.logDir, `${prefix}.${currentDate}.log`)
       
-      try {
-        await fs.access(todayLogFile)
+      if (await FileUtils.exists(todayLogFile)) {
         return todayLogFile
-      } catch {
-        const files = await fs.readdir(this.logDir)
-        const logFiles = files
-          .filter(file => file.startsWith(`${prefix}.`) && file.endsWith('.log'))
-          .sort((a, b) => b.localeCompare(a))
-        
-        if (logFiles.length > 0) {
-          return path.join(this.logDir, logFiles[0])
-        }
-        
-        if (prefix === 'app') {
-          const oldFiles = files
-            .filter(file => file.match(/^\d{4}-\d{2}-\d{2}\.log$/))
-            .sort((a, b) => b.localeCompare(a))
-          
-          if (oldFiles.length > 0) {
-            return path.join(this.logDir, oldFiles[0])
-          }
-        }
-        
-        return null
       }
+      const files = await FileUtils.readDir(this.logDir);
+      const logFiles = files
+        .filter(file => file.startsWith(`${prefix}.`) && file.endsWith('.log'))
+        .sort((a, b) => b.localeCompare(a))
+
+      if (logFiles.length > 0) {
+        return path.join(this.logDir, logFiles[0])
+      }
+
+      if (prefix === 'app') {
+        const oldFiles = files
+          .filter(file => file.match(/^\d{4}-\d{2}-\d{2}\.log$/))
+          .sort((a, b) => b.localeCompare(a))
+
+        if (oldFiles.length > 0) {
+          return path.join(this.logDir, oldFiles[0])
+        }
+      }
+
+      return null
     } catch (error) {
       logger.error(`[sendLog] 查找${prefix}日志文件失败:`, error)
       return null
@@ -262,7 +261,8 @@ export class sendLog extends plugin {
 
   async getLog(logFile, lineNum = 100, keyWord = "", filterLevel = null) {
     try {
-      const content = await fs.readFile(logFile, "utf8")
+      const content = await FileUtils.readFile(logFile, "utf8")
+      if (content === null) return []
       let lines = content.split("\n").filter(line => line.trim())
 
       // 级别过滤

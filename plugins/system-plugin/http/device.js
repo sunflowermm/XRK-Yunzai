@@ -6,13 +6,14 @@
  * - ASR/TTS 与 AGT 对齐：ASRFactory/TTSFactory、sign.json 非静态前端
  */
 import path from 'node:path';
-import fs from 'node:fs/promises';
 import BotUtil from '../../../lib/util.js';
+import { FileUtils } from '../../../lib/utils/file-utils.js';
 import ASRFactory from '../../../lib/factory/asr/ASRFactory.js';
 import TTSFactory from '../../../lib/factory/tts/TTSFactory.js';
 import cfg from '../../../lib/config/config.js';
+import { resolveProjectPath, DATA_MEDIA_DIR } from '../../../lib/config/config-constants.js';
 
-const mediaDir = path.join(process.cwd(), 'data', 'media');
+const mediaDir = resolveProjectPath(DATA_MEDIA_DIR);
 
 const asrClients = new Map();
 const asrSessions = new Map();
@@ -244,7 +245,7 @@ async function segmentsToWebUrls(segments, Bot, baseUrlOverride) {
   const baseUrl = baseUrlOverride || getBaseUrl(Bot);
   const out = [];
   try {
-    await fs.mkdir(mediaDir, { recursive: true });
+    await FileUtils.ensureDir(mediaDir);
   } catch (e) {
     BotUtil.makeLog('warn', `[Device] 创建 media 目录失败: ${e.message}`, 'DeviceAPI');
   }
@@ -271,11 +272,12 @@ async function segmentsToWebUrls(segments, Bot, baseUrlOverride) {
             else if (sig[0] === 0x52 && sig[2] === 0x49) mime = 'image/webp';
           }
         } else {
-          buf = await fs.readFile(url);
+          buf = await FileUtils.readFileBuffer(url);
+          if (!buf) throw new Error(`读取文件失败: ${url}`);
           if (s.type === 'image') mime = mimeFromPath(url);
         }
         const filename = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}${extFromMime(mime)}`;
-        await fs.writeFile(path.join(mediaDir, filename), buf);
+        await FileUtils.writeFileBuffer(path.join(mediaDir, filename), buf);
         s.url = baseUrl ? `${baseUrl}/media/${filename}` : `/media/${filename}`;
       } catch (e) {
         BotUtil.makeLog('warn', `[Device] 无法转媒体: ${e.message}`, 'DeviceAPI');
@@ -288,7 +290,7 @@ async function segmentsToWebUrls(segments, Bot, baseUrlOverride) {
           const mime = match[1];
           const buf = Buffer.from(match[2], 'base64');
           const filename = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}${extFromMime(mime)}`;
-          await fs.writeFile(path.join(mediaDir, filename), buf);
+          await FileUtils.writeFileBuffer(path.join(mediaDir, filename), buf);
           s.url = baseUrl ? `${baseUrl}/media/${filename}` : `/media/${filename}`;
         } catch (e) {
           BotUtil.makeLog('warn', `[Device] data URL 落盘失败: ${e.message}`, 'DeviceAPI');
@@ -400,6 +402,9 @@ export default {
         if (!device_id || !text) return res.status(400).json({ success: false, message: '缺少 device_id 或 text' });
         const id = String(device_id).trim();
         const ttsConfig = cfg.getTTSConfig?.() ?? {};
+        if (ttsConfig.onlyForASR === true) {
+          return res.status(403).json({ success: false, message: 'TTS 已配置为仅 ASR 场景可用' });
+        }
         if (ttsConfig.enabled) {
           try {
             const client = TTSFactory.createClient(id, ttsConfig, Bot);

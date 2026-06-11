@@ -5,11 +5,13 @@
 import AIStream from '../../../lib/aistream/aistream.js';
 import BotUtil from '../../../lib/util.js';
 import path from 'path';
-import fs from 'fs/promises';
-import fsSync from 'fs';
 import os from 'os';
+import { FileUtils } from '../../../lib/utils/file-utils.js';
 
 export default class DatabaseStream extends AIStream {
+  dbDir = path.join(os.homedir(), '.xrk', 'knowledge');
+  databases = new Map();
+
   constructor() {
     super({
       name: 'database',
@@ -19,13 +21,11 @@ export default class DatabaseStream extends AIStream {
       priority: 1,
       config: { enabled: true, temperature: 0.7, maxTokens: 2000 }
     });
-    this.dbDir = path.join(os.homedir(), '.xrk', 'knowledge');
-    this.databases = new Map();
   }
 
   async init() {
     await super.init();
-    await fs.mkdir(this.dbDir, { recursive: true });
+    await FileUtils.ensureDir(this.dbDir);
     this.registerAllFunctions();
   }
 
@@ -105,15 +105,23 @@ export default class DatabaseStream extends AIStream {
     });
   }
 
+  async _readRecords(dbFile) {
+    const data = await FileUtils.readFile(dbFile, 'utf8');
+    if (!data) return [];
+    try {
+      return JSON.parse(data);
+    } catch {
+      return [];
+    }
+  }
+
+  async _writeRecords(dbFile, records) {
+    await FileUtils.writeFile(dbFile, JSON.stringify(records, null, 2), 'utf8');
+  }
+
   async saveKnowledge(db, content) {
     const dbFile = path.join(this.dbDir, `${db}.json`);
-    let records = [];
-    try {
-      const data = await fs.readFile(dbFile, 'utf8');
-      records = JSON.parse(data);
-    } catch {
-      // 文件不存在
-    }
+    const records = await this._readRecords(dbFile);
     let knowledgeData;
     try {
       knowledgeData = JSON.parse(content);
@@ -126,20 +134,14 @@ export default class DatabaseStream extends AIStream {
       createdAt: new Date().toISOString()
     };
     records.push(record);
-    await fs.writeFile(dbFile, JSON.stringify(records, null, 2), 'utf8');
+    await this._writeRecords(dbFile, records);
     this.databases.set(db, records);
     BotUtil.makeLog('info', `[${this.name}] 保存知识到知识库: ${db}`, 'DatabaseStream');
   }
 
   async queryKnowledge(db, keyword) {
     const dbFile = path.join(this.dbDir, `${db}.json`);
-    let records = [];
-    try {
-      const data = await fs.readFile(dbFile, 'utf8');
-      records = JSON.parse(data);
-    } catch {
-      return [];
-    }
+    const records = await this._readRecords(dbFile);
     if (!keyword || keyword === '*') return records;
     const kw = keyword.toLowerCase();
     return records.filter(record => {
@@ -149,46 +151,40 @@ export default class DatabaseStream extends AIStream {
   }
 
   async listDatabases() {
-    try {
-      const files = await fs.readdir(this.dbDir);
-      return files.filter(file => file.endsWith('.json')).map(file => file.replace('.json', ''));
-    } catch {
-      return [];
-    }
+    const files = await FileUtils.readDir(this.dbDir);
+    return files.filter(file => file.endsWith('.json')).map(file => file.replace('.json', ''));
   }
 
   async deleteKnowledge(db, condition) {
     const dbFile = path.join(this.dbDir, `${db}.json`);
-    let records = [];
-    try {
-      const data = await fs.readFile(dbFile, 'utf8');
-      records = JSON.parse(data);
-    } catch {
-      return 0;
-    }
+    let records = await this._readRecords(dbFile);
+    if (!records.length && !(await FileUtils.exists(dbFile))) return 0;
+
     if (!condition || condition === '*') {
-      records = [];
-    } else {
-      const id = parseInt(condition, 10);
-      if (!Number.isNaN(id)) {
-        const before = records.length;
-        records = records.filter(r => r.id !== id);
-        const deleted = before - records.length;
-        await fs.writeFile(dbFile, JSON.stringify(records, null, 2), 'utf8');
-        this.databases.set(db, records);
-        return deleted;
-      }
-      const [key, value] = condition.split('=').map(s => s.trim());
       const before = records.length;
-      records = records.filter(r => r[key] !== value);
+      records = [];
+      await this._writeRecords(dbFile, records);
+      this.databases.set(db, records);
+      return before;
+    }
+
+    const id = parseInt(condition, 10);
+    if (!Number.isNaN(id)) {
+      const before = records.length;
+      records = records.filter(r => r.id !== id);
       const deleted = before - records.length;
-      await fs.writeFile(dbFile, JSON.stringify(records, null, 2), 'utf8');
+      await this._writeRecords(dbFile, records);
       this.databases.set(db, records);
       return deleted;
     }
-    await fs.writeFile(dbFile, JSON.stringify(records, null, 2), 'utf8');
+
+    const [key, value] = condition.split('=').map(s => s.trim());
+    const before = records.length;
+    records = records.filter(r => r[key] !== value);
+    const deleted = before - records.length;
+    await this._writeRecords(dbFile, records);
     this.databases.set(db, records);
-    return records.length;
+    return deleted;
   }
 
   buildSystemPrompt() {
@@ -196,12 +192,8 @@ export default class DatabaseStream extends AIStream {
   }
 
   getDatabasesSync() {
-    try {
-      const files = fsSync.readdirSync(this.dbDir);
-      return files.filter(file => file.endsWith('.json')).map(file => file.replace('.json', ''));
-    } catch {
-      return [];
-    }
+    const files = FileUtils.readDirSync(this.dbDir);
+    return files.filter(file => file.endsWith('.json')).map(file => file.replace('.json', ''));
   }
 
   async buildChatContext() {

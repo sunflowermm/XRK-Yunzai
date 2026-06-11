@@ -7,6 +7,7 @@ import BotUtil from "../../../lib/util.js";
 import { FileUtils } from "../../../lib/utils/file-utils.js";
 import { cropTopAndBottom } from "../../../lib/renderer/crop.js";
 import { toBuffer, toFileUrl } from "../../../lib/renderer/screenshot-utils.js";
+import { resolveProjectPath } from "../../../lib/config/config-constants.js";
 
 export default class PlaywrightRenderer extends Renderer {
   constructor(config = {}) {
@@ -149,7 +150,7 @@ export default class PlaywrightRenderer extends Renderer {
   }
 
   readCacheFile(filePath) {
-    const abs = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
+    const abs = path.isAbsolute(filePath) ? filePath : path.resolve(resolveProjectPath(), filePath);
     if (this._fileCache.has(abs)) return this._fileCache.get(abs);
     try {
       const buf = fs.readFileSync(abs);
@@ -334,7 +335,7 @@ export default class PlaywrightRenderer extends Renderer {
         if (!savePath) return false;
       }
     }
-    const filePath = useUrl ? null : (directFilePath || path.join(process.cwd(), String(savePath).replace(/^\.\/?/, "")));
+    const filePath = useUrl ? null : (directFilePath || path.join(resolveProjectPath(), String(savePath).replace(/^\.\/?/, "")));
     if (!useUrl && (typeof filePath !== "string" || !FileUtils.existsSync(filePath))) {
       BotUtil.makeLog("error", `HTML file does not exist: ${filePath}`, "PlaywrightRenderer");
       return false;

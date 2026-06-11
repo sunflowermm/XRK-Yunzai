@@ -1,8 +1,15 @@
 import cfg from "../../lib/config/config.js"
-import fs from "node:fs/promises"
 import path from "node:path"
 import lodash from "lodash"
 import crypto from "crypto"
+import { FileUtils } from "../../lib/utils/file-utils.js"
+import {
+  resolveProjectPath,
+  DATA_MESSAGE_JSON_DIR,
+  DATA_BANNED_WORDS_DIR,
+  DATA_BANNED_WORDS_IMAGES_DIR,
+  DATA_BANNED_WORDS_CONFIG_DIR,
+} from "../../lib/config/config-constants.js"
 
 export const messageMap = {}
 export const bannedWordsMap = {}
@@ -58,6 +65,11 @@ function collectSegmentFiles(segments, files) {
 }
 
 export class add extends plugin {
+  messageJsonDir = resolveProjectPath(DATA_MESSAGE_JSON_DIR)
+  bannedWordsDir = resolveProjectPath(DATA_BANNED_WORDS_DIR)
+  bannedImagesDir = resolveProjectPath(DATA_BANNED_WORDS_IMAGES_DIR)
+  bannedWordsConfigDir = resolveProjectPath(DATA_BANNED_WORDS_CONFIG_DIR)
+
   constructor() {
     super({
       name: "添加消息",
@@ -100,19 +112,14 @@ export class add extends plugin {
         }
       ]
     })
-
-    this.path = "data/messageJson/"
-    this.bannedWordsPath = "data/bannedWords/"
-    this.bannedImagesPath = "data/bannedWords/images/"
-    this.configPath = "data/bannedWords/config/"
   }
 
   async init() {
     await Promise.all([
-      Bot.mkdir(this.path),
-      Bot.mkdir(this.bannedWordsPath),
-      Bot.mkdir(this.bannedImagesPath),
-      Bot.mkdir(this.configPath)
+      Bot.mkdir(this.messageJsonDir),
+      Bot.mkdir(this.bannedWordsDir),
+      Bot.mkdir(this.bannedImagesDir),
+      Bot.mkdir(this.bannedWordsConfigDir)
     ])
     await this.initAllBannedWords()
   }
@@ -131,7 +138,7 @@ export class add extends plugin {
   /** 初始化所有违禁词 */
   async initAllBannedWords() {
     try {
-      const files = await fs.readdir(this.bannedWordsPath)
+      const files = await FileUtils.readDir(this.bannedWordsDir)
       await Promise.all(
         files.filter(f => f.endsWith('.json'))
           .map(f => this.initBannedWords(f.replace('.json', '')))
@@ -157,11 +164,13 @@ export class add extends plugin {
       }
     }
 
-    const filePath = `${this.bannedWordsPath}${groupId}.json`
+    const filePath = path.join(this.bannedWordsDir, `${groupId}.json`)
     if (!await Bot.fsStat(filePath)) return
 
     try {
-      const data = JSON.parse(await fs.readFile(filePath, "utf8"))
+      const raw = await FileUtils.readFile(filePath, "utf8")
+      if (!raw) return
+      const data = JSON.parse(raw)
       
       data.exact?.forEach(word => bannedWordsMap[groupId].exact.add(word))
       data.fuzzy?.forEach(word => bannedWordsMap[groupId].fuzzy.add(word))
@@ -187,7 +196,7 @@ export class add extends plugin {
       config: bannedWordsMap[groupId].config
     }
     
-    await fs.writeFile(`${this.bannedWordsPath}${groupId}.json`, JSON.stringify(data, null, 2))
+    await FileUtils.writeFile(path.join(this.bannedWordsDir, `${groupId}.json`), JSON.stringify(data, null, 2))
   }
 
   /** 获取身份信息 */
@@ -326,7 +335,7 @@ export class add extends plugin {
       const hash = await this.getImageHash(imgUrl)
       if (!hash) return { success: false, error: '获取图片hash失败' }
       
-      const groupImgPath = `${this.bannedImagesPath}${groupId}/`
+      const groupImgPath = path.join(this.bannedImagesDir, String(groupId))
       await Bot.mkdir(groupImgPath)
       
       const response = await fetch(imgUrl)
@@ -334,9 +343,9 @@ export class add extends plugin {
       
       const buffer = await response.arrayBuffer()
       const ext = imgUrl.match(/\.(jpg|jpeg|png|gif|webp)/i)?.[1] || 'jpg'
-      const filePath = `${groupImgPath}${hash}.${ext}`
-      
-      await fs.writeFile(filePath, Buffer.from(buffer))
+      const filePath = path.join(groupImgPath, `${hash}.${ext}`)
+
+      await FileUtils.writeFileBuffer(filePath, Buffer.from(buffer))
       
       bannedWordsMap[groupId].images.set(hash, {
         path: filePath,
@@ -465,7 +474,7 @@ export class add extends plugin {
             const [hash, info] = imagesList[num - exactList.length - 1]
             deletedItem = `图片违禁词 (${info.desc})`
             bannedWordsMap[this.group_id].images.delete(hash)
-            try { await fs.unlink(info.path) } catch {}
+            try { await FileUtils.unlink(info.path) } catch {}
           }
           deleted = true
         }
@@ -969,7 +978,7 @@ export class add extends plugin {
   /** 保存JSON */
   async saveJson() {
     const obj = Object.fromEntries(messageMap[this.group_id])
-    await fs.writeFile(`${this.path}${this.group_id}.json`, JSON.stringify(obj, "", "\t"))
+    await FileUtils.writeFile(path.join(this.messageJsonDir, `${this.group_id}.json`), JSON.stringify(obj, "", "\t"))
   }
 
   /** 保存文件 */
@@ -978,9 +987,9 @@ export class add extends plugin {
       const file = await Bot.fileType({ ...data, file: data.url })
       if (Buffer.isBuffer(file.buffer)) {
         file.name = `${this.group_id}/${data.type}/${file.name}`
-        file.path = `${this.path}${file.name}`
+        file.path = path.join(this.messageJsonDir, file.name)
         await Bot.mkdir(path.dirname(file.path))
-        await fs.writeFile(file.path, file.buffer)
+        await FileUtils.writeFileBuffer(file.path, file.buffer)
         return file.name
       }
     } catch (err) {
@@ -1083,7 +1092,7 @@ export class add extends plugin {
   /** 解析词条存储的媒体本地路径 */
   async resolveEntryMediaPath(item) {
     if (!item?.file) return item?.url || null
-    const localPath = `${this.path}${item.file}`
+    const localPath = path.join(this.messageJsonDir, item.file)
     if (await Bot.fsStat(localPath)) return localPath
     if (await Bot.fsStat(item.file)) return item.file
     return item?.url || null
@@ -1163,11 +1172,13 @@ export class add extends plugin {
     if (messageMap[this.group_id]) return
     messageMap[this.group_id] = new Map()
 
-    const filePath = `${this.path}${this.group_id}.json`
+    const filePath = path.join(this.messageJsonDir, `${this.group_id}.json`)
     if (!await Bot.fsStat(filePath)) return
 
     try {
-      const message = JSON.parse(await fs.readFile(filePath, "utf8"))
+      const raw = await FileUtils.readFile(filePath, "utf8")
+      if (!raw) return
+      const message = JSON.parse(raw)
       for (const i in message) messageMap[this.group_id].set(i, message[i])
     } catch (err) {
       logger.error(`JSON 格式错误：${filePath} ${err}`)
@@ -1179,11 +1190,13 @@ export class add extends plugin {
     if (messageMap.global) return
     messageMap.global = new Map()
 
-    const globalPath = `${this.path}global.json`
+    const globalPath = path.join(this.messageJsonDir, 'global.json')
     if (!await Bot.fsStat(globalPath)) return
 
     try {
-      const message = JSON.parse(await fs.readFile(globalPath, "utf8"))
+      const raw = await FileUtils.readFile(globalPath, "utf8")
+      if (!raw) return
+      const message = JSON.parse(raw)
       for (const i in message) messageMap.global.set(i, message[i])
     } catch (err) {
       logger.error(`JSON 格式错误：${globalPath} ${err}`)
@@ -1199,7 +1212,7 @@ export class add extends plugin {
       collectSegmentFiles(Array.isArray(msg) ? msg : [msg], files)
     }
 
-    return Promise.allSettled(files.map(file => fs.rm(`${this.path}${file}`).catch(() => {})))
+    return Promise.allSettled(files.map(file => FileUtils.rm(path.join(this.messageJsonDir, file)).catch(() => {})))
   }
 
   /** #删除 */

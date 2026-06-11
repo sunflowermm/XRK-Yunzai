@@ -1,11 +1,21 @@
-import { promises as fs } from 'fs';
 import path from 'path';
 import readline from 'node:readline';
 import { spawn, spawnSync } from 'child_process';
 import inquirer from 'inquirer';
 import chalk from 'chalk';
 import cfg from './lib/config/config.js';
-import { DEFAULT_CONFIG_DIR, SERVER_BOTS_DIR, LOGS_DIR, PM2_CONFIG_DIR } from './lib/config/config-constants.js';
+import {
+  APP_ENTRY_REL,
+  DATA_DIR,
+  DEFAULT_CONFIG_DIR,
+  LOGS_DIR,
+  PM2_CONFIG_DIR,
+  SERVER_BOTS_DIR,
+  resolveProjectPath,
+} from './lib/config/config-constants.js';
+import { FileUtils } from './lib/utils/file-utils.js';
+
+const projectRoot = resolveProjectPath();
 
 if (process.platform === 'win32') {
   try {
@@ -19,20 +29,20 @@ process.setMaxListeners(30);
 
 const entry = process.argv[1];
 if (entry && path.basename(entry) === 'start.js') {
-  const appPath = path.resolve(process.cwd(), 'app.js');
-  const result = spawnSync(process.argv[0], [appPath, ...process.argv.slice(2)], { stdio: 'inherit', cwd: process.cwd() });
+  const appPath = resolveProjectPath(APP_ENTRY_REL);
+  const result = spawnSync(process.argv[0], [appPath, ...process.argv.slice(2)], { stdio: 'inherit', cwd: projectRoot });
   process.exit(result.status !== null ? result.status : 1);
 }
 
 let globalSignalHandler = null;
 
 const PATHS = {
-  LOGS: `./${LOGS_DIR}`,
-  DATA: './data',
-  CONFIG: './config',
-  DEFAULT_CONFIG: `./${DEFAULT_CONFIG_DIR}`,
-  SERVER_BOTS: `./${SERVER_BOTS_DIR}`,
-  PM2_CONFIG: `./${PM2_CONFIG_DIR}`
+  LOGS: resolveProjectPath(LOGS_DIR),
+  DATA: resolveProjectPath(DATA_DIR),
+  CONFIG: resolveProjectPath('config'),
+  DEFAULT_CONFIG: resolveProjectPath(DEFAULT_CONFIG_DIR),
+  SERVER_BOTS: resolveProjectPath(SERVER_BOTS_DIR),
+  PM2_CONFIG: resolveProjectPath(PM2_CONFIG_DIR),
 };
 
 const CONFIG = {
@@ -48,12 +58,9 @@ const CONFIG = {
 };
 
 async function writeFileIfChanged(filePath, content) {
-  try {
-    const existing = await fs.readFile(filePath, typeof content === 'string' ? 'utf8' : undefined);
-    if (existing === content) return false;
-  } catch {}
-
-  await fs.writeFile(filePath, content);
+  const existing = await FileUtils.readFile(filePath, 'utf8');
+  if (existing === content) return false;
+  await FileUtils.writeFile(filePath, content, 'utf8');
   return true;
 }
 
@@ -81,7 +88,7 @@ class Logger {
     const messages = this.queue.splice(0, this.queue.length);
     
     try {
-      await fs.appendFile(this.logFile, messages.join(''));
+      await FileUtils.appendFile(this.logFile, messages.join(''));
     } catch (error) {
       // 静默失败，避免递归错误
     } finally {
@@ -115,7 +122,7 @@ class PM2Manager extends BaseManager {
   getPM2Path() {
     return process.platform === 'win32' 
       ? 'pm2' 
-      : path.join(process.cwd(), 'node_modules', 'pm2', 'bin', 'pm2');
+      : path.join(projectRoot, 'node_modules', 'pm2', 'bin', 'pm2');
   }
 
   getProcessName(port) {
@@ -235,7 +242,7 @@ class ServerManager extends BaseManager {
 
   async getAvailablePorts() {
     try {
-      const files = await fs.readdir(PATHS.SERVER_BOTS);
+      const files = await FileUtils.readDir(PATHS.SERVER_BOTS);
       return files
         .filter(file => !isNaN(file))
         .map(file => parseInt(file))
@@ -329,7 +336,7 @@ class ServerManager extends BaseManager {
 
   async runServerProcess(port, skipConfigCheck = false) {
     const nodeArgs = getNodeArgs();
-    const entryScript = path.join(process.cwd(), 'app.js');
+    const entryScript = resolveProjectPath(APP_ENTRY_REL);
     const startArgs = [...nodeArgs, entryScript, 'server', port.toString()];
     const cleanEnv = {
       ...process.env,
@@ -395,10 +402,10 @@ class ServerManager extends BaseManager {
     const pm2ConfigPath = path.join(PATHS.PM2_CONFIG, `pm2_server_${port}.json`);
     try {
       await this.pm2Manager.executePortCommand('stop', port);
-      await fs.rm(portDir, { recursive: true, force: true });
-      try {
-        await fs.unlink(pm2ConfigPath);
-      } catch {}
+      await FileUtils.rm(portDir, { recursive: true, force: true });
+      if (await FileUtils.exists(pm2ConfigPath)) {
+        await FileUtils.unlink(pm2ConfigPath);
+      }
       await this.logger.success(`端口 ${port} 的配置已删除`);
     } catch (error) {
       await this.logger.error(`删除端口配置失败: ${error.message}`);

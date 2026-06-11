@@ -6,8 +6,9 @@
  */
 import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
 import path from 'path';
-import fs from 'fs/promises';
 import BotUtil from '../../../lib/util.js';
+import { FileUtils } from '../../../lib/utils/file-utils.js';
+import { DATA_AI_CONFIG_REL } from '../../../lib/config/config-constants.js';
 
 export default class AIConfig extends ConfigBase {
   constructor() {
@@ -15,7 +16,7 @@ export default class AIConfig extends ConfigBase {
       name: 'ai_config',
       displayName: 'AI 助手配置',
       description: 'AI 助手触发策略与人设：前缀、白名单群/用户、随机触发冷却与概率、合并工作流列表（memory/tools/database 等）',
-      filePath: 'data/ai/config.yaml',
+      filePath: DATA_AI_CONFIG_REL,
       fileType: 'yaml',
       schema: {
         fields: {
@@ -89,7 +90,7 @@ export default class AIConfig extends ConfigBase {
         throw error;
       }
       const filePath = this.getFilePath();
-      await fs.mkdir(path.dirname(filePath), { recursive: true }).catch(() => {});
+      await FileUtils.ensureDir(path.dirname(filePath));
       const defaultData = {};
       for (const [key, meta] of Object.entries(this.schema?.fields || {})) {
         if (meta.default !== undefined) defaultData[key] = meta.default;

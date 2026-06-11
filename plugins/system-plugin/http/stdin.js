@@ -1,6 +1,7 @@
 import path from "path";
 import { fileURLToPath } from 'url';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
+import { resolveProjectPath, WWW_STDIN_DIR, WWW_MEDIA_DIR } from '../../../lib/config/config-constants.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -28,8 +29,8 @@ export default {
           });
         }
 
-        const tempDir = path.join(process.cwd(), "www/stdin");
-        const mediaDir = path.join(process.cwd(), "www/media");
+        const tempDir = resolveProjectPath(WWW_STDIN_DIR);
+        const mediaDir = resolveProjectPath(WWW_MEDIA_DIR);
         
         res.json({
           success: true,

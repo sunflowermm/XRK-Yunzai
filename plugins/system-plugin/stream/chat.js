@@ -1,11 +1,11 @@
 import path from 'path';
-import fs from 'fs';
 import AIStream from '../../../lib/aistream/aistream.js';
 import BotUtil from '../../../lib/util.js';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
 import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
 import { prepareOpenAIChatVisionMessages } from '../../../lib/utils/llm/image-utils.js';
-const EMOTIONS_DIR = path.join(process.cwd(), 'resources/aiimages');
+import { resolveProjectPath, RESOURCES_AIIMAGES_DIR, DATA_DIR } from '../../../lib/config/config-constants.js';
+const EMOTIONS_DIR = resolveProjectPath(RESOURCES_AIIMAGES_DIR);
 const EMOTION_TYPES = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
 
 // 表情回应映射
@@ -82,7 +82,7 @@ export default class ChatStream extends AIStream {
       const emotionDir = path.join(EMOTIONS_DIR, emotion);
       try {
         await BotUtil.mkdir(emotionDir);
-        const files = await fs.promises.readdir(emotionDir);
+        const files = FileUtils.existsSync(emotionDir) ? FileUtils.readDirSync(emotionDir) : [];
         const imageFiles = files.filter(file => 
           /\.(jpg|jpeg|png|gif)$/i.test(file)
         );
@@ -2441,7 +2441,7 @@ export default class ChatStream extends AIStream {
         bodyText = JSON.stringify(payload, null, 2);
       }
 
-      const fpath = path.join(process.cwd(), 'data', `ai_llm_request_${Date.now()}.json`);
+      const fpath = resolveProjectPath(DATA_DIR, `ai_llm_request_${Date.now()}.json`);
       const ok = await FileUtils.writeFile(fpath, bodyText, 'utf8');
       if (!ok) {
         result.error = 'writeFile 失败';

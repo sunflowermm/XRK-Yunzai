@@ -2,18 +2,18 @@
  * 桌面与通用助手工作流（与 tools/chat 一致使用相对路径，便于 StreamLoader 动态 import）
  */
 import path from 'path';
-import fs from 'fs/promises';
 import os from 'os';
 import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import AIStream from '../../../lib/aistream/aistream.js';
 import BotUtil from '../../../lib/util.js';
 import { BaseTools } from '../../../lib/utils/base-tools.js';
+import { FileUtils } from '../../../lib/utils/file-utils.js';
 import si from 'systeminformation';
 import fetch from 'node-fetch';
+import { resolveProjectPath, DATA_TRASH_DIR } from '../../../lib/config/config-constants.js';
 
-const cwd = process.cwd();
-const paths = { root: cwd, trash: path.join(cwd, 'data', 'trash') };
+const paths = { root: resolveProjectPath(), trash: resolveProjectPath(DATA_TRASH_DIR) };
 
 const IS_WINDOWS = process.platform === 'win32';
 const execAsync = promisify(exec);
@@ -240,15 +240,15 @@ export default class DesktopStream extends AIStream {
 
           const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
           const screenshotDir = path.join(paths.trash, 'screenshot');
-          await fs.mkdir(screenshotDir, { recursive: true });
+          await FileUtils.ensureDir(screenshotDir);
 
           const filename = `screenshot_${timestamp}.png`;
           const screenshotPath = path.join(screenshotDir, filename);
 
           const img = await screenshot({ screen: -1 });
-          await fs.writeFile(screenshotPath, img);
+          await FileUtils.writeFileBuffer(screenshotPath, img);
 
-          const stats = await fs.stat(screenshotPath);
+          const stats = await FileUtils.stat(screenshotPath);
           if (stats.size === 0) {
             throw new Error('截屏文件为空');
           }
@@ -543,7 +543,7 @@ export default class DesktopStream extends AIStream {
           const safeName = this.sanitizeFileName(folderName);
           const folderPath = path.join(workspace, safeName);
 
-          await fs.mkdir(folderPath, { recursive: true });
+          await FileUtils.ensureDir(folderPath);
 
           return this.successResponse({ 
             message: `已创建文件夹: ${safeName}`,
@@ -655,7 +655,7 @@ export default class DesktopStream extends AIStream {
 
         try {
           const workspace = this.getWorkspace();
-          const files = await fs.readdir(workspace);
+          const files = await FileUtils.readDir(workspace);
           let shortcutPath = null;
 
           for (const file of files) {
@@ -743,10 +743,10 @@ export default class DesktopStream extends AIStream {
 
           // 生成并保存文档
           const buffer = await Packer.toBuffer(doc);
-          await fs.writeFile(filePath, buffer);
+          await FileUtils.writeFileBuffer(filePath, buffer);
 
           // 验证文件是否生成
-          const stats = await fs.stat(filePath);
+          const stats = await FileUtils.stat(filePath);
           if (stats.size === 0) {
             throw new Error('Word文档文件为空');
           }
@@ -877,7 +877,7 @@ export default class DesktopStream extends AIStream {
           await workbook.xlsx.writeFile(filePath);
 
           // 验证文件
-          const stats = await fs.stat(filePath);
+          const stats = await FileUtils.stat(filePath);
           
           if (context.stream) {
             context.stream.context = context.stream.context || {};

@@ -1,14 +1,19 @@
 import path from 'path';
-import fs from 'fs/promises';
-import fsSync from 'fs';
 import { ulid } from 'ulid';
 import crypto from 'crypto';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
+import { parseMultipartData } from '../../../lib/utils/multipart-parser.js';
+import { getServerUploadLimits } from '../../../lib/utils/upload-limits.js';
+import {
+  resolveProjectPath,
+  DATA_UPLOADS_DIR,
+  DATA_MEDIA_DIR,
+  TEMP_HTML_DIR,
+} from '../../../lib/config/config-constants.js';
 
-// 与 lib/bot.js 静态路由一致：/media、/uploads 指向 data 目录
-const uploadDir = path.join(process.cwd(), 'data', 'uploads');
-const mediaDir = path.join(process.cwd(), 'data', 'media');
-const tempHtmlDir = path.join(process.cwd(), 'temp', 'html');
+const uploadDir = resolveProjectPath(DATA_UPLOADS_DIR);
+const mediaDir = resolveProjectPath(DATA_MEDIA_DIR);
+const tempHtmlDir = resolveProjectPath(TEMP_HTML_DIR);
 const UPLOAD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const MEDIA_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const TEMP_HTML_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -38,62 +43,6 @@ function buildFileUrls(baseUrl, pathPrefix, fileId, filename, isMedia) {
   const download_url = baseUrl ? `${baseUrl}/api/file/download/${fileId}` : `/api/file/download/${fileId}`;
   const preview_url = isMedia ? (baseUrl ? `${baseUrl}/api/file/preview/${fileId}` : `/api/file/preview/${fileId}`) : null;
   return { url, download_url, preview_url };
-}
-
-/**
- * 解析multipart/form-data
- */
-async function parseMultipartData(req) {
-  return new Promise((resolve, reject) => {
-    const boundary = req.headers['content-type'].split('boundary=')[1];
-    if (!boundary) {
-      reject(new Error('No boundary found'));
-      return;
-    }
-
-    let data = Buffer.alloc(0);
-    const files = [];
-
-    req.on('data', chunk => {
-      data = Buffer.concat([data, chunk]);
-    });
-
-    req.on('end', () => {
-      const parts = data.toString('binary').split(`--${boundary}`);
-      
-      for (const part of parts) {
-        if (part.includes('Content-Disposition: form-data')) {
-          const nameMatch = part.match(/name="([^"]+)"/);
-          const filenameMatch = part.match(/filename="([^"]+)"/);
-          
-          if (filenameMatch) {
-            const filename = filenameMatch[1];
-            const contentTypeMatch = part.match(/Content-Type: ([^\r\n]+)/);
-            const contentType = contentTypeMatch ? contentTypeMatch[1] : 'application/octet-stream';
-            
-            const headerEndIndex = part.indexOf('\r\n\r\n');
-            if (headerEndIndex !== -1) {
-              const fileStart = headerEndIndex + 4;
-              const fileEnd = part.lastIndexOf('\r\n');
-              const fileContent = Buffer.from(part.substring(fileStart, fileEnd), 'binary');
-              
-              files.push({
-                fieldname: nameMatch ? nameMatch[1] : 'file',
-                originalname: filename,
-                mimetype: contentType,
-                buffer: fileContent,
-                size: fileContent.length
-              });
-            }
-          }
-        }
-      }
-      
-      resolve({ files });
-    });
-
-    req.on('error', reject);
-  });
 }
 
 /**
@@ -138,8 +87,17 @@ export default {
           let files = [];
           
           if (contentType.includes('multipart/form-data')) {
-            const result = await parseMultipartData(req);
-            files = result.files;
+            try {
+              const result = await parseMultipartData(req, getServerUploadLimits());
+              files = result.files;
+            } catch (uploadErr) {
+              const isSize = /超过.*限制/.test(uploadErr?.message || '');
+              return res.status(isSize ? 413 : 400).json({
+                success: false,
+                message: uploadErr?.message || '上传解析失败',
+                code: isSize ? 413 : 400
+              });
+            }
           } else {
             return res.status(400).json({ 
               success: false, 
@@ -168,7 +126,7 @@ export default {
             const targetDir = isMedia ? mediaDir : uploadDir;
             const targetPath = path.join(targetDir, filename);
             
-            await fs.writeFile(targetPath, file.buffer);
+            await FileUtils.writeFileBuffer(targetPath, file.buffer);
             
             const hash = crypto.createHash('md5').update(file.buffer).digest('hex');
             const pathPrefix = isMedia ? 'media' : 'uploads';
@@ -248,7 +206,7 @@ export default {
         if (!fileInfo) {
           try {
             for (const dir of [uploadDir, mediaDir]) {
-              const files = await fs.readdir(dir);
+              const files = FileUtils.existsSync(dir) ? FileUtils.readDirSync(dir) : [];
               const file = files.find(f => f.includes(id));
               if (file) {
                 const filePath = path.join(dir, file);
@@ -262,13 +220,11 @@ export default {
           return notFound(res);
         }
 
-        try {
-          await fs.access(fileInfo.path);
-          res.sendFile(fileInfo.path);
-        } catch {
+        if (!FileUtils.existsSync(fileInfo.path)) {
           fileMap.delete(id);
           return notFound(res);
         }
+        res.sendFile(fileInfo.path);
       }
     },
 
@@ -281,13 +237,11 @@ export default {
 
         if (!fileInfo) return notFound(res);
 
-        try {
-          await fs.access(fileInfo.path);
-          res.download(fileInfo.path, fileInfo.name);
-        } catch {
+        if (!FileUtils.existsSync(fileInfo.path)) {
           fileMap.delete(id);
           return notFound(res);
         }
+        res.download(fileInfo.path, fileInfo.name);
       }
     },
 
@@ -300,15 +254,13 @@ export default {
 
         if (!fileInfo || !fileInfo.is_media) return notFound(res, '预览不可用');
 
-        try {
-          await fs.access(fileInfo.path);
-          res.setHeader('Content-Type', fileInfo.mime);
-          res.setHeader('Cache-Control', 'public, max-age=3600');
-          res.sendFile(fileInfo.path);
-        } catch {
+        if (!FileUtils.existsSync(fileInfo.path)) {
           fileMap.delete(id);
           return notFound(res);
         }
+        res.setHeader('Content-Type', fileInfo.mime);
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        res.sendFile(fileInfo.path);
       }
     },
 
@@ -322,7 +274,7 @@ export default {
 
         if (fileInfo) {
           try {
-            await fs.unlink(fileInfo.path);
+            await FileUtils.unlink(fileInfo.path);
             fileMap.delete(id);
           } catch (err) {
             logger.error(`删除文件失败: ${err.message}`);
@@ -393,7 +345,7 @@ export default {
           const targetDir = isMedia ? mediaDir : uploadDir;
           const targetPath = path.join(targetDir, finalFilename);
           
-          await fs.writeFile(targetPath, buffer);
+          await FileUtils.writeFileBuffer(targetPath, buffer);
           const baseUrl = getBaseUrl(req, Bot);
           const pathPrefix = isMedia ? 'media' : 'uploads';
           const urls = buildFileUrls(baseUrl, pathPrefix, fileId, finalFilename, isMedia);
@@ -451,7 +403,7 @@ export default {
       for (const [id, info] of fileMap) {
         if (now - info.upload_time > UPLOAD_MAX_AGE_MS) {
           try {
-            await fs.unlink(info.path);
+            await FileUtils.unlink(info.path);
             fileMap.delete(id);
           } catch {}
         }

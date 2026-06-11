@@ -3,6 +3,7 @@ import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
 import { transformOpenAIStyleVisionMessages } from '../../../lib/utils/llm/message-transform.js';
 import { MCPToolAdapter } from '../../../lib/utils/llm/mcp-tool-adapter.js';
 import { parseMultipartData } from '../../../lib/utils/multipart-parser.js';
+import { getServerUploadLimits } from '../../../lib/utils/upload-limits.js';
 import BotUtil from '../../../lib/util.js';
 
 /**
@@ -67,7 +68,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
   // 支持 multipart/form-data 格式（图片上传）
   if (contentType.includes('multipart/form-data')) {
     try {
-      const { files, fields } = await parseMultipartData(req);
+      const { files, fields } = await parseMultipartData(req, getServerUploadLimits());
       
       // 解析 JSON 字段
       if (fields.messages) {

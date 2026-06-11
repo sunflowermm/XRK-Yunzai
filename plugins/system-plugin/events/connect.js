@@ -2,8 +2,9 @@ import EventListener from "../../../lib/listener/listener.js"
 import cfg from "../../../lib/config/config.js"
 import Renderer from "../../../lib/renderer/loader.js"
 import { toBuffer } from "../../../lib/renderer/screenshot-utils.js"
-import fs from 'fs/promises'
 import path from 'path'
+import { FileUtils } from '../../../lib/utils/file-utils.js'
+import { resolveProjectPath, DATA_DIR } from "../../../lib/config/config-constants.js"
 
 const RESTART_KEY = 'Yz:restart'
 
@@ -12,9 +13,10 @@ export default class connectEvent extends EventListener {
     connect: async function (e) { await new this().execute(e) }
   }
 
+  dataDir = resolveProjectPath(DATA_DIR)
+
   constructor() {
     super({ event: "connect" })
-    this.dataDir = path.join(process.cwd(), 'data')
     this.renderer = Renderer.getRenderer()
   }
 
@@ -113,12 +115,12 @@ export default class connectEvent extends EventListener {
 
   async generateHTML(prefix, content) {
     const htmlPath = path.join(this.dataDir, `${prefix}_${Date.now()}.html`)
-    await fs.writeFile(htmlPath, content, 'utf-8')
+    await FileUtils.writeFile(htmlPath, content, 'utf-8')
     return htmlPath
   }
 
   cleanupFile(filePath, delay = 5000) {
-    setTimeout(() => fs.unlink(filePath).catch(() => {}), delay)
+    setTimeout(() => FileUtils.unlink(filePath).catch(() => {}), delay)
   }
 
   getWelcomeHTML() {

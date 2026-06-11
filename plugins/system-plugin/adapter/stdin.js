@@ -1,5 +1,4 @@
 import { createInterface } from "readline";
-import fs from "fs";
 import os from "os";
 import { exec } from "child_process";
 import path from "path";
@@ -7,14 +6,15 @@ import { ulid } from "ulid";
 import crypto from 'crypto';
 import BotUtil from "../../../lib/util.js";
 import { FileUtils } from "../../../lib/utils/file-utils.js";
+import { resolveProjectPath, WWW_STDIN_DIR, WWW_MEDIA_DIR } from "../../../lib/config/config-constants.js";
 
-const tempDir = path.join(process.cwd(), "www", "stdin");
-const mediaDir = path.join(process.cwd(), "www", "media");
+const tempDir = resolveProjectPath(WWW_STDIN_DIR);
+const mediaDir = resolveProjectPath(WWW_MEDIA_DIR);
 const TEMP_MAX_AGE_MS = 3600000;  // 1 小时
 const TEMP_CLEANUP_INTERVAL_MS = 3600000;
 
 /** 清理 www/stdin、www/media 下超过时效的临时文件，返回删除数量 */
-function runTempCleanup() {
+async function runTempCleanup() {
   let cleaned = 0;
   try {
     const now = Date.now();
@@ -24,9 +24,9 @@ function runTempCleanup() {
       for (const file of files) {
         const filePath = path.join(dir, file);
         try {
-          const stats = fs.statSync(filePath);
-          if (stats.mtimeMs && now - stats.mtimeMs > TEMP_MAX_AGE_MS) {
-            fs.unlinkSync(filePath);
+          const stats = FileUtils.statSync(filePath);
+          if (stats?.mtimeMs && now - stats.mtimeMs > TEMP_MAX_AGE_MS) {
+            await FileUtils.unlink(filePath);
             cleaned++;
           }
         } catch (_) {}
@@ -38,7 +38,11 @@ function runTempCleanup() {
   return cleaned;
 }
 
-setInterval(() => runTempCleanup(), TEMP_CLEANUP_INTERVAL_MS);
+setInterval(() => {
+  runTempCleanup().catch((err) => {
+    logger.error(`清理临时文件错误: ${err?.message || err}`);
+  });
+}, TEMP_CLEANUP_INTERVAL_MS);
 
 export class StdinHandler {
   constructor() {
@@ -129,7 +133,7 @@ export class StdinHandler {
       } else if (typeof filePath === 'string') {
         // 检查文件是否存在
         if (FileUtils.existsSync(filePath)) {
-          buffer = await fs.promises.readFile(filePath);
+          buffer = await FileUtils.readFileBuffer(filePath);
           fileName = path.basename(filePath);
           fileExt = path.extname(fileName).slice(1) || 'file';
         } else {
@@ -148,7 +152,7 @@ export class StdinHandler {
       
       // 保存文件到media目录
       const targetPath = path.join(mediaDir, fileName);
-      await fs.promises.writeFile(targetPath, buffer);
+      await FileUtils.writeFileBuffer(targetPath, buffer);
 
       // 返回访问URL
       const url = `${baseUrl}/media/${fileName}`;
@@ -361,7 +365,7 @@ export class StdinHandler {
         
         // 如果没有获取到buffer，尝试读取本地文件
         if (!buffer && typeof item.path === "string" && item.path !== "" && FileUtils.existsSync(item.path)) {
-          buffer = await fs.promises.readFile(item.path);
+          buffer = await FileUtils.readFileBuffer(item.path);
           fileName = fileName || path.basename(item.path);
           fileExt = path.extname(fileName).slice(1) || fileExt;
         }
@@ -389,7 +393,7 @@ export class StdinHandler {
 
       // 保存文件到media目录
       const filePath = path.join(mediaDir, fileName);
-      await fs.promises.writeFile(filePath, buffer);
+      await FileUtils.writeFileBuffer(filePath, buffer);
       
       // 生成访问URL
       const baseUrl = Bot.getServerUrl ? Bot.getServerUrl() : `http://localhost:${Bot.httpPort || 3000}`;
