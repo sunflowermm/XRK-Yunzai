@@ -2,6 +2,9 @@ import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
 import path from 'path';
 import cfg from '../../../lib/config/config.js';
 import { getServerConfigPath, SERVER_BOTS_DIR, RENDERERS_DIR, DATA_DB_DEFAULT_REL, resolveProjectPath } from '../../../lib/config/config-constants.js';
+import StreamLoader from '../../../lib/aistream/loader.js';
+import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
+import { mergeUniqueStrings } from '../../../lib/utils/string-array-utils.js';
 
 /**
  * 系统配置管理（与 XRK-AGT 对齐）
@@ -1289,7 +1292,7 @@ export default class SystemConfig extends ConfigBase {
                 Provider: {
                   type: 'string',
                   label: 'LLM运营商',
-                  description: '填写各工厂 providers[] 条目的 key（如 gptgod、deepseek-main）；先在对应 *_llm.yaml 添加端点',
+                  description: '从各工厂 providers[] 中选择；未列出时请先在对应 *_llm.yaml 添加端点',
                   default: '',
                   component: 'Input'
                 },
@@ -1404,6 +1407,30 @@ export default class SystemConfig extends ConfigBase {
                   max: 65535,
                   component: 'InputNumber'
                 },
+                defaultStreams: {
+                  type: 'array',
+                  label: '默认启用的工作流',
+                  description: '留空=代码内置默认（tools、web）；填写则覆盖',
+                  itemType: 'string',
+                  default: [],
+                  component: 'MultiSelect'
+                },
+                defaultRemoteMcp: {
+                  type: 'array',
+                  label: '默认启用的远程 MCP',
+                  description: '留空=不默认启用远程 MCP；填写则覆盖。用户自增 MCP 在 remote.mcpServers',
+                  itemType: 'string',
+                  default: [],
+                  component: 'MultiSelect'
+                },
+                toolMergeStrategy: {
+                  type: 'string',
+                  label: '工具合并策略',
+                  description: '当接口请求体同时传入 tools 且启用了工作流/MCP 工具时的合并策略：preferRequest=以接口 tools 为准，preferStream=以工作流/MCP 工具为准，merge=尽量合并（同名以接口为准）',
+                  enum: ['preferRequest', 'preferStream', 'merge'],
+                  default: 'preferRequest',
+                  component: 'Select'
+                },
                 autoRegister: {
                   type: 'boolean',
                   label: '自动注册工具',
@@ -1414,90 +1441,31 @@ export default class SystemConfig extends ConfigBase {
                 remote: {
                   type: 'object',
                   label: '远程MCP连接',
-                  description: '配置外部MCP服务器，支持多种协议（stdio/HTTP/SSE/WebSocket），兼容Claude Desktop配置格式',
+                  description: '远程 MCP 注册（建议：每条新增一个 JSON 块，直接粘贴社区的 { "mcpServers": { ... } } 即可）。',
                   component: 'SubForm',
                   fields: {
                     enabled: {
                       type: 'boolean',
                       label: '启用远程MCP',
+                      description: '用户自增远程 MCP；开放域检索内置 web.web_search（parallel-free 零配置）',
                       default: false,
                       component: 'Switch'
                     },
-                    // 选中的远程MCP服务器（多选）
-                    selected: {
+                    mcpServers: {
                       type: 'array',
-                      label: '已选中的MCP服务器',
-                      description: '从可用服务器列表中选择要启用的MCP服务器（多选）',
-                      component: 'ArrayForm',
-                      itemType: 'string',
-                      fields: {
-                        value: { 
-                          type: 'string', 
-                          label: '服务器名称', 
-                          component: 'Input',
-                          description: '输入服务器名称（需在servers列表中已定义）'
-                        }
-                      }
-                    },
-                    // 服务器定义列表
-                    servers: {
-                      type: 'array',
-                      label: 'MCP服务器定义',
-                      description: '定义所有可用的远程MCP服务器，支持原生JSON格式（command/args）和HTTP格式（url/transport）',
+                      label: 'MCP Servers（JSON 列表）',
+                      description: '每条为一个 JSON 对象（可直接粘贴含 mcpServers 的完整片段）。系统会把所有条目合并为最终可用的远程 MCP 列表。',
                       component: 'ArrayForm',
                       itemType: 'object',
+                      itemLabel: 'JSON 块',
+                      default: [],
                       fields: {
-                        name: { 
-                          type: 'string', 
-                          label: '服务器名称', 
-                          description: 'MCP服务器唯一标识（必填）',
-                          component: 'Input',
-                          required: true
-                        },
-                        // 原生JSON格式（command/args）- 用于stdio协议
-                        command: { 
-                          type: 'string', 
-                          label: '命令', 
-                          description: '启动MCP服务器的命令（如 npx、cmd、node 等，用于stdio协议）',
-                          component: 'Input'
-                        },
-                        args: {
-                          type: 'array',
-                          label: '命令参数',
-                          description: '命令的参数列表（如 ["-y", "bing-cn-mcp"]）',
-                          component: 'ArrayForm',
-                          itemType: 'string',
-                          fields: {
-                            value: { type: 'string', label: '参数', component: 'Input' }
-                          }
-                        },
-                        // HTTP格式（url/transport）- 用于HTTP/SSE/WebSocket协议
-                        url: { 
-                          type: 'string', 
-                          label: 'URL', 
-                          description: 'MCP服务器的HTTP地址（如 http://localhost:3000/mcp，用于HTTP/SSE/WebSocket协议）',
-                          component: 'Input'
-                        },
-                        transport: {
-                          type: 'string',
-                          label: '传输方式',
-                          description: '传输协议类型（仅HTTP格式需要）',
-                          enum: ['http', 'sse', 'websocket'],
-                          default: 'http',
-                          component: 'Select'
-                        },
-                        headers: { 
-                          type: 'object', 
-                          label: 'HTTP Headers', 
-                          description: 'HTTP请求头（仅HTTP格式需要，格式：{"Authorization":"Bearer token"}）',
-                          component: 'Textarea'
-                        },
-                        // 原生JSON配置（直接存储JSON字符串，用于复杂配置，优先级最高）
                         config: {
-                          type: 'string',
-                          label: '原生JSON配置',
-                          description: '直接存储完整JSON配置字符串（如：{"command":"npx","args":["-y","bing-cn-mcp"]}），优先级高于单独字段',
-                          component: 'Textarea'
+                          type: 'object',
+                          label: 'JSON',
+                          description: '示例：{ "mcpServers": { "my-mcp": { "command": "npx", "args": ["-y","some-mcp-package"] } } }',
+                          component: 'json',
+                          default: {}
                         }
                       }
                     }
@@ -2250,6 +2218,7 @@ export default class SystemConfig extends ConfigBase {
         }
       }
     };
+    this._refreshDynamicSchema();
   }
 
   /**
@@ -2260,7 +2229,11 @@ export default class SystemConfig extends ConfigBase {
   getConfigInstance(name) {
     const configMeta = this.configFiles[name];
     if (!configMeta) throw new Error(`未知的配置: ${name}`);
-    return new ConfigBase(configMeta);
+    const instance = new ConfigBase(configMeta);
+    if (name === 'aistream') {
+      instance.prepareValidate = (data) => this._refreshDynamicSchema(data);
+    }
+    return instance;
   }
 
   /** 委托到子配置实例执行方法，避免重复 getConfigInstance + 调用 */
@@ -2301,6 +2274,8 @@ export default class SystemConfig extends ConfigBase {
    * @returns {Object}
    */
   getStructure() {
+    this._refreshDynamicSchema();
+
     const structure = {
       name: this.name,
       displayName: this.displayName,
@@ -2316,6 +2291,77 @@ export default class SystemConfig extends ConfigBase {
     }
 
     return structure;
+  }
+
+  /**
+   * 动态刷新 aistream 相关 schema（工作流、远程 MCP、LLM Provider）
+   * @param {object} [validateSnapshot] - 待校验/写入的配置快照
+   */
+  _refreshDynamicSchema(validateSnapshot = null) {
+    try {
+      const aistreamSchema = this.configFiles?.aistream?.schema?.fields;
+      if (!aistreamSchema) return;
+
+      const snap = validateSnapshot || cfg?.aistream || {};
+      this._refreshAistreamMcpEnums(aistreamSchema.mcp?.fields, snap);
+      this._refreshAistreamLlmProviderEnum(aistreamSchema.llm?.fields, snap);
+    } catch (e) {
+      Bot.makeLog('error', `[SystemConfig] 刷新动态 schema 失败: ${e.message}`, 'SystemConfig');
+    }
+  }
+
+  _refreshAistreamMcpEnums(mcpFields, snap) {
+    if (!mcpFields) return;
+
+    let workflowKeys = [];
+    try {
+      const streams = StreamLoader.getStreamsByPriority?.() || [];
+      workflowKeys = streams
+        .filter((s) => !s.primaryStream && !s.secondaryStreams)
+        .map((s) => s.name)
+        .filter(Boolean);
+    } catch (e) {
+      Bot.makeLog('warn', `[SystemConfig] 获取工作流列表失败: ${e.message}`, 'SystemConfig');
+    }
+
+    let remoteServers = [];
+    try {
+      remoteServers = StreamLoader.listRemoteMCPServers?.() || [];
+    } catch (e) {
+      Bot.makeLog('warn', `[SystemConfig] 获取远程 MCP 列表失败: ${e.message}`, 'SystemConfig');
+    }
+
+    if (mcpFields.defaultStreams) {
+      mcpFields.defaultStreams.enum = mergeUniqueStrings(workflowKeys, snap?.mcp?.defaultStreams);
+    }
+    if (mcpFields.defaultRemoteMcp) {
+      mcpFields.defaultRemoteMcp.enum = mergeUniqueStrings(remoteServers, snap?.mcp?.defaultRemoteMcp);
+    }
+  }
+
+  _refreshAistreamLlmProviderEnum(llmFields, snap) {
+    if (!llmFields?.Provider) return;
+
+    let providers = [];
+    try {
+      providers = LLMFactory.listProviders?.() || [];
+    } catch (e) {
+      Bot.makeLog('warn', `[SystemConfig] 获取 LLM Provider 列表失败: ${e.message}`, 'SystemConfig');
+    }
+
+    const currentProvider = String(snap?.llm?.Provider ?? snap?.llm?.provider ?? '').trim().toLowerCase();
+    providers = mergeUniqueStrings(providers, currentProvider);
+
+    if (providers.length) {
+      llmFields.Provider.enum = providers;
+      llmFields.Provider.component = 'Select';
+      if (!llmFields.Provider.default || !providers.includes(llmFields.Provider.default)) {
+        llmFields.Provider.default = providers[0];
+      }
+    } else {
+      delete llmFields.Provider.enum;
+      llmFields.Provider.component = 'Input';
+    }
   }
 
   /**

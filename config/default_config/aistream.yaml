@@ -35,10 +35,12 @@ llm:
 mcp:
   enabled: true
   autoRegister: true
+  defaultStreams: []
+  defaultRemoteMcp: []
+  toolMergeStrategy: preferRequest
   remote:
     enabled: false
-    selected: []
-    servers: []
+    mcpServers: []
 
 # crawl：web_fetch / web_search / browser（browser 启动参数另合并 renderer/playwright）
 crawl:

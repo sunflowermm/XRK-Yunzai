@@ -11,6 +11,9 @@
   --config-border-strong: color-mix(in srgb, var(--text-muted) 44%, var(--border));
   --config-divider: color-mix(in srgb, var(--text-muted) 26%, var(--border-light));
   --config-control-height: 36px;
+  --config-accent-subtle: color-mix(in srgb, var(--primary) 10%, var(--bg-card));
+  --config-accent-gradient: linear-gradient(90deg, var(--config-accent-subtle) 0%, transparent 100%);
+  --config-hint: var(--text-secondary);
 
   display: grid;
   grid-template-columns: 320px 1fr;
@@ -645,8 +648,8 @@
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--primary-dark);
-  background: linear-gradient(90deg, var(--primary-50) 0%, transparent 100%);
+  color: var(--text-secondary);
+  background: var(--config-accent-gradient);
   border-radius: var(--radius-sm);
   border-left: 3px solid var(--primary);
 }
@@ -775,9 +778,10 @@
 
 .config-field-hint {
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--config-hint);
   margin: 0;
   line-height: 1.45;
+  opacity: 0.92;
 }
 
 .config-field-hint-compact {
