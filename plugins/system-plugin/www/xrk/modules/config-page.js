@@ -5,7 +5,7 @@
  * 数组项（providers 等）：renderArrayObjectControl → renderProviderEntryFields（分组）→ renderArrayObjectFieldMarkup
  */
 import { formatKeyValueLines, parseKeyValueLines } from './utils.js';
-import { fillMissingSchemaDefaults } from './config-manager.js';
+import { fillMissingSchemaDefaults, resolveConfigSchema, buildArraySchemaIndex } from './config-manager.js';
 import { showPromptDialog as showPromptDialogUI } from './ui/prompt-dialog.js';
 import { groupProviderSchemaFields } from './llm-provider-ui.js';
 import { API, fetchApi } from './platform.js';
@@ -626,7 +626,7 @@ export const configPageMethods = {
       const activeSchema = this.extractActiveSchema(structure, name, child) ?? { fields: {} };
       this._configState.activeSchema = activeSchema;
       this._configState.structureMeta = activeSchema.meta ?? {};
-      this._configState.arraySchemaMap = this.buildArraySchemaIndex(activeSchema);
+      this._configState.arraySchemaMap = buildArraySchemaIndex(activeSchema);
       this._configState.dynamicCollectionsMeta = this.buildDynamicCollectionsMeta(activeSchema);
       this._configState.flatSchema = schemaList;
   
@@ -668,28 +668,7 @@ export const configPageMethods = {
   },
 
   extractActiveSchema(structure, name, child) {
-    if (!structure) return null;
-    if (name === 'system') {
-      if (!child) return null;
-      const target = structure.configs?.[child];
-      return target?.schema ?? { fields: target?.fields ?? {} };
-    }
-    return structure.schema ?? { fields: structure.fields ?? {} };
-  },
-
-  buildArraySchemaIndex(schema, prefix = '', map = {}) {
-    if (!schema || !schema.fields) return map;
-    for (const [key, fieldSchema] of Object.entries(schema.fields)) {
-      const path = prefix ? `${prefix}.${key}` : key;
-      if (fieldSchema.type === 'array' && fieldSchema.itemType === 'object') {
-        const subFields = fieldSchema.itemSchema?.fields ?? fieldSchema.fields ?? {};
-        map[path] = subFields;
-      }
-      if ((fieldSchema.type === 'object' || fieldSchema.type === 'map') && fieldSchema.fields) {
-        this.buildArraySchemaIndex(fieldSchema, path, map);
-      }
-    }
-    return map;
+    return resolveConfigSchema(structure, child);
   },
 
   buildDynamicCollectionsMeta(schema) {

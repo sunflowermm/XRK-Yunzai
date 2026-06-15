@@ -5,7 +5,9 @@ import {
   applyDefaults,
   buildDefaultsFromSchema,
   deepMergeConfig,
+  resolveConfigSchema,
 } from '../../lib/commonconfig/config-utils.js';
+import { buildArraySchemaIndex } from '../../plugins/system-plugin/www/xrk/modules/config-manager.js';
 
 describe('config-utils merge layers', () => {
   it('mergeConfigLayers: template → stored → schema default', () => {
@@ -66,5 +68,52 @@ describe('config-utils merge layers', () => {
     const schema = { fields: { port: { type: 'number' } } };
     const merged = deepMergeConfig({ port: 8086 }, { port: '' }, schema);
     assert.equal(merged.port, 8086);
+  });
+
+  it('resolveConfigSchema reads configFiles child for non-system configs', () => {
+    const structure = {
+      name: 'xrk',
+      configs: {
+        js_plugins: {
+          schema: {
+            fields: {
+              list: {
+                type: 'array',
+                itemType: 'object',
+                component: 'ArrayForm',
+                fields: {
+                  name: { type: 'string', label: '插件名' },
+                  git: { type: 'string', label: 'Git 地址' }
+                }
+              }
+            }
+          }
+        }
+      }
+    };
+    const schema = resolveConfigSchema(structure, 'js_plugins');
+    assert.ok(schema.fields.list);
+    assert.equal(Object.keys(schema.fields.list.fields).length, 2);
+  });
+
+  it('buildArraySchemaIndex maps list[] fields for plugin arrays', () => {
+    const schema = resolveConfigSchema({
+      configs: {
+        js_plugins: {
+          schema: {
+            fields: {
+              list: {
+                type: 'array',
+                itemType: 'object',
+                component: 'ArrayForm',
+                fields: { name: { type: 'string' }, git: { type: 'string' } }
+              }
+            }
+          }
+        }
+      }
+    }, 'js_plugins');
+    const map = buildArraySchemaIndex(schema);
+    assert.equal(Object.keys(map.list).length, 2);
   });
 });

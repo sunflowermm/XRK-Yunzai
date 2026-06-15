@@ -98,6 +98,41 @@ export function normalizeTemplatePath(path = '') {
   return path.replace(/\[\d+\]/g, '[]');
 }
 
+export function resolveConfigSchema(structure, childName) {
+  if (!structure) return { fields: {} };
+
+  if (childName && structure.configs?.[childName]) {
+    const target = structure.configs[childName];
+    return target.schema ?? { fields: target.fields ?? {} };
+  }
+
+  return structure.schema ?? { fields: structure.fields ?? {} };
+}
+
+/**
+ * array<object> / ArrayForm 路径 → 元素 fields（Web 数组卡片渲染）
+ */
+export function buildArraySchemaIndex(schema, prefix = '', map = {}) {
+  if (!schema?.fields) return map;
+
+  for (const [key, fieldSchema] of Object.entries(schema.fields)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    const isObjectArray =
+      fieldSchema.type === 'array'
+      && (fieldSchema.itemType === 'object'
+        || String(fieldSchema.component ?? '').toLowerCase() === 'arrayform');
+
+    if (isObjectArray) {
+      map[path] = fieldSchema.itemSchema?.fields ?? fieldSchema.fields ?? {};
+    }
+
+    if ((fieldSchema.type === 'object' || fieldSchema.type === 'map') && fieldSchema.fields) {
+      buildArraySchemaIndex({ fields: fieldSchema.fields }, path, map);
+    }
+  }
+  return map;
+}
+
 export function buildDefaultsFromFields(fields = {}, cloneValueFn = cloneValue) {
   // 与 lib/commonconfig/config-utils.js buildDefaultsFromSchema 语义对齐（前端无法直接 import lib）
   const result = {};

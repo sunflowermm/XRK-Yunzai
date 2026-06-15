@@ -3,7 +3,7 @@
  * 使用 Bot.ConfigManager 提供配置读写
  */
 import cfg from '../../../lib/config/config.js';
-import { cleanConfigData, flattenStructure, flattenData, unflattenData, deepMergeConfig } from '../../../lib/commonconfig/config-utils.js';
+import { cleanConfigData, flattenStructure, flattenData, unflattenData, deepMergeConfig, resolveConfigSchema } from '../../../lib/commonconfig/config-utils.js';
 
 function getConfigManager(Bot) {
   return Bot?.ConfigManager;
@@ -543,17 +543,16 @@ export default {
               message: '多文件配置需要指定子配置路径（path 参数）'
             });
           }
-          let schema = null;
           const structure = config.getStructure();
-          if (childPath && structure?.configs?.[childPath]) {
-            const childConfig = structure.configs[childPath];
-            schema = (childConfig.schema?.fields && childConfig.schema) || (childConfig.fields && { fields: childConfig.fields }) || null;
-            if (!schema) {
+          let schema = null;
+          if (childPath) {
+            schema = resolveConfigSchema(structure, childPath);
+            if (!schema?.fields || Object.keys(schema.fields).length === 0) {
               return res.json({ success: true, flat: [], message: `子配置 ${childPath} 不存在或无 schema` });
             }
           } else {
-            schema = (structure?.schema?.fields && structure.schema) || (structure?.fields && { fields: structure.fields }) || null;
-            if (!schema) {
+            schema = resolveConfigSchema(structure);
+            if (!schema?.fields || Object.keys(schema.fields).length === 0) {
               return res.json({ success: true, flat: [], message: `配置 ${name} 的 schema 不存在` });
             }
           }
@@ -633,17 +632,8 @@ export default {
           // 将扁平化数据还原为嵌套对象
           const data = unflattenData(flat);
           
-          // 获取 schema 用于数据清理
-          let schema = null;
           const structure = config.getStructure();
-          if (config.configFiles && childPath && structure?.configs?.[childPath]) {
-            const childConfig = structure.configs[childPath];
-            schema = childConfig?.schema || { fields: childConfig?.fields || {} };
-          } else {
-            schema = structure?.schema || { fields: structure?.fields || {} };
-          }
-          
-          // 清理数据
+          const schema = resolveConfigSchema(structure, childPath || undefined);
           const cleanedData = cleanConfigData(data, { schema });
 
           // 对于批量更新，先读取现有数据，然后合并，确保必需字段不会丢失
