@@ -623,7 +623,7 @@ export const configPageMethods = {
       const schemaList = (flatStruct.flat ?? []).filter(field => field.path);
       const values = flatData.flat ?? {};
   
-      const activeSchema = this.extractActiveSchema(structure, name, child) ?? { fields: {} };
+      const activeSchema = resolveConfigSchema(structure, child) ?? { fields: {} };
       this._configState.activeSchema = activeSchema;
       this._configState.structureMeta = activeSchema.meta ?? {};
       this._configState.arraySchemaMap = buildArraySchemaIndex(activeSchema);
@@ -665,10 +665,6 @@ export const configPageMethods = {
     }
     this._schemaCache[name] = data.structure;
     return data.structure;
-  },
-
-  extractActiveSchema(structure, name, child) {
-    return resolveConfigSchema(structure, child);
   },
 
   buildDynamicCollectionsMeta(schema) {

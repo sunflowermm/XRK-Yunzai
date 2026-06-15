@@ -98,6 +98,9 @@ export function normalizeTemplatePath(path = '') {
   return path.replace(/\[\d+\]/g, '[]');
 }
 
+/**
+ * 与 lib/commonconfig/config-utils.js 保持同步（浏览器端无法 import lib）
+ */
 export function resolveConfigSchema(structure, childName) {
   if (!structure) return { fields: {} };
 
@@ -110,7 +113,7 @@ export function resolveConfigSchema(structure, childName) {
 }
 
 /**
- * array<object> / ArrayForm 路径 → 元素 fields（Web 数组卡片渲染）
+ * @sync lib/commonconfig/config-utils.js buildArraySchemaIndex
  */
 export function buildArraySchemaIndex(schema, prefix = '', map = {}) {
   if (!schema?.fields) return map;

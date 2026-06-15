@@ -6,8 +6,10 @@ import {
   buildDefaultsFromSchema,
   deepMergeConfig,
   resolveConfigSchema,
+  buildArraySchemaIndex,
+  coerceRootArrayToSchemaShape,
+  unwrapRootArrayFromSchemaShape,
 } from '../../lib/commonconfig/config-utils.js';
-import { buildArraySchemaIndex } from '../../plugins/system-plugin/www/xrk/modules/config-manager.js';
 
 describe('config-utils merge layers', () => {
   it('mergeConfigLayers: template → stored → schema default', () => {
@@ -115,5 +117,27 @@ describe('config-utils merge layers', () => {
     }, 'js_plugins');
     const map = buildArraySchemaIndex(schema);
     assert.equal(Object.keys(map.list).length, 2);
+  });
+
+  it('coerceRootArrayToSchemaShape wraps root JSON array for single list field', () => {
+    const schema = {
+      fields: {
+        list: {
+          type: 'array',
+          itemType: 'object',
+          fields: { name: { type: 'string' }, git: { type: 'string' } }
+        }
+      }
+    };
+    const items = [{ name: 'demo', git: 'https://example.com/x.js' }];
+    const merged = mergeConfigLayers([], items, schema);
+    assert.equal(merged.list.length, 1);
+    assert.equal(merged.list[0].name, 'demo');
+  });
+
+  it('unwrapRootArrayFromSchemaShape restores root JSON array on write', () => {
+    const schema = { fields: { list: { type: 'array' } } };
+    const unwrapped = unwrapRootArrayFromSchemaShape({ list: [{ name: 'a' }] }, schema);
+    assert.deepEqual(unwrapped, [{ name: 'a' }]);
   });
 });
