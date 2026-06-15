@@ -43,4 +43,5 @@ node scripts/validate-skills.mjs
 ## 与 XRK-AGT
 
 借鉴：配置三件套测试、模块基准、`coding-style` 速查、skill 索引。  
-勿照搬：`core/`、`src/infrastructure/`、Node 26 专项 API、Tasker 层路径。
+勿照搬：`core/`、`src/infrastructure/`、Node 26 专项 API、Tasker 层路径。  
+长期演进与平台规划见 **[XRK-AGT](https://github.com/sunflowermm/XRK-AGT)**。

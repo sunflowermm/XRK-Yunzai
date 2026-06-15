@@ -284,14 +284,9 @@ export default class FileBuilder extends AIStream {
 
 ---
 
-## 🧭 Roadmap
+## 演进方向
 
-- ✅ PM2 支持
-- ✅ 任务处理器开源化（MySQL、公众号等）
-- ✅ 农业场景设备工作流
-- ✅ 任务类型体系与安全能力
-- 🔄 拆分底层协议依赖、精简适配
-- 🔄 更多工作流模板与智能体互操作
+新特性与长期规划在姊妹项目 **[XRK-AGT](https://github.com/sunflowermm/XRK-AGT)** 中迭代；本仓库聚焦稳定可用的 Bot、工作流与 MCP 运行时。
 
 ---
 

@@ -35,9 +35,6 @@ llm:
 mcp:
   enabled: true
   autoRegister: true
-  defaultStreams: []
-  defaultRemoteMcp: []
-  toolMergeStrategy: preferRequest
   remote:
     enabled: false
     mcpServers: []

@@ -76,7 +76,7 @@ Redis 连接策略：
 | 目录 | 说明 |
 |------|------|
 | `lib/plugins/plugin.js` | 插件运行时：上下文、工作流调用、热重载钩子。 |
-| `plugins/<插件根>/stream/` | 插件内工作流（Chat、Device、文件等）。 |
+| `plugins/<插件根>/stream/` | 插件内工作流（chat、memory、tools 等）；设备走 `http/device.js`。 |
 | `plugins/<插件根>/http/` | 插件内 REST/SSE/WS 路由。 |
 | `plugins/<插件根>/adapter/` | 协议适配器（如 system-plugin 下 OneBotv11、ComWeChat）。 |
 

@@ -49,6 +49,7 @@ pnpm lint && pnpm test && node scripts/validate-skills.mjs
 | 事件监听 | EventListenerBase + init() | EventListener + deal() |
 | 工厂 | LLM + 历史 ASR/TTS | **仅 LLM** |
 | Node | ≥26 专项 API | ≥24 |
+| 长期 Roadmap | [XRK-AGT](https://github.com/sunflowermm/XRK-AGT) | 稳定 Bot / 工作流运行时 |
 | 测试 | `pnpm test` 框架基准 | 同方法论，`tests/framework/` |
 
 ## 回答方式

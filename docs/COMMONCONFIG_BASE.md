@@ -76,7 +76,7 @@
    - `prepareValidate(data)`：写入校验前刷新动态 enum（如 `system` 的 aistream Provider）
    - `transformRead(data)` / `transformWrite(data)`：读写变换
    - `customValidate(data)`：交叉字段校验
-4. **注册到 ConfigManager**：暴露 `getStructure()`；`system` 配置在返回结构前刷新 aistream 动态 enum（Provider / MCP 列表）。
+4. **注册到 ConfigManager**：暴露 `getStructure()`；`system` 配置在返回结构前刷新 aistream 动态 enum（`llm.Provider`）。
 
 ### 5. 与前端的协作约定
 - `getStructure()` 返回的 schema 将被缓存为 `schemaKey = configName[.subName]`，前端据此渲染组件与校验。

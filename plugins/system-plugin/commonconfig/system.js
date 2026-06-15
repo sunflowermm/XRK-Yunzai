@@ -2,7 +2,6 @@ import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
 import path from 'path';
 import cfg from '../../../lib/config/config.js';
 import { getServerConfigPath, SERVER_BOTS_DIR, RENDERERS_DIR, DATA_DB_DEFAULT_REL, resolveProjectPath } from '../../../lib/config/config-constants.js';
-import StreamLoader from '../../../lib/aistream/loader.js';
 import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
 import { mergeUniqueStrings } from '../../../lib/utils/string-array-utils.js';
 import { getAistreamConfigOptional } from '../../../lib/utils/aistream-config.js';
@@ -1400,38 +1399,6 @@ export default class SystemConfig extends ConfigBase {
                   default: true,
                   component: 'Switch'
                 },
-                port: {
-                  type: 'number',
-                  label: 'MCP服务端口',
-                  description: 'MCP服务监听的端口号（可选，默认使用HTTP API端口）',
-                  min: 1024,
-                  max: 65535,
-                  component: 'InputNumber'
-                },
-                defaultStreams: {
-                  type: 'array',
-                  label: '默认启用的工作流',
-                  description: '留空=代码内置默认（tools、web）；填写则覆盖',
-                  itemType: 'string',
-                  default: [],
-                  component: 'MultiSelect'
-                },
-                defaultRemoteMcp: {
-                  type: 'array',
-                  label: '默认启用的远程 MCP',
-                  description: '留空=不默认启用远程 MCP；填写则覆盖。用户自增 MCP 在 remote.mcpServers',
-                  itemType: 'string',
-                  default: [],
-                  component: 'MultiSelect'
-                },
-                toolMergeStrategy: {
-                  type: 'string',
-                  label: '工具合并策略',
-                  description: '当接口请求体同时传入 tools 且启用了工作流/MCP 工具时的合并策略：preferRequest=以接口 tools 为准，preferStream=以工作流/MCP 工具为准，merge=尽量合并（同名以接口为准）',
-                  enum: ['preferRequest', 'preferStream', 'merge'],
-                  default: 'preferRequest',
-                  component: 'Select'
-                },
                 autoRegister: {
                   type: 'boolean',
                   label: '自动注册工具',
@@ -2295,7 +2262,7 @@ export default class SystemConfig extends ConfigBase {
   }
 
   /**
-   * 动态刷新 aistream 相关 schema（工作流、远程 MCP、LLM Provider）
+   * 动态刷新 aistream LLM Provider schema
    * @param {object} [validateSnapshot] - 待校验/写入的配置快照
    */
   _refreshDynamicSchema(validateSnapshot = null) {
@@ -2304,38 +2271,9 @@ export default class SystemConfig extends ConfigBase {
       if (!aistreamSchema) return;
 
       const snap = validateSnapshot || getAistreamConfigOptional();
-      this._refreshAistreamMcpEnums(aistreamSchema.mcp?.fields, snap);
       this._refreshAistreamLlmProviderEnum(aistreamSchema.llm?.fields, snap);
     } catch (e) {
       Bot.makeLog('error', `[SystemConfig] 刷新动态 schema 失败: ${e.message}`, 'SystemConfig');
-    }
-  }
-
-  _refreshAistreamMcpEnums(mcpFields, snap) {
-    if (!mcpFields) return;
-
-    let workflowKeys = [];
-    try {
-      workflowKeys = StreamLoader.getStreamsByPriority()
-        .filter((s) => !s.primaryStream && !s.secondaryStreams)
-        .map((s) => s.name)
-        .filter(Boolean);
-    } catch (e) {
-      Bot.makeLog('warn', `[SystemConfig] 获取工作流列表失败: ${e.message}`, 'SystemConfig');
-    }
-
-    let remoteServers = [];
-    try {
-      remoteServers = StreamLoader.listRemoteMCPServers();
-    } catch (e) {
-      Bot.makeLog('warn', `[SystemConfig] 获取远程 MCP 列表失败: ${e.message}`, 'SystemConfig');
-    }
-
-    if (mcpFields.defaultStreams) {
-      mcpFields.defaultStreams.enum = mergeUniqueStrings(workflowKeys, snap?.mcp?.defaultStreams);
-    }
-    if (mcpFields.defaultRemoteMcp) {
-      mcpFields.defaultRemoteMcp.enum = mergeUniqueStrings(remoteServers, snap?.mcp?.defaultRemoteMcp);
     }
   }
 
