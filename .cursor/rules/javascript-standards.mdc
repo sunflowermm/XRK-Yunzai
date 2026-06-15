@@ -9,7 +9,7 @@ alwaysApply: false
 ## 错误处理
 
 - 禁止空 catch；捕获后应记录并视情况传播或封装。
-- 使用项目约定的日志（如 BotUtil.makeLog）记录错误与上下文。
+- 使用项目约定的日志（`Bot.makeLog`）记录错误与上下文。
 
 ## 异步与类型
 

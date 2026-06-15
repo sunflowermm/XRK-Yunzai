@@ -5,7 +5,6 @@
  * - 事件链用 Bot.PluginsLoader，工作流用 Bot.StreamLoader
  */
 import path from 'node:path';
-import BotUtil from '../../../lib/util.js';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
 import { resolveProjectPath, DATA_MEDIA_DIR } from '../../../lib/config/config-constants.js';
 
@@ -44,7 +43,7 @@ function send(conn, obj) {
   try {
     if (conn?.send) conn.send(JSON.stringify(obj));
   } catch (e) {
-    BotUtil.makeLog('warn', `[Device API] 发送失败: ${e.message}`, 'DeviceAPI');
+    Bot.makeLog('warn', `[Device API] 发送失败: ${e.message}`, 'DeviceAPI');
   }
 }
 
@@ -171,7 +170,7 @@ async function segmentsToWebUrls(segments, Bot, baseUrlOverride) {
   try {
     await FileUtils.ensureDir(mediaDir);
   } catch (e) {
-    BotUtil.makeLog('warn', `[Device] 创建 media 目录失败: ${e.message}`, 'DeviceAPI');
+    Bot.makeLog('warn', `[Device] 创建 media 目录失败: ${e.message}`, 'DeviceAPI');
   }
   for (const seg of segments) {
     const s = { ...seg };
@@ -181,7 +180,7 @@ async function segmentsToWebUrls(segments, Bot, baseUrlOverride) {
     if (isMedia && !isAlreadyWeb) {
       const url = normalizeMediaSource(raw);
       if (url == null) {
-        BotUtil.makeLog('warn', `[Device] 无法解析媒体来源，已跳过`, 'DeviceAPI');
+        Bot.makeLog('warn', `[Device] 无法解析媒体来源，已跳过`, 'DeviceAPI');
         continue;
       }
       try {
@@ -204,7 +203,7 @@ async function segmentsToWebUrls(segments, Bot, baseUrlOverride) {
         await FileUtils.writeFileBuffer(path.join(mediaDir, filename), buf);
         s.url = baseUrl ? `${baseUrl}/media/${filename}` : `/media/${filename}`;
       } catch (e) {
-        BotUtil.makeLog('warn', `[Device] 无法转媒体: ${e.message}`, 'DeviceAPI');
+        Bot.makeLog('warn', `[Device] 无法转媒体: ${e.message}`, 'DeviceAPI');
         continue;
       }
     } else if (isMedia && typeof raw === 'string' && /^data:/i.test(raw)) {
@@ -217,7 +216,7 @@ async function segmentsToWebUrls(segments, Bot, baseUrlOverride) {
           await FileUtils.writeFileBuffer(path.join(mediaDir, filename), buf);
           s.url = baseUrl ? `${baseUrl}/media/${filename}` : `/media/${filename}`;
         } catch (e) {
-          BotUtil.makeLog('warn', `[Device] data URL 落盘失败: ${e.message}`, 'DeviceAPI');
+          Bot.makeLog('warn', `[Device] data URL 落盘失败: ${e.message}`, 'DeviceAPI');
         }
       }
     }
@@ -313,7 +312,7 @@ export default {
           const segments = result.text ? [{ type: 'text', text: result.text }] : [];
           return res.json({ success: true, text: result.text || '', segments });
         } catch (e) {
-          BotUtil.makeLog('error', `[Device API] AI 执行失败: ${e.message}`, 'DeviceAPI');
+          Bot.makeLog('error', `[Device API] AI 执行失败: ${e.message}`, 'DeviceAPI');
           return res.status(500).json({ success: false, message: e.message });
         }
       }
@@ -383,7 +382,7 @@ export default {
             }
             const replySeg = message.find(m => m && m.type === 'reply');
             const replyId = replySeg?.id ?? null;
-            if (replyId) BotUtil.makeLog('debug', `[Device] 引用 reply_id=${replyId}`, 'DeviceAPI');
+            if (replyId) Bot.makeLog('debug', `[Device] 引用 reply_id=${replyId}`, 'DeviceAPI');
 
             const deviceInfo = deviceStore.get(deviceId) || {};
             const now = Math.floor(Date.now() / 1000);
@@ -423,16 +422,16 @@ export default {
               await Bot.PluginsLoader.deal(event);
               send(conn, { type: 'typing', typing: false });
             } catch (e) {
-              BotUtil.makeLog('error', `[Device] 事件链异常: ${e.message}`, 'DeviceAPI', e);
+              Bot.makeLog('error', `[Device] 事件链异常: ${e.message}`, 'DeviceAPI', e);
               send(conn, { type: 'typing', typing: false });
               send(conn, { type: 'error', message: e.message || '执行失败' });
             }
             return;
           }
 
-          BotUtil.makeLog('warn', `[Device WS] 未知消息类型: ${type}`, deviceId);
+          Bot.makeLog('warn', `[Device WS] 未知消息类型: ${type}`, deviceId);
         } catch (e) {
-          BotUtil.makeLog('debug', `[Device WS] 消息解析失败: ${e.message}`, 'DeviceAPI');
+          Bot.makeLog('debug', `[Device WS] 消息解析失败: ${e.message}`, 'DeviceAPI');
           send(conn, { type: 'error', message: e.message || '解析失败' });
         }
       });

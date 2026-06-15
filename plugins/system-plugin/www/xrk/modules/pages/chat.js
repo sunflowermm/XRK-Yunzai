@@ -1,17 +1,8 @@
 import { pokeHandIconSVG } from '../ui-kit.js';
-import {
-  animateChatMessage,
-  animateChatModeSwitch,
-  animateAISettingsPanel,
-  animateChatSendPulse,
-  cancelPageMotion,
-  isMotionReady,
-  isReducedMotion
-} from '../motion/gsap-motion.js';
 
 export async function renderChatPage(app) {
   const content = document.getElementById('content');
-  cancelPageMotion(content);
+  if (!content) return;
   const isAIMode = app._isAIMode();
   const aiSettingsPlaceholder = isAIMode
     ? `<div class="ai-settings-panel" id="aiSettingsPlaceholder">
@@ -156,8 +147,6 @@ export function bindChatEvents(app) {
       app._chatMode = mode;
       localStorage.setItem('chatMode', mode);
       await app._switchChatMode(mode);
-      const activeBtn = document.querySelector(`.chat-mode-btn[data-mode="${mode}"]`);
-      animateChatModeSwitch(activeBtn);
     });
   }
   if (app._isAIMode()) {
@@ -167,7 +156,6 @@ export function bindChatEvents(app) {
       if (!panel) return;
       panel.classList.toggle('mobile-collapsed');
       applyAIMobileSettingsState(false);
-      animateAISettingsPanel(panel, !panel.classList.contains('mobile-collapsed'));
     });
     const providerSelect = document.getElementById('aiProviderSelect');
     const personaInput = document.getElementById('aiPersonaInput');
@@ -197,7 +185,6 @@ export function bindChatEvents(app) {
     });
   }
   if (sendBtn) safeBind(sendBtn, 'click', () => {
-    animateChatSendPulse(sendBtn);
     app.sendChatMessage();
   });
   if (input) {
@@ -270,10 +257,6 @@ export function applyMessageEnter(app, div, animate = true) {
   if (!div || app._isRestoringHistory) return;
   if (!animate) {
     div.classList.remove('message-enter');
-    return;
-  }
-  if (isMotionReady() && !isReducedMotion()) {
-    animateChatMessage(div);
     return;
   }
   div.addEventListener('animationend', () => {

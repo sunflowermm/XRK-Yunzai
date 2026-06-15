@@ -10,22 +10,23 @@
 
 ## 提供商与实现类
 
-| provider | 实现类 | 说明 |
+| protocol | 实现类 | 说明 |
 |----------|--------|------|
 | gptgod | GPTGodLLMClient | GPTGod，OpenAI 兼容 |
 | volcengine | VolcengineLLMClient | 火山引擎豆包 |
+| deepseek | DeepSeekLLMClient | DeepSeek 官方（thinking / reasoning_effort） |
 | xiaomimimo | XiaomiMiMoLLMClient | 小米 MiMo |
 | openai | OpenAILLMClient | OpenAI 官方 |
 | gemini | GeminiLLMClient | Google Gemini |
-| openai_compat | OpenAICompatibleLLMClient | 任意 OpenAI 兼容（自定义 baseUrl/path/认证） |
 | anthropic | AnthropicLLMClient | Anthropic Claude |
 | azure_openai | AzureOpenAILLMClient | Azure OpenAI |
+| （compat） | 各 Compatible Client | 由 `*_compat_llm.providers[]` 注册，key 自定义 |
 
 ## 配置来源
 
-- 端口级配置：`data/server_bots/{port}/{provider}_llm.yaml`（如 `openai_llm.yaml`）。
-- 全局默认：`config/default_config/{provider}_llm.yaml`。
-- `LLMFactory.getProviderConfig(provider)` 通过 `global.cfg.getLLMConfig(provider)` 读取，**不**使用请求体中的 apiKey 覆盖（与 AGT 一致）。
+- 工厂 YAML：`data/server_bots/*_llm.yaml`，统一 **`providers: []` 数组**；每条 `key` 供 `aistream.llm.Provider` 引用。
+- 默认模板：`config/default_config/*_llm.yaml`。
+- `LLMFactory.getProviderConfig(key)` 读取对应 providers 条目，**不**使用请求体 apiKey 覆盖。
 
 ## 扩展
 

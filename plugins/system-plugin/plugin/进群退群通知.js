@@ -60,7 +60,7 @@ export class outNotice extends plugin {
     } else {
       msg = `${this.e.user_id} ${this.tips}`
     }
-    logger.mark(`[退出通知]${this.e.logText} ${msg}`)
+    Bot.makeLog('mark', `[退出通知]${this.e.logText} ${msg}`, 'GroupNotice')
     await this.reply(msg)
   }
 }

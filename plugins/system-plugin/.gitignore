@@ -20,6 +20,8 @@ stream/*
 !stream/database.js
 !stream/tools.js
 !stream/desktop.js
+!stream/web.js
+!stream/browser.js
 
 # http/
 http/*
@@ -71,16 +73,7 @@ adapter/*
 !adapter/ComWeChat.js
 !adapter/GSUIDCORE.js
 
-# www/xrk/
+# www/xrk/ — 控制台静态资源（整目录入库）
 www/*
 !www/xrk/
-!www/xrk/app.js
-!www/xrk/api-config.json
-!www/xrk/index.html
-!www/xrk/styles.css
-!www/xrk/lib/codemirror/mode/javascript/javascript.min.js
-!www/xrk/lib/codemirror/lib/codemirror.min.js
-!www/xrk/lib/codemirror/theme/monokai.min.css
-!www/xrk/lib/codemirror/lib/codemirror.min.css
-!www/xrk/lib/mermaid.min.js
-!www/xrk/lib/chart.umd.min.js
+!www/xrk/**

@@ -7,13 +7,30 @@ alwaysApply: true
 
 ## 项目定位
 
-- XRK-Yunzai 是基于 QQ/OneBot 的 Bot 框架，提供插件、HTTP API、AI 工作流、CommonConfig、前端控制台等能力；业务代码放在 `plugins/<插件名>/` 下，基础设施与基类在 `lib/`。
+- XRK-Yunzai 是基于 QQ/OneBot 的**多平台 Agent** 框架，提供插件、HTTP API、AI 工作流、CommonConfig、前端控制台等能力；业务代码放在 `plugins/<插件名>/` 下，基础设施与基类在 `lib/`。
 
 ## 目录与放码位置
 
 - **业务**：`plugins/<插件名>/` 下按类型分目录：插件入口、`http/`、`stream/`、`events/`、`commonconfig/`、`www/` 等；由各 Loader 扫描加载（工作流仅 `stream/`，不扫 `streams/`）。
 - **基础设施**：`lib/` 下为插件基类、HTTP 基类、工作流基类、配置、工具等；入口为 `lib/bot.js`，应用启动为根目录 `app.js` 等。
 - **米游 runtime**：`lib/plugins/runtime.js`、`lib/plugins/loader.js` 与 TRSS-Yunzai 对齐（`e.runtime.getMysApi`、星铁/绝区零前缀）；勿再使用已移除的 Runtime 扩展注册机制。
+
+## 旧版兼容路径（禁止删除）
+
+审计 `lib/` 时，下列文件**无框架内 import 不等于可删**——大量第三方/历史插件仍硬编码路径：
+
+| 路径 | 用途 | 实际实现 |
+|------|------|----------|
+| `lib/puppeteer/puppeteer.js` | genshin、earth-k-plugin、logier-plugin、rconsole-plugin 等 `import puppeteer from '../../../lib/puppeteer/puppeteer.js'` | 4 行 shim → `lib/renderer/puppeteer-compat.js` → `RendererLoader` |
+
+- **禁止**以「零引用」为由删除上述 shim；若需收敛，须全仓插件改 import 后再删。
+- `lib/renderer/puppeteer-compat.js` 为 runtime 与 shim 的共用实现，同样禁止删。
+
+## Bot.makeLog 与类内 Bot 绑定
+
+- 启动前：`lib/util.js` 在 `globalThis.Bot` 上挂 `makeLog` 桩。
+- `lib/bot.js` 末尾须保留 `Bot.makeLog = BotUtil.makeLog.bind(BotUtil)`：类方法内裸名 `Bot` 指**构造函数**，不是 `globalThis.Bot` 代理。
+- `start.js` / `debug.js` 调用 `globalThis.Bot.run()`，勿假定类内 `Bot.makeLog` 自动可用。
 
 ## 工具与路径
 
@@ -30,6 +47,7 @@ alwaysApply: true
 
 ## 基类开发
 
+- 写法速查：`docs/coding-style.md`；挂载面：`docs/runtime-surface.md`
 - 短契约：`docs/base-classes.md`；详述：`docs/BASE_CLASSES.md`。
 - constructor 不建可变状态（`Map`/缓存用类字段）；详见 `xrk-dev-requirements.mdc`。
 - 全局 `Bot`/`segment`；插件资源释放实现 `destroy()`。

@@ -6,110 +6,18 @@
 import { escapeHtml } from '../utils.js';
 import { setUpdating, clearUpdating } from '../dom.js';
 import { API, fetchApi } from '../platform.js';
-
-function hashStr(s) {
-  let h = 0;
-  const str = String(s ?? '');
-  for (let i = 0; i < str.length; i++) h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
-  return Math.abs(h);
-}
-
-function sizeClass(seed) {
-  const sizes = ['tag-cloud-chip--sm', 'tag-cloud-chip--md', 'tag-cloud-chip--lg'];
-  return sizes[hashStr(seed) % 3];
-}
-
-function toneClass(seed) {
-  const tones = [
-    'tag-cloud-chip--tone-primary',
-    'tag-cloud-chip--tone-success',
-    'tag-cloud-chip--tone-warning',
-    'tag-cloud-chip--tone-info'
-  ];
-  return tones[hashStr(seed) % 4];
-}
-
-function safeDomId(prefix, seed, index) {
-  const base = String(seed ?? 'x')
-    .replace(/[^a-zA-Z0-9_-]/g, '_')
-    .slice(0, 40);
-  return `${prefix}-${index}-${base || 'n'}`;
-}
+import {
+  buildTagCloudChip,
+  buildTagCloudFingerprint,
+  markTagCloudRendered,
+  mountTagCloud,
+  shouldSkipTagCloudRender,
+  TAG_CLOUD_VISIBLE_LIMIT
+} from '../tag-cloud.js';
 
 function formatLoadTime(ms) {
   const n = Number(ms) || 0;
   return n < 1000 ? `${n}ms` : `${(n / 1000).toFixed(2)}s`;
-}
-
-/** 靠近视口顶部的芯片改为向下弹出详情，减少裁切 */
-function applyTagCloudPopoverFlip(root) {
-  if (!root) return;
-  requestAnimationFrame(() => {
-    root.querySelectorAll('.tag-cloud-chip').forEach(chip => {
-      const r = chip.getBoundingClientRect();
-      chip.classList.toggle('popover-flip', r.top < 96);
-    });
-  });
-}
-
-/** 交互时再根据实时布局更新一次，避免首次渲染后布局变化导致的裁切 */
-function bindTagCloudPopoverFlip(root) {
-  if (!root) return;
-  const chips = Array.from(root.querySelectorAll('.tag-cloud-chip'));
-  const updateOne = (chip) => {
-    const r = chip.getBoundingClientRect();
-    chip.classList.toggle('popover-flip', r.top < 96);
-  };
-  for (const chip of chips) {
-    chip.addEventListener('mouseenter', () => updateOne(chip));
-    chip.addEventListener('focusin', () => updateOne(chip));
-    chip.addEventListener('touchstart', () => updateOne(chip), { passive: true });
-  }
-}
-
-function mountTagCloud(box, metaHtml, chipsHtml) {
-  box.innerHTML = chipsHtml
-    ? `${metaHtml}<div class="tag-cloud" role="list">${chipsHtml}</div>`
-    : metaHtml;
-  if (chipsHtml) {
-    applyTagCloudPopoverFlip(box);
-    bindTagCloudPopoverFlip(box);
-  }
-}
-
-function buildTagCloudChip({
-  seed,
-  tipPrefix,
-  index,
-  label,
-  badge = '',
-  extraClass = '',
-  popoverTitle,
-  popoverKey = '',
-  desc,
-  facts
-}) {
-  const tipId = safeDomId(tipPrefix, seed, index);
-  const keyLine = popoverKey
-    ? `<div class="tag-cloud-chip__popover-key mono">${escapeHtml(popoverKey)}</div>`
-    : '';
-  const factRows = facts
-    .map(({ label: k, value }) => `<li><span>${escapeHtml(k)}</span><em>${escapeHtml(String(value))}</em></li>`)
-    .join('');
-  return `
-    <div class="tag-cloud-chip ${sizeClass(seed)} ${toneClass(seed)}${extraClass}" style="--stagger:${index}">
-      <button type="button" class="tag-cloud-chip__btn" aria-describedby="${tipId}">
-        <span class="tag-cloud-chip__label">${escapeHtml(label)}</span>
-        ${badge}
-      </button>
-      <div class="tag-cloud-chip__popover" id="${tipId}" role="tooltip">
-        <div class="tag-cloud-chip__popover-title">${escapeHtml(popoverTitle)}</div>
-        ${keyLine}
-        <p class="tag-cloud-chip__popover-desc">${escapeHtml(desc)}</p>
-        <ul class="tag-cloud-chip__popover-facts">${factRows}</ul>
-      </div>
-    </div>
-  `;
 }
 
 function buildPluginFacts(p) {
@@ -117,6 +25,27 @@ function buildPluginFacts(p) {
   if (p.rule != null) facts.push({ label: '规则条数', value: Number(p.rule) || 0 });
   if (p.task != null) facts.push({ label: '定时任务', value: p.task > 0 ? '是' : '否' });
   return facts;
+}
+
+function pluginToChipPayload(p, i) {
+  const key = p.key ?? p.name ?? `p${i}`;
+  const label = p.name ?? p.key ?? 'plugin';
+  return {
+    seed: key,
+    tipPrefix: 'plg-tip',
+    index: i,
+    label,
+    popoverTitle: label,
+    popoverKey: String(key),
+    desc: (p.dsc ?? '暂无描述').trim() || '暂无描述',
+    facts: buildPluginFacts(p)
+  };
+}
+
+function renderPluginChips(plugins, startIndex = 0) {
+  return plugins
+    .map((p, i) => buildTagCloudChip(pluginToChipPayload(p, startIndex + i)))
+    .join('');
 }
 
 /**
@@ -142,6 +71,13 @@ export async function loadPluginsInfoPanel(app) {
 
     const summary = data.summary ?? {};
     const plugins = Array.isArray(data.plugins) ? data.plugins : [];
+    const fingerprint = buildTagCloudFingerprint('plugins', { summary, plugins });
+
+    if (shouldSkipTagCloudRender(box, fingerprint)) {
+      clearUpdating(box);
+      return;
+    }
+
     const totalPlugins = summary.totalPlugins ?? plugins.length;
     const pluginsWithRules = summary.withRules ?? 0;
     const pluginsWithTasks = summary.withTasks ?? summary.taskCount ?? 0;
@@ -161,28 +97,24 @@ export async function loadPluginsInfoPanel(app) {
 
     if (!plugins.length) {
       box.innerHTML = `${metaHtml}<div class="home-cloud-empty">暂无插件条目</div>`;
+      markTagCloudRendered(box, fingerprint);
       return;
     }
 
-    const chips = plugins
-      .map((p, i) => {
-        const key = p.key ?? p.name ?? `p${i}`;
-        const label = p.name ?? p.key ?? 'plugin';
-        return buildTagCloudChip({
-          seed: key,
-          tipPrefix: 'plg-tip',
-          index: i,
-          label,
-          popoverTitle: label,
-          popoverKey: String(key),
-          desc: (p.dsc ?? '暂无描述').trim() || '暂无描述',
-          facts: buildPluginFacts(p)
-        });
-      })
-      .join('');
+    const limit = TAG_CLOUD_VISIBLE_LIMIT;
+    const visible = limit > 0 && plugins.length > limit ? plugins.slice(0, limit) : plugins;
+    const pending = limit > 0 && plugins.length > limit
+      ? plugins.slice(limit).map((p, i) => pluginToChipPayload(p, limit + i))
+      : [];
 
-    mountTagCloud(box, metaHtml, chips);
+    mountTagCloud(box, metaHtml, renderPluginChips(visible, 0), {
+      total: plugins.length,
+      limit,
+      pendingItems: pending
+    });
+    markTagCloudRendered(box, fingerprint);
   } catch (e) {
+    delete box.dataset.tagCloudFp;
     if (e.name === 'AbortError' || e.name === 'TimeoutError') {
       box.innerHTML = '<div class="home-cloud-empty">加载超时</div>';
     } else {
@@ -201,8 +133,6 @@ export function renderWorkflowInfoPanel(app, workflows = {}, panels = {}) {
   const box = document.getElementById('workflowInfo');
   if (!box) return;
 
-  setUpdating(box);
-
   const panelWf = panels.workflows ?? {};
   const stats = panelWf.stats ?? workflows.stats ?? {};
   const total = stats.total ?? panelWf.total ?? workflows.total ?? 0;
@@ -210,8 +140,17 @@ export function renderWorkflowInfoPanel(app, workflows = {}, panels = {}) {
     ? workflows.items
     : (panelWf.items ?? []);
 
+  const fingerprint = buildTagCloudFingerprint('workflows', { total, items });
+
+  if (shouldSkipTagCloudRender(box, fingerprint)) {
+    return;
+  }
+
+  setUpdating(box);
+
   if (!total && !items.length) {
     box.innerHTML = '<div class="home-cloud-empty">暂无工作流数据</div>';
+    markTagCloudRendered(box, fingerprint);
     clearUpdating(box);
     return;
   }
@@ -225,6 +164,7 @@ export function renderWorkflowInfoPanel(app, workflows = {}, panels = {}) {
 
   if (!items.length) {
     box.innerHTML = `${metaHtml}<div class="home-cloud-empty">暂无工作流条目</div>`;
+    markTagCloudRendered(box, fingerprint);
     clearUpdating(box);
     return;
   }
@@ -250,6 +190,7 @@ export function renderWorkflowInfoPanel(app, workflows = {}, panels = {}) {
     })
     .join('');
 
-  mountTagCloud(box, metaHtml, chips);
+  mountTagCloud(box, metaHtml, chips, { total: items.length, limit: 0 });
+  markTagCloudRendered(box, fingerprint);
   clearUpdating(box);
 }

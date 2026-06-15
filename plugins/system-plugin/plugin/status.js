@@ -2,6 +2,7 @@ import os from 'os'
 import moment from 'moment'
 import * as si from 'systeminformation'
 import { createRequire } from "module"
+import { formatBytes, formatDuration } from '../../../lib/utils/byte-size.js'
 
 const require = createRequire(import.meta.url)
 
@@ -20,30 +21,11 @@ export class stattools extends plugin {
   }
 
   formatFileSize(bytes) {
-    if (!bytes || bytes === 0) return '0B'
-    const units = ['B', 'KB', 'MB', 'GB', 'TB']
-    let index = 0
-    let size = bytes
-    while (size >= 1024 && index < units.length - 1) {
-      size /= 1024
-      index++
-    }
-    return `${size.toFixed(2)}${units[index]}`
+    return formatBytes(bytes, { spaced: false })
   }
 
   formatTime(seconds) {
-    const days = Math.floor(seconds / 86400)
-    const hours = Math.floor((seconds % 86400) / 3600)
-    const minutes = Math.floor((seconds % 3600) / 60)
-    const secs = Math.floor(seconds % 60)
-    
-    let result = []
-    if (days > 0) result.push(`${days}天`)
-    if (hours > 0) result.push(`${hours}小时`)
-    if (minutes > 0) result.push(`${minutes}分钟`)
-    if (secs > 0 && days === 0 && hours === 0) result.push(`${secs}秒`)
-    
-    return result.length ? result.join('') : '0秒'
+    return formatDuration(seconds)
   }
 
   async status(e) {
@@ -84,7 +66,7 @@ export class stattools extends plugin {
         pluginCount = (loader.priority?.length || 0) + (loader.extended?.length || 0)
         taskCount = loader.task?.length || 0
       } catch (err) {
-        logger.warn('[stattools] 无法获取插件信息')
+        Bot.makeLog('warn', '[stattools] 无法获取插件信息', 'Status')
       }
 
       // Node进程信息
@@ -170,7 +152,7 @@ export class stattools extends plugin {
       await e.reply(msg.join('\n'))
       return true
     } catch (error) {
-      logger.error(`[stattools] 获取状态失败:`, error)
+      Bot.makeLog('error', `[stattools] 获取状态失败:`, 'Status', error)
       e.reply(`获取状态信息失败：${error.message || '未知错误'}`)
       return false
     }

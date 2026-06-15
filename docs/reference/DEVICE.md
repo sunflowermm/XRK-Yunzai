@@ -6,8 +6,8 @@
 
 ## 1. 概述
 
-- **REST**：设备注册、列表、单设备、TTS、AI 工作流。
-- **WebSocket**：设备连接 `/device`，上行 `register` / `heartbeat` / `message`；下行 `reply`、`asr_interim`/`asr_final`、`command.play_tts_audio`、`typing`、`error`。
+- **REST**：设备注册、列表、单设备、AI 工作流（默认 `chat`）。
+- **WebSocket**：设备连接 `/device`，上行 `register` / `heartbeat` / `message`；下行 `reply`、`typing`、`error`、`register_response`、`heartbeat_response`。
 - **事件链**：设备消息经 `Bot.PluginsLoader.deal(event)` 进入插件；事件上挂载 `e.reply`（发送回复）、`e.getReply`（获取当前引用消息）。
 
 ---
@@ -43,10 +43,9 @@
 | type     | 说明 |
 |----------|------|
 | `reply`  | 回复内容：`segments`（文本/图片等）、可选 `title`/`description`、可选 `mcp_tools`。 |
-| `asr_interim` / `asr_final` | 语音识别中间/最终结果。 |
-| `command` | 子类型 `play_tts_audio`：`parameters.audio_data` 为 PCM 十六进制，16kHz 单声道。 |
 | `typing` | 输入状态。 |
 | `error`  | 错误信息。 |
+| `register_response` / `heartbeat_response` | 注册与心跳响应。 |
 
 ---
 

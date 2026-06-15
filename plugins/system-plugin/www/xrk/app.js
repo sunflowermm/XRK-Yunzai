@@ -7,9 +7,7 @@ import {
   escapeSelector,
   copyToClipboard as copyTextToClipboard,
   cloneValue,
-  isSameValue,
-  formatKeyValueLines,
-  parseKeyValueLines
+  isSameValue
 } from './modules/utils.js';
 
 import {
@@ -75,7 +73,7 @@ import {
 
 import * as apiDebug from './modules/api-debug.js';
 import { configPageMethods } from './modules/config-page.js';
-import * as motion from './modules/motion/gsap-motion.js';
+import * as motion from './modules/motion/motion.js';
 import { ensurePageLibs } from './modules/runtime-libs.js';
 import {
   API,
@@ -475,7 +473,6 @@ class App {
         status.classList.add('online');
         const statusText = status.querySelector('.status-text');
         if (statusText) statusText.textContent = '已连接';
-        motion.pulseOnlineStatus(status.querySelector('.status-dot'));
       } else {
         status.classList.remove('online');
         const statusText = status.querySelector('.status-text');
@@ -515,18 +512,12 @@ class App {
       return;
     }
 
-    const content = $('#content');
     const prevPage = this.currentPage;
-    const shouldAnimate = this._routeInitialized && content && prevPage !== normalizedPage;
 
     if (prevPage === 'chat' && normalizedPage !== 'chat') {
       this._unbindChatEvents();
       this.stopActiveStream();
       this._releaseDeviceWs();
-    }
-
-    if (shouldAnimate) {
-      await motion.animatePageExit(content);
     }
 
     this.currentPage = normalizedPage;
@@ -578,7 +569,7 @@ class App {
       case 'chat':
         await ensurePageLibs('chat');
         markdownRenderer.initMermaid();
-        this.renderChat();
+        await this.renderChat();
         break;
       case 'config': this.renderConfig(); break;
       case 'api': this.renderAPI(); break;
@@ -592,16 +583,6 @@ class App {
       location.hash = `#/${normalizedPage}`;
     }
 
-    if (content) {
-      if (this._routeInitialized) {
-        motion.animatePageBlocks(content, normalizedPage);
-      } else {
-        motion.cancelPageMotion(content);
-      }
-    }
-    if (headerTitle && this._routeInitialized) {
-      motion.animateHeaderTitle(headerTitle);
-    }
     this._routeInitialized = true;
   }
 
@@ -1133,11 +1114,7 @@ class App {
       header.setAttribute('aria-expanded', 'false');
       const toggle = () => {
         const open = content.hidden;
-        if (motion.isMotionReady() && !motion.isReducedMotion()) {
-          motion.animateToolBlockToggle(content, open);
-        } else {
-          content.hidden = !open;
-        }
+        content.hidden = !open;
         header.querySelector('.chat-tool-block-toggle').textContent = open ? '收起' : '展开';
         header.setAttribute('aria-expanded', String(open));
       };
@@ -1781,7 +1758,6 @@ class App {
         this.removeImagePreview(fileId);
       });
     });
-    requestAnimationFrame(() => motion.animateImagePreviewItems(previewContainer));
   }
   
   /**
@@ -2029,7 +2005,7 @@ class App {
 
   /**
    * 创建流式消息元素
-   * @param {string} additionalClass - 额外的CSS类（如'voice-message'）
+   * @param {string} additionalClass - 额外的 CSS 类
    * @returns {HTMLElement} 消息元素
    */
   _createStreamingMessage(additionalClass = '') {
@@ -2328,7 +2304,6 @@ class App {
       ? (message || '文本生成中...')
       : '空闲';
     statusEl.classList.toggle('active', isRunning);
-    motion.animateStreamStatus(statusEl, isRunning);
   }
   
   _updateEventQuoteStrip() {

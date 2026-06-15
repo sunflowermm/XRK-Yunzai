@@ -100,7 +100,7 @@ async function start() {
     const bot = new Bot();
     
     // 将实例暴露到全局，供 Listener/Plugins 等模块使用
-    global.Bot = bot;
+    globalThis.Bot = bot;
     
     // 运行 Bot
     await bot.run({ port });

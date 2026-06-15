@@ -13,7 +13,7 @@ export default [
         setTimeout: r, setInterval: r, setImmediate: r, clearTimeout: r, clearInterval: r,
         Promise: r, Map: r, Set: r, WeakMap: r, WeakSet: r, Symbol: r, Proxy: r, Reflect: r,
         fetch: r, URL: r, URLSearchParams: r, AbortSignal: r, AbortController: r,
-        Bot: r, redis: r, logger: r, plugin: r, Renderer: r, segment: r
+        Bot: r, redis: r, logger: r, plugin: r, Renderer: r, segment: r, cfg: r, ConfigManager: r
       }
     },
     plugins: { import: importPlugin },

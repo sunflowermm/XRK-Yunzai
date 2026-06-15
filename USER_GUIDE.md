@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![User Guide](https://img.shields.io/badge/User%20Guide-v3.1.3-blue?style=flat-square)
+![User Guide](https://img.shields.io/badge/User%20Guide-v3.2.0-blue?style=flat-square)
 ![API](https://img.shields.io/badge/API-REST%20%7C%20WebSocket-green?style=flat-square)
 ![Frontend](https://img.shields.io/badge/Frontend-Web%20Panel-orange?style=flat-square)
 
@@ -51,7 +51,7 @@
 
 ### 2.2 API 控制中心（xrk 面板）
 
-**http://localhost:<端口>/xrk/** — 系统状态监控、AI 对话（Event/语音/文本）、配置管理、API 调试。顶部可填 API Key，左侧切换功能模块。**Event 模式**下支持引用回复（点击消息「引用」后发送，与后端 getReply 协议一致）。`<端口>` 以实际配置为准。
+**http://localhost:<端口>/xrk/** — 系统状态监控、AI 对话（Event / AI 双模式）、配置管理、API 调试。顶部可填 API Key，左侧切换功能模块。**Event 模式**下支持引用回复（点击消息「引用」后发送，与后端 getReply 协议一致）。`<端口>` 以实际配置为准。
 
 ### 2.3 静态资源
 
@@ -96,7 +96,7 @@
 |------|------|
 | GET /api/devices | 设备列表 `{ success, devices[], count }`，每项含 device_id、device_type、device_name、capabilities、registeredAt |
 | GET /api/device/:deviceId | 单设备详情 |
-| POST /api/device/:deviceId/ai | 请求体 `{ text, workflow? }`，执行设备工作流 |
+| POST /api/device/:deviceId/ai | 请求体 `{ text, workflow? }`，执行 AI 工作流；**默认 `workflow` 为 `chat`** |
 
 #### 3.2.6 AI 对话
 
@@ -263,9 +263,6 @@ ws.onclose = () => {
 | type | 说明 |
 |------|------|
 | `reply` | 回复内容：`segments`（文本/图片/引用/工具卡片等）、可选 `title`/`description`、可选 `mcp_tools` |
-| `asr_interim` | 语音识别中间结果：`session_id`、`text` |
-| `asr_final` | 语音识别最终结果：`session_id`、`text` |
-| `command` | 子类型 `play_tts_audio`：`parameters.audio_data` 为 PCM 十六进制字符串，16kHz 单声道 |
 | `typing` | 输入状态：`typing: true/false` |
 | `error` | 错误：`message` |
 | `register_response` / `heartbeat_response` | 注册与心跳响应 |

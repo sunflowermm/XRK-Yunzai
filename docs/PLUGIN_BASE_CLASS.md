@@ -4,7 +4,7 @@
 
 ![Plugin Base](https://img.shields.io/badge/Plugin%20Base-Class-blue?style=flat-square)
 ![Status](https://img.shields.io/badge/Status-Stable-success?style=flat-square)
-![Version](https://img.shields.io/badge/Version-3.1.3-informational?style=flat-square)
+![Version](https://img.shields.io/badge/Version-3.2.0-informational?style=flat-square)
 
 </div>
 

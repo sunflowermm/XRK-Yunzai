@@ -1,7 +1,7 @@
 import path from 'path';
 import yaml from 'yaml';
-import BotUtil from '../../../lib/util.js';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
+import { ObjectUtils } from '../../../lib/utils/object-utils.js';
 
 /** 按点号路径更新嵌套对象的值 */
 function updateNestedValue(obj, pathStr, value) {
@@ -81,7 +81,7 @@ export default {
             }
           });
         } catch (error) {
-          logger.error('[Data Editor API] 文件读取失败', error);
+          Bot.makeLog('error', '[Data Editor API] 文件读取失败', 'WriteAPI', error);
           if (error instanceof SyntaxError || error.name === 'YAMLParseError') {
             return res.status(400).json({ success: false, message: '文件格式错误', error: error.message });
           }
@@ -157,8 +157,8 @@ export default {
 
             switch (operation) {
               case 'merge':
-                finalData = BotUtil.isObject(existingData) && BotUtil.isObject(data)
-                  ? BotUtil.deepMerge({ ...existingData }, data)
+                finalData = ObjectUtils.isPlainObject(existingData) && ObjectUtils.isPlainObject(data)
+                  ? ObjectUtils.deepMergeImmutable({ ...existingData }, data)
                   : data;
                 break;
                 
@@ -174,7 +174,7 @@ export default {
                 break;
                 
               case 'update':
-                finalData = req.body.path && BotUtil.isObject(existingData)
+                finalData = req.body.path && ObjectUtils.isPlainObject(existingData)
                   ? updateNestedValue(existingData, req.body.path, data)
                   : data;
                 break;
@@ -215,7 +215,7 @@ export default {
             }
           });
         } catch (error) {
-          logger.error('[Data Editor API] 文件写入失败', error);
+          Bot.makeLog('error', '[Data Editor API] 文件写入失败', 'WriteAPI', error);
           res.status(500).json({ 
             success: false, 
             message: '文件写入失败',

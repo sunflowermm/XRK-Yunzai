@@ -2,7 +2,6 @@
 # 端口级覆盖：data/server_bots/{port}/aistream.yaml
 
 enabled: true
-streamDir: "plugins/stream"
 
 global:
   maxTimeout: 30000
@@ -15,7 +14,8 @@ cache:
   maxSize: 100
 
 llm:
-  Provider: gptgod
+  # 填写各工厂 providers[] 条目的 key（先在 data/server_bots/*_llm.yaml 配置端点）
+  Provider: ""
   timeout: 360000
   # 全局默认生成参数（单次请求 / 工作流 config / 各 *_llm.yaml 提供商可覆盖）
   temperature: 0.8
@@ -39,3 +39,94 @@ mcp:
     enabled: false
     selected: []
     servers: []
+
+# crawl：web_fetch / web_search / browser（browser 启动参数另合并 renderer/playwright）
+crawl:
+  webFetch:
+    timeoutSeconds: 30
+    cacheTtlMinutes: 15
+    maxChars: 50000
+    maxResponseBytes: 2000000
+    maxRedirects: 3
+    pinDns: true
+    readabilityEnabled: true
+    userAgent: ""
+    firecrawlApiKey: ""
+    firecrawlBaseUrl: "https://api.firecrawl.dev"
+    firecrawlEnabled: false
+  webSearch:
+    enabled: true
+    provider: ""
+    timeoutSeconds: 20
+    cacheTtlMinutes: 15
+    region: ""
+    safeSearch: moderate
+    country: ""
+    parallelFree:
+      url: "https://search.parallel.ai/mcp"
+    brave:
+      apiKey: ""
+      baseUrl: ""
+    perplexity:
+      apiKey: ""
+      openRouterApiKey: ""
+      baseUrl: ""
+      model: ""
+    exa:
+      apiKey: ""
+      baseUrl: ""
+    tavily:
+      apiKey: ""
+      baseUrl: ""
+    parallel:
+      apiKey: ""
+      baseUrl: ""
+    gemini:
+      apiKey: ""
+      baseUrl: ""
+      model: ""
+    kimi:
+      apiKey: ""
+      baseUrl: ""
+      model: ""
+    minimax:
+      apiKey: ""
+      baseUrl: ""
+      region: ""
+      apiHost: ""
+    firecrawl:
+      apiKey: ""
+      baseUrl: ""
+    searxng:
+      baseUrl: ""
+      categories: ""
+      language: ""
+    ollama:
+      baseUrl: "http://127.0.0.1:11434"
+      apiKey: ""
+      cloudApiKey: ""
+  browser:
+    browserType: chromium
+    headless: true
+    wsEndpoint: ""
+    executablePath: ""
+    launchTimeoutMs: 120000
+    navigationTimeoutMs: 60000
+    maxTextChars: 50000
+    screenshotMaxBytes: 4194304
+    screenshotFontDir: ""
+    screenshotFontUrlBase: ""
+    screenshotFontFiles: []
+    ssrfPolicy:
+      allowPrivateNetwork: false
+      dangerouslyAllowPrivateNetwork: false
+
+# 工具子系统（与 tools 工作流 file 配置对齐）
+tools:
+  file:
+    workspace: ""
+    maxReadChars: 500000
+    grepMaxResults: 100
+    runEnabled: true
+    runTimeoutMs: 120000
+    maxCommandOutputChars: 200000

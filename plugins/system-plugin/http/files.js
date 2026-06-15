@@ -185,7 +185,7 @@ export default {
             });
           }
         } catch (error) {
-          logger.error(`文件上传处理失败: ${error.message}`);
+          Bot.makeLog('error', `文件上传处理失败: ${error.message}`, 'FilesAPI');
           res.status(500).json({ 
             success: false, 
             message: '文件上传失败',
@@ -214,7 +214,7 @@ export default {
               }
             }
           } catch (err) {
-            logger.error(`查找文件失败: ${err.message}`);
+            Bot.makeLog('error', `查找文件失败: ${err.message}`, 'FilesAPI');
           }
           
           return notFound(res);
@@ -277,7 +277,7 @@ export default {
             await FileUtils.unlink(fileInfo.path);
             fileMap.delete(id);
           } catch (err) {
-            logger.error(`删除文件失败: ${err.message}`);
+            Bot.makeLog('error', `删除文件失败: ${err.message}`, 'FilesAPI');
           }
         }
 
@@ -385,7 +385,7 @@ export default {
             timestamp: Date.now()
           });
         } catch (error) {
-          logger.error(`Base64文件上传失败: ${error.message}`);
+          Bot.makeLog('error', `Base64文件上传失败: ${error.message}`, 'FilesAPI');
           res.status(500).json({ 
             success: false, 
             message: '文件上传失败',
@@ -405,12 +405,14 @@ export default {
           try {
             await FileUtils.unlink(info.path);
             fileMap.delete(id);
-          } catch {}
+          } catch (err) {
+            Bot.makeLog('debug', `[files] 清理过期上传失败 id=${id}: ${err?.message || err}`, 'FilesAPI');
+          }
         }
       }
       const mediaN = await FileUtils.cleanDirByMaxAge(mediaDir, MEDIA_MAX_AGE_MS);
       const tempN = await FileUtils.cleanDirByMaxAge(tempHtmlDir, TEMP_HTML_MAX_AGE_MS, true);
-      if (mediaN + tempN > 0) logger.debug(`清理过期媒体/临时: data/media ${mediaN} 个, temp/html ${tempN} 个`);
+      if (mediaN + tempN > 0) Bot.makeLog('debug', `清理过期媒体/临时: data/media ${mediaN} 个, temp/html ${tempN} 个`, 'FilesAPI');
     }, CLEANUP_INTERVAL_MS);
   }
 };

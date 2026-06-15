@@ -49,7 +49,14 @@
 * 多 Bot 实例下渲染器配置支持按 `data/server_bots/<uin>/renderers/` 独立配置 puppeteer / playwright
 * 修复帮助、网页截图、查天气等应用因渲染器路径或资源加载导致的载入失败或截图无样式问题
 
-# 3.1.3（当前版本）
+# 3.2.0（当前版本）
+* **Agent 平台底层精简**：移除 ASR/TTS 工厂、火山 ASR/TTS 配置与 CommonConfig 项；删除 `stream/device.js` 设备语音专用工作流
+* **Agent 平台工程化**：借鉴 XRK-AGT 新增 `docs/coding-style.md`、`runtime-surface.md`、框架测试（`pnpm test`）、skill 索引与文档审查清单
+* Web 控制台去掉语音聊天模式与 xiaozhi 协议分支；设备 HTTP/WS 仅保留 Event 消息链与 AI 工作流（默认 `chat`）
+* **system-plugin 底层审计**：`Bot.makeLog` 全后端统一；空 `catch` 补 debug 日志；stream 工作流类字段化；`system-plugin-conventions.test.mjs` 锁定约定
+* **全局裸名规范**：业务层禁止 `global.Bot/cfg/segment`；启动挂载 `globalThis`；`lib/utils/aistream-config.js` 自 AGT 复制
+
+# 3.1.3
 * 渲染器与插件层进一步收口：删冗余代码、无意义保护逻辑与多余 import，提高对象引用（RendererLoader、getRenderer）复用
 * 更新日志与版本号梳理，3.1.x 为当前维护主线
 * 依赖与配置说明见 README，渲染器接入详见 `lib/renderer/README.md`

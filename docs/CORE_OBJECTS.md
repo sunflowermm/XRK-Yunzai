@@ -4,7 +4,7 @@
 
 ![Core Objects](https://img.shields.io/badge/Core%20Objects-7-blue?style=flat-square)
 ![Status](https://img.shields.io/badge/Status-Active-success?style=flat-square)
-![Version](https://img.shields.io/badge/Version-3.1.3-informational?style=flat-square)
+![Version](https://img.shields.io/badge/Version-3.2.0-informational?style=flat-square)
 
 </div>
 

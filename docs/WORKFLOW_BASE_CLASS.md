@@ -11,7 +11,7 @@
 ```
 plugins/<插件根>/stream/
 ├── chat.js          # 聊天工作流
-├── device.js        # 设备工作流
+├── memory.js        # 记忆工作流
 └── [自定义].js      # 自定义工作流
 ```
 

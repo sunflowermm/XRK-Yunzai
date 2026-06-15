@@ -64,10 +64,10 @@ export class DailySignIn extends plugin {
             },
             reply: async (replyMsg) => {
                 try {
-                    logger.info(`模拟回复：${JSON.stringify(replyMsg)}`);
+                    Bot.makeLog('info', `模拟回复：${JSON.stringify(replyMsg)}`, 'SimInput');
                     return true;
                 } catch (error) {
-                    logger.error(`回复出错！: ${error.message}`);
+                    Bot.makeLog('error', `回复出错！: ${error.message}`, 'SimInput');
                     return false;
                 }
             }

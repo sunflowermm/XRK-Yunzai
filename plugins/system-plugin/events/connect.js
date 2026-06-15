@@ -81,12 +81,14 @@ export default class connectEvent extends EventListener {
           try {
             const fromData = Buffer.from(file)
             if (fromData.length) return fromData
-          } catch { }
+          } catch (err) {
+            Bot.makeLog('debug', `[connect] Buffer.from 跳过: ${err?.message || err}`, 'Connect');
+          }
         }
       }
       return false
     } catch (err) {
-      logger.error(`[connect] 截图失败: ${err.message}`)
+      Bot.makeLog('error', `[connect] 截图失败: ${err.message}`, 'Connect')
       return false
     }
   }
@@ -104,12 +106,12 @@ export default class connectEvent extends EventListener {
     const htmlPath = await this.generateHTML('plugin_load', this.getPluginLoadHTML(stats))
     const img = await this.takeScreenshot(htmlPath, 'plugin_load_report', { width: 800, deviceScaleFactor: 1.5 })
     if (!img) {
-      logger.warn('[connect] 插件加载报告: 截图未得到 img（见上方 takeScreenshot 日志），未发送')
+      Bot.makeLog('warn', '[connect] 插件加载报告: 截图未得到 img（见上方 takeScreenshot 日志），未发送', 'Connect')
       this.cleanupFile(htmlPath)
       return
     }
     await target.sendMsg([segment.image(img)])
-    logger.mark('[connect] 插件加载报告已 reply 发出')
+    Bot.makeLog('mark', '[connect] 插件加载报告已 reply 发出', 'Connect')
     this.cleanupFile(htmlPath)
   }
 
@@ -120,7 +122,12 @@ export default class connectEvent extends EventListener {
   }
 
   cleanupFile(filePath, delay = 5000) {
-    setTimeout(() => FileUtils.unlink(filePath).catch(() => {}), delay)
+    setTimeout(
+      () => FileUtils.unlink(filePath).catch((err) => {
+        Bot.makeLog('debug', `[connect] 清理临时文件失败 ${filePath}: ${err?.message || err}`, 'ConnectEvent');
+      }),
+      delay
+    );
   }
 
   getWelcomeHTML() {

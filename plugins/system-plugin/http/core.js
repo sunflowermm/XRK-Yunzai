@@ -56,7 +56,9 @@ async function __sampleNetWindows() {
     );
     const p = stdout.trim().split('|');
     if (p.length === 2) return { rxBytes: parseFloat(p[0]) || 0, txBytes: parseFloat(p[1]) || 0 };
-  } catch {}
+  } catch (err) {
+    Bot.makeLog('debug', `[core] Win32 网卡统计不可用: ${err?.message || err}`, 'CoreAPI');
+  }
   return null;
 }
 

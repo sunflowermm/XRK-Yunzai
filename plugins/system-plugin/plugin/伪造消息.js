@@ -58,7 +58,7 @@ export class MessageFabricator extends plugin {
       }
       
     } catch (error) {
-      logger.error(`[MessageFabricator] 错误: ${error}`);
+      Bot.makeLog('error', `[MessageFabricator] 错误: ${error}`, 'FakeMsg');
       await e.reply('❌ 处理消息时发生错误');
       return false;
     }
@@ -292,7 +292,7 @@ export class MessageFabricator extends plugin {
       return forwardMsg;
       
     } catch (error) {
-      logger.error(`[MessageFabricator] 制作转发消息失败: ${error}`);
+      Bot.makeLog('error', `[MessageFabricator] 制作转发消息失败: ${error}`, 'FakeMsg');
       return null;
     }
   }

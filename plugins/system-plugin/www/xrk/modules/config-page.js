@@ -1,11 +1,83 @@
-/** 配置页方法，挂载到 App.prototype（依赖 app.js 中的 config-manager 包装方法） */
+/**
+ * 配置页方法，挂载到 App.prototype（依赖 app.js 中的 config-manager 包装方法）
+ *
+ * 渲染管线：flatSchema → buildFieldTree → renderFieldTree → renderConfigField
+ * 数组项（providers 等）：renderArrayObjectControl → renderProviderEntryFields（分组）→ renderArrayObjectFieldMarkup
+ */
 import { formatKeyValueLines, parseKeyValueLines } from './utils.js';
+import { fillMissingSchemaDefaults } from './config-manager.js';
 import { showPromptDialog as showPromptDialogUI } from './ui/prompt-dialog.js';
+import { groupProviderSchemaFields } from './llm-provider-ui.js';
 import { API, fetchApi } from './platform.js';
+
+let _configScrollPersistTimer = null;
+let _configListSyncRaf = 0;
+let _configListSyncMode = 'restore';
 
 function escapeConfigItemSelector(name) {
   const id = String(name ?? '');
   return typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(id) : id.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function isConfigListItemVisible(list, item) {
+  if (!list || !item) return true;
+  const listHeight = list.clientHeight;
+  if (listHeight <= 0) return true;
+  const visibleTop = list.scrollTop;
+  const visibleBottom = visibleTop + listHeight;
+  const itemTop = item.offsetTop;
+  const itemBottom = itemTop + item.offsetHeight;
+  return itemTop >= visibleTop && itemBottom <= visibleBottom;
+}
+
+/** 选中项是否与列表可视区有交集（比 fully visible 宽松，避免 restore 时侧栏跳动） */
+function isConfigListItemInViewport(list, item) {
+  if (!list || !item) return true;
+  const listHeight = list.clientHeight;
+  if (listHeight <= 0) return true;
+  const visibleTop = list.scrollTop;
+  const visibleBottom = visibleTop + listHeight;
+  const itemTop = item.offsetTop;
+  const itemBottom = itemTop + item.offsetHeight;
+  return itemBottom > visibleTop && itemTop < visibleBottom;
+}
+
+/** 在 .config-list 容器内滚动，避免 scrollIntoView 误滚整页 */
+function scrollConfigListItem(list, item, { align = 'nearest', behavior = 'auto' } = {}) {
+  if (!list || !item) return;
+  const listHeight = list.clientHeight;
+  const itemHeight = item.offsetHeight;
+  if (listHeight <= 0) return;
+
+  const itemTop = item.offsetTop;
+  let targetTop;
+
+  if (align === 'center') {
+    targetTop = itemTop - (listHeight - itemHeight) / 2;
+  } else {
+    if (isConfigListItemVisible(list, item)) return;
+    const visibleTop = list.scrollTop;
+    targetTop = itemTop < visibleTop
+      ? itemTop - 8
+      : itemTop - listHeight + itemHeight + 8;
+  }
+
+  const maxScroll = Math.max(0, list.scrollHeight - listHeight);
+  targetTop = Math.max(0, Math.min(targetTop, maxScroll));
+  list.scrollTo({ top: targetTop, behavior });
+}
+
+function markConfigListActive(list, name) {
+  if (!list || !name) return null;
+  const item = list.querySelector(`.config-item[data-name="${escapeConfigItemSelector(name)}"]`);
+  if (!item) return null;
+  list.querySelectorAll('.config-item').forEach((el) => {
+    el.classList.remove('active');
+    el.setAttribute('aria-pressed', 'false');
+  });
+  item.classList.add('active');
+  item.setAttribute('aria-pressed', 'true');
+  return item;
 }
 
 export const configPageMethods = {
@@ -14,21 +86,275 @@ export const configPageMethods = {
     return Boolean(cfg?.configs && typeof cfg.configs === 'object' && Object.keys(cfg.configs).length > 0);
   },
 
-  setActiveConfigSidebarItem(name) {
-    const list = document.getElementById('configList');
-    if (!list || !name) return false;
-    const item = list.querySelector(`.config-item[data-name="${escapeConfigItemSelector(name)}"]`);
-    if (!item) return false;
-    list.querySelectorAll('.config-item').forEach((el) => {
-      el.classList.remove('active');
-      el.setAttribute('aria-pressed', 'false');
-    });
-    item.classList.add('active');
-    item.setAttribute('aria-pressed', 'true');
+  isConfigDense() {
     try {
-      item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      return localStorage.getItem('configEditorDense') === '1';
+    } catch {
+      return false;
+    }
+  },
+
+  toggleConfigDense() {
+    const next = !this.isConfigDense();
+    try {
+      localStorage.setItem('configEditorDense', next ? '1' : '0');
     } catch {}
-    return true;
+    document.querySelector('.config-page')?.classList.toggle('config-page-dense', next);
+    const btn = document.getElementById('configDensityToggle');
+    if (btn) btn.textContent = next ? '舒适布局' : '紧凑布局';
+    return next;
+  },
+
+  isLlmProvidersArray(path = '') {
+    return /(?:^|\.)providers$/.test(String(path || ''));
+  },
+
+  /** 短字段半宽（一行两个）；长字段/复杂控件占满行 */
+  resolveConfigFieldSpan(meta = {}, field = {}) {
+    if (meta.layout === 'full' || meta.span === 'full') return 'config-field-span-full';
+    if (meta.layout === 'half' || meta.span === 'half') return '';
+
+    const component = String(meta.component ?? field.component ?? '').toLowerCase();
+    const type = String(meta.type ?? field.type ?? '').toLowerCase();
+    const path = String(field.path ?? '');
+    const key = path.split('.').pop() || path;
+
+    const fullComponents = new Set(['textarea', 'tags', 'arrayform', 'subform', 'inputpassword']);
+    if (fullComponents.has(component)) return 'config-field-span-full';
+
+    if (type.startsWith('array') || type === 'object' || type === 'map') {
+      return 'config-field-span-full';
+    }
+
+    const fullKeyPattern = /^(wsUrl|baseUrl|path|instructions|promptCacheKey|safetyIdentifier|anthropicVersion|apiVersion|deployment|headers|extraBody|proxy|description|content|.*[Uu]rl)$/;
+    if (fullKeyPattern.test(key)) return 'config-field-span-full';
+
+    return '';
+  },
+
+  /**
+   * 扁平行字段统一外壳（顶层 schema 与 array 子项共用）。
+   * 结构：meta（标签 + 说明） + control + 可选 example
+   */
+  renderConfigFieldShell({
+    classNames = 'config-field config-field-row',
+    label,
+    description = '',
+    inputId = '',
+    required = false,
+    isFullSpan = false,
+    controlClass = '',
+    controlHtml = '',
+    exampleHtml = '',
+    dirty = false
+  }) {
+    const dirtyCls = dirty ? ' config-field-dirty' : '';
+    return `
+      <div class="${classNames}${dirtyCls}">
+        <div class="config-field-body">
+          ${this.renderFieldMetaBlock({ label, description, inputId, required, isFullSpan })}
+          <div class="config-field-control${controlClass}">${controlHtml}</div>
+          ${exampleHtml}
+        </div>
+      </div>
+    `;
+  },
+
+  /** 控件下方辅助说明（tags / JSON 等），与 meta 区 schema description 区分 */
+  renderControlFootnote(text) {
+    if (!text) return '';
+    return `<p class="config-field-hint config-control-footnote">${this.escapeHtml(text)}</p>`;
+  },
+
+  /** 标签 + 说明；无说明时不占位，避免半宽字段出现大块空行 */
+  renderFieldMetaBlock({ label, description = '', inputId = '', required = false, isFullSpan = false }) {
+    const hintClass = !isFullSpan ? ' config-field-hint-compact' : '';
+    const hintHtml = description
+      ? `<p class="config-field-hint${hintClass}">${this.escapeHtml(description)}</p>`
+      : '';
+    const forAttr = inputId ? ` for="${this.escapeHtml(inputId)}"` : '';
+    const titleAttr = description ? ` title="${this.escapeHtml(description)}"` : '';
+    const req = required ? '<span class="required">*</span>' : '';
+    return `
+      <div class="config-field-meta${isFullSpan ? ' config-field-meta-full' : ''}${description ? ' config-field-meta-has-hint' : ''}">
+        <label${forAttr}${titleAttr}>${label}${req}</label>
+        ${hintHtml}
+      </div>
+    `;
+  },
+
+  getProviderEntrySummary(item = {}) {
+    const key = item.key || item.provider || '—';
+    const label = item.label ? ` · ${item.label}` : '';
+    const model = item.model || item.chatModel || '';
+    const base = item.baseUrl || '';
+    const modelPart = model ? ` · ${model}` : '';
+    const basePart = base ? ` · ${base}` : '';
+    return `${key}${label}${modelPart}${basePart}`;
+  },
+
+  readStoredConfigListScroll() {
+    try {
+      const raw = localStorage.getItem('lastConfigListScrollTop');
+      if (raw == null || raw === '') return null;
+      const top = Number(raw);
+      return Number.isFinite(top) && top >= 0 ? top : null;
+    } catch {
+      return null;
+    }
+  },
+
+  persistConfigListScroll(top, { flush = false } = {}) {
+    if (!this._configState) return;
+    const n = Number(top);
+    if (!Number.isFinite(n) || n < 0) return;
+    this._configState.listScrollTop = n;
+
+    const write = () => {
+      try {
+        localStorage.setItem('lastConfigListScrollTop', String(Math.round(n)));
+      } catch {}
+    };
+
+    if (flush) {
+      if (_configScrollPersistTimer) {
+        clearTimeout(_configScrollPersistTimer);
+        _configScrollPersistTimer = null;
+      }
+      write();
+      return;
+    }
+
+    if (_configScrollPersistTimer) return;
+    _configScrollPersistTimer = setTimeout(() => {
+      _configScrollPersistTimer = null;
+      write();
+    }, 320);
+  },
+
+  _captureConfigEditorScroll() {
+    const list = document.getElementById('configList');
+    const content = document.querySelector('.content');
+    const listTop = list?.scrollTop ?? 0;
+    const contentTop = content?.scrollTop ?? 0;
+    if (list) this.persistConfigListScroll(listTop, { flush: true });
+    if (this._configState) this._configState.mainScrollTop = contentTop;
+    return { listTop, contentTop };
+  },
+
+  _restoreConfigEditorScroll(snapshot = null) {
+    const list = document.getElementById('configList');
+    const content = document.querySelector('.content');
+    const listTop = snapshot?.listTop ?? this._configState?.listScrollTop;
+    const contentTop = snapshot?.contentTop ?? this._configState?.mainScrollTop;
+    const apply = () => {
+      if (list && typeof listTop === 'number' && Number.isFinite(listTop)) {
+        list.scrollTop = listTop;
+      }
+      if (content && typeof contentTop === 'number' && Number.isFinite(contentTop)) {
+        content.scrollTop = contentTop;
+      }
+    };
+    requestAnimationFrame(() => {
+      apply();
+      requestAnimationFrame(apply);
+    });
+  },
+
+  _applyConfigListView(mode = 'restore') {
+    if (!this._configState) return;
+    const name = this._configState.selected?.name;
+    if (!name) return;
+
+    const list = document.getElementById('configList');
+    if (!list) return;
+    const item = markConfigListActive(list, name);
+    if (!item) return;
+
+    const hasFilter = Boolean(this._configState.filter);
+    const savedScroll = this._configState.listScrollTop;
+    const restoreScroll = mode === 'restore'
+      && !hasFilter
+      && typeof savedScroll === 'number'
+      && Number.isFinite(savedScroll);
+
+    if (restoreScroll) {
+      list.scrollTop = savedScroll;
+      if (!isConfigListItemInViewport(list, item)) {
+        scrollConfigListItem(list, item, { align: 'nearest', behavior: 'auto' });
+      }
+    } else if (mode === 'select') {
+      scrollConfigListItem(list, item, {
+        align: 'nearest',
+        behavior: hasFilter ? 'auto' : 'smooth'
+      });
+    } else if (!isConfigListItemVisible(list, item)) {
+      scrollConfigListItem(list, item, { align: 'nearest', behavior: 'auto' });
+    }
+
+    this.persistConfigListScroll(list.scrollTop, { flush: mode === 'restore' });
+  },
+
+  /** 同步列表选中态与滚动：restore=回页/刷新恢复；select=用户点选 */
+  syncConfigListView(mode = 'restore') {
+    if (!this._configState?.selected?.name) return;
+    _configListSyncMode = mode;
+    if (_configListSyncRaf) return;
+    _configListSyncRaf = requestAnimationFrame(() => {
+      _configListSyncRaf = 0;
+      this._applyConfigListView(_configListSyncMode);
+    });
+  },
+
+  /** 跳转到配置页并选中指定项（侧边栏 / 对话页入口共用） */
+  openConfigSelection(name, child = null) {
+    const target = { name, child: child || null };
+    try {
+      localStorage.setItem('lastConfigName', name);
+      localStorage.setItem('lastConfigChild', child || '');
+    } catch {}
+    if (!this._configState) {
+      void this.navigateTo('config');
+      return;
+    }
+    this._configState.pendingSelect = target;
+    if (this.currentPage !== 'config') {
+      void this.navigateTo('config');
+      return;
+    }
+    this._configState.pendingSelect = null;
+    this.selectConfig(name, child);
+  },
+
+  restoreConfigSelectionAfterListLoad() {
+    if (!this._configState) return;
+    const pending = this._configState.pendingSelect;
+    if (pending) this._configState.pendingSelect = null;
+
+    const name = pending?.name ?? this._configState.selected?.name;
+    const child = pending
+      ? (pending.child ?? null)
+      : (this._configState.selectedChild ?? null);
+    if (!name) return;
+
+    const target = this._configState.list.find(cfg => cfg.name === name);
+    if (!target) return;
+
+    const sameSelection = this._configState.selected?.name === name
+      && (this._configState.selectedChild ?? null) === (child ?? null);
+
+    if (!sameSelection) {
+      this.selectConfig(name, child, { listScroll: 'restore' });
+      return;
+    }
+
+    this._configState.selected = target;
+    if (this.isMultiFileConfig(target) && !child) {
+      this.renderMultiFileConfigChooser(target);
+    } else {
+      this.loadSelectedConfigDetail();
+    }
+    this.syncConfigListView('restore');
   },
   renderConfigPlaceholder() {
     return `
@@ -80,30 +406,8 @@ export const configPageMethods = {
       if (!data.success) throw new Error(data.message ?? '接口返回失败');
       if (!this._configState) return;
       this._configState.list = data.configs ?? [];
-      for (const cfg of this._configState.list) {
-        if (cfg?.name) this._schemaCache[cfg.name] = cfg;
-      }
       this.renderConfigList();
-  
-      const restore =
-        this._configState.pendingSelect ??
-        (this.currentPage === 'config' && this._configState.selected
-          ? { name: this._configState.selected.name, child: this._configState.selectedChild || null }
-          : null);
-      if (restore?.name) {
-        const target = this._configState.list.find(cfg => cfg.name === restore.name);
-        if (target) {
-          this._configState.selected = target;
-          if (this.isMultiFileConfig(target) && !restore.child) {
-            this.renderMultiFileConfigChooser(target);
-          } else if (this._configState.pendingSelect) {
-            this.selectConfig(restore.name, restore.child || null);
-          } else {
-            this.loadSelectedConfigDetail();
-          }
-        }
-        this._configState.pendingSelect = null;
-      }
+      this.restoreConfigSelectionAfterListLoad();
     } catch (e) {
       const msg = (e && e.message) ? String(e.message) : '未知错误';
       if (list) list.innerHTML = `<div class="empty-state"><p>加载失败: ${this.escapeHtml(msg)}</p></div>`;
@@ -152,7 +456,6 @@ export const configPageMethods = {
     list.innerHTML = filtered.map(cfg => {
       const title = this.escapeHtml(cfg.displayName || cfg.name);
       const desc = this.escapeHtml(cfg.description ?? cfg.filePath ?? '');
-      const multiFile = this.isMultiFileConfig(cfg);
       return `
       <div
         class="config-item ${this._configState.selected?.name === cfg.name ? 'active' : ''}"
@@ -165,22 +468,21 @@ export const configPageMethods = {
           <div class="config-name">${title}</div>
           <p class="config-desc">${desc}</p>
           </div>
-        ${multiFile ? '<span class="config-tag">多文件</span>' : ''}
+        ${this.isMultiFileConfig(cfg) ? '<span class="config-tag">多文件</span>' : ''}
           </div>
     `;
     }).join('');
 
     if (this._configState.selected?.name) {
-      this.setActiveConfigSidebarItem(this._configState.selected.name);
+      this.syncConfigListView('restore');
     }
   },
 
-  selectConfig(name, child = null) {
+  selectConfig(name, child = null, { listScroll = 'select' } = {}) {
     if (!this._configState) return;
-    
-    // 若选择与当前相同的配置和子项，避免重复渲染导致的抖动
+
     if (this._configState.selected?.name === name && (child || null) === this._configState.selectedChild) {
-      this.setActiveConfigSidebarItem(name);
+      this.syncConfigListView(listScroll === 'restore' ? 'restore' : 'select');
       return;
     }
   
@@ -204,13 +506,13 @@ export const configPageMethods = {
     this._configState.jsonText = '';
     this._configState.jsonDirty = false;
 
-    this.setActiveConfigSidebarItem(name);
+    this.syncConfigListView(listScroll === 'restore' ? 'restore' : 'select');
 
     if (this.isMultiFileConfig(config) && !child) {
       this.renderMultiFileConfigChooser(config);
       return;
     }
-
+  
     this.loadSelectedConfigDetail();
   },
 
@@ -257,10 +559,34 @@ export const configPageMethods = {
         `).join('')}
       </div>
     `;
+    
+    if (!main.dataset._multiFileChooserBound) {
+      main.dataset._multiFileChooserBound = '1';
+
+      main.addEventListener('click', (e) => {
+        const card = e.target.closest('.config-subcard');
+        if (!card || !this._configState) return;
+        const parent = card.dataset.parent || config.name;
+        const child = card.dataset.child;
+        if (parent && child) this.selectConfig(parent, child);
+      });
+
+      main.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const card = e.target.closest('.config-subcard');
+        if (!card || !this._configState) return;
+        const parent = card.dataset.parent || config.name;
+        const child = card.dataset.child;
+        if (!parent || !child) return;
+        e.preventDefault();
+        this.selectConfig(parent, child);
+      });
+    }
   },
 
   async loadSelectedConfigDetail() {
     if (!this._configState?.selected) return;
+    const scrollSnapshot = this._captureConfigEditorScroll();
     const main = document.getElementById('configMain');
     const { name } = this._configState.selected;
     const child = this._configState.selectedChild;
@@ -307,7 +633,7 @@ export const configPageMethods = {
       const normalizedValues = this.normalizeIncomingFlatValues(schemaList, values);
       // flat 数据默认不包含“父对象字段本身”（例如 headers: {}），会导致 SubForm/JSON 控件初始为空。
       // 这里基于 schema 的 default 为 object/map 字段补齐缺失项，保证前端有可编辑的初始值。
-      const filledValues = this.fillMissingObjectDefaults(schemaList, normalizedValues);
+      const filledValues = fillMissingSchemaDefaults(schemaList, normalizedValues, this._cloneValue.bind(this));
       this._configState.values = filledValues;
       this._configState.rawObject = this.unflattenObject(filledValues);
       this._configState.original = this._cloneFlat(filledValues);
@@ -321,6 +647,7 @@ export const configPageMethods = {
       if (mainEl) mainEl.innerHTML = `<div class="empty-state"><p>加载失败：${this.escapeHtml(e.message)}</p></div>`;
     } finally {
       if (this._configState) this._configState.loading = false;
+      this._restoreConfigEditorScroll(scrollSnapshot);
     }
   },
 
@@ -340,10 +667,11 @@ export const configPageMethods = {
     return data.structure;
   },
 
-  extractActiveSchema(structure, _name, child) {
+  extractActiveSchema(structure, name, child) {
     if (!structure) return null;
-    if (child && structure.configs?.[child]) {
-      const target = structure.configs[child];
+    if (name === 'system') {
+      if (!child) return null;
+      const target = structure.configs?.[child];
       return target?.schema ?? { fields: target?.fields ?? {} };
     }
     return structure.schema ?? { fields: structure.fields ?? {} };
@@ -354,16 +682,11 @@ export const configPageMethods = {
     for (const [key, fieldSchema] of Object.entries(schema.fields)) {
       const path = prefix ? `${prefix}.${key}` : key;
       if (fieldSchema.type === 'array' && fieldSchema.itemType === 'object') {
-        const itemFields = fieldSchema.itemSchema?.fields ?? fieldSchema.fields ?? {};
-        map[path] = itemFields;
-        for (const [subKey, sub] of Object.entries(itemFields)) {
-          if (sub.type === 'array' && sub.itemType === 'object') {
-            const nested = sub.itemSchema?.fields ?? sub.fields ?? {};
-            map[`${path}[].${subKey}`] = nested;
-          }
-        }
-      } else if ((fieldSchema.type === 'object' || fieldSchema.type === 'map') && fieldSchema.fields) {
-        this.buildArraySchemaIndex({ fields: fieldSchema.fields }, path, map);
+        const subFields = fieldSchema.itemSchema?.fields ?? fieldSchema.fields ?? {};
+        map[path] = subFields;
+      }
+      if ((fieldSchema.type === 'object' || fieldSchema.type === 'map') && fieldSchema.fields) {
+        this.buildArraySchemaIndex(fieldSchema, path, map);
       }
     }
     return map;
@@ -395,27 +718,6 @@ export const configPageMethods = {
       );
     });
     return normalized;
-  },
-
-  fillMissingObjectDefaults(flatSchema, values) {
-    const filled = { ...(values ?? {}) };
-    if (!Array.isArray(flatSchema)) return filled;
-    flatSchema.forEach(field => {
-      const path = field?.path;
-      if (!path || Object.hasOwn(filled, path)) return;
-      const meta = field.meta ?? {};
-      const component = String(meta.component ?? field.component ?? '').toLowerCase();
-      const type = String(meta.type ?? field.type ?? '').toLowerCase();
-      const isObjectLike = type === 'object' || type === 'map';
-      const isSubForm = component === 'subform';
-      if (!isObjectLike && !isSubForm) return;
-      if (Object.hasOwn(meta, 'default')) {
-        filled[path] = this._cloneValue(meta.default);
-      } else if (isObjectLike) {
-        filled[path] = {};
-      }
-    });
-    return filled;
   },
 
   getSchemaNodeByPath(path = '', schema = this._configState?.activeSchema) {
@@ -451,6 +753,7 @@ export const configPageMethods = {
         </div>
         <div class="config-main-actions">
           <button class="btn btn-secondary" id="configReloadBtn">重载</button>
+          <button class="btn btn-secondary" id="configDensityToggle" type="button">${this.isConfigDense() ? '舒适布局' : '紧凑布局'}</button>
           <div class="config-mode-toggle">
             <button class="${mode === 'form' ? 'active' : ''}" data-mode="form">表单</button>
             <button class="${mode === 'json' ? 'active' : ''}" data-mode="json">JSON</button>
@@ -487,6 +790,14 @@ export const configPageMethods = {
         const reloadBtn = e.target.closest('#configReloadBtn');
         if (reloadBtn) {
           this.loadSelectedConfigDetail();
+          return;
+        }
+        const densityBtn = e.target.closest('#configDensityToggle');
+        if (densityBtn) {
+          const snap = this._captureConfigEditorScroll();
+          this.toggleConfigDense();
+          this.renderConfigFormPanel();
+          this._restoreConfigEditorScroll(snap);
           return;
         }
         const saveBtn = e.target.closest('#configSaveBtn');
@@ -540,6 +851,12 @@ export const configPageMethods = {
     return this.renderFieldTree(fieldTree);
   },
 
+  /**
+   * 将扁平 schema 整理为分组树：{ [groupKey]: { fields, subGroups } }
+   * - 顶层无 meta.group → __default__，避免工厂配置每字段单独成组
+   * - SubForm 子字段归入 subGroups，不重复渲染父级自由对象编辑器
+   * - 含 [] 的模板路径、dynamicCollections basePath 跳过
+   */
   buildFieldTree(flatSchema) {
     const tree = {};
     const subFormFields = new Map(); // 记录所有 SubForm 类型的字段路径及其信息
@@ -630,10 +947,9 @@ export const configPageMethods = {
         groupKey = top || parentSubFormPath;
       }
       
-      // 如果还是没有 group，根据路径确定
-      // 统一使用路径的第一部分作为分组，避免重复分组
+      // 顶层无 meta.group 的字段归入同一组，避免每个字段单独成组（工厂配置常见）
       if (!groupKey) {
-        groupKey = parts[0];
+        groupKey = parts.length === 1 ? '__default__' : parts[0];
       }
       
       // 格式化分组键
@@ -711,7 +1027,7 @@ export const configPageMethods = {
   },
 
   formatGroupKey(key) {
-    if (!key) return '其他';
+    if (!key || key === '__default__') return '__default__';
     
     // 如果包含点，说明是嵌套路径，只取第一部分作为分组
     // 避免生成 "Proxy - Domains" 这样的重复标题
@@ -725,24 +1041,25 @@ export const configPageMethods = {
 
   getFieldLabel(key) {
     const labelMap = {
-      'llm': 'LLM 大语言模型',
-      'defaults': '默认参数',
-      'profiles': '模型档位',
-      'embedding': 'Embedding 向量检索',
-      'drawing': '绘图模型',
-      'device': '设备运行参数',
-      'global': '全局设置',
-      'cache': '缓存设置'
+      llm: 'LLM 大语言模型',
+      defaults: '默认参数',
+      device: '设备运行参数',
+      emotions: '表情映射',
+      global: '全局设置',
+      cache: '缓存设置'
     };
-    
+
     return labelMap[key] || this.formatGroupLabel(key);
   },
 
   renderFieldTree(tree) {
-    return Object.entries(tree).map(([groupKey, group]) => {
-      const sole = group.fields.length === 1 ? group.fields[0] : null;
-      const groupLabel = sole?.displayName || sole?.meta?.label || this.formatGroupLabel(groupKey);
-      const groupDesc = sole?.description || sole?.meta?.description || sole?.meta?.groupDesc || '';
+    const entries = Object.entries(tree);
+    const singleDefaultGroup = entries.length === 1 && entries[0][0] === '__default__';
+
+    return entries.map(([groupKey, group]) => {
+      const hideGroupHeader = singleDefaultGroup || groupKey === '__default__';
+      const groupLabel = hideGroupHeader ? '' : this.formatGroupLabel(groupKey);
+      const groupDesc = group.fields[0]?.meta?.groupDesc ?? '';
       const totalFields = group.fields.length + Object.values(group.subGroups).reduce((sum, sg) => sum + sg.fields.length, 0);
       
       // 渲染子分组（SubForm），子分组内的字段也需要按分组显示
@@ -759,7 +1076,7 @@ export const configPageMethods = {
                   <h5>${this.escapeHtml(this.formatGroupLabel(subGroupKey))}</h5>
                 </div>
               ` : ''}
-              <div class="config-field-grid">
+              <div class="config-field-grid config-field-grid--flat">
                 ${subFields.map(field => this.renderConfigField(field)).join('')}
               </div>
             </div>
@@ -779,13 +1096,14 @@ export const configPageMethods = {
       
       // 渲染普通字段
       const fieldsHtml = group.fields.length > 0 ? `
-        <div class="config-field-grid">
+        <div class="config-field-grid config-field-grid--flat">
           ${group.fields.map(field => this.renderConfigField(field)).join('')}
         </div>
       ` : '';
       
       return `
       <div class="config-group">
+        ${hideGroupHeader ? '' : `
         <div class="config-group-header">
           <div>
               <h3>${this.escapeHtml(groupLabel)}</h3>
@@ -793,6 +1111,7 @@ export const configPageMethods = {
           </div>
             <span class="config-group-count">${totalFields} 项</span>
         </div>
+        `}
           ${fieldsHtml}
           ${subGroupsHtml}
         </div>
@@ -824,20 +1143,28 @@ export const configPageMethods = {
     const inputId = `cfg-${path.replace(/[^a-zA-Z0-9]/g, '_')}`;
   
     const label = this.escapeHtml(meta.label || path);
-    const description = meta.description ? `<p class="config-field-hint">${this.escapeHtml(meta.description)}</p>` : '';
-    const example = Object.hasOwn(meta, 'example') ? this.renderExampleBlock(meta.example) : '';
-  
-    return `
-      <div class="config-field ${dirty ? 'config-field-dirty' : ''}">
-        <label for="${inputId}">
-          ${label}
-          ${meta.required ? '<span class="required">*</span>' : ''}
-        </label>
-        ${description}
-        ${this.renderConfigControl(field, value, inputId)}
-        ${example}
-      </div>
-    `;
+    const dense = this.isConfigDense();
+    const spanClass = this.resolveConfigFieldSpan(meta, field);
+    const isFullSpan = spanClass.includes('config-field-span-full');
+    const component = String(meta.component ?? field.component ?? '').toLowerCase();
+    const example = dense && !isFullSpan && Object.hasOwn(meta, 'example')
+      ? ''
+      : (Object.hasOwn(meta, 'example') ? this.renderExampleBlock(meta.example) : '');
+    const controlClass = component === 'switch' ? ' config-field-control-switch' : '';
+    const subformClass = component === 'subform' ? ' config-field-subform' : '';
+
+    return this.renderConfigFieldShell({
+      classNames: `config-field config-field-row ${spanClass}${subformClass}`,
+      label,
+      description: meta.description ?? '',
+      inputId,
+      required: !!meta.required,
+      isFullSpan,
+      controlClass,
+      controlHtml: this.renderConfigControl(field, value, inputId),
+      exampleHtml: example,
+      dirty: !!dirty
+    });
   },
 
   renderExampleBlock(example) {
@@ -898,7 +1225,7 @@ export const configPageMethods = {
           <select class="form-input" id="${inputId}" multiple ${dataset} data-control="multiselect" ${disabled}>
             ${opts.map(opt => `<option value="${this.escapeHtml(opt.value)}" ${current.includes(String(opt.value)) ? 'selected' : ''}>${this.escapeHtml(opt.label)}</option>`).join('')}
           </select>
-          <p class="config-field-hint">按住 Ctrl/Command 多选</p>
+          ${this.renderControlFootnote('按住 Ctrl/Command 多选')}
         `;
       }
       case 'tags': {
@@ -906,7 +1233,7 @@ export const configPageMethods = {
         const tagsPlaceholder = placeholder || '每行一个值';
         return `
           <textarea class="form-input" rows="3" id="${inputId}" ${dataset} data-control="tags" placeholder="${tagsPlaceholder}" ${disabled}>${text}</textarea>
-          <p class="config-field-hint">将文本拆分为数组</p>
+          ${this.renderControlFootnote('将文本拆分为数组')}
         `;
       }
       case 'textarea':
@@ -962,25 +1289,22 @@ export const configPageMethods = {
       case 'subform': {
         const modeKey = `subform_mode:${this._configState?.selected?.name ?? 'config'}:${this._configState?.selectedChild ?? ''}:${field.path}`;
         const defaultValue = Object.hasOwn(meta, 'default') ? meta.default : {};
-        return `
-          ${this.renderFreeObjectSubFormEditor({
-            dataset,
-            value,
-            defaultValue,
-            modeKey,
-            subformId: field.path,
-            inputIdPrefix: inputId,
-            disabled,
-            fieldPath: field.path
-          })}
-          <p class="config-field-hint">键值模式更适合 Header/简单对象；复杂结构建议切换 JSON。</p>
-        `;
+        return this.renderFreeObjectSubFormEditor({
+          dataset,
+          value,
+          defaultValue,
+          modeKey,
+          subformId: field.path,
+          inputIdPrefix: inputId,
+          disabled,
+          fieldPath: field.path
+        });
       }
       case 'arrayform':
       case 'json':
         return `
           <textarea class="form-input" rows="4" id="${inputId}" ${dataset} data-control="json" placeholder="JSON 数据" ${disabled}>${value ? this.escapeHtml(JSON.stringify(value, null, 2)) : ''}</textarea>
-          <p class="config-field-hint">以 JSON 形式编辑该字段</p>
+          ${this.renderControlFootnote('以 JSON 形式编辑该字段')}
         `;
       default:
         if (field.type === 'object' || field.type === 'map') {
@@ -997,7 +1321,7 @@ export const configPageMethods = {
             disabled,
             fieldPath: field.path
           })}
-          <p class="config-field-hint">键值模式更适合简单键值对；复杂结构建议切换 JSON。</p>
+          ${this.renderControlFootnote('键值模式更适合简单键值对；复杂结构建议切换 JSON。')}
         `;
         }
         const displayValue = (value != null && typeof value === 'object')
@@ -1008,11 +1332,11 @@ export const configPageMethods = {
   },
 
   renderFreeObjectSubFormEditor({ dataset, value, defaultValue, modeKey, subformId, inputIdPrefix, disabled, fieldPath }) {
-    const mode = (localStorage.getItem(modeKey) || 'kv').toLowerCase(); // kv | json
+    const mode = (localStorage.getItem(modeKey) || 'kv').toLowerCase();
     const obj = value && typeof value === 'object' && !Array.isArray(value)
       ? value
       : this._cloneValue(defaultValue ?? {});
-  
+
     const kvText = this.escapeHtml(this.formatKeyValueLines(obj));
     const jsonText = obj ? this.escapeHtml(JSON.stringify(obj, null, 2)) : '';
     const kvHidden = mode === 'json' ? 'hidden' : '';
@@ -1022,15 +1346,23 @@ export const configPageMethods = {
     const kvId = inputIdPrefix ? `id="${inputIdPrefix}-kv"` : '';
     const jsonId = inputIdPrefix ? `id="${inputIdPrefix}-json"` : '';
     const fieldAttr = fieldPath ? `data-field="${this.escapeHtml(fieldPath)}"` : '';
-  
+    const tip = mode === 'json'
+      ? '标准 JSON 对象；保存前会自动校验格式'
+      : '每行一项 key=value，值可写 JSON 字面量';
+
     return `
       <div class="subform-editor" data-subform-id="${this.escapeHtml(subformId)}" data-subform-mode-key="${this.escapeHtml(modeKey)}">
-        <div class="subform-editor-tabs">
-          <button type="button" class="subform-tab ${kvActive}" data-action="subform-toggle" ${fieldAttr} data-subform-id="${this.escapeHtml(subformId)}" data-mode="kv">键值</button>
-          <button type="button" class="subform-tab ${jsonActive}" data-action="subform-toggle" ${fieldAttr} data-subform-id="${this.escapeHtml(subformId)}" data-mode="json">JSON</button>
+        <div class="subform-editor-toolbar">
+          <div class="subform-editor-tabs config-mode-toggle" role="tablist" aria-label="编辑模式">
+            <button type="button" role="tab" aria-selected="${mode === 'kv' ? 'true' : 'false'}" class="subform-tab ${kvActive}" data-action="subform-toggle" ${fieldAttr} data-subform-id="${this.escapeHtml(subformId)}" data-mode="kv">键值</button>
+            <button type="button" role="tab" aria-selected="${mode === 'json' ? 'true' : 'false'}" class="subform-tab ${jsonActive}" data-action="subform-toggle" ${fieldAttr} data-subform-id="${this.escapeHtml(subformId)}" data-mode="json">JSON</button>
+          </div>
+          <span class="subform-editor-tip">${this.escapeHtml(tip)}</span>
         </div>
-        <textarea class="form-input subform-kv" rows="4" ${kvId} ${dataset} data-control="kvlines" placeholder="每行一个：key=value（value 可写 JSON）" ${disabled ?? ''} ${kvHidden}>${kvText}</textarea>
-        <textarea class="form-input subform-json" rows="4" ${jsonId} ${dataset} data-control="json" placeholder="JSON 数据" ${disabled ?? ''} ${jsonHidden}>${jsonText}</textarea>
+        <div class="subform-editor-panel">
+          <textarea class="form-input subform-kv" rows="5" ${kvId} ${dataset} data-control="kvlines" placeholder="Authorization=Bearer xxx&#10;X-Custom=value" ${disabled ?? ''} ${kvHidden}>${kvText}</textarea>
+          <textarea class="form-input subform-json" rows="8" ${jsonId} ${dataset} data-control="json" placeholder="{&#10;  &quot;key&quot;: &quot;value&quot;&#10;}" ${disabled ?? ''} ${jsonHidden}>${jsonText}</textarea>
+        </div>
       </div>
     `;
   },
@@ -1090,15 +1422,16 @@ export const configPageMethods = {
 
   renderArrayObjectControl(field, items = [], meta = {}) {
     const subFields = this._configState.arraySchemaMap[field.path] ?? meta.itemSchema?.fields ?? meta.fields ?? {};
-    const itemLabel = meta.label ?? field.displayName ?? meta.itemLabel ?? '条目';
+    const itemLabel = meta.itemLabel ?? '条目';
     const fullItems = Array.isArray(items) && items.length > 0 ? items : 
       (this.getNestedValue(this._configState?.rawObject ?? {}, field.path) ?? []);
+    const isProviders = this.isLlmProvidersArray(field.path);
     const body = fullItems.length
-      ? fullItems.map((item, idx) => this.renderArrayObjectItem(field.path, subFields, item ?? {}, idx, itemLabel)).join('')
+      ? fullItems.map((item, idx) => this.renderArrayObjectItem(field.path, subFields, item ?? {}, idx, itemLabel, { isProviders })).join('')
       : `<div class="config-field-hint">暂无${this.escapeHtml(itemLabel)}，点击下方按钮新增。</div>`;
   
     return `
-      <div class="array-object" data-array-wrapper="${this.escapeHtml(field.path)}">
+      <div class="array-object ${isProviders ? 'array-object-providers' : ''}" data-array-wrapper="${this.escapeHtml(field.path)}">
         ${body}
         <button type="button" class="btn btn-secondary array-object-add" data-action="array-add" data-field="${this.escapeHtml(field.path)}">
           新增${this.escapeHtml(itemLabel)}
@@ -1107,8 +1440,11 @@ export const configPageMethods = {
     `;
   },
 
-  renderArrayObjectItem(parentPath, subFields, item, index, itemLabel) {
-    return `
+  renderArrayObjectItem(parentPath, subFields, item, index, itemLabel, options = {}) {
+    const { isProviders = this.isLlmProvidersArray(parentPath) } = options;
+    const summary = isProviders ? this.getProviderEntrySummary(item) : '';
+    if (!isProviders) {
+      return `
       <div class="array-object-card" data-array-card="${this.escapeHtml(parentPath)}" data-index="${index}">
         <div class="array-object-card-header">
           <span>${this.escapeHtml(itemLabel)} #${index + 1}</span>
@@ -1117,74 +1453,123 @@ export const configPageMethods = {
           </div>
         </div>
         <div class="array-object-card-body">
-          ${this.renderArrayObjectFields(parentPath, subFields, item, index)}
+          ${this.renderArrayObjectFields(parentPath, subFields, item, index, '', { isProviders })}
         </div>
       </div>
     `;
+    }
+    return `
+      <details class="array-object-card array-object-card-compact" data-array-card="${this.escapeHtml(parentPath)}" data-index="${index}" open>
+        <summary class="array-object-card-header">
+          <span class="array-object-card-title">${this.escapeHtml(summary || `${itemLabel} #${index + 1}`)}</span>
+          <div class="array-object-actions">
+            <button type="button" class="btn btn-sm btn-secondary array-object-remove" data-action="array-remove" data-field="${this.escapeHtml(parentPath)}" data-index="${index}">删除</button>
+          </div>
+        </summary>
+        <div class="array-object-card-body array-object-card-body-collapsible">
+          ${this.renderArrayObjectFields(parentPath, subFields, item, index, '', { isProviders: true })}
+        </div>
+      </details>
+    `;
   },
 
-  renderArrayObjectFields(parentPath, fields, itemValue, index, basePath = '') {
-    return Object.entries(fields ?? {}).map(([key, schema]) => {
-      const relPath = basePath ? `${basePath}.${key}` : key;
-      const templatePath = `${parentPath}[].${relPath}`;
-      
-      // 优先从rawObject获取完整数据，确保嵌套对象（如SSL证书）正确显示
-      const fullPath = `${parentPath}.${index}.${relPath}`;
-      const rawValue = this.getNestedValue(this._configState?.rawObject ?? {}, fullPath);
-      const value = rawValue !== undefined ? rawValue : this.getNestedValue(itemValue, relPath);
-      
-      const component = (schema.component ?? '').toLowerCase();
-      const example = Object.hasOwn(schema, 'example') ? this.renderExampleBlock(schema.example) : '';
-      const isSubForm = component === 'subform';
-      const hasChildFields = schema.fields && Object.keys(schema.fields).length > 0;
-      const isNestedObject = (schema.type === 'object' || schema.type === 'map') && hasChildFields;
-      const isNestedArray =
-        schema.type === 'array' &&
-        (schema.itemType === 'object' || String(schema.component ?? '').toLowerCase() === 'arrayform');
+  renderArrayObjectFieldMarkup(parentPath, key, schema, itemValue, index, basePath = '', options = {}) {
+    const relPath = basePath ? `${basePath}.${key}` : key;
+    const templatePath = `${parentPath}[].${relPath}`;
+    const fullPath = `${parentPath}.${index}.${relPath}`;
+    const rawValue = this.getNestedValue(this._configState?.rawObject ?? {}, fullPath);
+    const value = rawValue !== undefined ? rawValue : this.getNestedValue(itemValue, relPath);
 
-      if (isNestedArray) {
-        const nestedPath = `${parentPath}.${index}.${relPath}`;
-        const nestedItems = this.getNestedValue(this._configState?.rawObject ?? {}, nestedPath) ?? [];
-        const nestedField = {
-          path: nestedPath,
-          type: 'array<object>',
-          displayName: schema.label || key,
-          meta: schema,
-          component: schema.component
-        };
-        return `
-          <div class="array-object-subgroup">
-            <div class="array-object-subgroup-title">${this.escapeHtml(schema.label || key)}</div>
-            ${schema.description ? `<p class="config-field-hint">${this.escapeHtml(schema.description)}</p>` : ''}
-            ${this.renderArrayObjectControl(nestedField, nestedItems, schema)}
-          </div>
-        `;
-      }
+    const component = String(schema.component ?? '').toLowerCase();
+    const example = Object.hasOwn(schema, 'example') ? this.renderExampleBlock(schema.example) : '';
+    const isSubForm = component === 'subform';
+    const hasChildFields = schema.fields && Object.keys(schema.fields).length > 0;
+    const isNestedObject = (schema.type === 'object' || schema.type === 'map') && hasChildFields;
 
-      // SubForm / 嵌套对象 且 定义了子字段：展开显示子字段
-      // 如果 SubForm 的 fields 为空（如 headers/extraBody 这种“自由对象”），不走这里，直接渲染为一个控件。
-      if ((isSubForm || isNestedObject) && hasChildFields) {
-        // 对于嵌套对象，也需要从rawObject获取完整数据
-        const nestedRawValue = this.getNestedValue(this._configState?.rawObject ?? {}, fullPath);
-        const nestedValue = nestedRawValue !== undefined ? nestedRawValue : (value ?? {});
-        return `
-          <div class="array-object-subgroup">
-            <div class="array-object-subgroup-title">${this.escapeHtml(schema.label || key)}</div>
-            ${schema.description ? `<p class="config-field-hint">${this.escapeHtml(schema.description)}</p>` : ''}
-            ${this.renderArrayObjectFields(parentPath, schema.fields, nestedValue, index, relPath)}
-          </div>
-        `;
-      }
-  
+    if ((isSubForm || isNestedObject) && hasChildFields) {
+      const nestedRawValue = this.getNestedValue(this._configState?.rawObject ?? {}, fullPath);
+      const nestedValue = nestedRawValue !== undefined ? nestedRawValue : (value ?? {});
       return `
-        <div class="array-object-field">
-          <label>${this.escapeHtml(schema.label || key)}</label>
-          ${schema.description ? `<p class="config-field-hint">${this.escapeHtml(schema.description)}</p>` : ''}
-          ${this.renderArrayObjectFieldControl(parentPath, relPath, templatePath, schema, value, index)}
-          ${example}
+        <div class="array-object-subgroup config-field-span-full">
+          <div class="array-object-subgroup-header">
+            <span class="array-object-subgroup-title">${this.escapeHtml(schema.label || key)}</span>
+            ${schema.description ? `<p class="config-field-hint config-field-hint-compact">${this.escapeHtml(schema.description)}</p>` : ''}
+          </div>
+          ${this.renderArrayObjectFields(parentPath, schema.fields, nestedValue, index, relPath, options)}
         </div>
       `;
+    }
+
+    const spanClass = this.resolveConfigFieldSpan(schema, { path: relPath });
+    const isFullSpan = spanClass.includes('config-field-span-full');
+    const isFreeSubForm = isSubForm && !hasChildFields;
+    const controlClass = component === 'switch' ? ' config-field-control-switch' : '';
+    const fieldClass = [
+      'config-field',
+      'config-field-row',
+      spanClass,
+      isFreeSubForm ? 'config-field-subform' : ''
+    ].filter(Boolean).join(' ');
+
+    return this.renderConfigFieldShell({
+      classNames: fieldClass,
+      label: this.escapeHtml(schema.label || key),
+      description: schema.description ?? '',
+      isFullSpan,
+      controlClass,
+      controlHtml: this.renderArrayObjectFieldControl(parentPath, relPath, templatePath, schema, value, index),
+      exampleHtml: example || ''
+    });
+  },
+
+  renderArrayObjectFieldGrid(entries, parentPath, itemValue, index, basePath, options) {
+    const html = entries.map(([key, schema]) =>
+      this.renderArrayObjectFieldMarkup(parentPath, key, schema, itemValue, index, basePath, options)
+    ).join('');
+    return html ? `<div class="config-field-grid config-field-grid--flat array-object-field-grid">${html}</div>` : '';
+  },
+
+  /** LLM providers[] 单条：按 llm-provider-ui 分组顺序渲染，collapsible 组用 details */
+  renderProviderEntryFields(parentPath, fields, itemValue, index, options = {}) {
+    const sections = groupProviderSchemaFields(fields);
+    return sections.map((section) => {
+      const grid = this.renderArrayObjectFieldGrid(
+        section.entries,
+        parentPath,
+        itemValue,
+        index,
+        '',
+        options
+      );
+      if (!grid) return '';
+
+      if (section.collapsible) {
+        return `
+          <details class="config-form-section config-form-section-collapsible" open>
+            <summary class="config-form-section-head">${this.escapeHtml(section.label)}</summary>
+            <div class="config-form-section-body">${grid}</div>
+          </details>
+        `;
+      }
+
+      return `
+        <section class="config-form-section">
+          <header class="config-form-section-head">${this.escapeHtml(section.label)}</header>
+          <div class="config-form-section-body">${grid}</div>
+        </section>
+      `;
     }).join('');
+  },
+
+  renderArrayObjectFields(parentPath, fields, itemValue, index, basePath = '', options = {}) {
+    const { isProviders = false } = options;
+
+    if (isProviders && !basePath) {
+      return this.renderProviderEntryFields(parentPath, fields, itemValue, index, options);
+    }
+
+    const entries = Object.entries(fields ?? {});
+    return this.renderArrayObjectFieldGrid(entries, parentPath, itemValue, index, basePath, options);
   },
 
   renderArrayObjectFieldControl(parentPath, relPath, templatePath, schema, value, index) {
@@ -1277,36 +1662,51 @@ export const configPageMethods = {
   },
 
   renderDynamicFields(collection, fields, value, entryKey, basePath = '') {
-    return Object.entries(fields ?? {}).map(([key, schema]) => {
+    const html = Object.entries(fields ?? {}).map(([key, schema]) => {
       const relPath = basePath ? `${basePath}.${key}` : key;
       const templatePathBase = collection.valueTemplatePath ?? '';
       const templatePath = this.normalizeTemplatePath(templatePathBase ? `${templatePathBase}.${relPath}` : relPath);
       const fieldValue = this.getNestedValue(value, relPath);
-  
-      const component = (schema.component ?? '').toLowerCase();
+
+      const component = String(schema.component ?? '').toLowerCase();
       const isSubForm = component === 'subform';
       const hasChildFields = schema.fields && Object.keys(schema.fields).length > 0;
       if ((isSubForm || schema.type === 'object' || schema.type === 'map') && hasChildFields) {
         return `
-          <div class="array-object-subgroup">
-            <div class="array-object-subgroup-title">${this.escapeHtml(schema.label || key)}</div>
+          <div class="array-object-subgroup config-field-span-full">
+            <div class="array-object-subgroup-header">
+              <span class="array-object-subgroup-title">${this.escapeHtml(schema.label || key)}</span>
+              ${schema.description ? `<p class="config-field-hint config-field-hint-compact">${this.escapeHtml(schema.description)}</p>` : ''}
+            </div>
             ${this.renderDynamicFields(collection, schema.fields, fieldValue ?? {}, entryKey, relPath)}
           </div>
         `;
       }
-  
-      const dataset = `data-collection="${this.escapeHtml(collection.name)}" data-entry-key="${this.escapeHtml(entryKey)}" data-object-path="${this.escapeHtml(relPath)}" data-template-path="${this.escapeHtml(templatePath)}" data-component="${(schema.component ?? '').toLowerCase()}" data-type="${schema.type}"`;
+
+      const spanClass = this.resolveConfigFieldSpan(schema, { path: relPath });
+      const isFullSpan = spanClass.includes('config-field-span-full');
+      const dataset = `data-collection="${this.escapeHtml(collection.name)}" data-entry-key="${this.escapeHtml(entryKey)}" data-object-path="${this.escapeHtml(relPath)}" data-template-path="${this.escapeHtml(templatePath)}" data-component="${component}" data-type="${schema.type}"`;
       const subformId = `${collection.name}.${entryKey}.${relPath}`;
       const example = Object.hasOwn(schema, 'example') ? this.renderExampleBlock(schema.example) : '';
+      const controlClass = component === 'switch' ? ' config-field-control-switch' : '';
       return `
-        <div class="array-object-field">
-          <label>${this.escapeHtml(schema.label || key)}</label>
-          ${schema.description ? `<p class="config-field-hint">${this.escapeHtml(schema.description)}</p>` : ''}
-          ${this.renderDynamicFieldControl(dataset, schema, fieldValue, subformId)}
-          ${example}
+        <div class="config-field config-field-row ${spanClass}">
+          <div class="config-field-body">
+            ${this.renderFieldMetaBlock({
+              label: this.escapeHtml(schema.label || key),
+              description: schema.description ?? '',
+              isFullSpan
+            })}
+            <div class="config-field-control${controlClass}">
+              ${this.renderDynamicFieldControl(dataset, schema, fieldValue, subformId)}
+            </div>
+            ${example || ''}
+          </div>
         </div>
       `;
     }).join('');
+
+    return `<div class="config-field-grid config-field-grid--flat array-object-field-grid">${html}</div>`;
   },
 
   renderDynamicFieldControl(dataset, schema, value, subformId) {
@@ -1641,7 +2041,17 @@ export const configPageMethods = {
   
     if (kv) kv.hidden = m === 'json';
     if (json) json.hidden = m === 'kv';
-    tabs.forEach(btn => btn.classList.toggle('active', (btn.dataset.mode || '').toLowerCase() === m));
+    tabs.forEach(btn => {
+      const active = (btn.dataset.mode || '').toLowerCase() === m;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    const tip = editor.querySelector('.subform-editor-tip');
+    if (tip) {
+      tip.textContent = m === 'json'
+        ? '标准 JSON 对象；保存前会自动校验格式'
+        : '每行一项 key=value，值可写 JSON 字面量';
+    }
     try {
       if (key) localStorage.setItem(key, m);
     } catch {}
@@ -1733,6 +2143,11 @@ export const configPageMethods = {
       this._configState.dirty = {};
       this.showToast('配置已保存', 'success');
       await this.loadSelectedConfigDetail();
+      const { name } = this._configState.selected || {};
+      const child = this._configState.selectedChild || '';
+      if (this._isLlmRelatedConfigName?.(name, child)) {
+        await this._notifyLlmConfigChanged?.();
+      }
     } catch (e) {
       this.showToast('保存失败: ' + e.message, 'error');
     }
@@ -1749,6 +2164,11 @@ export const configPageMethods = {
       this.showToast('配置已保存', 'success');
       this._configState.mode = 'form';
       await this.loadSelectedConfigDetail();
+      const { name } = this._configState.selected || {};
+      const child = this._configState.selectedChild || '';
+      if (this._isLlmRelatedConfigName?.(name, child)) {
+        await this._notifyLlmConfigChanged?.();
+      }
     } catch (e) {
       this.showToast('保存失败: ' + e.message, 'error');
     }

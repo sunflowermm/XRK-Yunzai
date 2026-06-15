@@ -19,7 +19,7 @@ if (process.platform === 'win32') {
   } catch {}
 }
 
-if (process.argv[2] !== 'server' && !process.execArgv.includes('--expose-gc')) {
+if (!process.execArgv.includes('--expose-gc')) {
   const appPath = process.argv[1] || resolveProjectPath(APP_ENTRY_REL);
   const result = spawnSync(process.argv[0], ['--expose-gc', ...process.execArgv, appPath, ...process.argv.slice(2)], {
     stdio: 'inherit',
@@ -192,7 +192,6 @@ class Bootstrap {
     try {
       await this.initialize();
       global.bootstrapLogger = this.logger;
-      console.log(`[引导完成] 日志已写入 ${BOOTSTRAP_LOG}\n`);
       await new Promise(r => setImmediate(r));
       await import('./start.js');
     } catch (e) {

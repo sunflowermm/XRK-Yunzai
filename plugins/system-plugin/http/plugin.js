@@ -23,19 +23,22 @@ function getPluginListAndStats(Bot) {
   let withTasks = 0;
   for (const p of allPlugins) {
     try {
-      const plugin = new p.class();
-      if (plugin.rule && plugin.rule.length) withRules++;
-      if (plugin.task) withTasks++;
+      const plugin = p.plugin;
+      if (!plugin) continue;
+      const ruleCount = Array.isArray(plugin.rule) ? plugin.rule.length : 0;
+      const hasTask = Boolean(plugin.task);
+      if (ruleCount) withRules++;
+      if (hasTask) withTasks++;
       list.push({
         key: p.key,
-        name: plugin.name || p.key,
+        name: p.name || plugin.name || p.key,
         priority: p.priority,
         dsc: plugin.dsc || '暂无描述',
-        rule: plugin.rule && plugin.rule.length || 0,
-        task: plugin.task ? 1 : 0
+        rule: ruleCount,
+        task: hasTask ? 1 : 0
       });
     } catch (e) {
-      Bot.makeLog('error', `插件初始化失败: ${p.key}`, 'Plugin API', e);
+      Bot.makeLog('error', `插件摘要读取失败: ${p.key}`, 'Plugin API', e);
     }
   }
   return { allPlugins, list, totalPlugins, withRules, withTasks, taskCount, totalLoadTime };

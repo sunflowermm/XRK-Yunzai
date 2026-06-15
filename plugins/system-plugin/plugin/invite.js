@@ -11,13 +11,13 @@ export class invite extends plugin {
 
   async accept () {
     if (!cfg.masterQQ || !cfg.masterQQ.includes(Number(this.e.user_id))) {
-      logger.mark(`[邀请加群]：${this.e.group_name}：${this.e.group_id}`)
+      Bot.makeLog('mark', `[邀请加群]：${this.e.group_name}：${this.e.group_id}`, 'Invite')
       return
     }
-    logger.mark(`[主人邀请加群]：${this.e.group_name}：${this.e.group_id}`)
+    Bot.makeLog('mark', `[主人邀请加群]：${this.e.group_name}：${this.e.group_id}`, 'Invite')
     this.e.approve(true)
     this.e.bot.sendPrivateMsg(this.e.user_id, `已同意加群：${this.e.group_name}`).catch((err) => {
-      logger.error(err)
+      Bot.makeLog('error', err, 'Invite')
     })
   }
 }

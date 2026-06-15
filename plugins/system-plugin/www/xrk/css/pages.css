@@ -910,6 +910,42 @@
   gap: 8px 10px;
   padding: 8px 6px 4px;
   max-width: 100%;
+  max-height: min(420px, 55vh);
+  overflow-y: auto;
+  overflow-x: hidden;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
+}
+
+.tag-cloud--compact .tag-cloud-chip {
+  animation: none;
+}
+
+.tag-cloud__hidden {
+  display: none;
+}
+
+.tag-cloud-expand {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px dashed var(--border);
+  background: var(--bg-muted, var(--bg-card));
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.tag-cloud-expand:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.tag-cloud-expand:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 @keyframes tagCloudChipIn {

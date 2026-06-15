@@ -1,23 +1,33 @@
 /**
  * 基础工具工作流
  * 业务层：plugins/system-plugin/stream/
+ * MCP 对齐 XRK-AGT system-Core/tools.js
  */
 import AIStream from '../../../lib/aistream/aistream.js';
 import path from 'path';
-import os from 'os';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { BaseTools } from '../../../lib/utils/base-tools.js';
+import { InputValidator } from '../../../lib/utils/input-validator.js';
+import { getDefaultDesktopDirSync } from '../../../lib/utils/user-dirs.js';
+import { getAistreamConfigOptional } from '../../../lib/utils/aistream-config.js';
+import { exec } from '../../../lib/utils/exec-async.js';
 
-const execAsync = promisify(exec);
 const IS_WINDOWS = process.platform === 'win32';
 
 export default class ToolsStream extends AIStream {
+  workspace = getDefaultDesktopDirSync();
+  fileToolsCfg = {
+    maxReadChars: 500_000,
+    grepMaxResults: 100,
+    runEnabled: true,
+    runTimeoutMs: 120_000,
+    maxCommandOutputChars: 200_000
+  };
+
   constructor() {
     super({
       name: 'tools',
-      description: '基础工具工作流（read/grep/write/run）',
-      version: '1.0.5',
+      description: '基础工具工作流（read/grep/write/delete_file/modify_file/list_files/run）',
+      version: '1.0.6',
       author: 'XRK',
       priority: 200,
       config: {
@@ -27,12 +37,38 @@ export default class ToolsStream extends AIStream {
         topP: 0.9
       }
     });
-    this.workspace = path.join(os.homedir(), 'Desktop');
-    this.tools = new BaseTools(this.workspace);
+  }
+
+  applyFileToolsConfig() {
+    const fileCfg = getAistreamConfigOptional().tools?.file ?? {};
+    this.fileToolsCfg = {
+      maxReadChars:
+        typeof fileCfg.maxReadChars === 'number' && Number.isFinite(fileCfg.maxReadChars)
+          ? Math.max(1000, Math.floor(fileCfg.maxReadChars))
+          : 500_000,
+      grepMaxResults:
+        typeof fileCfg.grepMaxResults === 'number' && Number.isFinite(fileCfg.grepMaxResults)
+          ? Math.min(500, Math.max(1, Math.floor(fileCfg.grepMaxResults)))
+          : 100,
+      runEnabled: fileCfg.runEnabled !== false,
+      runTimeoutMs:
+        typeof fileCfg.runTimeoutMs === 'number' && Number.isFinite(fileCfg.runTimeoutMs)
+          ? Math.max(1000, Math.floor(fileCfg.runTimeoutMs))
+          : 120_000,
+      maxCommandOutputChars:
+        typeof fileCfg.maxCommandOutputChars === 'number' && Number.isFinite(fileCfg.maxCommandOutputChars)
+          ? Math.max(1000, Math.floor(fileCfg.maxCommandOutputChars))
+          : 200_000
+    };
+    if (typeof fileCfg.workspace === 'string' && fileCfg.workspace.trim()) {
+      this.workspace = fileCfg.workspace.trim();
+    }
   }
 
   async init() {
     await super.init();
+    this.applyFileToolsConfig();
+    this.tools = new BaseTools(this.workspace);
     this.registerAllFunctions();
   }
 
@@ -50,13 +86,23 @@ export default class ToolsStream extends AIStream {
         let result = await this.tools.readFile(filePath);
         if (!result.success) result = await this.trySearchAndReadFile(filePath);
         if (result.success) {
+          const maxChars = this.fileToolsCfg.maxReadChars;
+          let content = result.content;
+          let truncated = false;
+          if (typeof content === 'string' && content.length > maxChars) {
+            content = content.slice(0, maxChars);
+            truncated = true;
+          }
           return {
             success: true,
             data: {
               filePath: result.path,
               fileName: path.basename(result.path),
-              content: result.content,
-              size: result.content.length
+              content,
+              size: result.content.length,
+              returnedChars: typeof content === 'string' ? content.length : 0,
+              truncated,
+              maxReadChars: maxChars
             }
           };
         }
@@ -81,7 +127,7 @@ export default class ToolsStream extends AIStream {
         const result = await this.tools.grep(pattern, filePath, {
           caseSensitive: false,
           lineNumbers: true,
-          maxResults: 50
+          maxResults: this.fileToolsCfg.grepMaxResults
         });
         if (result.success) {
           return {
@@ -100,7 +146,7 @@ export default class ToolsStream extends AIStream {
     });
 
     this.registerMCPTool('write', {
-      description: '写入文件内容（完全覆盖）。文件不存在时自动创建。',
+      description: '写入文件内容（完全覆盖）。文件不存在时自动创建。如需追加请使用 modify_file。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -116,6 +162,62 @@ export default class ToolsStream extends AIStream {
         const result = await this.tools.writeFile(filePath, content);
         if (result.success) {
           return { success: true, data: { filePath: result.path, message: '文件写入成功' } };
+        }
+        return { success: false, error: result.error };
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('delete_file', {
+      description: '删除文件。此操作不可恢复，请谨慎使用。',
+      inputSchema: {
+        type: 'object',
+        properties: { filePath: { type: 'string', description: '文件路径' } },
+        required: ['filePath']
+      },
+      handler: async (args = {}) => {
+        const { filePath } = args;
+        if (!filePath) return { success: false, error: '文件路径不能为空' };
+        const result = await this.tools.deleteFile(filePath);
+        if (result.success) {
+          return { success: true, data: { filePath: result.path, message: '文件删除成功' } };
+        }
+        return { success: false, error: result.error };
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('modify_file', {
+      description: '修改文件内容。支持 replace（替换全部或指定行）、append、prepend。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          filePath: { type: 'string', description: '文件路径' },
+          content: { type: 'string', description: '要添加或替换的内容' },
+          mode: {
+            type: 'string',
+            enum: ['replace', 'append', 'prepend'],
+            default: 'replace'
+          },
+          lineNumber: { type: 'integer', description: '行号（replace 模式，从 1 开始）' }
+        },
+        required: ['filePath', 'content']
+      },
+      handler: async (args = {}) => {
+        const { filePath, content, mode = 'replace', lineNumber } = args;
+        if (!filePath || content === undefined) {
+          return { success: false, error: '文件路径和内容不能为空' };
+        }
+        const result = await this.tools.modifyFile(filePath, content, { mode, lineNumber });
+        if (result.success) {
+          return {
+            success: true,
+            data: {
+              filePath: result.path,
+              mode,
+              message: `文件${mode === 'replace' ? '替换' : mode === 'append' ? '追加' : '插入'}成功`
+            }
+          };
         }
         return { success: false, error: result.error };
       },
@@ -147,21 +249,38 @@ export default class ToolsStream extends AIStream {
     });
 
     this.registerMCPTool('run', {
-      description: '执行系统命令。在工作区目录下执行。',
+      description: '在工作区目录下执行 shell 命令。Windows 支持 CMD/PowerShell；Linux/macOS 使用 /bin/sh。',
       inputSchema: {
         type: 'object',
         properties: { command: { type: 'string', description: '要执行的命令' } },
         required: ['command']
       },
       handler: async (args = {}) => {
-        if (!IS_WINDOWS) return { success: false, error: 'run 命令仅在 Windows 上支持' };
+        if (!this.fileToolsCfg.runEnabled) {
+          return { success: false, error: 'run 已在 aistream.tools.file.runEnabled 中关闭' };
+        }
         const { command } = args;
         if (!command) return { success: false, error: '命令不能为空' };
         try {
-          const output = await this.executeCommand(command);
+          const { output, stderr } = await this.executeCommand(command);
+          const maxOut = this.fileToolsCfg.maxCommandOutputChars;
+          let out = output;
+          let truncated = false;
+          if (out.length > maxOut) {
+            out = out.slice(0, maxOut);
+            truncated = true;
+          }
           return {
             success: true,
-            data: { command, output, message: '命令执行成功' }
+            data: {
+              command,
+              output: out,
+              stderr: stderr ? String(stderr).slice(0, maxOut) : '',
+              message: '命令执行完成',
+              truncated,
+              maxCommandOutputChars: maxOut,
+              platform: process.platform
+            }
           };
         } catch (err) {
           return { success: false, error: err.message, stderr: err.stderr || '' };
@@ -183,32 +302,40 @@ export default class ToolsStream extends AIStream {
   }
 
   async executeCommand(command) {
-    const fullCommand = this.buildFullCommand(command, this.workspace);
-    const { stdout } = await execAsync(fullCommand, {
+    const safeCommand = InputValidator.validateCommand(command);
+    const timeout = this.fileToolsCfg.runTimeoutMs;
+    const fullCommand = this.buildFullCommand(safeCommand, this.workspace);
+    const opts = {
       maxBuffer: 10 * 1024 * 1024,
       cwd: this.workspace,
-      shell: IS_WINDOWS ? 'cmd.exe' : undefined
-    });
-    return (stdout ?? '').trim();
+      timeout,
+      env: { ...process.env }
+    };
+    if (IS_WINDOWS) {
+      opts.shell = 'cmd.exe';
+    } else {
+      opts.shell = '/bin/sh';
+    }
+    const { stdout, stderr } = await exec(fullCommand, opts);
+    return { output: (stdout ?? '').trim(), stderr: (stderr ?? '').trim() };
   }
 
   buildFullCommand(command, workspace) {
     const isPowerShellCmd = /^(Get-|Set-|New-|Remove-|Test-|Invoke-|Start-|Stop-)/i.test(command);
     if (IS_WINDOWS) {
+      const ws = workspace.replace(/'/g, "''");
       return isPowerShellCmd
-        ? `powershell -NoProfile -Command "Set-Location '${workspace}'; ${command.replace(/"/g, '`"')}"`
+        ? `powershell -NoProfile -Command "Set-Location '${ws}'; ${command.replace(/"/g, '`"')}"`
         : `cd /d "${workspace}" && ${command}`;
     }
-    return `cd "${workspace}" && ${command}`;
+    const ws = workspace.replace(/'/g, `'\\''`);
+    return `cd '${ws}' && ${command}`;
   }
 
   buildSystemPrompt() {
     return `【基础工具说明】
-所有功能都通过 MCP 工具提供：
-- read：读取文件内容
-- grep：在文件中搜索文本
-- write：写入文件内容（覆盖）
-- list_files：列出目录中的文件
-- run：执行命令（工作区：桌面）`;
+MCP：read / grep / write / delete_file / modify_file / list_files / run
+当前工作区：${this.workspace}
+read 受 maxReadChars 截断；run 受 aistream.tools.file 开关与超时约束。`;
   }
 }

@@ -28,7 +28,8 @@ if (process.platform === 'win32') {
 process.setMaxListeners(30);
 
 const entry = process.argv[1];
-if (entry && path.basename(entry) === 'start.js') {
+const cliCommand = process.argv[2];
+if (entry && path.basename(entry) === 'start.js' && cliCommand !== 'server' && cliCommand !== 'stop') {
   const appPath = resolveProjectPath(APP_ENTRY_REL);
   const result = spawnSync(process.argv[0], [appPath, ...process.argv.slice(2)], { stdio: 'inherit', cwd: projectRoot });
   process.exit(result.status !== null ? result.status : 1);
@@ -187,7 +188,7 @@ class PM2Manager extends BaseManager {
     }
   }
 
-  async createConfig(port, mode) {
+  async createConfig(port) {
     const processName = this.getProcessName(port);
     const nodeArgs = getNodeArgs();
     const pm2Config = {
@@ -203,7 +204,6 @@ class PM2Manager extends BaseManager {
       error_file: `./logs/pm2_server_error_${port}.log`,
       env: {
         NODE_ENV: 'production',
-        XRK_SELECTED_MODE: mode,
         XRK_SERVER_PORT: port.toString()
       }
     };
@@ -218,7 +218,7 @@ class PM2Manager extends BaseManager {
     const processName = this.getProcessName(port);
     const commandMap = {
       start: async () => {
-        const configPath = await this.createConfig(port, 'server');
+        const configPath = await this.createConfig(port);
         return this.executePM2Command('start', [configPath], processName);
       },
       logs: () => this.executePM2Command('logs', [processName, '--lines', CONFIG.PM2_LINES.toString()], processName),
@@ -290,12 +290,11 @@ class ServerManager extends BaseManager {
       await this.logger.log(`启动葵崽服务器，端口: ${port}`);
       await this.ensurePortConfig(port);
     }
-    global.selectedMode = 'server';
     try {
       const { default: BotClass } = await import('./lib/bot.js');
-      delete global.Bot;
-      global.Bot = new BotClass();
-      await global.Bot.run({ port });
+      delete globalThis.Bot;
+      globalThis.Bot = new BotClass();
+      await globalThis.Bot.run({ port });
     } catch (error) {
       await this.logger.error(`服务器模式启动失败: ${error.message}\n${error.stack}`);
       throw error;
@@ -336,8 +335,8 @@ class ServerManager extends BaseManager {
 
   async runServerProcess(port, skipConfigCheck = false) {
     const nodeArgs = getNodeArgs();
-    const entryScript = resolveProjectPath(APP_ENTRY_REL);
-    const startArgs = [...nodeArgs, entryScript, 'server', port.toString()];
+    const startScript = resolveProjectPath('start.js');
+    const startArgs = [...nodeArgs, startScript, 'server', port.toString()];
     const cleanEnv = {
       ...process.env,
       XRK_SERVER_PORT: port.toString(),
@@ -489,14 +488,13 @@ class MenuManager {
   }
 
   async run() {
-    if (global.bootstrapLogger) {
-      console.log(chalk.gray('  引导日志: logs/bootstrap.log'));
-    }
-    console.log(chalk.cyan('\n' + '='.repeat(50)));
+    const bootstrapLog = resolveProjectPath(LOGS_DIR, 'bootstrap.log');
+    console.log(`[引导完成] 日志已写入 ${bootstrapLog}`);
+    console.log(chalk.cyan('='.repeat(50)));
     console.log(chalk.cyan.bold('  🤖 XRK-Yunzai 多端口服务器管理系统'));
     console.log(chalk.cyan('='.repeat(50)));
     console.log(chalk.gray(`  版本: 3.1.3 | Node.js: ${process.version}`));
-    console.log(chalk.cyan('='.repeat(50) + '\n'));
+    console.log(chalk.cyan('='.repeat(50)));
 
     let shouldExit = false;
     
@@ -573,7 +571,7 @@ class MenuManager {
   async handleMenuAction(selected) {
     switch (selected.action) {
       case 'start_server':
-        console.log(chalk.blue(`\n正在启动端口 ${selected.port} 的服务器...\n`));
+        console.log(chalk.blue(`\n正在启动端口 ${selected.port} 的服务器...`));
         await this.serverManager.startWithAutoRestart(selected.port);
         break;
         
@@ -640,7 +638,7 @@ class MenuManager {
       }]);
       
       if (startNow) {
-        console.log(chalk.blue(`\n正在启动端口 ${newPort} 的服务器...\n`));
+        console.log(chalk.blue(`\n正在启动端口 ${newPort} 的服务器...`));
         await this.serverManager.startWithAutoRestart(newPort);
       } else {
         console.log(chalk.yellow(`\n提示: 稍后可以通过主菜单启动端口 ${newPort} 的服务器`));

@@ -12,6 +12,10 @@
 |------|------|------|
 | **概览** | [TECH_STACK.md](./TECH_STACK.md) | 技术栈、运行时、Web/Redis/工作流/插件、DevOps |
 | **概览** | [ARCHITECTURE.md](./ARCHITECTURE.md) | 系统架构、核心对象、数据流与事件流、扩展点 |
+| **写法** | [coding-style.md](./coding-style.md) | 底层与插件写法速查（对齐 AGT 方法论） |
+| **运行时** | [runtime-surface.md](./runtime-surface.md) | Bot/segment/cfg 全局挂载面 |
+| **质量** | [框架测试指南.md](./框架测试指南.md) | 框架基准测试、`pnpm test` |
+| **质量** | [文档审查清单.md](./文档审查清单.md) | 文档与代码一致性 |
 | **概览** | [overview/DEVELOPER_HUB.md](./overview/DEVELOPER_HUB.md) | 开发者导航：对象关系图、文档地图、开发流程与扩展入口 |
 | **核心对象** | [CORE_OBJECTS.md](./CORE_OBJECTS.md) | Bot / 事件 `e` / logger / cfg / segment / redis / BotUtil |
 | **基类** | [BASE_CLASSES.md](./BASE_CLASSES.md) | 各基类索引与简要说明 |
@@ -39,10 +43,10 @@
 
 ## 推荐阅读顺序
 
-1. **快速了解**：主 [README](../README.md) → [TECH_STACK.md](./TECH_STACK.md) → [DEVELOPER_HUB.md](./overview/DEVELOPER_HUB.md)
-2. **写插件**：[CORE_OBJECTS.md](./CORE_OBJECTS.md)（事件 `e`）→ [PLUGIN_BASE_CLASS.md](./PLUGIN_BASE_CLASS.md) 或 [reference/PLUGINS.md](./reference/PLUGINS.md)
+1. **快速了解**：主 [README](../README.md) → [coding-style.md](./coding-style.md) → [DEVELOPER_HUB.md](./overview/DEVELOPER_HUB.md)
+2. **写插件**：[runtime-surface.md](./runtime-surface.md) → [CORE_OBJECTS.md](./CORE_OBJECTS.md) → [PLUGIN_BASE_CLASS.md](./PLUGIN_BASE_CLASS.md)
 3. **写工作流**：[WORKFLOW_BASE_CLASS.md](./WORKFLOW_BASE_CLASS.md) → [reference/WORKFLOWS.md](./reference/WORKFLOWS.md)
-4. **扩展适配器**：[reference/ADAPTER_AND_ROUTING.md](./reference/ADAPTER_AND_ROUTING.md)，实现置于 `plugins/system-plugin/adapter/` 或任意插件 `adapter/`
+4. **发布前**：[框架测试指南.md](./框架测试指南.md) → [文档审查清单.md](./文档审查清单.md)
 
 ---
 

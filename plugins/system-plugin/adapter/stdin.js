@@ -29,18 +29,20 @@ async function runTempCleanup() {
             await FileUtils.unlink(filePath);
             cleaned++;
           }
-        } catch (_) {}
+        } catch (err) {
+          Bot.makeLog('debug', `[stdin] 跳过临时文件 ${filePath}: ${err?.message || err}`, 'StdinAdapter');
+        }
       }
     }
   } catch (error) {
-    logger.error(`清理临时文件错误: ${error.message}`);
+    Bot.makeLog('error', `清理临时文件错误: ${error.message}`, 'StdinAdapter');
   }
   return cleaned;
 }
 
 setInterval(() => {
   runTempCleanup().catch((err) => {
-    logger.error(`清理临时文件错误: ${err?.message || err}`);
+    Bot.makeLog('error', `清理临时文件错误: ${err?.message || err}`, 'StdinAdapter');
   });
 }, TEMP_CLEANUP_INTERVAL_MS);
 
@@ -106,7 +108,7 @@ export class StdinHandler {
             const result = await this.processFileToUrl(filePath, baseUrl);
             return result;
           } catch (err) {
-            logger.error(`文件转URL失败: ${err.message}`);
+            Bot.makeLog('error', `文件转URL失败: ${err.message}`, 'StdinAdapter');
             return '';
           }
         }
@@ -156,11 +158,11 @@ export class StdinHandler {
 
       // 返回访问URL
       const url = `${baseUrl}/media/${fileName}`;
-      logger.debug(`文件已保存: ${targetPath} -> ${url}`);
+      Bot.makeLog('debug', `文件已保存: ${targetPath} -> ${url}`, 'StdinAdapter');
       
       return url;
     } catch (error) {
-      logger.error(`processFileToUrl错误: ${error.message}`);
+      Bot.makeLog('error', `processFileToUrl错误: ${error.message}`, 'StdinAdapter');
       throw error;
     }
   }
@@ -251,7 +253,7 @@ export class StdinHandler {
       const event = this.createEvent(trimmedInput, userInfo);
       return await this.handleEvent(event);
     } catch (error) {
-      logger.error(`处理命令错误: ${error.message}`);
+      Bot.makeLog('error', `处理命令错误: ${error.message}`, 'StdinAdapter');
       return { 
         success: false, 
         code: 500, 
@@ -281,7 +283,7 @@ export class StdinHandler {
         results.push({ ...result, content: processedMsg });
         return result;
       } catch (error) {
-        logger.error(`reply包装错误: ${error.message}`);
+        Bot.makeLog('error', `reply包装错误: ${error.message}`, 'StdinAdapter');
         throw error;
       }
     };
@@ -375,7 +377,7 @@ export class StdinHandler {
       }
 
       if (!buffer) {
-        logger.warn(`无法获取文件内容: ${JSON.stringify(item)}`);
+        Bot.makeLog('warn', `无法获取文件内容: ${JSON.stringify(item)}`, 'StdinAdapter');
         return item;
       }
 
@@ -399,7 +401,7 @@ export class StdinHandler {
       const baseUrl = Bot.getServerUrl ? Bot.getServerUrl() : `http://localhost:${Bot.httpPort || 3000}`;
       const fileUrl = `${baseUrl}/media/${fileName}`;
 
-      logger.debug(`媒体文件已保存: ${filePath} -> ${fileUrl}`);
+      Bot.makeLog('debug', `媒体文件已保存: ${filePath} -> ${fileUrl}`, 'StdinAdapter');
 
       // 如果是图片且设置了自动打开
       if (item.type === 'image' && process.env.OPEN_IMAGES === 'true') {
@@ -420,7 +422,7 @@ export class StdinHandler {
         mime: mimeType
       };
     } catch (error) {
-      logger.error(`处理媒体文件错误: ${error.message}`);
+      Bot.makeLog('error', `处理媒体文件错误: ${error.message}`, 'StdinAdapter');
       return item;
     }
   }
@@ -437,7 +439,7 @@ export class StdinHandler {
         exec(commands[platform]);
       }
     } catch (error) {
-      logger.error(`打开图片失败: ${error.message}`);
+      Bot.makeLog('error', `打开图片失败: ${error.message}`, 'StdinAdapter');
     }
   }
 
@@ -452,21 +454,23 @@ export class StdinHandler {
       if (typeof input === 'string' && input.startsWith('[') && input.endsWith(']')) {
         parsedInput = JSON.parse(input);
       }
-    } catch {}
+    } catch (err) {
+      Bot.makeLog('debug', `[stdin] JSON 解析跳过: ${err?.message || err}`, 'StdinAdapter');
+    }
     
     // 使用stdin适配器
     const result = await this.processCommand(parsedInput, { adapter: 'stdin' });
     
     // 在控制台显示结果
     if (result.results && result.results.length > 0) {
-      logger.info('执行结果:');
+      Bot.makeLog('info', '执行结果:', 'StdinAdapter');
       result.results.forEach((r, index) => {
-        logger.mark(`[${index + 1}] ${this.formatResultForConsole(r)}`);
+        Bot.makeLog('mark', `[${index + 1}] ${this.formatResultForConsole(r)}`, 'StdinAdapter');
       });
     }
     
     if (!result.success) {
-      logger.error(`命令执行失败: ${result.error || result.message || '未知错误'}`);
+      Bot.makeLog('error', `命令执行失败: ${result.error || result.message || '未知错误'}`, 'StdinAdapter');
     }
     
     this.rl.prompt();
@@ -552,11 +556,11 @@ export class StdinHandler {
       },
       friend: {
         sendMsg: async (msg) => this.sendMsg(msg, nickname, userInfo),
-        recallMsg: () => logger.mark(`${logger.xrkyzGradient(`[${nickname}]`)} 撤回消息`),
+        recallMsg: () => Bot.makeLog('mark', `${logger.xrkyzGradient(`[${nickname}]`)} 撤回消息`, 'StdinAdapter'),
         makeForwardMsg: async (forwardMsg) => this.makeForwardMsg(forwardMsg),
       },
       recall: () => { 
-        logger.mark(`${logger.xrkyzGradient(`[${nickname}]`)} 撤回消息`); 
+        Bot.makeLog('mark', `${logger.xrkyzGradient(`[${nickname}]`)} 撤回消息`, 'StdinAdapter'); 
         return true; 
       },
       reply: async (msg) => this.sendMsg(msg, nickname, userInfo),
@@ -640,20 +644,20 @@ export class StdinHandler {
 
   async makeForwardMsg(forwardMsg) {
     if (!Array.isArray(forwardMsg)) {
-      logger.error("转发消息必须是数组格式");
+      Bot.makeLog('error', "转发消息必须是数组格式", 'StdinAdapter');
       return [];
     }
 
     logger.subtitle("收到转发消息");
     logger.line('-', 40, 'cyan');
-    logger.mark(`转发消息内容: ${JSON.stringify(forwardMsg, null, 2)}`);
+    Bot.makeLog('mark', `转发消息内容: ${JSON.stringify(forwardMsg, null, 2)}`, 'StdinAdapter');
     logger.line('-', 40, 'cyan');
     return forwardMsg;
   }
 
   cleanupTempFiles() {
     const cleaned = runTempCleanup();
-    if (cleaned > 0) logger.info(`清理了 ${cleaned} 个临时文件`);
+    if (cleaned > 0) Bot.makeLog('info', `清理了 ${cleaned} 个临时文件`, 'StdinAdapter');
   }
 
   load() {

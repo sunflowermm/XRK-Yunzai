@@ -6,7 +6,6 @@
  */
 import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
 import path from 'path';
-import BotUtil from '../../../lib/util.js';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
 import { DATA_AI_CONFIG_REL } from '../../../lib/config/config-constants.js';
 
@@ -86,7 +85,7 @@ export default class AIConfig extends ConfigBase {
       return await super.read(useCache);
     } catch (error) {
       if (error.code !== 'ENOENT' && !error.message?.includes('不存在')) {
-        BotUtil.makeLog('error', `读取 AI 配置失败: ${error.message}`, 'AIConfig', error);
+        Bot.makeLog('error', `读取 AI 配置失败: ${error.message}`, 'AIConfig', error);
         throw error;
       }
       const filePath = this.getFilePath();

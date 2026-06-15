@@ -4,12 +4,14 @@
  * 使用文件存储，不依赖 MemoryManager
  */
 import AIStream from '../../../lib/aistream/aistream.js';
-import BotUtil from '../../../lib/util.js';
 import path from 'path';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
 import { filterMemoriesForEvent, getMemoryBaseDir, userMemoryFile } from '../../../lib/aistream/memory-file-context.js';
 
 export default class MemoryStream extends AIStream {
+  memoryDir = getMemoryBaseDir();
+  memories = new Map();
+
   constructor() {
     super({
       name: 'memory',
@@ -19,8 +21,6 @@ export default class MemoryStream extends AIStream {
       priority: 1,
       config: { enabled: true, temperature: 0.7, maxTokens: 2000 }
     });
-    this.memoryDir = getMemoryBaseDir();
-    this.memories = new Map();
   }
 
   async init() {

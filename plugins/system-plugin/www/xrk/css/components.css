@@ -144,6 +144,32 @@
   to { opacity: 0; transform: translateX(16px) scale(0.98); }
 }
 
+.chat-send-btn.pulse-send {
+  transform: scale(0.92);
+  transition: transform 0.12s ease;
+}
+
+.status-dot.pulse-dot {
+  animation: statusDotPulse 0.4s ease;
+}
+
+@keyframes statusDotPulse {
+  from { transform: scale(0.75); }
+  to { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast,
+  .toast.hide,
+  .chat-message.message-enter {
+    animation: none !important;
+  }
+
+  .chat-message.assistant.streaming::after {
+    animation: none !important;
+  }
+}
+
 @media (max-width: 768px) {
   .toast-container {
     left: 16px;

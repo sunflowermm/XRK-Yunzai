@@ -39,7 +39,7 @@ export class example2 extends plugin {
         results.push(await this.processRepo(pluginsPath, repo))
       } catch (err) {
         results.push(`❌ ${repo.name}: ${err.message}`)
-        logger.error(`[XRK] 处理 ${repo.name} 时出错:`, err)
+        Bot.makeLog('error', `[XRK] 处理 ${repo.name} 时出错:`, 'XRK', err)
       }
     }
 
@@ -55,7 +55,7 @@ export class example2 extends plugin {
     if (!FileUtils.existsSync(repoPath)) return await this.cloneRepo(pluginsPath, repo)
     const isComplete = repo.requiredFiles.every(f => FileUtils.existsSync(path.join(repoPath, f)))
     if (!isComplete) {
-      logger.info(`[XRK] ${repo.name} 目录不完整，重新克隆...`)
+      Bot.makeLog('info', `[XRK] ${repo.name} 目录不完整，重新克隆...`, 'XRK')
       await this.removeDirectory(repoPath)
       return await this.cloneRepo(pluginsPath, repo)
     }
@@ -90,7 +90,7 @@ export class example2 extends plugin {
       }
       return list.length ? `${repoName} 更新内容（共${list.length}条）：\n\n${list.join('\n\n')}` : null
     } catch (err) {
-      logger.error('[XRK] 获取更新日志失败:', err)
+      Bot.makeLog('error', '[XRK] 获取更新日志失败:', 'XRK', err)
       return null
     }
   }
@@ -109,7 +109,7 @@ export class example2 extends plugin {
       await tryClone(repo.url)
     } catch (err) {
       if (repo.urlGitHub) {
-        logger.warn(`[XRK] ${repo.name} GitCode 克隆失败，尝试 GitHub: ${err.message}`)
+        Bot.makeLog('warn', `[XRK] ${repo.name} GitCode 克隆失败，尝试 GitHub: ${err.message}`, 'XRK')
         await tryClone(repo.urlGitHub)
       } else {
         throw err
@@ -153,7 +153,7 @@ export class example2 extends plugin {
       try {
         await execAsync(cmd)
       } catch (err) {
-        logger.error('[XRK] 删除目录失败:', dirPath, err)
+        Bot.makeLog('error', '[XRK] 删除目录失败:', 'XRK', dirPath, err)
         throw new Error(`无法删除目录: ${err.message}`)
       }
     }

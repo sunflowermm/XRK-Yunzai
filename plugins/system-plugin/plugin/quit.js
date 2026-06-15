@@ -18,11 +18,11 @@ export class quit extends plugin {
       if (this.e.sub_type !== 'invite') return
       const inviter = Number(this.e.user_id)
       if (cfg.masterQQ.some(qq => Number(qq) === inviter)) {
-        logger.mark(`[主人邀请] ${this.e.group_id}`)
+        Bot.makeLog('mark', `[主人邀请] ${this.e.group_id}`, 'Quit')
         return
       }
       await this.e.bot.setGroupAddRequest(this.e.flag, false, '禁止拉群')
-      logger.mark(`[自动拒绝拉群邀请] ${this.e.group_id}`)
+      Bot.makeLog('mark', `[自动拒绝拉群邀请] ${this.e.group_id}`, 'Quit')
       return
     }
 
@@ -32,7 +32,7 @@ export class quit extends plugin {
     /** 邀请人（operator_id）优先判定，少数群可能没有单独的邀请事件 */
     const inviter = Number(this.e.operator_id || this.e.inviter_id || 0)
     if (inviter && cfg.masterQQ.some(qq => Number(qq) === inviter)) {
-      logger.mark(`[主人邀请] ${this.e.group_id}`)
+      Bot.makeLog('mark', `[主人邀请] ${this.e.group_id}`, 'Quit')
       return
     }
 
@@ -47,7 +47,7 @@ export class quit extends plugin {
     if (gl) {
       for (let qq of cfg.masterQQ) {
         if (gl.has(Number(qq))) {
-          logger.mark(`[主人拉群] ${this.e.group_id}`)
+          Bot.makeLog('mark', `[主人拉群] ${this.e.group_id}`, 'Quit')
           return
         }
       }
@@ -57,7 +57,7 @@ export class quit extends plugin {
     const memberCount = Number(info?.member_count) || gl?.size || 0
     if (memberCount <= other.autoQuit && !group.is_owner) {
       await this.e.reply('禁止拉群，已自动退出')
-      logger.mark(`[自动退群] ${this.e.group_id} (inviter: ${inviter || 'unknown'})`)
+      Bot.makeLog('mark', `[自动退群] ${this.e.group_id} (inviter: ${inviter || 'unknown'})`, 'Quit')
       setTimeout(() => {
         group.quit()
       }, 2000)

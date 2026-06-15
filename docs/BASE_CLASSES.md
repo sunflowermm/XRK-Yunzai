@@ -95,15 +95,14 @@
 
 **路径**: `lib/factory/BaseFactory.js`
 
-LLM / ASR / TTS 等工厂的提供商注册与创建基类。
+LLM 等工厂的提供商注册与创建基类。
 
 ### 核心特性
 
 - **registerProvider**: 注册提供商工厂函数
 - **createClient**: 子类实现，按 provider 创建客户端
-- **createDeviceClient**: 设备级 ASR/TTS 等统一入口
 
-**使用**: `LLMFactory`、`ASRFactory`、`TTSFactory` 均继承此类。
+**使用**: `LLMFactory` 继承此类。
 
 ---
 
@@ -219,7 +218,7 @@ graph TB
 | EventListener | `lib/listener/listener.js` | 事件监听基类 |
 | Renderer | `lib/renderer/Renderer.js` | 渲染器基类 |
 | ConfigBase | `lib/commonconfig/commonconfig.js` | CommonConfig 配置基类 |
-| BaseFactory | `lib/factory/BaseFactory.js` | 工厂基类（LLM/ASR/TTS） |
+| BaseFactory | `lib/factory/BaseFactory.js` | 工厂基类（LLM） |
 | HotReloadBase | `lib/utils/hot-reload-base.js` | 热重载监视基类 |
 | Bot | `lib/bot.js` | Bot主类 |
 

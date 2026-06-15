@@ -4,7 +4,6 @@ import { transformOpenAIStyleVisionMessages } from '../../../lib/utils/llm/messa
 import { MCPToolAdapter } from '../../../lib/utils/llm/mcp-tool-adapter.js';
 import { parseMultipartData } from '../../../lib/utils/multipart-parser.js';
 import { getServerUploadLimits } from '../../../lib/utils/upload-limits.js';
-import BotUtil from '../../../lib/util.js';
 
 /**
  * POST /api/v3/chat/completions
@@ -63,7 +62,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
   const body = req.body || {};
   let messages = Array.isArray(body.messages) ? body.messages : null;
   const uploadedImages = [];
-  BotUtil.makeLog('debug', `[AI] POST /api/v3/chat/completions 收到请求`, 'HTTP');
+  Bot.makeLog('debug', `[AI] POST /api/v3/chat/completions 收到请求`, 'HTTP');
 
   // 支持 multipart/form-data 格式（图片上传）
   if (contentType.includes('multipart/form-data')) {
@@ -155,7 +154,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
 
   const base = LLMFactory.getProviderConfig(provider);
   const llmConfig = { provider, ...base };
-  BotUtil.makeLog('debug', `[AI] 运营商=${provider}, stream=${streamFlag}, messages=${messages?.length ?? 0}`, 'HTTP');
+  Bot.makeLog('debug', `[AI] 运营商=${provider}, stream=${streamFlag}, messages=${messages?.length ?? 0}`, 'HTTP');
 
   if (streamFlag && base.enableStream === false) {
     return res.status(400).json({ 
@@ -165,7 +164,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
   }
 
   const client = LLMFactory.createClient(llmConfig);
-  BotUtil.makeLog('debug', `[AI] 客户端已创建: provider=${provider}`, 'HTTP');
+  Bot.makeLog('debug', `[AI] 客户端已创建: provider=${provider}`, 'HTTP');
 
   const transformedMessages = await transformOpenAIStyleVisionMessages(messages, llmConfig);
   
@@ -209,7 +208,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
     const thirdParty = allMcpStreams.filter(name => !workflowNames.has(name));
     if (thirdParty.length) {
       workflowStreams = [...new Set([...workflowStreams, ...thirdParty])];
-      BotUtil.makeLog('debug', `[AI] MCP 工具已合并第三方: ${thirdParty.join(', ')}`, 'HTTP');
+      Bot.makeLog('debug', `[AI] MCP 工具已合并第三方: ${thirdParty.join(', ')}`, 'HTTP');
     }
   }
   if (workflowStreams?.length) overrides.streams = workflowStreams;
@@ -217,12 +216,12 @@ async function handleChatCompletionsV3(req, res, Bot) {
   // 若显式通过 workflow 声明了 streams，则认为调用方希望使用本地 MCP 工具能力
   overrides.mcpToolMode = workflowStreams?.length ? 'execute' : 'passthrough';
   if (streamFlag) {
-    if (workflowStreams?.length) BotUtil.makeLog('debug', `[AI] MCP 工具作用域: ${workflowStreams.join(', ')}`, 'HTTP');
-    else BotUtil.makeLog('debug', `[AI] 未传 workflow.streams，将按全部工作流注入 MCP 工具（若提供商已开启）`, 'HTTP');
+    if (workflowStreams?.length) Bot.makeLog('debug', `[AI] MCP 工具作用域: ${workflowStreams.join(', ')}`, 'HTTP');
+    else Bot.makeLog('debug', `[AI] 未传 workflow.streams，将按全部工作流注入 MCP 工具（若提供商已开启）`, 'HTTP');
   }
 
   if (!streamFlag) {
-    BotUtil.makeLog('debug', `[AI] 非流式调用 chat()`, 'HTTP');
+    Bot.makeLog('debug', `[AI] 非流式调用 chat()`, 'HTTP');
     const text = await client.chat(transformedMessages, overrides);
     const promptText = extractMessageText(messages);
     const promptTokens = estimateTokens(promptText);
@@ -248,7 +247,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
     });
   }
 
-  BotUtil.makeLog('debug', `[AI] 流式输出开始`, 'HTTP');
+  Bot.makeLog('debug', `[AI] 流式输出开始`, 'HTTP');
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -328,7 +327,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
     })}\n\n`);
     res.write('data: [DONE]\n\n');
   } catch (error) {
-    BotUtil.makeLog('error', `[AI] 流式请求异常: ${error.message}`, 'HTTP');
+    Bot.makeLog('error', `[AI] 流式请求异常: ${error.message}`, 'HTTP');
     res.write(`data: ${JSON.stringify({
       id,
       object: 'chat.completion.chunk',
@@ -353,7 +352,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
 
 async function handleModels(req, res, Bot) {
   const providers = LLMFactory.listProviders();
-  const defaultProvider = LLMFactory.resolveProvider({}) ?? LLMFactory.firstBuiltinProviderKey();
+  const defaultProvider = LLMFactory.resolveProvider({}) ?? LLMFactory.listProviders()[0] ?? null;
   const format = (req.query.format || '').toLowerCase();
 
   if (format === 'openai' || req.path === '/api/v3/models') {

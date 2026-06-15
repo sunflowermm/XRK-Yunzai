@@ -9,7 +9,7 @@
 **system-plugin** 是框架内置的“系统插件”，提供：
 
 - **多端适配**：OneBot（QQ）、标准输入、QBQBot、GSUIDCORE、ComWeChat 等适配器，将各端消息/事件转为统一事件流。
-- **AI 工作流**：chat、memory、tools、database、desktop、device 等流，通过 MCP 工具供 AI 调用。
+- **AI 工作流**：chat、memory、tools、database、desktop、web、browser 等流，通过 MCP 工具供 AI 调用。
 - **AI 助手入口**：`plugin/ai.js` 根据 `data/ai/config.yaml` 触发聊天、合并工作流，并处理白名单与冷却。
 - **通用能力**：HTTP API（插件列表、MCP、设备、文件等）、事件监听（消息、连接、请求、通知）、进群/退群/撤回/邀请等小功能。
 
@@ -32,8 +32,10 @@ plugins/system-plugin/
 │   ├── memory.js      # 长期记忆
 │   ├── tools.js       # 读写/搜索/执行（read/grep/write/run）
 │   ├── database.js    # 知识库
-│   ├── desktop.js     # 桌面/系统/浏览器等
-│   └── device.js      # 设备语音与表情
+│   ├── desktop.js     # 桌面/系统（精简版，无浏览器自动化）
+│   ├── web.js         # Web 抓取与搜索（web_fetch / web_search）
+│   └── browser.js     # Playwright 受控浏览器
+│   # 设备接入见 http/device.js（Event WS），非 stream 工作流
 ├── plugin/             # 消息/请求级插件
 │   ├── ai.js          # XRK-AI 助手（入口，调 chat/chat-merged）
 │   ├── recallReply.js # 撤回回复
@@ -53,7 +55,7 @@ plugins/system-plugin/
 │   ├── mcp.js         # MCP JSON-RPC
 │   ├── ai.js          # AI 相关接口
 │   ├── bot.js
-│   ├── device.js
+│   ├── device.js      # 设备 Event WS / REST（非语音流）
 │   ├── files.js
 │   ├── config.js
 │   ├── write.js
@@ -75,8 +77,6 @@ plugins/system-plugin/
 │   ├── xiaomimimo_llm.js
 │   ├── gptgod_llm.js
 │   ├── gemini_llm.js
-│   ├── volcengine_asr.js
-│   ├── volcengine_tts.js
 │   └── tools.js
 ├── www/                # 前端静态与页面
 │   └── xrk/
@@ -112,8 +112,9 @@ plugins/system-plugin/
 | **memory**  | 长期记忆。工具：`save_memory`、`query_memory`、`list_memories`。存储目录 `~/.xrk/memory`。 |
 | **tools**   | 文件与执行。工具：`read`、`grep`、`write`、`run`。工作区默认 `~/Desktop`。 |
 | **database**| 知识库。工具：`save_knowledge`、`query_knowledge`、`list_knowledge`。存储目录 `~/.xrk/knowledge`。 |
-| **desktop** | 桌面/系统/浏览器等（如 `show_desktop`、`open_browser`、`open_application` 等）。 |
-| **device**  | 设备语音与表情驱动，多用于设备端对话。 |
+| **desktop** | 桌面/系统（如 `show_desktop`、`open_application` 等；浏览器能力见 **web** / **browser**）。 |
+| **web**     | Web 抓取与搜索。工具：`web_fetch`（SSRF + Readability）、`web_search`（多搜索提供商）。 |
+| **browser** | Playwright 受控浏览器。工具：导航、正文快照、截图等（SSRF 策略与 web_fetch 一致）。 |
 
 合并流（见下）会把主工作流与若干副工作流的工具合并到一个虚拟流（如 `chat-merged`），供 AI 一次调用。
 
@@ -154,7 +155,7 @@ plugins/system-plugin/
 - **ConfigManager**（ConfigLoader）仅扫描各插件目录 **plugins/&lt;插件名&gt;/commonconfig/** 下的 `.js` 文件；加载后通过 **配置管理 API**（`http/config.js`，路由前缀 `/api/config/:name/`）暴露读写。
 - **system.js**：系统级子配置（bot、other、server、device、aistream 等），对应 `data/server_bots/{port}/` 或 `config/default_config/` 下各 yaml；loader 对 system-plugin 的 system 做特殊映射，**键名为 `system`**。
 - **ai_config.js**：AI 助手配置，对应 **data/ai/config.yaml**，**键名为 `system-plugin_ai_config`**（插件名_文件名）。用户可通过 `GET /api/config/system-plugin_ai_config/read`、`POST /api/config/system-plugin_ai_config/write` 等接口或前端配置页编辑，与 `plugin/ai.js` 读取的为同一文件。
-- 其余为 LLM/ASR/TTS 等工厂配置（OpenAI、Volc、小蜜、Gemini 等），被 aistream 等引用。
+- 其余为 LLM 等工厂配置（OpenAI、Volc、小蜜、Gemini 等），被 aistream 等引用。
 
 ---
 
@@ -216,7 +217,7 @@ mergeStreams:
 ## 五、扩展与注意
 
 1. **新增工作流**：在 `plugins/<某插件>/stream/` 下新增 `xxx.js`，导出继承 `AIStream` 的类，实现 `init()` 并在其中 `registerMCPTool()`。StreamLoader 会自动扫描并加载。  
-2. **合并到聊天**：在 `data/ai/config.yaml` 的 `mergeStreams` 中加上工作流名称即可（如 `desktop`、`device`），前提是 AI 助手 init 时已调用 `mergeStreams`。  
+2. **合并到聊天**：在 `data/ai/config.yaml` 的 `mergeStreams` 中加上工作流名称即可（如 `desktop`、`memory`），前提是 AI 助手 init 时已调用 `mergeStreams`。  
 3. **适配器**：新端实现与 OneBotv11 类似的接口（事件上报、`sendMsg`、`sendApi` 等），并 `Bot.adapter.push(实例)`。  
 4. **表情包资源**：chat 工作流从 `resources/aiimages/{开心|惊讶|伤心|大笑|害怕|生气}/` 读取图片，可按需放置。  
 5. **文档与仓库**：本文档仅描述 system-plugin 自带的能力与结构。框架底层文档见项目根 **`docs/`** 与 **`docs/overview/DEVELOPER_HUB.md`**（核心对象、插件/工作流基类、适配器、配置等）。
@@ -228,10 +229,10 @@ mergeStreams:
 | 模块     | 作用 |
 |----------|------|
 | **adapter** | 多端连接与消息/事件上报，挂载发送与 pick 系列 API。 |
-| **stream**  | AI 工作流与 MCP 工具，chat 负责聊天与群管，其余负责记忆/工具/知识库/桌面/设备等。 |
+| **stream**  | AI 工作流与 MCP 工具，chat 负责聊天与群管，其余负责记忆/工具/知识库/桌面等。 |
 | **plugin**  | AI 助手入口（ai.js）与撤回、邀请、退群等小功能。 |
 | **http**    | 插件列表、MCP、配置管理、设备、文件等 API。 |
 | **events**  | 统一事件入口（message、connect 等）。 |
-| **commonconfig** | 通用配置（含 system、**ai_config**、LLM/ASR/TTS 等）；system-plugin_ai_config 对应 data/ai/config.yaml，可经 API 编辑。 |
+| **commonconfig** | 通用配置（含 system、**ai_config**、LLM 等）；system-plugin_ai_config 对应 data/ai/config.yaml，可经 API 编辑。 |
 
 通过 `data/ai/config.yaml` 配置人设、白名单、冷却、概率与 `mergeStreams`，即可控制“谁在哪些群/私聊里、以何种方式触发 AI”以及“聊天时能用哪些工作流的工具”；该文件可通过 **/api/config/system-plugin_ai_config/read、write** 或前端配置页编辑。

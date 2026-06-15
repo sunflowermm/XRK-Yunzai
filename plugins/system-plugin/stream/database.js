@@ -3,7 +3,6 @@
  * 业务层：plugins/system-plugin/stream/
  */
 import AIStream from '../../../lib/aistream/aistream.js';
-import BotUtil from '../../../lib/util.js';
 import path from 'path';
 import os from 'os';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
@@ -136,7 +135,7 @@ export default class DatabaseStream extends AIStream {
     records.push(record);
     await this._writeRecords(dbFile, records);
     this.databases.set(db, records);
-    BotUtil.makeLog('info', `[${this.name}] 保存知识到知识库: ${db}`, 'DatabaseStream');
+    Bot.makeLog('info', `[${this.name}] 保存知识到知识库: ${db}`, 'DatabaseStream');
   }
 
   async queryKnowledge(db, keyword) {

@@ -4,7 +4,7 @@
 
 ![Config Base](https://img.shields.io/badge/CommonConfig-Base%20Class-blue?style=flat-square)
 ![Status](https://img.shields.io/badge/Status-Active-success?style=flat-square)
-![Version](https://img.shields.io/badge/Version-3.1.3-informational?style=flat-square)
+![Version](https://img.shields.io/badge/Version-3.2.0-informational?style=flat-square)
 
 </div>
 
@@ -108,5 +108,3 @@
 | gemini_compat_llm | Gemini Generate Content 协议 | gemini_compat_llm.yaml |
 | anthropic_compat_llm | Anthropic Messages 协议 | anthropic_compat_llm.yaml |
 | azure_openai_compat_llm | Azure OpenAI Chat Completions 协议 | azure_openai_compat_llm.yaml |
-| volcengine_asr | 火山引擎 ASR | volcengine_asr.yaml |
-| volcengine_tts | 火山引擎 TTS | volcengine_tts.yaml |

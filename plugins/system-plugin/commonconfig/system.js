@@ -1,5 +1,6 @@
 import ConfigBase from '../../../lib/commonconfig/commonconfig.js';
 import path from 'path';
+import cfg from '../../../lib/config/config.js';
 import { getServerConfigPath, SERVER_BOTS_DIR, RENDERERS_DIR, DATA_DB_DEFAULT_REL, resolveProjectPath } from '../../../lib/config/config-constants.js';
 
 /**
@@ -1218,13 +1219,6 @@ export default class SystemConfig extends ConfigBase {
               default: true,
               component: 'Switch'
             },
-            streamDir: {
-              type: 'string',
-              label: '工作流目录',
-              description: '兼容保留；实际工作流从各插件的 stream/ 目录加载',
-              default: 'plugins/stream',
-              component: 'Input'
-            },
             global: {
               type: 'object',
               label: '全局设置',
@@ -1295,8 +1289,8 @@ export default class SystemConfig extends ConfigBase {
                 Provider: {
                   type: 'string',
                   label: 'LLM运营商',
-                  description: '可填写内置 provider（gptgod/volcengine/openai/gemini/...）或兼容工厂中定义的自定义 key',
-                  default: 'gptgod',
+                  description: '填写各工厂 providers[] 条目的 key（如 gptgod、deepseek-main）；先在对应 *_llm.yaml 添加端点',
+                  default: '',
                   component: 'Input'
                 },
                 timeout: {
@@ -1869,7 +1863,7 @@ export default class SystemConfig extends ConfigBase {
         multiFile: {
           keys: ['puppeteer', 'playwright'],
           getFilePath: (key) => {
-            const port = getPort(global.cfg);
+            const port = getPort(cfg);
             return port
               ? path.join(resolveProjectPath(SERVER_BOTS_DIR), String(port), 'renderers', key, 'config.yaml')
               : path.join(resolveProjectPath(RENDERERS_DIR), key, 'config_default.yaml');

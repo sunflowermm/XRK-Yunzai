@@ -2,7 +2,8 @@
 
 业务代码放在 `plugins/<插件名>/` 对应子目录；**必须**继承或符合下列基类/导出约定。
 
-> 详细说明见 `PLUGIN_BASE_CLASS.md` 等；本文档为**短契约**，与 skill `xrk-base-layer` 对齐。冲突时**以代码为准**。
+> **写法**：`docs/coding-style.md` · **挂载**：`docs/runtime-surface.md`  
+> 详述见 `PLUGIN_BASE_CLASS.md` 等；本文档为**短契约**，与 skill `xrk-base-layer` 对齐。冲突时**以代码与 `pnpm test` 为准**。
 
 ## 通用编码约定
 
@@ -10,7 +11,7 @@
 - **constructor** 内只做 `super({...})` 与固定配置赋值。
 - **全局对象**：使用全局 `Bot`、`segment`（`PluginsLoader` 已挂载）；业务勿 `new Bot()`。新插件应 `import plugin from '../../lib/plugins/plugin.js'`。
 - **文件/对象**：业务用 `FileUtils`、`ObjectUtils`；配置路径用 `getServerConfigPath(port, name)`。
-- **日志**：`BotUtil.makeLog`；禁止空 catch。
+- **日志**：`Bot.makeLog`；禁止空 catch。
 
 ## plugin（`lib/plugins/plugin.js`）
 
@@ -78,7 +79,7 @@ export default class MyStream extends AIStream {
 }
 ```
 
-- 扫描路径：`plugins/<插件根>/stream/*.js` 或 `plugins/<插件根>/streams/*.js`（`PluginDirScanner.listStreamDirs()`）。
+- 扫描路径：`plugins/<插件根>/stream/*.js`（`PluginDirScanner.listStreamDirs()`，**仅** `stream/`，不扫 `streams/`）。
 - `callAI` 返回 `{ text, usedReplyTool } | null`；配置合并见 `CONFIG_PRIORITY.md`。
 - 可选 `async cleanup()` 释放资源。
 
@@ -120,9 +121,9 @@ export default class MyListener extends EventListener {
 
 路径 `renderers/`；`super({ id, type, render })`；模板 I/O 经 `FileUtils`。
 
-## BaseFactory（`lib/factory/BaseFactory.js`）
+## LLMFactory（`lib/factory/llm/LLMFactory.js`）
 
-LLM/ASR/TTS 工厂继承此类，实现 `createClient`；提供商用 `registerProvider` 注册。
+LLM 端点从各 `*_llm.yaml` 的 `providers[]` 解析；注册表见 `lib/factory/llm/factory-registry.js`。
 
 ## 热重载与基础设施工具
 
@@ -131,7 +132,7 @@ LLM/ASR/TTS 工厂继承此类，实现 `createClient`；提供商用 `registerP
 - 文件 I/O：`FileUtils`（含 `statSync`、`readFileBuffer`、`chmod`、`createWriteStream`）；`lib/` 禁止直连 `fs`/`chokidar`（仅 `file-utils.js`、`hot-reload-base.js` 内部）。
 - 流式 JSON/SSE/NDJSON：`tryParseJson`（`lib/utils/json-utils.js`），解析失败返回 `null`，禁止空 `catch {}`。
 - 对象合并：`ObjectUtils.shallowMergePlain` / `deepMergeImmutable`。
-- 热重载：`HotReloadBase.createWatcher` / `watchModuleDirs`；配置/插件/API/工作流/CommonConfig/渲染器均已接入。
+- 热重载：`HotReloadBase.createWatcher` / `watchModuleDirs`；`WATCH_DEBOUNCE_MS`（300ms）与 `closeWatcher` / `closeWatchers` 为 Loader 统一契约；配置/插件/API/工作流/CommonConfig/渲染器均已接入。
 - HttpApi 热更：每个 API 使用独立 `express.Router`，`stop(app)` 时从 Express 栈移除，避免路由重复注册。
 - Loader 状态：`Map`/`Set` 用**类字段**，禁止 constructor 内 `new Map()`。
 - 资源释放：工作流 `cleanup()`、插件 `destroy()`。

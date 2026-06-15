@@ -124,3 +124,41 @@ export function formatGroupLabel(label) {
   if (!label || label === '基础') return '基础设置';
   return label.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 }
+
+/**
+ * 按 flat-structure 补齐缺失的 schema 默认值（object / array / subform）
+ * 避免「新增再删除」后 original 为 undefined 而当前值为 [] 仍显示脏状态
+ */
+export function fillMissingSchemaDefaults(flatSchema, values, cloneValueFn = cloneValue) {
+  const filled = { ...(values ?? {}) };
+  if (!Array.isArray(flatSchema)) return filled;
+
+  for (const field of flatSchema) {
+    const path = field?.path;
+    if (!path || path.includes('[]') || Object.hasOwn(filled, path)) continue;
+
+    const meta = field.meta ?? {};
+    const component = String(meta.component ?? field.component ?? '').toLowerCase();
+    const type = String(meta.type ?? field.type ?? '').toLowerCase();
+    const isArrayType = type === 'array' || type === 'array<object>' || type.startsWith('array');
+    const isObjectLike = type === 'object' || type === 'map';
+    const isSubForm = component === 'subform';
+
+    if (isArrayType) {
+      filled[path] = Object.hasOwn(meta, 'default') || Object.hasOwn(field, 'default')
+        ? cloneValueFn(meta.default ?? field.default)
+        : [];
+      continue;
+    }
+
+    if (!isObjectLike && !isSubForm) continue;
+
+    if (Object.hasOwn(meta, 'default') || Object.hasOwn(field, 'default')) {
+      filled[path] = cloneValueFn(meta.default ?? field.default);
+    } else if (isObjectLike) {
+      filled[path] = {};
+    }
+  }
+
+  return filled;
+}

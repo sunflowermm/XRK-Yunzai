@@ -1,6 +1,5 @@
 // API 调试模块：从 app.js 中提取的逻辑，统一通过 app 实例传入
 
-import { cancelPageMotion } from './motion/gsap-motion.js';
 import { fetchApi, getUploadHeaders, API, joinApiUrl, normalizeDebugRequestBody } from './platform.js';
 
 /** 当前应高亮的 API id：内存态优先，其次 localStorage */
@@ -46,7 +45,6 @@ function restoreApiSidebarSelection(app) {
 export function renderAPI(app) {
   const content = document.getElementById('content');
   if (!content) return;
-  cancelPageMotion(content);
 
   const activeApiId = getResolvedActiveApiId(app);
   const restoring = Boolean(activeApiId);

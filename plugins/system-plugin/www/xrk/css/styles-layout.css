@@ -24,7 +24,7 @@
   backface-visibility: hidden;
 }
 
-/* 桌面端侧栏始终可见（防止 GSAP 移动端遗留 inline transform） */
+/* 桌面端侧栏始终可见（防止移动端遗留 inline transform） */
 @media (min-width: 769px) {
   .sidebar {
     transform: translateX(0) !important;

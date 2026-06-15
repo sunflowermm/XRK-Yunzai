@@ -1,4 +1,4 @@
-<h1 align="center">XRK-Yunzai v3.1.3</h1>
+<h1 align="center">XRK-Yunzai v3.2.0</h1>
 
 <p align="center">
   <strong>跨平台、多适配器的智能工作流机器人</strong><br>
@@ -8,7 +8,7 @@
 <div align="center">
 
 ![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)
-![Version](https://img.shields.io/badge/Version-3.1.3-brightgreen?style=flat-square)
+![Version](https://img.shields.io/badge/Version-3.2.0-brightgreen?style=flat-square)
 ![Node.js](https://img.shields.io/badge/Node.js-24%2B-green?style=flat-square&logo=node.js)
 ![Redis](https://img.shields.io/badge/Redis-5%2B-red?style=flat-square&logo=redis)
 
@@ -20,7 +20,7 @@
 
 | 分类 | 能力 |
 |------|------|
-| 模块化工作流 | Chat / Device / File 等工作流并行、串行、管线化执行；内置记忆、推理与润色。 |
+| 模块化工作流 | chat / memory / tools / database / desktop 等工作流，支持 mergeStreams 合并与 MCP 工具调用。 |
 | 统一对象 | `Bot`、事件 `e`、`logger`、`cfg`、`segment` 与全局 `redis` 客户端开箱即用，协议与设备场景一致。 |
 | 现代 HTTP 栈 | Express + WebSocket + 反向代理 + HTTPS/HTTP2 + CORS + 限流 + 静态资源热重载。 |
 | 插件生态 | 热重载、权限/优先级、上下文管理、多账号发送、转发消息、工作流调用。 |
@@ -37,7 +37,7 @@
 | Web 服务 | Express 4、`ws`、`http-proxy-middleware` | HTTP/WS、一体化代理、Helmet 安全头、独立速率限制器。 |
 | 数据缓存 | Redis 5+（官方 client） | 记忆系统、会话缓存、API 限流、跨进程通信。 |
 | 语义能力 | `node-fetch` + 第三方 LLM API | Chat Completions、流式输出。 |
-| 渲染与自动化 | Puppeteer / Playwright | 图像渲染、设备工作流截图、Web 控制台。 |
+| 渲染与自动化 | Puppeteer / Playwright | 图像渲染、网页截图、Web 控制台。 |
 | 配置管理 | YAML + chokidar | 多端口隔离配置、热更新、默认值自动回写。 |
 
 更多技术细节见 `docs/TECH_STACK.md`。
@@ -141,7 +141,7 @@ XRK-Yunzai/
 │       ├── adapter/       # 协议适配器（如 system-plugin 内 OneBotv11、stdin）
 │       ├── commonconfig/  # 公共配置（ConfigLoader 仅从此目录加载，键名 插件名_文件名）
 │       ├── http/          # REST/WS/SSE
-│       ├── stream/        # AI 工作流 (chat/device/…)
+│       ├── stream/        # AI 工作流（chat/memory/tools/…，仅 stream/）
 │       ├── events/        # 消息/系统事件
 │       └── …
 │
@@ -162,6 +162,9 @@ XRK-Yunzai/
 | 主题 | 入口 | 说明 |
 |------|------|------|
 | **文档索引** | [`docs/README.md`](./docs/README.md) | 底层文档一览与推荐阅读顺序。 |
+| **写法规范** | [`docs/coding-style.md`](./docs/coding-style.md) | 全局裸名、FileUtils、stream/ 目录等速查。 |
+| **运行挂载** | [`docs/runtime-surface.md`](./docs/runtime-surface.md) | Bot / segment / cfg 唯一说明。 |
+| **框架测试** | [`docs/框架测试指南.md`](./docs/框架测试指南.md) | `pnpm test`、配置三件套、模块基准。 |
 | 技术栈全景 | [`docs/TECH_STACK.md`](./docs/TECH_STACK.md) | 框架栈、依赖、部署策略。 |
 | 开发者导航（可视化） | [`docs/overview/DEVELOPER_HUB.md`](./docs/overview/DEVELOPER_HUB.md) | Mermaid 拓扑展示 `Bot → Plugins → Workflows` 关系及基类入口。 |
 | 核心对象 | [`docs/CORE_OBJECTS.md`](./docs/CORE_OBJECTS.md) | Bot / 事件 `e` / `logger` / `cfg` / `segment` / `redis` 速查。 |
@@ -191,6 +194,18 @@ XRK-Yunzai/
 - `device.yaml` / `group.yaml` / `notice.yaml`：设备、群、通知策略。
 
 > 优先级：运行时传入 > `cfg` 实例化时覆盖 > `data/server_bots/<port>` > `config/default_config` > 内置默认值。详情见 `docs/reference/CONFIG_AND_REDIS.md#配置优先级`。
+
+---
+
+## 🧪 开发与验证
+
+```bash
+pnpm lint
+pnpm test
+node scripts/validate-skills.mjs
+```
+
+详见 [`docs/框架测试指南.md`](./docs/框架测试指南.md)。
 
 ---
 

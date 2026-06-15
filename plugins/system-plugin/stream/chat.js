@@ -66,7 +66,7 @@ export default class ChatStream extends AIStream {
         ChatStream.cleanupTimer = setInterval(() => this.cleanupCache(), 300000);
       }
     } catch (error) {
-      BotUtil.makeLog('error', 
+      Bot.makeLog('error', 
         `[${this.name}] 初始化失败: ${error.message}`, 
         'ChatStream'
       );
@@ -157,7 +157,7 @@ export default class ChatStream extends AIStream {
 
         const text = String(args.text ?? '').trim();
         return this._wrapHandler(async () => {
-          const seg = global.segment || segment;
+          const seg = segment;
           if (text) {
             await context.e.reply([seg.at(qq), ' ', text]);
           } else {
@@ -257,7 +257,7 @@ export default class ChatStream extends AIStream {
       },
       handler: async (args = {}, context = {}) => {
         const e = context.e;
-        BotUtil.makeLog(
+        Bot.makeLog(
           'debug',
           `[chat.emojiReaction] 调用上下文: hasE=${Boolean(e)}, isGroup=${e?.isGroup}, message_type=${e?.message_type}, group_id=${e?.group_id}, user_id=${e?.user_id}`,
           'ChatStream'
@@ -343,7 +343,7 @@ export default class ChatStream extends AIStream {
         
         // ⚠️ 重要：检查是否已发送过表情包
         if (this._hasSentEmotionThisTurn) {
-          BotUtil.makeLog('debug', `[ChatStream] emotion 工具调用被跳过（本轮已发送过表情包） emotionType=${t}`, 'ChatStream');
+          Bot.makeLog('debug', `[ChatStream] emotion 工具调用被跳过（本轮已发送过表情包） emotionType=${t}`, 'ChatStream');
           // 这里不要返回 error：LLM 很容易把 error 当成“需要重试”，导致刷屏式重复 tool_calls
           // 改为“成功但跳过”，并明确告知不要再调用
           return { success: true, raw: '本轮已发过表情包，未重复发送。无话可说则空返回。' };
@@ -352,7 +352,7 @@ export default class ChatStream extends AIStream {
         if (!image) return { success: false, error: '该表情暂无可用图片' };
         const text = String(args.text ?? '').trim();
         return this._wrapHandler(async () => {
-          const seg = global.segment || segment;
+          const seg = segment;
           if (text) {
             await e.reply([seg.image(image), text]);
           } else {
@@ -819,7 +819,7 @@ export default class ChatStream extends AIStream {
           const group = context.e.group;
           if (group && typeof group.getInfoEx === 'function') {
             const info = await group.getInfoEx();
-            BotUtil.makeLog('debug', `获取群信息ex成功: ${JSON.stringify(info)}`, 'ChatStream');
+            Bot.makeLog('debug', `获取群信息ex成功: ${JSON.stringify(info)}`, 'ChatStream');
             const raw = this._queryToolRawDetail('群扩展信息', info, context.e);
             const result = { success: true, data: info, raw };
             return result;
@@ -827,7 +827,7 @@ export default class ChatStream extends AIStream {
           const result = { success: false, error: 'API不可用' };
           return result;
         }, 0).catch(error => {
-          BotUtil.makeLog('warn', `获取群信息ex失败: ${error.message}`, 'ChatStream');
+          Bot.makeLog('warn', `获取群信息ex失败: ${error.message}`, 'ChatStream');
           const result = { success: false, error: error.message };
           return result;
         });
@@ -846,7 +846,7 @@ export default class ChatStream extends AIStream {
           const group = context.e.group;
           if (group && typeof group.getAtAllRemain === 'function') {
             const remain = await group.getAtAllRemain();
-            BotUtil.makeLog('debug', `@全体成员剩余次数: ${JSON.stringify(remain)}`, 'ChatStream');
+            Bot.makeLog('debug', `@全体成员剩余次数: ${JSON.stringify(remain)}`, 'ChatStream');
             const raw = this._queryToolRawDetail('@全体剩余次数', remain, context.e);
             const result = { success: true, data: remain, raw };
             return result;
@@ -854,7 +854,7 @@ export default class ChatStream extends AIStream {
           const result = { success: false, error: 'API不可用' };
           return result;
         }, 0).catch(error => {
-          BotUtil.makeLog('warn', `获取@全体剩余次数失败: ${error.message}`, 'ChatStream');
+          Bot.makeLog('warn', `获取@全体剩余次数失败: ${error.message}`, 'ChatStream');
           const result = { success: false, error: error.message };
           return result;
         });
@@ -873,7 +873,7 @@ export default class ChatStream extends AIStream {
           const group = context.e.group;
           if (group && typeof group.getBanList === 'function') {
             const banList = await group.getBanList();
-            BotUtil.makeLog('debug', `群禁言列表: ${JSON.stringify(banList)}`, 'ChatStream');
+            Bot.makeLog('debug', `群禁言列表: ${JSON.stringify(banList)}`, 'ChatStream');
             const raw = this._queryToolRawDetail('禁言列表', banList, context.e);
             const result = { success: true, data: banList, raw };
             return result;
@@ -881,7 +881,7 @@ export default class ChatStream extends AIStream {
           const result = { success: false, error: 'API不可用' };
           return result;
         }, 0).catch(error => {
-          BotUtil.makeLog('warn', `获取禁言列表失败: ${error.message}`, 'ChatStream');
+          Bot.makeLog('warn', `获取禁言列表失败: ${error.message}`, 'ChatStream');
           const result = { success: false, error: error.message };
           return result;
         });
@@ -1183,7 +1183,7 @@ export default class ChatStream extends AIStream {
               const result = await e.bot.sendApi('get_msg', { message_id: msgId });
               messageData = result?.data || null;
             } catch (err) {
-              BotUtil.makeLog('debug', `[ChatStream] getMessageImages get_msg API失败: ${err?.message}`, 'ChatStream');
+              Bot.makeLog('debug', `[ChatStream] getMessageImages get_msg API失败: ${err?.message}`, 'ChatStream');
             }
           }
           
@@ -1192,7 +1192,7 @@ export default class ChatStream extends AIStream {
             try {
               messageData = await e.bot.adapter.getMsg(e, msgId);
             } catch (err) {
-              BotUtil.makeLog('debug', `[ChatStream] getMessageImages adapter.getMsg失败: ${err?.message}`, 'ChatStream');
+              Bot.makeLog('debug', `[ChatStream] getMessageImages adapter.getMsg失败: ${err?.message}`, 'ChatStream');
             }
           }
 
@@ -1240,10 +1240,10 @@ export default class ChatStream extends AIStream {
             };
           const raw = this._queryToolRaw(`消息 ${msgId} 的图片URL列表（共 ${images.length} 张）`, data);
           const result = { success: true, data, raw };
-          BotUtil.makeLog('debug', `[ChatStream] getMessageImages 成功获取消息图片 messageId=${msgId} imageCount=${images.length} images=${images.join(',')}`, 'ChatStream');
+          Bot.makeLog('debug', `[ChatStream] getMessageImages 成功获取消息图片 messageId=${msgId} imageCount=${images.length} images=${images.join(',')}`, 'ChatStream');
           return result;
         } catch (error) {
-          BotUtil.makeLog('error', `[ChatStream] getMessageImages 异常: ${error.message}`, 'ChatStream');
+          Bot.makeLog('error', `[ChatStream] getMessageImages 异常: ${error.message}`, 'ChatStream');
           return { success: false, error: error.message };
         }
       },
@@ -1304,10 +1304,10 @@ export default class ChatStream extends AIStream {
             };
           const raw = this._queryToolRaw('该图片的识别结果', data);
           const result = { success: true, data, raw };
-          BotUtil.makeLog('debug', `[ChatStream] recognizeImage 成功识别图片 imageUrl=${imageUrl} descriptionLen=${recognitionResult.trim().length}`, 'ChatStream');
+          Bot.makeLog('debug', `[ChatStream] recognizeImage 成功识别图片 imageUrl=${imageUrl} descriptionLen=${recognitionResult.trim().length}`, 'ChatStream');
           return result;
         } catch (error) {
-          BotUtil.makeLog('error', `[ChatStream] recognizeImage 异常: ${error.message}`, 'ChatStream');
+          Bot.makeLog('error', `[ChatStream] recognizeImage 异常: ${error.message}`, 'ChatStream');
           return { success: false, error: error.message };
         }
       },
@@ -1385,9 +1385,9 @@ export default class ChatStream extends AIStream {
         }
       }
 
-      BotUtil.makeLog('debug', `[ChatStream] recordMessage group=${groupId} userId=${userId} msgLen=${(message || '').length} messageId=${messageId}`, 'ChatStream');
+      Bot.makeLog('debug', `[ChatStream] recordMessage group=${groupId} userId=${userId} msgLen=${(message || '').length} messageId=${messageId}`, 'ChatStream');
     } catch (err) {
-      BotUtil.makeLog('debug', `[ChatStream] recordMessage 异常: ${err?.message}`, 'ChatStream');
+      Bot.makeLog('debug', `[ChatStream] recordMessage 异常: ${err?.message}`, 'ChatStream');
     }
   }
 
@@ -1401,7 +1401,7 @@ export default class ChatStream extends AIStream {
 
   recordAIResponse(e, text) {
     if (!text?.trim()) return;
-    BotUtil.makeLog('debug', `[ChatStream] recordAIResponse group=${e?.group_id} textLen=${text.length} text=${text}`, 'ChatStream');
+    Bot.makeLog('debug', `[ChatStream] recordAIResponse group=${e?.group_id} textLen=${text.length} text=${text}`, 'ChatStream');
     
     // 提取图片内容标记（不会被用户看见，仅记录到历史）
     const { imageContent, text: cleanText } = this.parseImageContentMark(text);
@@ -1423,7 +1423,7 @@ export default class ChatStream extends AIStream {
       if (history.length > 50) ChatStream.messageHistory.set(e.group_id, history.slice(-50));
     }
     if (imageContent) {
-      BotUtil.makeLog('debug', `[ChatStream] recordAIResponse 提取图片内容标记: ${imageContent}`, 'ChatStream');
+      Bot.makeLog('debug', `[ChatStream] recordAIResponse 提取图片内容标记: ${imageContent}`, 'ChatStream');
     }
   }
 
@@ -1433,7 +1433,7 @@ export default class ChatStream extends AIStream {
       if (!redisSummary?.trim()) return null;
       return `【会话记忆】\n${redisSummary.trim()}`;
     } catch (err) {
-      BotUtil.makeLog('debug', `[ChatStream] buildMemorySummary 失败: ${err?.message}`, 'ChatStream');
+      Bot.makeLog('debug', `[ChatStream] buildMemorySummary 失败: ${err?.message}`, 'ChatStream');
       return null;
     }
   }
@@ -1480,9 +1480,9 @@ export default class ChatStream extends AIStream {
       }
 
       // 日志输出完整内容
-      BotUtil.makeLog('debug', `[ChatStream] recordToolCallResult tool=${toolName} group=${groupId} resultLen=${fullResultText.length} result=${fullResultText}`, 'ChatStream');
+      Bot.makeLog('debug', `[ChatStream] recordToolCallResult tool=${toolName} group=${groupId} resultLen=${fullResultText.length} result=${fullResultText}`, 'ChatStream');
     } catch (err) {
-      BotUtil.makeLog('debug', `[ChatStream] recordToolCallResult 异常: ${err?.message}`, 'ChatStream');
+      Bot.makeLog('debug', `[ChatStream] recordToolCallResult 异常: ${err?.message}`, 'ChatStream');
     }
   }
 
@@ -1639,7 +1639,7 @@ export default class ChatStream extends AIStream {
           }
         }
       } catch (err) {
-        BotUtil.makeLog('debug', `[ChatStream] _extractImagesFromEvent 获取被回复图片失败: ${err?.message}`, 'ChatStream');
+        Bot.makeLog('debug', `[ChatStream] _extractImagesFromEvent 获取被回复图片失败: ${err?.message}`, 'ChatStream');
       }
     }
 
@@ -1799,7 +1799,7 @@ export default class ChatStream extends AIStream {
 
       }
     } catch (error) {
-      BotUtil.makeLog(
+      Bot.makeLog(
         'debug',
         `[ChatStream.syncHistoryFromAdapter] 获取聊天记录失败: ${error.message}`,
         'ChatStream'
@@ -1952,7 +1952,7 @@ export default class ChatStream extends AIStream {
     if (debugDumpFullPrompt && dumpEvent && Array.isArray(forApi) && forApi.length > 0) {
       try {
         const r = await ChatStream.dumpLlmRequestSnapshot(this, dumpEvent, forApi, rest);
-        BotUtil.makeLog(
+        Bot.makeLog(
           r.success ? 'info' : 'warn',
           r.success
             ? `[ChatStream] 已导出 LLM 请求体: ${r.path}`
@@ -1960,7 +1960,7 @@ export default class ChatStream extends AIStream {
           'ChatStream'
         );
       } catch (err) {
-        BotUtil.makeLog('error', `[ChatStream] 请求体导出异常: ${err?.message}`, 'ChatStream');
+        Bot.makeLog('error', `[ChatStream] 请求体导出异常: ${err?.message}`, 'ChatStream');
       }
     }
 
@@ -2007,7 +2007,7 @@ export default class ChatStream extends AIStream {
 
       return text || '';
     } catch (error) {
-      BotUtil.makeLog('error', `[ChatStream] execute 失败: ${error.message}`, 'ChatStream');
+      Bot.makeLog('error', `[ChatStream] execute 失败: ${error.message}`, 'ChatStream');
       return null;
     } finally {
       this._hasSentEmotionThisTurn = false;
@@ -2031,7 +2031,7 @@ export default class ChatStream extends AIStream {
       return { totalSent: 0, allSentContent: [] };
     }
 
-    const seg = global.segment || segment;
+    const seg = segment;
     let totalSent = 0;
     const allSentContent = [];
     let hasEmotionInThisContent = false; // 检查当前内容中是否有表情包
@@ -2055,7 +2055,7 @@ export default class ChatStream extends AIStream {
       // ⚠️ 重要：处理表情包 - 一次聊天最好只发一次表情包
       if (emotion) {
         if (!skipEmotionCheck && this._hasSentEmotionThisTurn) {
-          BotUtil.makeLog('debug', `[ChatStream] _processAndSendTextProtocol 跳过重复表情包 emotion=${emotion}`, 'ChatStream');
+          Bot.makeLog('debug', `[ChatStream] _processAndSendTextProtocol 跳过重复表情包 emotion=${emotion}`, 'ChatStream');
           hasEmotionInThisContent = true;
         } else {
           // 首次发送表情包，允许发送
@@ -2238,7 +2238,7 @@ export default class ChatStream extends AIStream {
     const cqPattern = /\[CQ:(\w+)(?:,([^\]]+))?\]/g;
     let match;
     let currentIndex = 0;
-    const seg = global.segment || segment;
+    const seg = segment;
     while ((match = cqPattern.exec(text)) !== null) {
       const [full, type, params] = match;
       if (match.index > currentIndex) {
@@ -2415,7 +2415,7 @@ export default class ChatStream extends AIStream {
           requestBody = await ChatStream._buildRound1RequestBody(client, ctor, messagesAssembled, overrides, timeoutMs);
         } catch (prepErr) {
           requestBodyError = prepErr.message;
-          BotUtil.makeLog('warn', `[ChatStream] request_body 构建失败，仅写入 messages_assembled: ${prepErr.message}`, 'ChatStream');
+          Bot.makeLog('warn', `[ChatStream] request_body 构建失败，仅写入 messages_assembled: ${prepErr.message}`, 'ChatStream');
         }
       }
 
@@ -2451,7 +2451,7 @@ export default class ChatStream extends AIStream {
       result.path = fpath;
     } catch (error) {
       result.error = error.message;
-      BotUtil.makeLog('error', `[ChatStream] dumpLlmRequestSnapshot 失败: ${error.message}`, 'ChatStream');
+      Bot.makeLog('error', `[ChatStream] dumpLlmRequestSnapshot 失败: ${error.message}`, 'ChatStream');
     }
     return result;
   }
@@ -2475,13 +2475,13 @@ export default class ChatStream extends AIStream {
       if (ChatStream.messageHistory.has(gid)) {
         ChatStream.messageHistory.delete(gid);
         result.cleared.history = true;
-        BotUtil.makeLog('debug', `[ChatStream] clearConversation 清除聊天记录 group=${gid}`, 'ChatStream');
+        Bot.makeLog('debug', `[ChatStream] clearConversation 清除聊天记录 group=${gid}`, 'ChatStream');
       }
 
-      BotUtil.makeLog('debug', `[ChatStream] clearConversation 完成 group=${gid} cleared=${JSON.stringify(result.cleared)}`, 'ChatStream');
+      Bot.makeLog('debug', `[ChatStream] clearConversation 完成 group=${gid} cleared=${JSON.stringify(result.cleared)}`, 'ChatStream');
     } catch (error) {
       result.success = false;
-      BotUtil.makeLog('error', `[ChatStream] clearConversation 失败: ${error.message}`, 'ChatStream');
+      Bot.makeLog('error', `[ChatStream] clearConversation 失败: ${error.message}`, 'ChatStream');
     }
 
     return result;

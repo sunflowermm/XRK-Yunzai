@@ -9,34 +9,24 @@
 
 ```
 LLMFactory
-├── builtinProviders: gptgod / volcengine / xiaomimimo / openai / gemini / anthropic / azure_openai
-├── compatFactories: openai_compat_llm、openai_responses_compat_llm、newapi_compat_llm、cherryin_compat_llm（后二者共用 OpenAIPathCompatLLMClient）、ollama、gemini、anthropic、azure_openai 兼容等
-└── registerProvider / listProviders / hasProvider / resolveProvider / getProviderConfig / createClient
+├── factoryRegistry：gptgod / volcengine / deepseek / xiaomimimo / openai / gemini / anthropic / azure_openai + 各 *_compat_llm
+├── 所有工厂 YAML 统一 providers[] 数组（每条 key 即 provider 名）
+├── builtinClientFactories：按 protocol 实例化官方 Client
+└── listFactories / listProviders / listModelProfiles / resolveProvider / getProviderConfig / createClient
 ```
 
 | API | 说明 |
 |-----|------|
-| `resolveProvider(input?, options?)` | 从 `input.provider/model/llm/profile` 或 `aistream.llm.Provider` 等解析出 provider 名。 |
-| `getProviderConfig(name)` | 内置：合并 `cfg` 中对应 `*_llm`；兼容：合并 yaml defaults + `providers[]` 条目，含 `protocol`、`factoryType`、`_clientClass`（仅供工厂内部）。对外读取可用 **`cfg.getLLMConfig(name)`**（会去掉 `_clientClass`）。 |
-| `createClient(config?)` | `resolveProvider(config)` → 内置 `new X(config)` 或 compat `new ClientClass(merged)`；合并时丢弃传入字段值为 `undefined` 的项，避免覆盖默认。 |
-
-## 使用
-
-```javascript
-import LLMFactory from '../../lib/factory/llm/LLMFactory.js';
-
-// 依赖全局已加载 cfg（含 aistream.llm.Provider）
-const client = LLMFactory.createClient({ provider: 'openai', model: 'gpt-4o' });
-await client.chat(messages, { stream: false, temperature: 0.7 });
-```
-
-自定义提供商：实现 `chat` / `chatStream`（及项目约定的 overrides），再 `registerProvider`。
+| `resolveProvider(input?, options?)` | 从 `input.provider/model/llm/profile` 或 `aistream.llm.Provider` 解析 **providers[].key**。 |
+| `getProviderConfig(name)` | 从各工厂 `providers[]` 合并条目；含 `protocol`、`factoryType`、`_clientClass`（compat）。对外用 **`cfg.getLLMConfig(name)`**（去掉 `_clientClass`）。 |
+| `createClient(config?)` | `resolveProvider` → builtin 按 `protocol` 或 compat 按 `clientClass` 创建客户端。 |
 
 ## 配置
 
-- 默认 YAML：`config/default_config/*.yaml`；表单与 schema：`plugins/*/commonconfig/`。
-- **默认内置 provider**：未配置 `aistream.llm.Provider` 时，由 `LLMFactory.js` 内部 `resolveDefaultProvider()` 取 **`builtinProviders` Map 按插入顺序的第一个 key**（对外 `LLMFactory.firstBuiltinProviderKey()`）；不在 config 层维护枚举。`cfg._getBuiltinLlmFallback` 使用 `LLMFactory.listBuiltinProviderKeys()`。
-- 详见 [CONFIG_PRIORITY.md](./CONFIG_PRIORITY.md)、[COMMONCONFIG_BASE.md](./COMMONCONFIG_BASE.md)。
+- 各工厂 YAML：`data/server_bots/*_llm.yaml`，结构为 `providers: [{ key, baseUrl, apiKey, model, ... }]`。
+- `aistream.llm.Provider` 填写 **providers[].key**（非工厂名）。
+- 旧版扁平 yaml（无 providers）会在读取时自动合成单条端点（key 为工厂 id，如 `gptgod`）。
+- CommonConfig 表单：`plugins/system-plugin/commonconfig/shared/llm-provider-fields.js` 预设字段。
 
 ## 相关
 

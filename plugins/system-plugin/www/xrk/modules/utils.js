@@ -143,7 +143,15 @@ export function cloneValue(value) {
  */
 export function isSameValue(a, b) {
   if (a === b) return true;
-  if (a == null || b == null) return a === b;
+  if (a == null || b == null) {
+    if (a == null && b == null) return true;
+    // flat 接口常省略空数组/空对象，与显式 [] / {} 应视为未变更
+    if (a == null && Array.isArray(b) && b.length === 0) return true;
+    if (b == null && Array.isArray(a) && a.length === 0) return true;
+    if (a == null && typeof b === 'object' && !Array.isArray(b) && Object.keys(b).length === 0) return true;
+    if (b == null && typeof a === 'object' && !Array.isArray(a) && Object.keys(a).length === 0) return true;
+    return false;
+  }
   if (typeof a !== typeof b) return false;
   if (typeof a !== 'object') return a === b;
 

@@ -1,20 +1,21 @@
 /**
  * 配置管理API
- * 使用 Bot.ConfigManager（与 global.ConfigManager 一致）提供配置读写
+ * 使用 Bot.ConfigManager 提供配置读写
  */
-import BotUtil from '../../../lib/util.js';
 import cfg from '../../../lib/config/config.js';
 import { cleanConfigData, flattenStructure, flattenData, unflattenData } from '../../../lib/commonconfig/config-utils.js';
 
 function getConfigManager(Bot) {
-  return Bot?.ConfigManager ?? global.ConfigManager;
+  return Bot?.ConfigManager;
 }
 
 /** 配置保存后清除 cfg 缓存，确保 LLMFactory 等读取到最新 providers 子配置 */
 function invalidateCfgCache(configName) {
   try {
     if (cfg?.clearConfig) cfg.clearConfig(configName);
-  } catch (_) {}
+  } catch (err) {
+    Bot.makeLog('debug', `[config] clearConfig 跳过: ${err?.message || err}`, 'ConfigAPI');
+  }
 }
 
 export default {
@@ -113,7 +114,7 @@ export default {
               try {
                 data = await config.read(keyPath);
               } catch (subError) {
-                BotUtil.makeLog('error', `读取子配置失败 [${configName}/${keyPath}]: ${subError.message}`, 'ConfigAPI', subError);
+                Bot.makeLog('error', `读取子配置失败 [${configName}/${keyPath}]: ${subError.message}`, 'ConfigAPI', subError);
                 throw subError;
               }
             } else if (typeof config.get === 'function') {
@@ -128,7 +129,7 @@ export default {
               try {
                 data = await config.read();
               } catch (error) {
-                BotUtil.makeLog('error', `读取多文件配置列表失败 [${configName}]: ${error.message}`, 'ConfigAPI', error);
+                Bot.makeLog('error', `读取多文件配置列表失败 [${configName}]: ${error.message}`, 'ConfigAPI', error);
                 throw error;
               }
             } else if (typeof config.read === 'function') {
@@ -145,7 +146,7 @@ export default {
           });
         } catch (error) {
           const errorName = configName || 'unknown';
-          BotUtil.makeLog('error', `读取配置失败 [${errorName}]: ${error.message}`, 'ConfigAPI', error);
+          Bot.makeLog('error', `读取配置失败 [${errorName}]: ${error.message}`, 'ConfigAPI', error);
           res.status(500).json({
             success: false,
             message: '读取配置失败',
@@ -166,7 +167,7 @@ export default {
           configName = req.params && req.params.name;
           const { data, path: keyPath, backup = true, validate = true } = req.body || {};
 
-          BotUtil.makeLog('debug', `收到配置写入请求 [${configName}] path: ${keyPath || 'none'}`, 'ConfigAPI');
+          Bot.makeLog('debug', `收到配置写入请求 [${configName}] path: ${keyPath || 'none'}`, 'ConfigAPI');
 
           if (!configName) {
             return res.status(400).json({
@@ -178,7 +179,7 @@ export default {
           const config = getConfigManager(Bot).get(configName);
 
           if (!config) {
-            BotUtil.makeLog('error', `配置不存在: ${configName}`, 'ConfigAPI');
+            Bot.makeLog('error', `配置不存在: ${configName}`, 'ConfigAPI');
             return res.status(404).json({
               success: false,
               message: `配置 ${configName} 不存在`
@@ -187,7 +188,7 @@ export default {
 
           // 验证数据
           if (data === undefined || data === null) {
-            BotUtil.makeLog('warn', `配置数据为空 [${configName}]`, 'ConfigAPI');
+            Bot.makeLog('warn', `配置数据为空 [${configName}]`, 'ConfigAPI');
           }
 
           // 清理数据：将空字符串转换为 null（对于数字字段）
@@ -201,7 +202,7 @@ export default {
               try {
                 result = await config.write(keyPath, cleanedData, { backup, validate, silent: true });
               } catch (subError) {
-                BotUtil.makeLog('error', `写入子配置失败 [${configName}/${keyPath}]: ${subError.message}`, 'ConfigAPI', subError);
+                Bot.makeLog('error', `写入子配置失败 [${configName}/${keyPath}]: ${subError.message}`, 'ConfigAPI', subError);
                 throw subError;
               }
             } else if (typeof config.set === 'function') {
@@ -228,7 +229,7 @@ export default {
           });
         } catch (error) {
           const errorName = configName || (req.params && req.params.name) || 'unknown';
-          BotUtil.makeLog('error', `写入配置失败 [${errorName}]: ${error.message}`, 'ConfigAPI', error);
+          Bot.makeLog('error', `写入配置失败 [${errorName}]: ${error.message}`, 'ConfigAPI', error);
           res.status(500).json({
             success: false,
             message: '写入配置失败',
@@ -559,7 +560,7 @@ export default {
           const flat = flattenStructure(schema);
           return res.json({ success: true, flat });
         } catch (error) {
-          BotUtil.makeLog('warn', `[config] flat-structure ${name} 异常: ${error.message}`, 'ConfigAPI');
+          Bot.makeLog('warn', `[config] flat-structure ${name} 异常: ${error.message}`, 'ConfigAPI');
           return res.json({ success: true, flat: [], message: error.message || '获取结构异常，已返回空' });
         }
       }
@@ -592,7 +593,7 @@ export default {
           const flat = flattenData(data ?? {});
           return res.json({ success: true, flat });
         } catch (error) {
-          BotUtil.makeLog('warn', `[config] flat ${name} 异常: ${error.message}`, 'ConfigAPI');
+          Bot.makeLog('warn', `[config] flat ${name} 异常: ${error.message}`, 'ConfigAPI');
           return res.json({ success: true, flat: {}, message: error.message || '读取失败，已返回空数据' });
         }
       }

@@ -22,7 +22,7 @@ alwaysApply: true
 - 文件：`FileUtils`（`lib/utils/file-utils.js`），禁止 `fs.existsSync` / `fs.readdirSync` 等。
 - 对象：`ObjectUtils`（`lib/utils/object-utils.js`）。
 - 配置路径：`getServerConfigPath(port, configName)`（`lib/config/config-constants.js`）。
-- 日志：`BotUtil.makeLog`；禁止空 catch。
+- 日志：`Bot.makeLog`；禁止空 catch。
 
 ## HTTP API
 
@@ -34,3 +34,9 @@ alwaysApply: true
 - 插件持有 watcher/定时器：实现 `async destroy()`。
 - 工作流持有连接/缓存：实现 `async cleanup()`。
 - 文件监视：优先 `HotReloadBase`，勿业务层直接 chokidar。
+
+## 底层删减红线
+
+- **勿删** `lib/puppeteer/puppeteer.js`（历史插件硬编码 import，见 `xrk-yunzai-core.mdc`「旧版兼容路径」）。
+- **勿删** `lib/bot.js` 末尾 `Bot.makeLog = BotUtil.makeLog.bind(BotUtil)`（否则 `run()` 启动即 `Bot.makeLog is not a function`，`start.js` 会无限重启）。
+- 删 `lib/` 文件前：除 grep 框架内引用外，还须 `rg 'lib/<path>' plugins/` 查第三方插件硬编码路径。

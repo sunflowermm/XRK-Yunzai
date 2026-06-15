@@ -47,8 +47,8 @@ export class XRKAIAssistant extends plugin {
   }
 
   async init() {
-    logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    logger.info('【XRK-AI 助手初始化】');
+    Bot.makeLog('info', '━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'XRK-AI');
+    Bot.makeLog('info', '【XRK-AI 助手初始化】', 'XRK-AI');
 
     await this.initConfig();
     this.config = await this.loadConfig();
@@ -59,14 +59,14 @@ export class XRKAIAssistant extends plugin {
         try {
           const loader = Bot.StreamLoader;
           if (!loader || typeof loader.mergeStreams !== 'function') {
-            logger.warn('├─ ⚠️ StreamLoader 未就绪，1秒后重试合并工作流', 'XRK-AI');
+            Bot.makeLog('warn', '├─ ⚠️ StreamLoader 未就绪，1秒后重试合并工作流', 'XRK-AI');
             setTimeout(doMerge, 1000);
             return;
           }
 
           const existing = loader.getStream?.(CHAT_MERGED_NAME);
           if (existing) {
-            logger.info(`├─ 🔀 合并工作流已存在: ${CHAT_MERGED_NAME}`);
+            Bot.makeLog('info', `├─ 🔀 合并工作流已存在: ${CHAT_MERGED_NAME}`, 'XRK-AI');
             return;
           }
 
@@ -78,25 +78,25 @@ export class XRKAIAssistant extends plugin {
           });
 
           if (merged) {
-            logger.info(`├─ 🔀 合并工作流: chat + [${secondaries.join(', ')}] -> ${CHAT_MERGED_NAME}`);
+            Bot.makeLog('info', `├─ 🔀 合并工作流: chat + [${secondaries.join(', ')}] -> ${CHAT_MERGED_NAME}`, 'XRK-AI');
           } else {
-            logger.warn('├─ ⚠️ 合并工作流失败，请检查配置与工作流名称', 'XRK-AI');
+            Bot.makeLog('warn', '├─ ⚠️ 合并工作流失败，请检查配置与工作流名称', 'XRK-AI');
           }
         } catch (err) {
-          logger.error(`├─ ⚠️ 合并工作流异常: ${err.message || err}`, 'XRK-AI');
+          Bot.makeLog('error', `├─ ⚠️ 合并工作流异常: ${err.message || err}`, 'XRK-AI', err);
         }
       };
 
       setTimeout(doMerge, 0);
     }
 
-    logger.info(`├─ 📝 人设: 已加载`);
-    logger.info(`├─ 📋 白名单群: ${this.config.groups?.length || 0}个`);
-    logger.info(`├─ 👤 白名单用户: ${this.config.users?.length || 0}个`);
-    logger.info(`├─ ⏱️ 冷却: ${this.config.cooldown ?? 300}秒`);
-    logger.info(`├─ 🎲 概率: ${((this.config.chance ?? 0.1) * 100)}%`);
-    logger.info('└─ ✅ 初始化完成');
-    logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    Bot.makeLog('info', `├─ 📝 人设: 已加载`, 'XRK-AI');
+    Bot.makeLog('info', `├─ 📋 白名单群: ${this.config.groups?.length || 0}个`, 'XRK-AI');
+    Bot.makeLog('info', `├─ 👤 白名单用户: ${this.config.users?.length || 0}个`, 'XRK-AI');
+    Bot.makeLog('info', `├─ ⏱️ 冷却: ${this.config.cooldown ?? 300}秒`, 'XRK-AI');
+    Bot.makeLog('info', `├─ 🎲 概率: ${((this.config.chance ?? 0.1) * 100)}%`, 'XRK-AI');
+    Bot.makeLog('info', '└─ ✅ 初始化完成', 'XRK-AI');
+    Bot.makeLog('info', '━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'XRK-AI');
   }
 
   async initConfig() {
@@ -120,10 +120,10 @@ export class XRKAIAssistant extends plugin {
           minContentWidth: 0
         });
         await FileUtils.writeFile(CONFIG_PATH, content, 'utf8');
-        logger.info(`├─ 📄 配置文件已生成: ${CONFIG_PATH}`);
+        Bot.makeLog('info', `├─ 📄 配置文件已生成: ${CONFIG_PATH}`, 'XRK-AI');
       }
     } catch (error) {
-      logger.error(`初始化配置文件失败: ${error.message}`);
+      Bot.makeLog('error', `初始化配置文件失败: ${error.message}`, 'XRK-AI');
     }
   }
 
@@ -135,7 +135,7 @@ export class XRKAIAssistant extends plugin {
         return content ? yaml.parse(content) || {} : {};
       }
     } catch (error) {
-      logger.error(`加载配置文件失败: ${error.message}`);
+      Bot.makeLog('error', `加载配置文件失败: ${error.message}`, 'XRK-AI');
     }
     return {};
   }
@@ -163,7 +163,7 @@ export class XRKAIAssistant extends plugin {
           return true;
         }
         const groupId = e.group_id || e.user_id;
-        BotUtil.makeLog('info', `[XRK-AI] 检测到清除对话指令 group=${groupId} user=${e.user_id}`, 'XRK-AI');
+        Bot.makeLog('info', `[XRK-AI] 检测到清除对话指令 group=${groupId} user=${e.user_id}`, 'XRK-AI');
         
         try {
           const result = await ChatStream.clearConversation(groupId);
@@ -173,12 +173,12 @@ export class XRKAIAssistant extends plugin {
             if (result.cleared.history) clearedItems.push('聊天记录');
 
             await e.reply(`✅ 对话已重置！已清除：${clearedItems.join('、') || '无'}`);
-            BotUtil.makeLog('info', `[XRK-AI] 清除对话成功 group=${groupId} cleared=${JSON.stringify(result.cleared)}`, 'XRK-AI');
+            Bot.makeLog('info', `[XRK-AI] 清除对话成功 group=${groupId} cleared=${JSON.stringify(result.cleared)}`, 'XRK-AI');
           } else {
             await e.reply('❌ 清除对话失败，请稍后重试');
           }
         } catch (err) {
-          BotUtil.makeLog('error', `[XRK-AI] 清除对话异常: ${err.message}`, 'XRK-AI');
+          Bot.makeLog('error', `[XRK-AI] 清除对话异常: ${err.message}`, 'XRK-AI');
           await e.reply('❌ 清除对话时发生错误');
         }
         return true;
@@ -189,29 +189,29 @@ export class XRKAIAssistant extends plugin {
       const rawForDump = rawMessageTextForAiTrigger(e);
       const debugDumpFullPrompt = AI_FULL_PROMPT_DUMP_REGEX.test(rawForDump);
       if (debugDumpFullPrompt && !this.isInAiWhitelist(e)) {
-        BotUtil.makeLog('debug', `[XRK-AI] 调试口令 dump context 非白名单 group=${e.group_id}`, 'XRK-AI');
+        Bot.makeLog('debug', `[XRK-AI] 调试口令 dump context 非白名单 group=${e.group_id}`, 'XRK-AI');
         return false;
       }
 
       let trigger = true;
       if (!debugDumpFullPrompt) {
         trigger = await this.shouldTriggerAI(e);
-        BotUtil.makeLog('debug', `[XRK-AI] handleMessage 触发检查 group=${e.group_id} user=${e.user_id} atBot=${e.atBot} trigger=${trigger}`, 'XRK-AI');
+        Bot.makeLog('debug', `[XRK-AI] handleMessage 触发检查 group=${e.group_id} user=${e.user_id} atBot=${e.atBot} trigger=${trigger}`, 'XRK-AI');
       }
       if (!trigger) return false;
 
       const stream = this._resolveChatStream();
       if (!stream) {
-        logger.error('[XRK-AI] chat 工作流未加载');
+        Bot.makeLog('error', '[XRK-AI] chat 工作流未加载', 'XRK-AI');
         return false;
       }
-      BotUtil.makeLog('debug', `[XRK-AI] 使用工作流 name=${stream?.name}`, 'XRK-AI');
+      Bot.makeLog('debug', `[XRK-AI] 使用工作流 name=${stream?.name}`, 'XRK-AI');
 
       const isRandom = !e.atBot && !(this.config.prefix && e.msg?.startsWith(this.config.prefix));
       const text = await this.processMessageContent(e);
       // 调试导出：勿走「随机撸猫」群合并分支，便于对照真实 messages
       const isGlobalTrigger = isRandom && !debugDumpFullPrompt;
-      BotUtil.makeLog('debug', `[XRK-AI] 消息内容 isRandom=${isRandom} isGlobalTrigger=${isGlobalTrigger} len=${text?.length ?? 0} debugDump=${!!debugDumpFullPrompt}`, 'XRK-AI');
+      Bot.makeLog('debug', `[XRK-AI] 消息内容 isRandom=${isRandom} isGlobalTrigger=${isGlobalTrigger} len=${text?.length ?? 0} debugDump=${!!debugDumpFullPrompt}`, 'XRK-AI');
       // 仅调试口令、剥离后无正文时也必须走 stream（否则会跳过 execute 里的 dumpFullLlmContextToData）
       if (!debugDumpFullPrompt && !isGlobalTrigger && !text) {
         const img = stream.getRandomEmotionImage?.('惊讶');
@@ -221,7 +221,7 @@ export class XRKAIAssistant extends plugin {
         return true;
       }
 
-      BotUtil.makeLog('debug', `[XRK-AI] 调用 stream.process personaLen=${(this.config.persona ?? '').length}`, 'XRK-AI');
+      Bot.makeLog('debug', `[XRK-AI] 调用 stream.process personaLen=${(this.config.persona ?? '').length}`, 'XRK-AI');
       await stream.process(
         e,
         {
@@ -233,10 +233,10 @@ export class XRKAIAssistant extends plugin {
         },
         {}
       );
-      BotUtil.makeLog('debug', `[XRK-AI] stream.process 完成`, 'XRK-AI');
+      Bot.makeLog('debug', `[XRK-AI] stream.process 完成`, 'XRK-AI');
       return true;
     } catch (err) {
-      BotUtil.makeLog('error', `[XRK-AI] handleMessage: ${err.message}`, 'XRK-AI');
+      Bot.makeLog('error', `[XRK-AI] handleMessage: ${err.message}`, 'XRK-AI');
       return false;
     }
   }
@@ -246,21 +246,21 @@ export class XRKAIAssistant extends plugin {
 
     if (e.atBot) {
       const ok = this.isInAiWhitelist(e);
-      BotUtil.makeLog('debug', `[XRK-AI] shouldTrigger atBot 白名单=${ok}`, 'XRK-AI');
+      Bot.makeLog('debug', `[XRK-AI] shouldTrigger atBot 白名单=${ok}`, 'XRK-AI');
       return ok;
     }
     if (this.config.prefix && e.msg?.startsWith(this.config.prefix)) {
       const ok = this.isInAiWhitelist(e);
-      BotUtil.makeLog('debug', `[XRK-AI] shouldTrigger prefix 白名单=${ok}`, 'XRK-AI');
+      Bot.makeLog('debug', `[XRK-AI] shouldTrigger prefix 白名单=${ok}`, 'XRK-AI');
       return ok;
     }
 
     if (!e.isGroup) {
-      BotUtil.makeLog('debug', '[XRK-AI] shouldTrigger 非群聊 不触发', 'XRK-AI');
+      Bot.makeLog('debug', '[XRK-AI] shouldTrigger 非群聊 不触发', 'XRK-AI');
       return false;
     }
     if (!this.isInAiWhitelist(e)) {
-      BotUtil.makeLog('debug', `[XRK-AI] shouldTrigger 不在白名单 group=${e.group_id}`, 'XRK-AI');
+      Bot.makeLog('debug', `[XRK-AI] shouldTrigger 不在白名单 group=${e.group_id}`, 'XRK-AI');
       return false;
     }
 
@@ -271,16 +271,16 @@ export class XRKAIAssistant extends plugin {
     const lastTrigger = cooldownState.get(groupId) || 0;
     const inCooldown = now - lastTrigger < cooldown;
     if (inCooldown) {
-      BotUtil.makeLog('debug', `[XRK-AI] shouldTrigger 冷却中 group=${groupId} remain=${Math.round((cooldown - (now - lastTrigger)) / 1000)}s`, 'XRK-AI');
+      Bot.makeLog('debug', `[XRK-AI] shouldTrigger 冷却中 group=${groupId} remain=${Math.round((cooldown - (now - lastTrigger)) / 1000)}s`, 'XRK-AI');
       return false;
     }
     const roll = Math.random();
     if (roll < chance) {
       cooldownState.set(groupId, now);
-      BotUtil.makeLog('debug', `[XRK-AI] shouldTrigger 随机命中 group=${groupId} roll=${roll.toFixed(3)} chance=${chance}`, 'XRK-AI');
+      Bot.makeLog('debug', `[XRK-AI] shouldTrigger 随机命中 group=${groupId} roll=${roll.toFixed(3)} chance=${chance}`, 'XRK-AI');
       return true;
     }
-    BotUtil.makeLog('debug', `[XRK-AI] shouldTrigger 随机未中 group=${groupId} roll=${roll.toFixed(3)} chance=${chance}`, 'XRK-AI');
+    Bot.makeLog('debug', `[XRK-AI] shouldTrigger 随机未中 group=${groupId} roll=${roll.toFixed(3)} chance=${chance}`, 'XRK-AI');
     return false;
   }
 
@@ -288,7 +288,7 @@ export class XRKAIAssistant extends plugin {
     const fallback = e.msg || '';
     const message = e.message;
     if (!Array.isArray(message)) {
-      BotUtil.makeLog('debug', `[XRK-AI] processMessageContent 非数组 len=${String(fallback).length}`, 'XRK-AI');
+      Bot.makeLog('debug', `[XRK-AI] processMessageContent 非数组 len=${String(fallback).length}`, 'XRK-AI');
       return stripAiFullPromptDumpMark(String(fallback));
     }
 
@@ -303,7 +303,7 @@ export class XRKAIAssistant extends plugin {
             content += `[回复${name}的"${raw}"] `;
           }
         } catch (err) {
-          BotUtil.makeLog('debug', `[XRK-AI] processMessageContent getReply 失败: ${err.message}`, 'XRK-AI');
+          Bot.makeLog('debug', `[XRK-AI] processMessageContent getReply 失败: ${err.message}`, 'XRK-AI');
         }
       }
       for (const seg of message) {
@@ -327,10 +327,10 @@ export class XRKAIAssistant extends plugin {
       if (this.config.prefix) content = content.replace(new RegExp(`^${this.config.prefix}`), '');
       const trimmed = content.trim();
       const text = stripAiFullPromptDumpMark(trimmed);
-      BotUtil.makeLog('debug', `[XRK-AI] processMessageContent segs=${message.length} len=${text.length}`, 'XRK-AI');
+      Bot.makeLog('debug', `[XRK-AI] processMessageContent segs=${message.length} len=${text.length}`, 'XRK-AI');
       return text;
     } catch (err) {
-      BotUtil.makeLog('error', `[XRK-AI] processMessageContent: ${err.message}`, 'XRK-AI');
+      Bot.makeLog('error', `[XRK-AI] processMessageContent: ${err.message}`, 'XRK-AI');
       return stripAiFullPromptDumpMark(String(fallback));
     }
   }
