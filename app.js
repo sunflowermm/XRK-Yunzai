@@ -80,12 +80,16 @@ class DependencyManager {
     const prefix = cwd !== projectRoot ? `[${path.basename(cwd)}] ` : '';
     await this.logger.warning(`${prefix}发现 ${missingDeps.length} 个缺失依赖，使用 pnpm 安装...`);
     await this.logger.log(`${prefix}正在安装依赖，若出现 DEP0190 警告可忽略，请稍候...`);
-    const result = spawnSync('pnpm', ['install'], {
+    const runInstall = (extraArgs = []) => spawnSync('pnpm', ['install', ...extraArgs], {
       cwd,
       stdio: 'inherit',
       shell: process.platform === 'win32',
-      env: { ...process.env, CI: 'true' }
+      env: { ...process.env }
     });
+    let result = runInstall();
+    if (result.status !== 0) {
+      result = runInstall(['--no-frozen-lockfile']);
+    }
     if (result.status !== 0) {
       const err = result.error || new Error(`pnpm install 退出码 ${result.status}`);
       if (err.code === 'ENOENT') {

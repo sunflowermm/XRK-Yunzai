@@ -477,16 +477,27 @@ export class StdinHandler {
   }
 
   formatResultForConsole(result) {
-    if (!result.content) return '空结果';
-    
-    if (result.content.length === 1 && result.content[0].type === 'forward') {
-      return `转发消息: ${JSON.stringify(result.content[0].messages || result.content[0], null, 2)}`;
+    if (!result?.content?.length) {
+      if (typeof result === 'string') return result;
+      if (result?.message) return String(result.message);
+      return '空结果';
     }
-    
+
+    if (result.content.length === 1 && result.content[0].type === 'forward') {
+      const forward = result.content[0].messages || result.content[0];
+      return `转发消息: ${JSON.stringify(forward, null, 2)}`;
+    }
+
     const parts = [];
     for (const item of result.content) {
+      if (item == null) continue;
+      if (typeof item === 'string') {
+        parts.push(item);
+        continue;
+      }
       if (item.type === 'text') {
-        parts.push(item.text);
+        const text = item.text;
+        parts.push(typeof text === 'string' ? text : JSON.stringify(text));
       } else if (item.type === 'image') {
         parts.push(`[图片: ${item.name || '未命名'} - ${item.url}]`);
       } else if (item.type === 'video') {
@@ -495,12 +506,14 @@ export class StdinHandler {
         parts.push(`[音频: ${item.name || '未命名'} - ${item.url}]`);
       } else if (item.type === 'file') {
         parts.push(`[文件: ${item.name || '未命名'} - ${item.url}]`);
-      } else {
+      } else if (item.type) {
         parts.push(`[${item.type}]`);
+      } else {
+        parts.push(JSON.stringify(item));
       }
     }
-    
-    return parts.join(' ');
+
+    return parts.join(' ') || '空结果';
   }
 
   startImprovedListener() {
