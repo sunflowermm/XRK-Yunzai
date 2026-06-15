@@ -1206,7 +1206,7 @@ export default class SystemConfig extends ConfigBase {
       aistream: {
         name: 'aistream',
         displayName: '工作流系统配置',
-        description: 'AI 工作流总开关与全局参数；LLM/ASR/TTS 运营商选择与详细配置在 data/server_bots/{port}/*_llm.yaml 等工厂配置中（全局配置，不随端口变化）',
+        description: 'AI 工作流总开关与全局参数；LLM 运营商选择与详细配置在 data/server_bots/*_llm.yaml 等工厂配置中（全局配置，不随端口变化）',
         filePath: getConfigPath('aistream'),
         fileType: 'yaml',
         schema: {
@@ -1389,43 +1389,6 @@ export default class SystemConfig extends ConfigBase {
               }
             },
             // 识图能力已统一由各家 LLM 自身的多模态接口承担，这里不再单独暴露 Vision 工厂配置
-            asr: {
-              type: 'object',
-              label: 'ASR工厂运营商选择',
-              description: '详细配置位于 data/server_bots/{port}/volcengine_asr.yaml。ASR识别结果直接返回文本。',
-              component: 'SubForm',
-              fields: {
-                Provider: {
-                  type: 'string',
-                  label: 'ASR运营商',
-                  enum: ['volcengine'],
-                  default: 'volcengine',
-                  component: 'Select'
-                }
-              }
-            },
-            tts: {
-              type: 'object',
-              label: 'TTS工厂运营商选择',
-              description: '详细配置位于 data/server_bots/{port}/volcengine_tts.yaml',
-              component: 'SubForm',
-              fields: {
-                Provider: {
-                  type: 'string',
-                  label: 'TTS运营商',
-                  enum: ['volcengine'],
-                  default: 'volcengine',
-                  component: 'Select'
-                },
-                onlyForASR: {
-                  type: 'boolean',
-                  label: '仅ASR触发TTS',
-                  description: '关闭后所有消息事件都能触发TTS',
-                  default: true,
-                  component: 'Switch'
-                }
-              }
-            },
             mcp: {
               type: 'object',
               label: 'MCP服务配置',

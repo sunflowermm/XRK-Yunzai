@@ -27,8 +27,6 @@ html.motion-enabled .chat-stream-status.active::before {
     animation: none !important;
   }
 
-  .voice-emotion-display,
-  .voice-wave-bar,
   .chat-message.assistant.streaming::after {
     animation: none !important;
   }

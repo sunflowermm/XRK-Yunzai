@@ -450,16 +450,6 @@ export function animateChatSendPulse(btn) {
   );
 }
 
-export function animateVoiceWave(waveEl, active) {
-  if (!gsap || !waveEl || reducedMotion) return;
-  gsap.to(waveEl, {
-    autoAlpha: active ? 1 : 0.4,
-    duration: dur(0.2),
-    ease: EASE_OUT,
-    overwrite: 'auto'
-  });
-}
-
 export function pulseOnlineStatus(dotEl) {
   if (!gsap || !dotEl || reducedMotion) return;
   gsap.fromTo(

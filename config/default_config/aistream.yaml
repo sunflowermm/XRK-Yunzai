@@ -32,13 +32,6 @@ llm:
       - network
       - "5xx"
 
-asr:
-  Provider: volcengine
-
-tts:
-  Provider: volcengine
-  onlyForASR: true
-
 mcp:
   enabled: true
   autoRegister: true

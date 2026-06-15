@@ -1,91 +1,15 @@
 /**
  * 设备 HTTP/WebSocket 业务层（与 XRK-AGT 协议对齐）
- * - REST: 注册、设备列表、单设备、TTS、AI 工作流
- * - WS 下行：reply(segments)、asr_interim/asr_final、command.play_tts_audio
+ * - REST: 注册、设备列表、单设备、AI 工作流
+ * - WS 下行：reply(segments)、typing、error
  * - 事件链用 Bot.PluginsLoader，工作流用 Bot.StreamLoader
- * - ASR/TTS 与 AGT 对齐：ASRFactory/TTSFactory、sign.json 非静态前端
  */
 import path from 'node:path';
 import BotUtil from '../../../lib/util.js';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
-import ASRFactory from '../../../lib/factory/asr/ASRFactory.js';
-import TTSFactory from '../../../lib/factory/tts/TTSFactory.js';
-import cfg from '../../../lib/config/config.js';
 import { resolveProjectPath, DATA_MEDIA_DIR } from '../../../lib/config/config-constants.js';
 
 const mediaDir = resolveProjectPath(DATA_MEDIA_DIR);
-
-const asrClients = new Map();
-const asrSessions = new Map();
-let asrResultListenerAttached = false;
-
-function isHexString(str) {
-  if (typeof str !== 'string') return false;
-  const s = str.trim();
-  return !!s && s.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(s);
-}
-
-/** 解码 ASR 音频负载（与 AGT 一致） */
-function decodeAsrAudioPayload(payload, deviceId) {
-  try {
-    if (!payload || typeof payload !== 'object') return Buffer.alloc(0);
-    const audio = payload.audio || {};
-    const encoding = (audio.encoding || payload.encoding || '').toString().toLowerCase();
-    let raw = audio.data ?? payload.data ?? payload.audioData;
-    if (raw == null) return Buffer.alloc(0);
-    if (Buffer.isBuffer(raw)) return raw;
-    if (raw instanceof ArrayBuffer) return Buffer.from(new Uint8Array(raw));
-    if (ArrayBuffer.isView && ArrayBuffer.isView(raw)) return Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength);
-    if (Array.isArray(raw)) {
-      const samples = raw.map(v => (Number.isFinite(v) ? v : 0));
-      if (!samples.length) return Buffer.alloc(0);
-      const hasFloat = samples.some(v => Math.abs(v) <= 1 && !Number.isInteger(v));
-      const buf = Buffer.allocUnsafe(samples.length * 2);
-      for (let i = 0; i < samples.length; i++) {
-        let s = samples[i];
-        if (hasFloat) { s = Math.max(-1, Math.min(1, s)); s = s < 0 ? s * 0x8000 : s * 0x7FFF; }
-        s = Math.max(-32768, Math.min(32767, s | 0));
-        buf.writeInt16LE(s, i * 2);
-      }
-      return buf;
-    }
-    if (typeof raw === 'string') {
-      const s = raw.trim();
-      if (!s) return Buffer.alloc(0);
-      if (!encoding || encoding === 'hex' || encoding === 'pcm_hex') {
-        if (isHexString(s)) return Buffer.from(s, 'hex');
-      }
-      const b64 = s.startsWith('base64:') ? s.slice(7) : s;
-      try { return Buffer.from(b64, 'base64'); } catch (e) {
-        BotUtil.makeLog('error', `[ASR] base64 解码失败: ${e.message}`, 'DeviceAPI');
-        return Buffer.alloc(0);
-      }
-    }
-    return Buffer.alloc(0);
-  } catch (e) {
-    BotUtil.makeLog('error', `[ASR] 解码异常: ${e.message}`, 'DeviceAPI');
-    return Buffer.alloc(0);
-  }
-}
-
-function attachAsrResultListener(Bot) {
-  if (asrResultListenerAttached || !Bot?.on) return;
-  asrResultListenerAttached = true;
-  Bot.on('device.asr_result', (e) => {
-    const conn = deviceConnections.get(e?.device_id);
-    if (!conn || conn.readyState !== 1) return;
-    try {
-      conn.send(JSON.stringify({
-        type: e.is_final ? 'asr_final' : 'asr_interim',
-        device_id: e.device_id,
-        session_id: e.session_id,
-        text: e.text || ''
-      }));
-    } catch (err) {
-      BotUtil.makeLog('warn', `[Device] 转发 ASR 结果失败: ${err.message}`, 'DeviceAPI');
-    }
-  });
-}
 
 /**
  * 获取用于拼装媒体绝对 URL 的 baseUrl（Web 端图片等依赖绝对 URL 才能加载）
@@ -377,7 +301,7 @@ export default {
       path: '/api/device/:deviceId/ai',
       handler: async (req, res, Bot) => {
         const deviceId = req.params.deviceId;
-        const { text, workflow = 'device' } = req.body || {};
+        const { text, workflow = 'chat' } = req.body || {};
         const stream = Bot.StreamLoader.getStream(workflow);
         if (!stream || typeof stream.execute !== 'function') {
           return res.status(400).json({ success: false, message: `工作流不存在或不支持执行: ${workflow}` });
@@ -387,37 +311,11 @@ export default {
           const result = await stream.execute(deviceId, (text || '').toString().trim(), {}, persona);
           if (result == null) return res.json({ success: false, message: '执行无结果' });
           const segments = result.text ? [{ type: 'text', text: result.text }] : [];
-          return res.json({ success: true, text: result.text || '', emotion: result.emotion || null, segments });
+          return res.json({ success: true, text: result.text || '', segments });
         } catch (e) {
           BotUtil.makeLog('error', `[Device API] AI 执行失败: ${e.message}`, 'DeviceAPI');
           return res.status(500).json({ success: false, message: e.message });
         }
-      }
-    },
-    {
-      method: 'POST',
-      path: '/api/device/tts',
-      handler: async (req, res, Bot) => {
-        const { device_id, text } = req.body || {};
-        if (!device_id || !text) return res.status(400).json({ success: false, message: '缺少 device_id 或 text' });
-        const id = String(device_id).trim();
-        const ttsConfig = cfg.getTTSConfig?.() ?? {};
-        if (ttsConfig.onlyForASR === true) {
-          return res.status(403).json({ success: false, message: 'TTS 已配置为仅 ASR 场景可用' });
-        }
-        if (ttsConfig.enabled) {
-          try {
-            const client = TTSFactory.createClient(id, ttsConfig, Bot);
-            await client.synthesize(String(text).trim());
-            return res.json({ success: true, message: 'TTS 合成已启动' });
-          } catch (e) {
-            BotUtil.makeLog('error', `[Device API] TTS 合成失败: ${e.message}`, 'DeviceAPI');
-            return res.status(500).json({ success: false, message: e.message });
-          }
-        }
-        const conn = deviceConnections.get(id);
-        if (conn) send(conn, { type: 'command', command: 'tts_text', parameters: { text: String(text) } });
-        return res.json({ success: true });
       }
     }
   ],
@@ -463,76 +361,11 @@ export default {
             };
             deviceStore.set(id, device);
             if (Bot?.bots) Bot.bots[id] = { device_type: 'web', online: true, nickname: name, info: { device_name: name } };
-            Bot[id] = {
-              sendAudioChunk(hex) {
-                const c = deviceConnections.get(id);
-                if (c && c.readyState === 1 && typeof hex === 'string' && hex.length) {
-                  try { c.send(Buffer.from(hex, 'hex')); } catch (e) { BotUtil.makeLog('warn', `[Device] TTS 发送失败: ${e.message}`, 'DeviceAPI'); }
-                }
-              }
-            };
-            attachAsrResultListener(Bot);
             send(conn, { type: 'register_response', success: true, device: { device_id: id, device_type: device.device_type, device_name: device.device_name } });
             Bot.em('connect.device', { self_id: id, adapter: 'device', device_id: id, sendReply: async (content) => {
               const payload = await buildReplyPayload(content, id, Bot);
               send(conn, payload);
             } });
-            return;
-          }
-
-          if (type === 'asr_session_start') {
-            try {
-              const asrConfig = cfg.getASRConfig?.() ?? {};
-              if (!asrConfig.enabled) { send(conn, { type: 'asr_session_start_response', success: false, error: 'ASR未启用' }); return; }
-              const { session_id, sample_rate, bits, channels, audio_format, format, audio_codec, codec, model_name, model, asr_model } = data;
-              let client = asrClients.get(deviceId);
-              if (!client || client.__provider !== asrConfig.provider) {
-                client = ASRFactory.createClient(deviceId, asrConfig, Bot);
-                client.__provider = asrConfig.provider;
-                asrClients.set(deviceId, client);
-              }
-              if (client.currentUtterance && !client.currentUtterance.ending) {
-                await client.endUtterance().catch(() => {});
-                await new Promise(r => setTimeout(r, 200));
-              }
-              asrSessions.set(session_id, { deviceId, session_id, sample_rate, bits, channels });
-              await client.beginUtterance(session_id, { sample_rate, bits, channels, format: audio_format || format, codec: audio_codec || codec, modelName: model_name || model || asr_model });
-              send(conn, { type: 'asr_session_start_response', success: true, session_id });
-            } catch (e) {
-              BotUtil.makeLog('error', `[Device] ASR 会话启动失败: ${e.message}`, 'DeviceAPI');
-              send(conn, { type: 'asr_session_start_response', success: false, error: e.message });
-            }
-            return;
-          }
-
-          if (type === 'asr_audio_chunk') {
-            try {
-              const session = asrSessions.get(data.session_id);
-              if (!session || session.deviceId !== deviceId) return;
-              const audioBuf = decodeAsrAudioPayload(data, deviceId);
-              const client = asrClients.get(deviceId);
-              if (client?.connected && client.currentUtterance && !client.currentUtterance.ending && (data.vad_state === 'active' || data.vad_state === 'ending')) {
-                client.sendAudio(audioBuf);
-                if (data.vad_state === 'ending') client.endUtterance().catch(() => {});
-              }
-            } catch (e) {
-              BotUtil.makeLog('debug', `[Device] ASR 音频块: ${e.message}`, 'DeviceAPI');
-            }
-            return;
-          }
-
-          if (type === 'asr_session_stop') {
-            try {
-              const session_id = data.session_id;
-              const session = asrSessions.get(session_id);
-              if (session && session.deviceId === deviceId) {
-                const client = asrClients.get(deviceId);
-                if (client) await client.endUtterance().catch(() => {});
-                asrSessions.delete(session_id);
-              }
-            } catch (e) {
-              BotUtil.makeLog('debug', `[Device] ASR 会话停止: ${e.message}`, 'DeviceAPI');
-            }
             return;
           }
 
@@ -609,12 +442,6 @@ export default {
           if (Bot?.bots) delete Bot.bots[deviceId];
           if (Bot?.[deviceId]) delete Bot[deviceId];
           deviceConnections.delete(deviceId);
-          try {
-            const c = asrClients.get(deviceId);
-            if (c?.destroy) c.destroy();
-            asrClients.delete(deviceId);
-          } catch {}
-          for (const [sid, s] of asrSessions) { if (s.deviceId === deviceId) asrSessions.delete(sid); }
         }
       });
     }]

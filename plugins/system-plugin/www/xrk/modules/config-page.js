@@ -730,10 +730,7 @@ export const configPageMethods = {
       'profiles': '模型档位',
       'embedding': 'Embedding 向量检索',
       'drawing': '绘图模型',
-      'tts': 'TTS 语音合成',
-      'asr': 'ASR 语音识别',
       'device': '设备运行参数',
-      'emotions': '表情映射',
       'global': '全局设置',
       'cache': '缓存设置'
     };

@@ -16,7 +16,6 @@ plugin/*
 # stream/
 stream/*
 !stream/chat.js
-!stream/device.js
 !stream/memory.js
 !stream/database.js
 !stream/tools.js
@@ -47,8 +46,6 @@ commonconfig/*
 !commonconfig/anthropic_llm.js
 !commonconfig/gemini_llm.js
 !commonconfig/azure_openai_llm.js
-!commonconfig/volcengine_asr.js
-!commonconfig/volcengine_tts.js
 !commonconfig/ai_config.js
 !commonconfig/openai_responses_compat_llm.js
 !commonconfig/newapi_compat_llm.js

@@ -28,16 +28,14 @@ import {
 } from './modules/file-manager.js';
 
 import {
-  markdownRenderer,
-  stripMarkdownForTTS
+  markdownRenderer
 } from './modules/markdown.js';
 
 import {
   pokeHandIconSVG,
   paperclipIconSVG,
   wrenchIconSVG,
-  filePreviewIconSVG,
-  emotionIconSVG
+  filePreviewIconSVG
 } from './modules/ui-kit.js';
 
 import { showToast as showToastUI } from './modules/ui/toast.js';
@@ -111,42 +109,20 @@ class App {
     /** Event 模式引用回复（回复=引用）：{ id, text }，发送后清空 */
     this._eventReplyTo = null;
     this._aiChatHistory = this._loadChatHistory('ai');
-    this._voiceChatHistory = this._loadChatHistory('voice');
     this._isRestoringHistory = false;
-    this._chatMessagesCache = { event: null, ai: null, voice: null };
+    this._chatMessagesCache = { event: null, ai: null };
     this._chatStreamState = { running: false, source: null };
     this._deviceWs = null;
     this._wsConnecting = false;
-    this._micActive = false;
-    this._ttsPlaying = false;
-    this._ttsAudioContext = null;
-    this._ttsAudioQueue = [];
-    this._ttsTextQueue = []; // TTS文本请求队列
-    // 用户是否主动点击“停止播报”——用于丢弃之后到达的音频块，避免还在疯狂播放
-    this._ttsStoppedManually = false;
-    this._ttsSessionActive = false; // 当前是否有活跃的TTS Session
-    this._ttsSessionStartTime = null; // Session开始时间
-    this._ttsNextPlayTime = 0;
-    this._ttsActiveSources = []; // 跟踪活跃的播放源，用于资源管理
-    this._ttsPrebufferTimer = null; // 预缓冲定时器
-    this._ttsStats = {
-      totalChunks: 0,
-      totalBytes: 0,
-      totalDuration: 0,
-      sessionStartTime: null,
-      lastChunkTime: null
-    };
-    this._ttsQueueWarned = false; // 队列接近上限是否已告警（避免重复日志）
-    // 前端TTS队列状态上报（用于后端实时背压）
-    this._ttsQueueReportTimer = null;
-    this._ttsLastQueueReportAt = 0;
-    this._ttsLastReportedQueueLen = -1;
-    this._ttsLastReportedPlaying = null;
-    this._ttsLastReportedActiveSources = -1;
     this._configState = null;
     this._schemaCache = {};
     this._llmOptions = { profiles: [], defaultProfile: '' };
-    this._chatMode = localStorage.getItem('chatMode') || 'event';
+    let chatMode = localStorage.getItem('chatMode') || 'event';
+    if (chatMode === 'voice') {
+      chatMode = 'event';
+      localStorage.setItem('chatMode', 'event');
+    }
+    this._chatMode = chatMode;
     const savedWorkflows = localStorage.getItem('chatWorkflows');
     this._chatSettings = {
       workflows: savedWorkflows ? JSON.parse(savedWorkflows) : [],
@@ -155,22 +131,6 @@ class App {
     };
     this._webUserId = null;
     this._activeEventSource = null;
-    // ASR相关状态
-    this._asrSessionId = null;
-    this._asrChunkIndex = 0;
-    this._audioBuffer = [];
-    this._audioBufferTimer = null;
-    this._preAudioBuffer = []; // 预缓冲：在录音开始前收集的音频
-    this._asrReady = false; // ASR是否已准备好接收音频
-    this._asrStats = {
-      totalChunks: 0,
-      totalBytes: 0,
-      totalSamples: 0,
-      sessionStartTime: null,
-      lastChunkTime: null
-    };
-    this._micStarting = false;
-    this._micStopping = false;
     this._systemThemeWatcher = null;
     this.theme = 'light';
     this._chatPendingTimer = null;
@@ -809,15 +769,6 @@ class App {
     return markdownRenderer.render(text);
   }
 
-  /**
-   * 为TTS准备的纯文本：彻底去除所有Markdown标记，避免读出符号
-   * @param {string} text - 原始Markdown文本
-   * @returns {string} 纯文本
-   */
-  _stripMarkdownForTTS(text = '') {
-    return stripMarkdownForTTS(text);
-  }
-
   updateSystemStatus(data) {
     return updateSystemStatusPanel(this, data);
   }
@@ -966,12 +917,11 @@ class App {
   }
 
   _isAIMode() { return this._chatMode === 'ai'; }
-  _isVoiceMode() { return this._chatMode === 'voice'; }
   _isEventMode() { return this._chatMode === 'event'; }
 
   _getHistoryStorageKey(mode) {
     const m = mode ?? this._chatMode;
-    return m === 'ai' ? 'aiChatHistory' : m === 'voice' ? 'voiceChatHistory' : 'eventChatHistory';
+    return m === 'ai' ? 'aiChatHistory' : 'eventChatHistory';
   }
 
   _getCurrentChatHistory() {
@@ -979,7 +929,7 @@ class App {
   }
 
   _getChatHistoryByMode(mode) {
-    const prop = mode === 'ai' ? '_aiChatHistory' : mode === 'voice' ? '_voiceChatHistory' : '_eventChatHistory';
+    const prop = mode === 'ai' ? '_aiChatHistory' : '_eventChatHistory';
     if (!Array.isArray(this[prop])) {
       this[prop] = [];
     }
@@ -1723,10 +1673,6 @@ class App {
     const box = document.getElementById('chatMessages');
     if (box) box.innerHTML = '';
     this._chatMessagesCache[this._chatMode] = null;
-    if (this._isVoiceMode()) {
-      this.updateVoiceEmotion('happy');
-      this.updateVoiceStatus('点击麦克风开始对话');
-    }
   }
 
   /**
@@ -2256,493 +2202,6 @@ class App {
     }
   }
 
-  async sendVoiceMessage(text) {
-    // 新一轮语音对话前，如仍在播报则先停止，避免TTS队列排队导致体感“卡顿”
-    if (this._ttsPlaying || this._ttsSessionActive || (this._ttsAudioQueue && this._ttsAudioQueue.length > 0)) {
-      this.stopTTS();
-    }
-    if (this._chatStreamState.running) return;
-    
-    try {
-      this.appendChat('user', text);
-      
-      const messages = buildChatMessagesFromHistory(this._getCurrentChatHistory());
-
-      const provider = this._chatSettings.provider || this._llmOptions?.defaultProfile || '';
-
-      const requestBody = {
-        messages,
-        stream: true
-      };
-      
-      if (provider) {
-        requestBody.model = provider;
-      }
-
-      this._chatStreamState = { running: true, source: 'voice' };
-      this.updateVoiceStatus('AI 思考中...');
-      this.updateVoiceEmotion('think');
-
-      const response = await fetchApi(this.serverUrl, API.chatCompletions, {
-        method: 'POST',
-        body: requestBody
-      });
-
-      let assistantMsg = null;
-      const state = await this._parseV3Stream(response, {
-        onDelta: (_d, s) => {
-          if (!assistantMsg) assistantMsg = this._createStreamingMessage('voice-message');
-          this._updateStreamingMarkdown(assistantMsg, [...(s.segments || []), { type: 'text', text: s.currentText ?? s.fullText ?? '' }]);
-          this.updateVoiceEmotion('message');
-        },
-        onError: (err) => this.showToast(`AI 请求失败: ${err.message}`, 'error')
-      });
-
-      const { fullText, mcpTools, segments, error: streamError } = state;
-      if (assistantMsg) assistantMsg.classList.remove('streaming');
-      this.clearChatStreamState();
-      if (!streamError && assistantMsg) {
-        this._updateStreamingMarkdown(assistantMsg, (segments && segments.length) ? segments : fullText, (segments && segments.length) ? undefined : mcpTools);
-        const ttsText = this._stripMarkdownForTTS((fullText || '').toString()).trim();
-        if (ttsText) {
-          // 语音模式下：整句一次 TTS 合成，由云 TTS 自身流式下发音频
-          this._sendTTSChunk(ttsText).catch(() => {});
-        }
-        this._renderMermaidIn(assistantMsg);
-        this.updateVoiceEmotion('happy');
-        this.updateVoiceStatus('对话完成');
-        const historyItem = { role: 'assistant', text: fullText, ts: Date.now(), id: assistantMsg.dataset.messageId };
-        if (segments && segments.length > 0) historyItem.segments = segments;
-        else if (mcpTools?.length) historyItem.mcpTools = mcpTools;
-        this._getCurrentChatHistory().push(historyItem);
-        this._saveChatHistory();
-        this.scrollToBottom();
-      }
-      setTimeout(() => { this.updateVoiceStatus('点击麦克风开始对话'); }, 2000);
-    } catch (error) {
-      this.showToast(`AI 请求失败: ${error.message}`, 'error');
-      this.updateVoiceEmotion('sad');
-      this.updateVoiceStatus('出错了，请重试');
-      this.clearChatStreamState();
-      setTimeout(() => {
-        this.updateVoiceStatus('点击麦克风开始对话');
-        this.updateVoiceEmotion('happy');
-      }, 3000);
-    }
-  }
-
-  async _sendTTSChunk(text) {
-    if (!text || !text.trim()) return;
-    
-    // 一旦有新的TTS文本要播报，认为进入新的会话，允许重新播放语音
-    this._ttsStoppedManually = false;
-    this._ttsDropLogged = false;
-
-    // 将文本添加到队列
-    this._ttsTextQueue.push(text.trim());
-    
-    // 如果当前没有活跃的Session，立即处理队列
-    if (!this._ttsSessionActive) {
-      this._processTTSQueue();
-    }
-  }
-
-  async _processTTSQueue() {
-    // 如果队列为空或已有活跃Session，直接返回
-    if (this._ttsTextQueue.length === 0 || this._ttsSessionActive) {
-      return;
-    }
-
-    // 合并队列中的文本：优化合并策略，减少Session数量
-    const textsToMerge = [];
-    let totalLength = 0;
-    const MAX_MERGE_COUNT = 5; // 增加合并数量，减少Session
-    const MAX_LENGTH = 150; // 增加最大长度，允许更长的文本合并
-
-    while (this._ttsTextQueue.length > 0 && textsToMerge.length < MAX_MERGE_COUNT && totalLength < MAX_LENGTH) {
-      const text = this._ttsTextQueue.shift();
-      textsToMerge.push(text);
-      totalLength += text.length;
-      
-      // 如果当前文本以句号/问号/感叹号结尾，且总长度已足够，可以停止合并
-      // 这样可以避免在标点符号处产生明显间隔
-      if (/[。！？]$/.test(text) && totalLength >= 30) {
-        break;
-      }
-    }
-
-    // 合并时在文本之间添加空格，避免连接处不自然
-    const mergedText = textsToMerge.join(' ').replace(/\s+/g, ' ').trim();
-    
-    if (!mergedText.trim()) {
-      // 如果合并后为空，继续处理队列
-      this._processTTSQueue();
-      return;
-    }
-    
-    // 标记Session为活跃状态
-    this._ttsSessionActive = true;
-    this._ttsSessionStartTime = Date.now();
-
-    try {
-      await fetchApi(this.serverUrl, API.deviceTts, {
-        method: 'POST',
-        body: { device_id: this.getWebUserId(), text: mergedText }
-      });
-      await new Promise(resolve => setTimeout(resolve, 100));
-    } catch (e) {
-      // 网络错误时，清理Session状态并重试
-      console.warn('[TTS前端] 请求失败:', e);
-      this._ttsSessionActive = false;
-      this._ttsSessionStartTime = null;
-      // 继续处理队列（自动重试）
-      this._processTTSQueue();
-    } finally {
-      // Session状态由WebSocket消息控制，这里不重置
-    }
-  }
-
-  // 当TTS Session结束时调用（通过检测最后一个音频块或WebSocket消息）
-  _onTTSSessionEnd() {
-    // 计算Session耗时（仅做简单统计，不再触发超时强制结束）
-    if (this._ttsSessionStartTime) {
-      this._ttsSessionStartTime = null;
-    }
-    this._ttsSessionActive = false;
-    // 继续处理队列中的下一个请求
-    if (this._ttsTextQueue.length > 0) {
-      this._processTTSQueue();
-    }
-  }
-
-  _handleBinaryTTS(arrayBuffer) {
-    if (!arrayBuffer || !(arrayBuffer instanceof ArrayBuffer) || arrayBuffer.byteLength === 0) return;
-    this._playTTSAudioFromBytes(new Uint8Array(arrayBuffer));
-  }
-
-  _playTTSAudioFromBytes(bytes) {
-    if (!bytes || bytes.length === 0) return;
-    // 如果用户已经手动点击“停止播报”，则直接丢弃后续所有音频块，避免需要连点多次按钮
-    if (this._ttsStoppedManually) {
-      // 仅在首次丢弃时打日志，防止刷屏
-      if (!this._ttsDropLogged) {
-        this._ttsDropLogged = true;
-        console.warn('[TTS前端] 已收到用户手动停止指令，丢弃后续音频块');
-      }
-      return;
-    }
-    
-    try {
-      // 浏览器兼容性检查
-      if (!window.AudioContext && !window.webkitAudioContext) {
-        console.error('[TTS] 浏览器不支持Web Audio API');
-        return;
-      }
-      
-      if (!this._ttsAudioContext) {
-        this._ttsAudioContext = new (window.AudioContext || window.webkitAudioContext)({
-          sampleRate: 16000 // 统一采样率为16kHz（ASR/TTS标准）
-        });
-      }
-      
-      // 如果AudioContext被暂停，尝试恢复
-      if (this._ttsAudioContext.state === 'suspended') {
-        this._ttsAudioContext.resume().catch((e) => {
-          console.warn('[TTS] AudioContext恢复失败:', e);
-        });
-      }
-      
-      // 二进制 TTS（xiaozhi 风格）
-      // PCM转换
-      const sampleCount = bytes.length / 2;
-      const view = new DataView(bytes.buffer);
-      const audioBuffer = this._ttsAudioContext.createBuffer(1, sampleCount, 16000);
-      const channelData = audioBuffer.getChannelData(0);
-      const scale = 1.0 / 32768.0;
-      
-      for (let i = 0; i < sampleCount; i++) {
-        channelData[i] = view.getInt16(i * 2, true) * scale;
-      }
-      
-      // 获取音频时长
-      const duration = audioBuffer.duration;
-      
-      // 更新统计信息（仅做轻量统计，避免额外计算开销）
-      this._ttsStats.totalChunks++;
-      this._ttsStats.totalBytes += bytes.length;
-      this._ttsStats.totalDuration += duration;
-      this._ttsStats.lastChunkTime = Date.now();
-      
-      // 如果是第一个块，记录Session开始时间并标记Session为活跃
-      if (this._ttsStats.totalChunks === 1) {
-        this._ttsStats.sessionStartTime = this._ttsStats.lastChunkTime;
-        // 确保Session状态正确（可能在收到第一个块之前就已经标记为活跃）
-        if (!this._ttsSessionActive) {
-          this._ttsSessionActive = true;
-          this._ttsSessionStartTime = now;
-        }
-      }
-      
-      // 只在队列积压或接收间隔异常时输出日志
-       // 队列告警阈值（不丢弃）
-       const WARNING_QUEUE_SIZE = 32;
-      
-       // 队列管理：不丢弃音频块（用户要求不丢包），仅告警提示积压
-       // 允许队列积压到 100 块；超过后继续积压，但会强告警（真正背压在后端发送侧做）
-       const HARD_MAX_QUEUE_SIZE = 100;
-       if (this._ttsAudioQueue.length >= HARD_MAX_QUEUE_SIZE) {
-         console.warn(`[TTS前端] ⚠️ 队列已达上限: ${this._ttsAudioQueue.length}/${HARD_MAX_QUEUE_SIZE}（不丢弃，等待后端背压/前端播放消化）`);
-       } else if (this._ttsAudioQueue.length >= WARNING_QUEUE_SIZE && !this._ttsQueueWarned) {
-         this._ttsQueueWarned = true;
-         console.warn(`[TTS前端] 队列接近上限: ${this._ttsAudioQueue.length}/${HARD_MAX_QUEUE_SIZE}`);
-       }
-      
-      // 加入队列尾部，确保不丢包且有序
-      this._ttsAudioQueue.push(audioBuffer);
-      this._reportTTSQueueStatus(false, 'enqueue');
-      
-      // 预缓冲：1 块或 ~80ms，尽量贴近“边到边播”的实时感
-      const PREBUFFER_CHUNKS = 1;
-      const PREBUFFER_MS = 80;
-      const elapsed = this._ttsStats.sessionStartTime ? (Date.now() - this._ttsStats.sessionStartTime) : 0;
-      const prebufferReady = this._ttsAudioQueue.length >= PREBUFFER_CHUNKS || elapsed >= PREBUFFER_MS;
-      
-      if (!this._ttsPlaying && prebufferReady) {
-        clearTimeout(this._ttsPrebufferTimer);
-        this._ttsPrebufferTimer = null;
-        this._ttsPlaying = true;
-        this._ttsNextPlayTime = 0;
-        this._playNext();
-      } else if (!this._ttsPlaying && this._ttsAudioQueue.length === 1 && elapsed < PREBUFFER_MS) {
-        // 单块时设定时器，200ms 后若仍无新块则开播，避免短语音卡住
-        const wait = PREBUFFER_MS - elapsed;
-        clearTimeout(this._ttsPrebufferTimer);
-        this._ttsPrebufferTimer = setTimeout(() => {
-          this._ttsPrebufferTimer = null;
-          if (!this._ttsPlaying && this._ttsAudioQueue.length > 0) {
-            this._ttsPlaying = true;
-            this._ttsNextPlayTime = 0;
-            this._playNext();
-          }
-        }, wait);
-      }
-    } catch (e) {
-      console.error('[TTS] 音频处理失败:', e);
-    }
-  }
-
-  // 上报前端TTS队列状态到后端（用于闭环背压）
-  _reportTTSQueueStatus(force = false, reason = '') {
-    try {
-      if (!this._deviceWs || this._deviceWs.readyState !== WebSocket.OPEN) return;
-      const now = Date.now();
-      const queueLen = (this._ttsAudioQueue && this._ttsAudioQueue.length) || 0;
-      const playing = this._ttsPlaying === true;
-      const activeSources = (this._ttsActiveSources && this._ttsActiveSources.length) || 0;
-
-      // 节流：默认 100ms 一次；但跨阈值/状态变化立即上报
-      const MIN_INTERVAL_MS = 100;
-      const HIGH_WATER = 40;
-      const LOW_WATER = 20;
-      const crossedHigh = queueLen >= HIGH_WATER && this._ttsLastReportedQueueLen < HIGH_WATER;
-      const crossedLow = queueLen <= LOW_WATER && this._ttsLastReportedQueueLen > LOW_WATER;
-      const stateChanged = (this._ttsLastReportedPlaying !== null && playing !== this._ttsLastReportedPlaying) ||
-        (this._ttsLastReportedActiveSources !== -1 && activeSources !== this._ttsLastReportedActiveSources);
-
-      if (!force && !crossedHigh && !crossedLow && !stateChanged && (now - this._ttsLastQueueReportAt) < MIN_INTERVAL_MS) {
-        if (!this._ttsQueueReportTimer) {
-          const wait = MIN_INTERVAL_MS - (now - this._ttsLastQueueReportAt);
-          this._ttsQueueReportTimer = setTimeout(() => {
-            this._ttsQueueReportTimer = null;
-            this._reportTTSQueueStatus(true, reason || 'throttle');
-          }, Math.max(0, wait));
-        }
-        return;
-      }
-
-      this._ttsLastQueueReportAt = now;
-      this._ttsLastReportedQueueLen = queueLen;
-      this._ttsLastReportedPlaying = playing;
-      this._ttsLastReportedActiveSources = activeSources;
-
-      this._deviceWs.send(JSON.stringify({
-        type: 'tts_queue_status',
-        device_id: this.getWebUserId(),
-        queue_len: queueLen,
-        playing,
-        active_sources: activeSources,
-        ts: now,
-        reason
-      }));
-    } catch {
-      // 静默：不影响主流程
-    }
-  }
-  
-  _playNext() {
-      // 如果队列为空，停止播放并清理资源
-    if (this._ttsAudioQueue.length === 0) {
-      this._ttsPlaying = false;
-      this._ttsNextPlayTime = 0;
-      this._reportTTSQueueStatus(false, 'queue_empty');
-      // 注意：不清理 _ttsActiveSources，因为最后一个播放源可能还在播放
-      // 等 onended 回调触发时会自动清理
-      
-      // 如果所有播放源都结束了，Session 结束，可以处理下一个 TTS 请求
-      if (this._ttsActiveSources.length === 0 && this._ttsStats.totalChunks > 0) {
-        this._onTTSSessionEnd();
-        this._reportTTSQueueStatus(true, 'session_end');
-        
-        // 轻量重置统计信息
-        this._ttsStats = {
-          totalChunks: 0,
-          totalBytes: 0,
-          totalDuration: 0,
-          sessionStartTime: null,
-          lastChunkTime: null
-        };
-      }
-      return;
-    }
-    
-    // 严格顺序播放：依赖 AudioContext 时间线与 onended，不引入额外延迟
-    const currentTime = this._ttsAudioContext.currentTime;
-    
-    try {
-      // 从队列头部取出一个音频块（FIFO，确保有序）
-      const audioBuffer = this._ttsAudioQueue.shift();
-      if (this._ttsAudioQueue.length < 15) {
-        this._ttsQueueWarned = false;
-      }
-      const duration = audioBuffer.duration;
-      
-      // 计算播放开始时间：严格不重叠，按官方推荐写法排队到时间线
-      const startTime = this._ttsNextPlayTime === 0
-        ? currentTime
-        : Math.max(currentTime, this._ttsNextPlayTime);
-      
-      // 更新下次播放时间（在 start 之前更新，防止并发问题）
-      this._ttsNextPlayTime = startTime + duration;
-      this._reportTTSQueueStatus(false, 'dequeue');
-      
-      // 创建播放源：使用恒定增益，避免每块音频首尾重复淡入淡出导致的卡顿 / 重读感
-      const source = this._ttsAudioContext.createBufferSource();
-      source.buffer = audioBuffer;
-      const gainNode = this._ttsAudioContext.createGain();
-      gainNode.gain.setValueAtTime(1, startTime);
-      source.connect(gainNode);
-      gainNode.connect(this._ttsAudioContext.destination);
-      
-      // 添加到活跃源列表，用于资源管理
-      this._ttsActiveSources.push(source);
-      
-      // 播放结束后立即播放下一个（确保连续）
-      source.onended = () => {
-        const index = this._ttsActiveSources.indexOf(source);
-        if (index > -1) this._ttsActiveSources.splice(index, 1);
-        try {
-          source.disconnect();
-          gainNode.disconnect();
-        } catch (e) { /* 忽略 */ }
-        this._playNext();
-      };
-      
-      source.onerror = (e) => {
-        console.error('[TTS] 播放源错误:', e);
-        const index = this._ttsActiveSources.indexOf(source);
-        if (index > -1) this._ttsActiveSources.splice(index, 1);
-        try { source.disconnect(); gainNode.disconnect(); } catch (err) { /* 忽略 */ }
-        this._playNext();
-      };
-      
-      // 开始播放
-      source.start(startTime);
-      
-       // 不丢弃：队列过长只告警；节流应由后端按 ws.bufferedAmount 背压控制
-       if (this._ttsAudioQueue.length > 100) {
-         console.warn('[TTS前端] ⚠️ 播放侧队列过长:', this._ttsAudioQueue.length, '（不丢弃）');
-       }
-    } catch (e) {
-      console.error('[TTS] 播放失败:', e);
-      this._cleanupTTS();
-    }
-  }
-  
-  // 清理TTS资源，防止内存泄漏
-  _cleanupTTS() {
-    // 停止所有活跃的播放源
-    for (const source of this._ttsActiveSources) {
-      try {
-        source.stop();
-        source.disconnect();
-      } catch (e) {
-        // 忽略已停止或已断开的错误
-      }
-    }
-    this._ttsActiveSources = [];
-    
-    // 清空队列
-    this._ttsAudioQueue = [];
-    this._ttsTextQueue = []; // 清空文本队列
-    this._reportTTSQueueStatus(true, 'cleanup');
-    if (this._ttsQueueReportTimer) {
-      clearTimeout(this._ttsQueueReportTimer);
-      this._ttsQueueReportTimer = null;
-    }
-    if (this._ttsPrebufferTimer) {
-      clearTimeout(this._ttsPrebufferTimer);
-      this._ttsPrebufferTimer = null;
-    }
-    
-    // 重置状态
-    this._ttsPlaying = false;
-    this._ttsNextPlayTime = 0;
-    this._ttsSessionActive = false; // 重置Session状态
-    this._ttsSessionStartTime = null; // 重置Session开始时间
-    this._ttsQueueWarned = false;
-    
-    // 重置统计信息
-    this._ttsStats = {
-      totalChunks: 0,
-      totalBytes: 0,
-      totalDuration: 0,
-      sessionStartTime: null,
-      lastChunkTime: null
-    };
-  }
-  
-  // 停止TTS播放（外部调用）
-  stopTTS() {
-    // 标记为用户手动停止：后续到达的音频块一律丢弃，直到下一次重新发起TTS
-    this._ttsStoppedManually = true;
-    this._ttsDropLogged = false;
-    this._cleanupTTS();
-    // 主动上报一次队列状态，帮助后端更快感知到“已经停止”
-    try {
-      this._reportTTSQueueStatus(true, 'manual_stop');
-    } catch {
-      // 忽略上报错误
-    }
-  }
-
-  updateVoiceStatus(text, recognizing = false) {
-    const statusEl = document.getElementById('voiceStatus');
-    if (statusEl) {
-      statusEl.textContent = text || '';
-      statusEl.classList.toggle('asr-recognizing', !!recognizing);
-    }
-  }
-
-  updateVoiceEmotion(emotion) {
-    const emotionEl = document.getElementById('voiceEmotionIcon');
-    if (emotionEl) {
-      emotionEl.innerHTML = emotionIconSVG(emotion);
-      emotionEl.style.animation = 'none';
-      setTimeout(() => {
-        emotionEl.style.animation = 'pulse 0.5s ease';
-      }, 10);
-    }
-  }
 
   async fileToBase64(file) {
     return new Promise((resolve, reject) => {
@@ -2865,8 +2324,8 @@ class App {
     if (!statusEl) return;
     
     const isRunning = this._chatStreamState.running;
-    statusEl.textContent = isRunning 
-      ? (message || `${this._chatStreamState.source === 'voice' ? '语音' : '文本'}生成中...`)
+    statusEl.textContent = isRunning
+      ? (message || '文本生成中...')
       : '空闲';
     statusEl.classList.toggle('active', isRunning);
     motion.animateStreamStatus(statusEl, isRunning);
@@ -2903,7 +2362,7 @@ class App {
       input.disabled = streaming;
       input.placeholder = streaming
         ? (this._isAIMode() ? 'AI 正在处理...' : '正在处理...')
-        : (this._isAIMode() ? '输入消息...' : '输入消息或发送语音...');
+        : '输入消息...';
     }
     if (sendBtn) {
       sendBtn.disabled = streaming;
@@ -2952,11 +2411,6 @@ class App {
       streamingMsg.remove();
     }
     this.showToast('已中断 AI 输出', 'info');
-  }
-
-  updateEmotionDisplay(emotion) {
-    const el = document.getElementById('emotionIcon');
-    if (el) el.innerHTML = emotionIconSVG(emotion);
   }
 
   // ========== 配置管理 ==========
@@ -3052,7 +2506,7 @@ class App {
     return escapeHtml(value);
   }
 
-  // ========== WebSocket & 语音 ==========
+  // ========== WebSocket ==========
   getWebUserId() {
     if (!this._webUserId) {
       this._webUserId = localStorage.getItem('webUserId');
@@ -3065,7 +2519,7 @@ class App {
   }
 
   _needsDeviceWs(page = this.currentPage) {
-    return page === 'chat' && (this._isVoiceMode() || !this._isAIMode());
+    return page === 'chat' && !this._isAIMode();
   }
 
   // 清理 WebSocket 相关定时器
@@ -3117,7 +2571,6 @@ class App {
     
     try {
       this._deviceWs = new WebSocket(wsUrl);
-      this._deviceWs.binaryType = 'arraybuffer'; // xiaozhi 风格：二进制直接为 ArrayBuffer
       
       this._deviceWs.onopen = () => {
         this._wsConnecting = false;
@@ -3129,7 +2582,7 @@ class App {
           device_id: deviceId,
           device_type: 'web',
           device_name: 'Web客户端',
-          capabilities: ['display', 'microphone'],
+          capabilities: ['display'],
           user_id: this.getWebUserId()
         }));
         
@@ -3176,10 +2629,6 @@ class App {
       this._deviceWs.onmessage = (e) => {
         try {
           this._lastWsMessageAt = Date.now();
-          if (e.data instanceof ArrayBuffer) {
-            this._handleBinaryTTS(e.data);
-            return;
-          }
           const data = JSON.parse(e.data);
           this.handleWsMessage(data);
         } catch (err) {
@@ -3261,7 +2710,6 @@ class App {
       message: Array.isArray(meta.message) ? meta.message : undefined,
       meta: {
         persona: this.getCurrentPersona(),
-        workflow: this._chatSettings.workflow || 'device',
         source: meta.source || 'manual',
         ...meta.meta
       }
@@ -3319,7 +2767,6 @@ class App {
   }
 
   handleWsMessage(data) {
-    // 消息去重（TTS 走二进制通道，不经过此处）
     const messageId = data.event_id || `${data.type}_${data.timestamp || Date.now()}_${JSON.stringify(data).slice(0, 50)}`;
     if (this._processedMessageIds.has(messageId)) return;
     this._processedMessageIds.add(messageId);
@@ -3329,77 +2776,9 @@ class App {
     }
 
     switch (data.type) {
-      case 'heartbeat_request':
-        if (this._deviceWs?.readyState === WebSocket.OPEN) {
-          this._deviceWs.send(JSON.stringify({
-            type: 'heartbeat_response',
-            timestamp: Date.now()
-          }));
-        }
-        break;
       case 'heartbeat':
         this._lastWsMessageAt = Date.now();
         break;
-      case 'stt':
-        // xiaozhi 协议：STT 识别结果，等同 asr_final
-        if (data.text) {
-          const sttText = (data.text || '').trim();
-          if (this._isVoiceMode()) {
-            if (sttText && !this._chatStreamState.running) {
-              this.updateVoiceStatus('AI 思考中...');
-              this.sendVoiceMessage(sttText).catch(e => {
-                this.showToast(`语音处理失败: ${e.message}`, 'error');
-              });
-            }
-          } else {
-            this.renderASRStreaming(sttText, true);
-          }
-        }
-        break;
-      case 'llm':
-        // xiaozhi 协议：LLM 回复 { text, emotion }
-        {
-          const llmText = String(data.text ?? '').trim();
-          if (llmText) {
-          this.clearChatStreamState();
-            this.appendSegments([{ type: 'text', text: llmText }], true, 'assistant');
-          if (data.emotion && typeof this.updateEmotionDisplay === 'function') {
-            this.updateEmotionDisplay(data.emotion);
-          }
-        }
-        }
-        break;
-      case 'tts':
-        // xiaozhi 协议：TTS 状态 { state: 'start'|'stop' }
-        if (data.state === 'start') {
-          this.updateChatStatus('正在播放语音...');
-        } else if (data.state === 'stop') {
-          this.updateChatStatus();
-        }
-        break;
-      case 'asr_interim': {
-        const text = (data.text || '').trim();
-        if (this._isVoiceMode()) {
-          this.updateVoiceStatus(text ? `识别中: ${text}` : '正在聆听...', !!text);
-        } else {
-          this.renderASRStreaming(text, false);
-        }
-        break;
-      }
-      case 'asr_final': {
-        const finalText = (data.text || '').trim();
-        if (this._isVoiceMode()) {
-          if (finalText && !this._chatStreamState.running) {
-            this.updateVoiceStatus('AI 思考中...');
-            this.sendVoiceMessage(finalText).catch(e => {
-              this.showToast(`语音处理失败: ${e.message}`, 'error');
-            });
-          }
-        } else {
-          this.renderASRStreaming(finalText, true);
-        }
-        break;
-      }
       case 'reply': {
         const segments = Array.isArray(data.segments) ? data.segments : [];
         if (segments.length === 0 && data.text) segments.push({ type: 'text', text: data.text });
@@ -3420,65 +2799,6 @@ class App {
         }
         break;
       }
-      case 'forward': {
-        // 处理转发消息（聊天记录）
-        this.clearChatStreamState();
-        
-        if (data.messages && Array.isArray(data.messages) && data.messages.length > 0) {
-          // 提取消息内容：支持node格式和普通格式
-          const messages = data.messages.map((msg) => {
-            // node格式：从content数组中提取文本
-            if (msg.type === 'node' && msg.data) {
-              if (msg.data.content && Array.isArray(msg.data.content)) {
-                const texts = msg.data.content
-                  .filter(c => c && c.type === 'text' && c.data && c.data.text)
-                  .map(c => c.data.text)
-                  .filter(text => text && text.trim());
-                if (texts.length > 0) {
-                  return texts.join('\n');
-                }
-                const firstContent = msg.data.content[0];
-                if (firstContent && firstContent.data && firstContent.data.text) {
-                  return firstContent.data.text;
-                }
-              }
-              // 降级处理
-              if (typeof msg.data.content === 'string') {
-                return msg.data.content;
-              }
-              if (msg.data.message) {
-                return typeof msg.data.message === 'string' ? msg.data.message : String(msg.data.message);
-              }
-              return '';
-            }
-            // 普通格式：直接提取文本
-            if (typeof msg === 'string') {
-              return msg;
-            }
-            if (msg.message) {
-              return typeof msg.message === 'string' ? msg.message : String(msg.message);
-            }
-            if (msg.content) {
-              return typeof msg.content === 'string' ? msg.content : String(msg.content);
-            }
-            return String(msg);
-          }).filter(text => text && text.trim());
-          
-          if (messages.length > 0) {
-            this.appendChatRecord(messages, data.title || '', data.description || '', true);
-          }
-        }
-        break;
-      }
-      case 'status':
-        {
-          const statusText = String(data.text ?? '').trim();
-          if (statusText) {
-            this.appendChat('system', statusText, { persist: true, withCopyBtn: false });
-          }
-        }
-        // 状态消息不中断聊天流程
-        break;
       case 'error':
         {
           const errorMsg = String(data.message ?? '').trim();
@@ -3508,328 +2828,6 @@ class App {
           this.updateChatStatus();
         }
         break;
-      case 'command': {
-        const cmd = data.command;
-        if (cmd?.command === 'display' && cmd?.parameters?.text) {
-          const displayText = String(cmd.parameters.text ?? '').trim();
-          if (!displayText) break;
-          const opts = { persist: true, withCopyBtn: true };
-          if (cmd.parameters.mcp_tools?.length) opts.mcpTools = cmd.parameters.mcp_tools;
-          this.appendChat('assistant', displayText, opts);
-        } else if (cmd?.command === 'display_emotion' && cmd?.parameters?.emotion) {
-          this.updateEmotionDisplay(cmd.parameters.emotion);
-        }
-        break;
-      }
-    }
-  }
-
-  renderASRStreaming(text = '', done = false) {
-    const t = (text || '').trim();
-    //  interim 时加闪烁光标，提升流式识别反馈感（xiaozhi 风格）
-    const displayText = done ? t : (t + ' |');
-    const chatInput = document.getElementById('chatInput');
-    if (chatInput) {
-      chatInput.value = displayText;
-      chatInput.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    const voiceInput = document.getElementById('voiceInput');
-    if (voiceInput) {
-      voiceInput.value = displayText;
-    }
-    if (!done && voiceInput) {
-      voiceInput.classList.add('asr-interim');
-    } else {
-      voiceInput?.classList.remove('asr-interim');
-    }
-  }
-
-  async toggleMic() {
-    if (this._micStarting || this._micStopping) return;
-    
-    if (this._micActive) {
-      await this.stopMic();
-    } else {
-      await this.startMic();
-    }
-  }
-
-  async startMic() {
-    if (this._micActive || this._micStarting) return;
-    
-    this._micStarting = true;
-    try {
-      // 开启麦克风前，如仍在播报则先停止，保证“说话即可打断播报”
-      if (this._ttsPlaying || this._ttsSessionActive || (this._ttsAudioQueue && this._ttsAudioQueue.length > 0)) {
-        this.stopTTS();
-      }
-      // 如果已有会话，先停止
-      if (this._asrSessionId || this._micActive) {
-        await this.stopMic();
-        await new Promise(resolve => setTimeout(resolve, 200));
-      }
-      
-      await this.ensureDeviceWs();
-      
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000, channelCount: 1 }
-      });
-      
-      this._micStream = stream;
-      this._audioCtx = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 16000,
-        latencyHint: 'interactive'
-      });
-      
-      const source = this._audioCtx.createMediaStreamSource(stream);
-      let processor = null;
-      const FRAME_SIZE = 960; // xiaozhi-web-client: 60ms @ 16kHz
-      
-      if (this._audioCtx.audioWorklet) {
-        try {
-          const workletCode = `
-            class ASRAudioProcessor extends AudioWorkletProcessor {
-              constructor(o){super();const s=o.processorOptions?.bufferSize||960;this.buf=new Float32Array(s);this.i=0;}
-              process(inputs){
-                const in0=inputs[0]?.[0];if(!in0)return true;
-                for(let k=0;k<in0.length;k++){
-                  this.buf[this.i++]=in0[k];
-                  if(this.i>=this.buf.length){
-                    const pcm=new Int16Array(this.buf.length);
-                    for(let j=0;j<this.buf.length;j++){
-                      const v=Math.max(-1,Math.min(1,this.buf[j]));
-                      pcm[j]=v<0?v*32768:v*32767;
-                    }
-                    this.port.postMessage(pcm);this.i=0;
-                  }
-                }
-                return true;
-              }
-            }
-            registerProcessor('asr-audio-processor',ASRAudioProcessor);
-          `;
-          const blob = new Blob([workletCode], { type: 'application/javascript' });
-          const url = URL.createObjectURL(blob);
-          await this._audioCtx.audioWorklet.addModule(url);
-          URL.revokeObjectURL(url);
-          const workletNode = new AudioWorkletNode(this._audioCtx, 'asr-audio-processor', {
-            processorOptions: { bufferSize: FRAME_SIZE }
-          });
-          workletNode.port.onmessage = (e) => {
-            if (!this._micActive || !e.data) return;
-            const pcm = e.data instanceof Int16Array ? e.data : new Int16Array(e.data);
-            this._preAudioBuffer.push(pcm.slice());
-            if (this._preAudioBuffer.length > 30) this._preAudioBuffer.shift();
-            this._audioBuffer.push(pcm.slice());
-          };
-          const silent = this._audioCtx.createGain();
-          silent.gain.value = 0;
-          source.connect(workletNode);
-          workletNode.connect(silent);
-          silent.connect(this._audioCtx.destination);
-          processor = workletNode;
-        } catch (workletErr) {
-          console.warn('[ASR] AudioWorklet 不可用，使用 ScriptProcessor:', workletErr.message);
-        }
-      }
-      
-      if (!processor) {
-        processor = this._audioCtx.createScriptProcessor(2048, 1, 1);
-        source.connect(processor);
-        processor.connect(this._audioCtx.destination);
-        processor.onaudioprocess = (e) => {
-          if (!this._micActive) return;
-          const input = e.inputBuffer.getChannelData(0);
-          const pcm16 = new Int16Array(input.length);
-          for (let i = 0; i < input.length; i++) {
-            const s = Math.max(-1, Math.min(1, input[i]));
-            pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-          }
-          this._preAudioBuffer.push(pcm16);
-          if (this._preAudioBuffer.length > 30) this._preAudioBuffer.shift();
-          this._audioBuffer.push(pcm16);
-        };
-      }
-      
-      this._audioProcessor = processor;
-      const sessionId = `sess_${Date.now()}`;
-      this._asrSessionId = sessionId;
-      this._asrChunkIndex = 0;
-      this._asrStats = {
-        totalChunks: 0,
-        totalBytes: 0,
-        totalSamples: 0,
-        sessionStartTime: Date.now(),
-        lastChunkTime: null
-      };
-      this._micActive = true;
-      this._audioBuffer = [];
-      this._preAudioBuffer = [];
-      this.updateVoiceStatus('正在聆听...');
-      document.getElementById('micBtn')?.classList.add('recording');
-      document.getElementById('voiceWave')?.classList.add('active');
-      motion.animateVoiceWave(document.getElementById('voiceWave'), true);
-      
-      // 发送会话启动请求
-      this._deviceWs?.send(JSON.stringify({
-        type: 'asr_session_start',
-        device_id: this.getWebUserId(),
-        session_id: sessionId,
-        sample_rate: 16000,
-        bits: 16,
-        channels: 1
-      }));
-      
-      // 优化：立即发送音频，不等待ASR确认（后端会缓存）
-      // 使用预缓冲机制确保不丢失最开始的话
-      const sendBufferedAudio = () => {
-        if (!this._micActive) return;
-        
-        // 合并预缓冲和当前缓冲（确保不丢失最开始的话）
-        const allBuffers = [...this._preAudioBuffer, ...this._audioBuffer];
-        if (allBuffers.length === 0) return;
-        
-        // 清空预缓冲（已合并）
-        this._preAudioBuffer = [];
-        
-        const combined = new Int16Array(allBuffers.reduce((sum, buf) => sum + buf.length, 0));
-        let offset = 0;
-        for (const buf of allBuffers) {
-          combined.set(buf, offset);
-          offset += buf.length;
-        }
-        
-        const hex = Array.from(new Uint8Array(combined.buffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-        const samples = combined.length;
-        const bytes = samples * 2;
-        const sr = 16000;
-        const duration = samples / sr;
-        const now = performance.now();
-        const last = this._asrStats.lastChunkTime;
-        const interval = last ? (now - last) : 0;
-        this._asrStats.lastChunkTime = now;
-        this._asrStats.totalChunks += 1;
-        this._asrStats.totalBytes += bytes;
-        this._asrStats.totalSamples += samples;
-
-        this._deviceWs?.send(JSON.stringify({
-          type: 'asr_audio_chunk',
-          device_id: this.getWebUserId(),
-          session_id: sessionId,
-          chunk_index: this._asrChunkIndex++,
-          vad_state: 'active',
-          data: hex
-        }));
-        
-        
-        this._audioBuffer = [];
-      };
-      
-      // xiaozhi 风格：60ms 发送间隔，更快首包
-      const startSending = () => {
-        if (!this._micActive) return;
-        this._asrReady = true;
-        sendBufferedAudio();
-        
-        if (!this._audioBufferTimer) {
-          this._audioBufferTimer = setInterval(sendBufferedAudio, 60);
-        }
-      };
-      
-      // 立即开始发送（不等待），确保不丢失最开始的话
-      startSending();
-    } catch (e) {
-      if (e.name === 'NotAllowedError') {
-        this.showToast('请允许访问麦克风', 'error');
-      } else if (e.name === 'NotFoundError') {
-        this.showToast('未找到麦克风设备', 'error');
-      } else {
-        this.showToast('麦克风启动失败: ' + (e.message || '未知错误'), 'error');
-      }
-      this._micActive = false;
-      this._asrSessionId = null;
-      if (this._micStream) {
-        this._micStream.getTracks().forEach(t => t.stop());
-        this._micStream = null;
-      }
-      if (this._audioCtx) {
-        await this._audioCtx.close().catch(() => {});
-        this._audioCtx = null;
-      }
-    } finally {
-      this._micStarting = false;
-    }
-  }
-
-  async stopMic() {
-    if (this._micStopping) return;
-    if (!this._micActive && !this._asrSessionId) return;
-    
-    this._micStopping = true;
-    try {
-        if (this._audioBufferTimer) {
-        clearInterval(this._audioBufferTimer);
-        this._audioBufferTimer = null;
-      }
-      
-      // 发送剩余的音频（包括预缓冲）
-      const allBuffers = [...this._preAudioBuffer, ...this._audioBuffer];
-      if (allBuffers.length > 0 && this._deviceWs && this._asrSessionId) {
-        const combined = new Int16Array(allBuffers.reduce((sum, buf) => sum + buf.length, 0));
-        let offset = 0;
-        for (const buf of allBuffers) {
-          combined.set(buf, offset);
-          offset += buf.length;
-        }
-        const hex = Array.from(new Uint8Array(combined.buffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-        const samples = combined.length;
-        const bytes = samples * 2;
-        const sr = 16000;
-        const duration = samples / sr;
-        const now = performance.now();
-        const last = this._asrStats.lastChunkTime;
-        const interval = last ? (now - last) : 0;
-        this._asrStats.lastChunkTime = now;
-        this._asrStats.totalChunks += 1;
-        this._asrStats.totalBytes += bytes;
-        this._asrStats.totalSamples += samples;
-
-        this._deviceWs.send(JSON.stringify({
-          type: 'asr_audio_chunk',
-          device_id: this.getWebUserId(),
-          session_id: this._asrSessionId,
-          chunk_index: this._asrChunkIndex++,
-          vad_state: 'ending',
-          data: hex
-        }));
-        
-      }
-
-      this._audioProcessor?.disconnect();
-      this._micStream?.getTracks().forEach(t => t.stop());
-      await this._audioCtx?.close().catch(() => {});
-      
-      if (this._asrSessionId && this._deviceWs) {
-        const totalDuration = this._asrStats.totalSamples / 16000;
-        this._deviceWs.send(JSON.stringify({
-          type: 'asr_session_stop',
-          device_id: this.getWebUserId(),
-          session_id: this._asrSessionId,
-          duration: Number.isFinite(totalDuration) ? Number(totalDuration.toFixed(3)) : undefined
-        }));
-      }
-    } finally {
-      this._micActive = false;
-      document.getElementById('micBtn')?.classList.remove('recording');
-      document.getElementById('voiceWave')?.classList.remove('active');
-      motion.animateVoiceWave(document.getElementById('voiceWave'), false);
-      this._audioCtx = null;
-      this._micStream = null;
-      this._audioProcessor = null;
-      this._asrSessionId = null;
-      this._audioBuffer = [];
-      this._preAudioBuffer = [];
-      this._micStopping = false;
     }
   }
 

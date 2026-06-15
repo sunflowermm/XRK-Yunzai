@@ -12,7 +12,6 @@ export const API = {
   systemOverview: '/api/system/overview',
   aiModels: '/api/ai/models',
   chatCompletions: '/api/v3/chat/completions',
-  deviceTts: '/api/device/tts',
   fileUpload: '/api/file/upload',
   pluginsSummary: '/api/plugins/summary',
   configList: '/api/config/list',

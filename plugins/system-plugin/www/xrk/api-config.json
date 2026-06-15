@@ -780,7 +780,7 @@
           "method": "POST",
           "path": "/api/device/:deviceId/ai",
           "title": "设备AI回复",
-          "description": "触发设备工作流，执行AI并驱动表情/TTS",
+          "description": "通过 Agent 工作流对设备执行 AI 推理（默认 chat）",
           "pathParams": {
             "deviceId": {
               "label": "设备ID",
@@ -799,31 +799,8 @@
               "name": "workflow",
               "label": "工作流",
               "type": "text",
-              "placeholder": "device",
-              "defaultValue": "device"
-            }
-          ]
-        },
-        {
-          "id": "device-tts",
-          "method": "POST",
-          "path": "/api/device/tts",
-          "title": "设备TTS播报",
-          "description": "调用设备 TTS 为指定设备播放一段文字",
-          "bodyParams": [
-            {
-              "name": "device_id",
-              "label": "设备ID",
-              "type": "text",
-              "required": true,
-              "placeholder": "DEVICE_001"
-            },
-            {
-              "name": "text",
-              "label": "播报文本",
-              "type": "textarea",
-              "required": true,
-              "placeholder": "你好，这是一条测试播报"
+              "placeholder": "chat",
+              "defaultValue": "chat"
             }
           ]
         }
@@ -1308,11 +1285,8 @@
     },
     "device-ai": {
       "path_deviceId": "webclient",
-      "text": "你好"
-    },
-    "device-tts": {
-      "device_id": "SENSOR_001",
-      "text": "你好，这是一条测试播报"
+      "text": "你好",
+      "workflow": "chat"
     },
     "file-upload": {},
     "file-get": {

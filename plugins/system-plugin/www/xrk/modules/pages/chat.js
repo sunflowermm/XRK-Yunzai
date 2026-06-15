@@ -1,4 +1,4 @@
-import { emotionIconSVG, pokeHandIconSVG } from '../ui-kit.js';
+import { pokeHandIconSVG } from '../ui-kit.js';
 import {
   animateChatMessage,
   animateChatModeSwitch,
@@ -13,14 +13,13 @@ export async function renderChatPage(app) {
   const content = document.getElementById('content');
   cancelPageMotion(content);
   const isAIMode = app._isAIMode();
-  const isVoiceMode = app._isVoiceMode();
   const aiSettingsPlaceholder = isAIMode
     ? `<div class="ai-settings-panel" id="aiSettingsPlaceholder">
           <div style="padding:16px;color:var(--text-muted);font-size:13px;">AI 设置加载中...</div>
         </div>`
     : '';
   content.innerHTML = `
-      <div class="chat-container ${isVoiceMode ? 'voice-mode' : ''}">
+      <div class="chat-container">
         <div class="chat-sidebar">
           <div class="chat-mode-selector">
             <button class="chat-mode-btn ${app._isEventMode() ? 'active' : ''}" data-mode="event">
@@ -28,15 +27,6 @@ export async function renderChatPage(app) {
                 <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
               </svg>
               <span>Event</span>
-            </button>
-            <button class="chat-mode-btn ${app._isVoiceMode() ? 'active' : ''}" data-mode="voice">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
-                <path d="M19 10v2a7 7 0 01-14 0v-2"/>
-                <line x1="12" y1="19" x2="12" y2="23"/>
-                <line x1="8" y1="23" x2="16" y2="23"/>
-              </svg>
-              <span>Voice</span>
             </button>
             <button class="chat-mode-btn ${app._isAIMode() ? 'active' : ''}" data-mode="ai">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -49,25 +39,8 @@ export async function renderChatPage(app) {
           ${aiSettingsPlaceholder}
         </div>
         <div class="chat-main">
-        ${isVoiceMode ? `
-            <div class="voice-chat-center">
-            <div class="voice-emotion-display" id="voiceEmotionIcon">${emotionIconSVG('happy')}</div>
-            <div class="voice-wave" id="voiceWave">
-              ${Array(6).fill('<div class="voice-wave-bar"></div>').join('')}
-            </div>
-            <div class="voice-status" id="voiceStatus">点击麦克风开始对话</div>
-            <button class="voice-clear-btn" id="voiceClearBtn" title="清空聊天记录">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="3 6 5 6 21 6"/>
-                <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
-              </svg>
-              <span>清空</span>
-            </button>
-          </div>
-        ` : `
         <div class="chat-header">
           <div class="chat-header-title">
-            <span class="emotion-display" id="emotionIcon">${emotionIconSVG('happy')}</span>
               <span>${isAIMode ? 'AI 对话' : 'Event 对话'}</span>
           </div>
           <div class="chat-header-actions">
@@ -77,40 +50,9 @@ export async function renderChatPage(app) {
         <div class="chat-settings">
           <span class="chat-stream-status" id="chatStreamStatus">空闲</span>
         </div>
-        `}
-        <div class="chat-messages ${isVoiceMode ? 'voice-messages' : ''}" id="chatMessages"></div>
+        <div class="chat-messages" id="chatMessages"></div>
         <div class="chat-input-area">
-          ${!isAIMode && !isVoiceMode ? `<div class="event-quote-strip" id="eventQuoteStrip" style="display:none;"><span class="event-quote-label">引用：</span><span class="event-quote-text"></span><button type="button" class="event-quote-cancel" aria-label="取消引用">×</button></div>` : ''}
-          ${isVoiceMode ? `
-          <button class="voice-mic-btn" id="micBtn" title="按住或点击说话">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
-              <path d="M19 10v2a7 7 0 01-14 0v-2"/>
-              <line x1="12" y1="19" x2="12" y2="23"/>
-              <line x1="8" y1="23" x2="16" y2="23"/>
-            </svg>
-          </button>
-          <input type="text" class="voice-input" id="voiceInput" placeholder="或直接输入文字...">
-          <button class="voice-tts-stop-btn" id="voiceTtsStopBtn" title="停止当前播报">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="6" y="6" width="12" height="12" rx="2" ry="2"/>
-            </svg>
-          </button>
-          <button class="voice-send-btn" id="voiceSendBtn" title="发送并触发TTS">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="22" y1="2" x2="11" y2="13"/>
-              <polygon points="22,2 15,22 11,13 2,9"/>
-            </svg>
-          </button>
-          ` : `
-          <button class="mic-btn" id="micBtn">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
-              <path d="M19 10v2a7 7 0 01-14 0v-2"/>
-              <line x1="12" y1="19" x2="12" y2="23"/>
-              <line x1="8" y1="23" x2="16" y2="23"/>
-            </svg>
-          </button>
+          ${!isAIMode ? `<div class="event-quote-strip" id="eventQuoteStrip" style="display:none;"><span class="event-quote-label">引用：</span><span class="event-quote-text"></span><button type="button" class="event-quote-cancel" aria-label="取消引用">×</button></div>` : ''}
           <button class="image-upload-btn" id="imageUploadBtn" title="${isAIMode ? '上传图片' : '上传文件'}">
             ${isAIMode ? `
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -134,9 +76,8 @@ export async function renderChatPage(app) {
               <polygon points="22,2 15,22 11,13 2,9"/>
             </svg>
           </button>
-          `}
         </div>
-        ${!isVoiceMode ? `<div class="chat-image-preview" id="chatImagePreview" style="display: none;"></div>` : ''}
+        <div class="chat-image-preview" id="chatImagePreview" style="display: none;"></div>
         </div>
       </div>
     `;
@@ -150,14 +91,9 @@ export async function renderChatPage(app) {
     } catch {}
   }
 
-  if (isVoiceMode) {
-    await app.loadLlmOptions();
-  }
-  if (!isVoiceMode) {
-    app.initChatControls();
-  }
+  app.initChatControls();
   app.restoreChatHistory();
-  if (isVoiceMode || !isAIMode) {
+  if (!isAIMode) {
     app.ensureDeviceWs();
   }
   app._bindChatEvents();
@@ -186,8 +122,6 @@ export function bindChatEvents(app) {
   unbindChatEvents(app);
   const sendBtn = document.getElementById('chatSendBtn');
   const input = document.getElementById('chatInput');
-  const voiceInput = document.getElementById('voiceInput');
-  const micBtn = document.getElementById('micBtn');
   const clearBtn = document.getElementById('clearChatBtn');
   const imageUploadBtn = document.getElementById('imageUploadBtn');
   const imageInput = document.getElementById('chatImageInput');
@@ -202,14 +136,10 @@ export function bindChatEvents(app) {
   };
   const chatRootContainer = document.querySelector('.chat-container');
   const setKeyboardOpen = (open) => chatRootContainer?.classList.toggle('keyboard-open', open);
-  const isAnyChatInputFocused = () => {
-    const active = document.activeElement;
-    return active === input || active === voiceInput;
-  };
   const onChatInputFocusIn = () => setKeyboardOpen(true);
   const onChatInputFocusOut = () => {
     setTimeout(() => {
-      if (!isAnyChatInputFocused()) setKeyboardOpen(false);
+      if (document.activeElement !== input) setKeyboardOpen(false);
     }, 0);
   };
 
@@ -280,38 +210,7 @@ export function bindChatEvents(app) {
     safeBind(input, 'focusin', onChatInputFocusIn);
     safeBind(input, 'focusout', onChatInputFocusOut);
   }
-  if (voiceInput) {
-    safeBind(voiceInput, 'focusin', onChatInputFocusIn);
-    safeBind(voiceInput, 'focusout', onChatInputFocusOut);
-  }
-  if (micBtn) safeBind(micBtn, 'click', () => app.toggleMic());
   if (clearBtn) safeBind(clearBtn, 'click', () => app.clearChat());
-  if (app._isVoiceMode()) {
-    const voiceClearBtn = document.getElementById('voiceClearBtn');
-    if (voiceClearBtn) safeBind(voiceClearBtn, 'click', () => app.clearChat());
-    const voiceSendBtn = document.getElementById('voiceSendBtn');
-    const voiceTtsStopBtn = document.getElementById('voiceTtsStopBtn');
-    if (voiceInput && voiceSendBtn) {
-      safeBind(voiceSendBtn, 'click', () => {
-        const text = voiceInput.value.trim();
-        if (text) {
-          app.sendVoiceMessage(text).catch(e => app.showToast(`发送失败: ${e.message}`, 'error'));
-          voiceInput.value = '';
-        }
-      });
-      safeBind(voiceInput, 'keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          voiceSendBtn.click();
-        }
-      });
-    }
-    if (voiceTtsStopBtn) safeBind(voiceTtsStopBtn, 'click', () => {
-      app.stopTTS();
-      app.clearChatStreamState();
-      app.updateVoiceStatus('播报已停止');
-    });
-  }
   if (imageUploadBtn && imageInput) {
     safeBind(imageUploadBtn, 'click', () => imageInput.click());
     safeBind(imageInput, 'change', (e) => app.handleImageSelect(e.target.files));
@@ -383,7 +282,6 @@ export function applyMessageEnter(app, div, animate = true) {
 }
 
 export function appendChatMessage(app, role, text, options = {}) {
-  const isVoiceMode = app._isVoiceMode();
   const { persist = true, mcpTools = null, messageId = null, source = null } = options;
   const msgId = messageId || `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   if (persist) {
@@ -397,7 +295,7 @@ export function appendChatMessage(app, role, text, options = {}) {
   const box = document.getElementById('chatMessages');
   if (!box) return null;
   const div = document.createElement('div');
-  div.className = `chat-message ${role}${isVoiceMode ? ' voice-message' : ''}${app._isRestoringHistory ? '' : ' message-enter'}`;
+  div.className = `chat-message ${role}${app._isRestoringHistory ? '' : ' message-enter'}`;
   div.dataset.messageId = msgId;
   div.dataset.role = role;
   const contentDiv = document.createElement('div');
@@ -412,4 +310,3 @@ export function appendChatMessage(app, role, text, options = {}) {
   app._applyMessageEnter(div, persist);
   return div;
 }
-
