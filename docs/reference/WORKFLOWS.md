@@ -10,7 +10,7 @@
 
 | 方法 | 说明 |
 |------|------|
-| `constructor(options)` | 合并 `options.config` 与基类默认 `this.config`；初始化 MemorySystem、函数 Map 等（不在此读取 `cfg`） |
+| `constructor(options)` | 合并 `options.config` 与基类默认；从 `getAistreamConfigOptional().llm` 取全局温度等默认值 |
 | `init()` | 一次性初始化：函数 Map、记忆（若启用） |
 
 ### 上下文增强（可选）
@@ -90,4 +90,5 @@
 
 ---
 
-自定义工作流装载见 `plugins/<插件根>/stream/*.js` 与 [PLUGINS.md](./PLUGINS.md)。
+自定义工作流装载见 `plugins/<插件根>/stream/*.js` 与 [PLUGINS.md](./PLUGINS.md)。  
+aistream / MCP 配置见 [AISTREAM_AND_MCP.md](./AISTREAM_AND_MCP.md)。

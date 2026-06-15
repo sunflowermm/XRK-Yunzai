@@ -1,5 +1,5 @@
-import cfg from '../../../lib/config/config.js';
 import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
+import { getAistreamConfigOptional } from '../../../lib/utils/aistream-config.js';
 import { transformOpenAIStyleVisionMessages } from '../../../lib/utils/llm/message-transform.js';
 import { MCPToolAdapter } from '../../../lib/utils/llm/mcp-tool-adapter.js';
 import { parseMultipartData } from '../../../lib/utils/multipart-parser.js';
@@ -406,7 +406,7 @@ async function handleModels(req, res, Bot) {
     uiHidden: false
   }));
 
-  const aistreamConfig = cfg.aistream || {};
+  const aistreamConfig = getAistreamConfigOptional();
   return res.json({
     success: true,
     data: {

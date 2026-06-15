@@ -56,8 +56,9 @@ export default class MyConfig extends ConfigBase {
 
 ## 约定
 
-- 合并：`mergeConfigLayers`（读）、`deepMergeConfig`（写/表单）、`applyDefaults`、`buildDefaultsFromSchema`（`lib/commonconfig/config-utils.js`）
+- 合并：`mergeConfigLayers`（读）、`deepMergeConfig`（写/表单）、`buildDefaultsFromSchema`（`lib/commonconfig/config-utils.js`）
 - 读：`ConfigBase.read()` = default_config → data → schema.default；`readStored()` = 仅 data 层
+- 动态 enum：`prepareValidate` + `getStructure()` 前刷新（aistream Provider / MCP 列表）
 - 运行时 `cfg`：`getMergedConfig(name)` = 深合并 `getdefSet` + `getConfig`
 - 对象判断：`ObjectUtils`，不重复实现
 - 默认模板：`config/default_config/`；运行时：`data/server_bots/<port>/` 或全局根 yaml

@@ -1,34 +1,47 @@
 # LLM 工厂层（lib/factory/llm）
 
-多提供商 LLM 客户端工厂，与 XRK-AGT 一致的单一创建与调用路径。
+多提供商 LLM 客户端工厂：单一 `createClient` 路径。
 
 ## 架构
 
-- **LLMFactory**：根据 `config.provider` 选择实现类，合并 `getProviderConfig(provider)` 与传入的 `config` 后创建客户端。
-- **客户端约定**：各客户端实现 `chat(messages, overrides)`、可选 `chatStream(messages, onDelta, overrides)`。overrides 使用规范键（如 `maxTokens`、`topP`），由 `buildOpenAIChatCompletionsBody` 统一映射为 API 体。
-- **流式回调**：`onDelta(delta, metadata)`。`delta` 为文本增量；执行 tool_calls 后各客户端通过 `MCPToolAdapter.emitMcpToolsToStream(tool_calls, toolResults, onDelta)` 发送 `metadata.mcp_tools`，供 v3 接口转发给前端展示工具卡片。
+- **LLMFactory**：按 `provider`（`providers[].key`）选择实现，合并 `getProviderConfig` 与调用方 `config`
+- **factory-registry.js**：16 个工厂元数据（`configKey`、`protocol`、`displayName`）
+- **客户端**：`chat` / `chatStream`；流式 tool_calls 经 `MCPToolAdapter.emitMcpToolsToStream` 推送 `mcp_tools`
 
 ## 提供商与实现类
 
 | protocol | 实现类 | 说明 |
 |----------|--------|------|
-| gptgod | GPTGodLLMClient | GPTGod，OpenAI 兼容 |
-| volcengine | VolcengineLLMClient | 火山引擎豆包 |
-| deepseek | DeepSeekLLMClient | DeepSeek 官方（thinking / reasoning_effort） |
+| gptgod | GPTGodLLMClient | GPTGod |
+| volcengine | VolcengineLLMClient | 火山引擎 |
+| deepseek | DeepSeekLLMClient | DeepSeek |
 | xiaomimimo | XiaomiMiMoLLMClient | 小米 MiMo |
-| openai | OpenAILLMClient | OpenAI 官方 |
-| gemini | GeminiLLMClient | Google Gemini |
-| anthropic | AnthropicLLMClient | Anthropic Claude |
+| openai | OpenAILLMClient | OpenAI |
+| gemini | GeminiLLMClient | Gemini |
+| anthropic | AnthropicLLMClient | Claude |
 | azure_openai | AzureOpenAILLMClient | Azure OpenAI |
-| （compat） | 各 Compatible Client | 由 `*_compat_llm.providers[]` 注册，key 自定义 |
+| （compat） | `*CompatibleLLMClient` | `*_compat_llm.providers[]` 自定义 key |
 
 ## 配置来源
 
-- 工厂 YAML：`data/server_bots/*_llm.yaml`，统一 **`providers: []` 数组**；每条 `key` 供 `aistream.llm.Provider` 引用。
-- 默认模板：`config/default_config/*_llm.yaml`。
-- `LLMFactory.getProviderConfig(key)` 读取对应 providers 条目，**不**使用请求体 apiKey 覆盖。
+- YAML：`data/server_bots/*_llm.yaml`，统一 **`providers: []`**；每条 `key` 供 `aistream.llm.Provider` 引用
+- 默认模板：`config/default_config/*_llm.yaml`
+- 默认 Provider：`getAistreamConfigOptional().llm` 的 `Provider` / `provider` 字段
+- 对外封装：`cfg.getLLMConfig(name)`（去掉内部 `_clientClass`）
 
-## 扩展
+## 常用 API
 
-- 注册新提供商：`LLMFactory.registerProvider(name, (config) => new YourClient(config))`。
-- 新客户端需实现：`constructor(config)`、`chat(messages, overrides)`；流式需实现 `chatStream(messages, onDelta, overrides)`，若支持 tool_calls 则在执行后调用 `MCPToolAdapter.emitMcpToolsToStream(tool_calls, toolResults, onDelta)` 以统一输出 mcp_tools。
+| 方法 | 说明 |
+|------|------|
+| `listProviders()` | 所有已配置 provider key（控制台下拉 enum 来源） |
+| `listFactories()` | 工厂元数据列表 |
+| `resolveProvider(input?)` | 解析最终 provider key |
+| `getProviderConfig(key)` | 合并后的提供商配置 |
+| `createClient(config?)` | 创建客户端实例 |
+| `registerProvider(name, fn)` | 运行时注册扩展 |
+
+## 扩展新客户端
+
+实现 `constructor(config)`、`chat(messages, overrides)`；流式需 `chatStream` 并在 tool 执行后调用 `MCPToolAdapter.emitMcpToolsToStream`。
+
+详见 [docs/FACTORY.md](../../docs/FACTORY.md)。

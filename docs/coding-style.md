@@ -16,6 +16,8 @@
 | 全局 | 裸名 `Bot`、`segment`、`cfg`（启动挂载）；`lib/` 可读 `import cfg` | `import Bot`；`global.Bot` / `global.cfg` |
 | 基类 | `import plugin from '../../lib/plugins/plugin.js'` | 新代码依赖 `global.plugin` |
 | 配置路径 | `getServerConfigPath(port, name)`（`config-constants.js`） | 手写 `data/server_bots/...` 字符串 |
+| aistream（`lib/`） | `getAistreamConfigOptional()` | 散落 `cfg?.aistream` |
+| MCP | `StreamLoader.mcpServer` | 已移除的全局 MCP 挂载 |
 | 文件 I/O | `FileUtils`（含 `createReadStream` / `createWriteStream`） | 业务中 `fs.existsSync` / `import fs` |
 | 对象工具 | `ObjectUtils` 类型判断、合并、克隆 | 重复实现 `isPlainObject` 等 |
 | 状态 | **类字段** `cache = new Map()` 或 `init()` | constructor 里 `this.cache = new Map()` |

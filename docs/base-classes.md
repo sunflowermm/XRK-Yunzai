@@ -123,7 +123,13 @@ export default class MyListener extends EventListener {
 
 ## LLMFactory（`lib/factory/llm/LLMFactory.js`）
 
-LLM 端点从各 `*_llm.yaml` 的 `providers[]` 解析；注册表见 `lib/factory/llm/factory-registry.js`。
+LLM 端点从各 `*_llm.yaml` 的 `providers[]` 解析；注册表见 `lib/factory/llm/factory-registry.js`。默认 Provider 读 `getAistreamConfigOptional().llm`。
+
+## StreamLoader / MCP（`lib/aistream/loader.js`）
+
+- 扫描 `plugins/<名>/stream/`；MCP 实例为 **`StreamLoader.mcpServer`**
+- 配置：`getAistreamConfigOptional()`；远程 MCP 用 `aistream.mcp.remote.mcpServers` JSON 块（非 `servers`/`selected`）
+- 详见 [reference/AISTREAM_AND_MCP.md](reference/AISTREAM_AND_MCP.md)
 
 ## 热重载与基础设施工具
 

@@ -9,7 +9,7 @@ description: 在 XRK-Yunzai 中开发或修改 AI 工作流时使用；涉及 pl
 
 - **写法**：`docs/coding-style.md` · **挂载**：`docs/runtime-surface.md`
 - **短契约**：`docs/base-classes.md`（AIStream 段）· **详述**：`docs/WORKFLOW_BASE_CLASS.md`
-- **工厂**：`docs/FACTORY.md` · **引擎**：`docs/reference/WORKFLOWS.md`
+- **工厂**：`docs/FACTORY.md` · **引擎**：`docs/reference/WORKFLOWS.md` · **MCP/配置**：`docs/reference/AISTREAM_AND_MCP.md`
 - **基类**：`lib/aistream/aistream.js` · **加载**：`lib/aistream/loader.js`
 
 ## 适用场景
@@ -54,7 +54,8 @@ export default class ChatStream extends AIStream {
 | 状态 | **类字段**；constructor 不建 Map 缓存 |
 | callAI | 返回 `{ text, usedReplyTool } \| null` |
 | LLM | `LLMFactory.createClient()`；合并见 `CONFIG_PRIORITY.md` |
-| 配置 | `data/server_bots/<port>/aistream.yaml` 或全局 `aistream.yaml` |
+| 配置 | `data/server_bots/<port>/aistream.yaml` 或全局 `aistream.yaml`；代码读 `getAistreamConfigOptional()` |
+| MCP | `StreamLoader.mcpServer`；远程 `mcp.remote.mcpServers` JSON 块 |
 
 ## 插件调用
 

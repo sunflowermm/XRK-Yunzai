@@ -73,10 +73,10 @@
 1. **创建类**：继承 `ConfigBase`，传入基础元数据（`name/displayName/description/filePath/fileType/schema`）。
 2. **定义 schema**：覆盖所有需要暴露到 UI 的字段，合理设置默认值与验证条件。
 3. **可选 hook**：
-   - `transformRead(data)`：读取后动态整理展示结构。
-   - `transformWrite(data)`：写入前做额外的派生或剪裁。
-   - `customValidate(data)`：除了 schema 之外的交叉字段校验，返回错误数组。
-4. **注册到 ConfigManager**：确保 `global.ConfigManager` 能实例化并暴露 `getStructure()`，前端即可自动渲染表单。
+   - `prepareValidate(data)`：写入校验前刷新动态 enum（如 `system` 的 aistream Provider）
+   - `transformRead(data)` / `transformWrite(data)`：读写变换
+   - `customValidate(data)`：交叉字段校验
+4. **注册到 ConfigManager**：暴露 `getStructure()`；`system` 配置在返回结构前刷新 aistream 动态 enum（Provider / MCP 列表）。
 
 ### 5. 与前端的协作约定
 - `getStructure()` 返回的 schema 将被缓存为 `schemaKey = configName[.subName]`，前端据此渲染组件与校验。

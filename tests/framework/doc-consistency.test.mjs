@@ -14,6 +14,7 @@ const DEPRECATION_DOCS_ALLOWLIST = new Set([
   '.cursor/skills/xrk-docs-audit/SKILL.md',
   '.cursor/skills/xrk-framework-tests/SKILL.md',
   'docs/runtime-surface.md',
+  'docs/reference/AISTREAM_AND_MCP.md',
 ]);
 
 const DOC_FILES = [
@@ -23,11 +24,20 @@ const DOC_FILES = [
   'docs/base-classes.md',
   'docs/BASE_CLASSES.md',
   'docs/FACTORY.md',
+  'docs/CONFIG_PRIORITY.md',
+  'docs/COMMONCONFIG_BASE.md',
+  'docs/runtime-surface.md',
   'docs/ARCHITECTURE.md',
   'docs/coding-style.md',
-  'docs/runtime-surface.md',
   'docs/WORKFLOW_BASE_CLASS.md',
+  'docs/reference/AISTREAM_AND_MCP.md',
+  'docs/reference/WORKFLOWS.md',
+  'docs/CORE_OBJECTS.md',
+  'docs/reference/CONFIG_AND_REDIS.md',
   'docs/reference/DEVICE.md',
+  'lib/aistream/README.md',
+  'lib/factory/llm/README.md',
+  'lib/utils/llm/README.md',
   'plugins/system-plugin/SYSTEM-PLUGIN.md',
   '.cursor/skills/xrk-base-layer/SKILL.md',
   '.cursor/skills/xrk-coding-style/SKILL.md',
@@ -48,6 +58,9 @@ const FORBIDDEN_PATTERNS = [
   { name: 'asr_interim WS', re: /asr_interim/ },
   { name: 'play_tts_audio', re: /play_tts_audio/ },
   { name: 'stream 目录列举 device 工作流', re: /stream\/.*chat\/device|chat\/device\/…/ },
+  { name: 'global.mcpServer', re: /global\.mcpServer/ },
+  { name: '旧版 MCP remote.servers', re: /remote\.servers/ },
+  { name: '旧版 MCP remote.selected', re: /remote\.selected/ },
 ];
 
 function readIfExists(rel) {
@@ -66,7 +79,7 @@ describe('文档一致性（禁止过时表述）', () => {
       const allowDeprecation = DEPRECATION_DOCS_ALLOWLIST.has(rel);
       for (const { name, re } of FORBIDDEN_PATTERNS) {
         it(`不含 ${name}`, () => {
-          if (allowDeprecation && /ASR|TTS|stream\/device|volcengine_asr|asr_interim|play_tts/.test(name)) {
+          if (allowDeprecation && /ASR|TTS|stream\/device|volcengine_asr|asr_interim|play_tts|global\.mcpServer|remote\.servers|remote\.selected/.test(name)) {
             return;
           }
           assert.ok(!re.test(text), `${rel} 仍含 ${name}`);
@@ -94,6 +107,7 @@ describe('权威文档存在', () => {
     'docs/runtime-surface.md',
     'docs/框架测试指南.md',
     'docs/文档审查清单.md',
+    'docs/reference/AISTREAM_AND_MCP.md',
     '.cursor/skills/SKILL_INDEX.md',
   ]) {
     it(rel, () => {

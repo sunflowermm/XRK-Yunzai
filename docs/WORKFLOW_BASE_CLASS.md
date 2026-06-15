@@ -207,18 +207,26 @@ ${this.buildFunctionsPrompt()}`;
 
 ## 配置参考
 
-### aistream配置
+### aistream 配置
+
+完整字段与 MCP 约定见 [reference/AISTREAM_AND_MCP.md](./reference/AISTREAM_AND_MCP.md)。默认模板：`config/default_config/aistream.yaml`。
 
 ```yaml
-# config/default_config/aistream.yaml
-aistream:
-  enabled: true
+# config/default_config/aistream.yaml（节选）
+enabled: true
+
+global:
+  maxTimeout: 30000
+
+llm:
+  Provider: ""          # 各 *_llm.yaml providers[] 的 key
   temperature: 0.8
-  max_tokens: 2000
-  top_p: 0.9
-  presence_penalty: 0.6
-  frequency_penalty: 0.6
-  timeout: 30000
+  maxTokens: 6000
+
+mcp:
+  enabled: true
+  remote:
+    mcpServers: []      # JSON 块数组，见 AISTREAM_AND_MCP
 ```
 
 ### LLM提供商配置
@@ -249,3 +257,4 @@ A: 工作流由 `lib/aistream/loader.js` 自动扫描 `plugins/<插件根>/strea
 - [项目基类总览](./BASE_CLASSES.md) - 所有基类的概览
 - [工厂模式文档](./FACTORY.md) - LLM提供商管理和客户端创建
 - [配置优先级文档](./CONFIG_PRIORITY.md) - 详细的配置优先级说明
+- [aistream / MCP 参考](./reference/AISTREAM_AND_MCP.md) - 配置读取、远程 MCP、Provider

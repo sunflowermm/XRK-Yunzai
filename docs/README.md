@@ -33,6 +33,7 @@
 | [reference/BOT.md](./reference/BOT.md) | Bot 生命周期、HTTP/代理、好友/群/消息、WS |
 | [reference/PLUGINS.md](./reference/PLUGINS.md) | 插件运行时手册（工作流调用、上下文、渲染） |
 | [reference/WORKFLOWS.md](./reference/WORKFLOWS.md) | AIStream、MemorySystem、WorkflowManager |
+| [reference/AISTREAM_AND_MCP.md](./reference/AISTREAM_AND_MCP.md) | aistream.yaml、MCP、Provider、配置读取约定 |
 | [reference/HTTP.md](./reference/HTTP.md) | HttpApi、路由与 WS 注册 |
 | [reference/CONFIG_AND_REDIS.md](./reference/CONFIG_AND_REDIS.md) | cfg API、Redis 初始化与事件 |
 | [reference/LOGGER.md](./reference/LOGGER.md) | logger 方法与格式化 |
@@ -45,7 +46,7 @@
 
 1. **快速了解**：主 [README](../README.md) → [coding-style.md](./coding-style.md) → [DEVELOPER_HUB.md](./overview/DEVELOPER_HUB.md)
 2. **写插件**：[runtime-surface.md](./runtime-surface.md) → [CORE_OBJECTS.md](./CORE_OBJECTS.md) → [PLUGIN_BASE_CLASS.md](./PLUGIN_BASE_CLASS.md)
-3. **写工作流**：[WORKFLOW_BASE_CLASS.md](./WORKFLOW_BASE_CLASS.md) → [reference/WORKFLOWS.md](./reference/WORKFLOWS.md)
+3. **写工作流**：[WORKFLOW_BASE_CLASS.md](./WORKFLOW_BASE_CLASS.md) → [reference/AISTREAM_AND_MCP.md](./reference/AISTREAM_AND_MCP.md) → [reference/WORKFLOWS.md](./reference/WORKFLOWS.md)
 4. **发布前**：[框架测试指南.md](./框架测试指南.md) → [文档审查清单.md](./文档审查清单.md)
 
 ---

@@ -24,10 +24,10 @@ LLMFactory
 ## 配置
 
 - 各工厂 YAML：`data/server_bots/*_llm.yaml`，结构为 `providers: [{ key, baseUrl, apiKey, model, ... }]`。
-- `aistream.llm.Provider` 填写 **providers[].key**（非工厂名）。
+- `aistream.llm.Provider` 填写 **providers[].key**；控制台为动态 **Select**（有可用 provider 时）。
 - 旧版扁平 yaml（无 providers）会在读取时自动合成单条端点（key 为工厂 id，如 `gptgod`）。
 - CommonConfig 表单：`plugins/system-plugin/commonconfig/shared/llm-provider-fields.js` 预设字段。
 
 ## 相关
 
-- [WORKFLOW_BASE_CLASS.md](./WORKFLOW_BASE_CLASS.md)、[reference/WORKFLOWS.md](./reference/WORKFLOWS.md)（工作流内如何传 `apiConfig`）
+- [WORKFLOW_BASE_CLASS.md](./WORKFLOW_BASE_CLASS.md)、[reference/AISTREAM_AND_MCP.md](./reference/AISTREAM_AND_MCP.md)、[reference/WORKFLOWS.md](./reference/WORKFLOWS.md)

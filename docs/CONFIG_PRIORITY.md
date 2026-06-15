@@ -4,7 +4,7 @@
 
 与 **单次 LLM 请求**相关的字段，在 `AIStream.resolveLLMConfig(apiConfig)` 中按 **字段** 选择来源（不是整对象一层层覆盖）。同一字段的常见优先级为：
 
-**`apiConfig`（含 `execute` 第三参数传入的 config） > `this.config`（工作流构造函数里的 `config`）> 提供商默认（`LLMFactory.getProviderConfig(provider)`）> `cfg.aistream.llm`**（`aistream.yaml`：含 `Provider`、`timeout`、`temperature`、`maxTokens`、`retry` 等）**；请求超时还会在以上皆无时参照 `cfg.aistream.global.maxTimeout`**
+**`apiConfig`（含 `execute` 第三参数）> `this.config` > `LLMFactory.getProviderConfig(provider)` > `getAistreamConfigOptional().llm`**（`aistream.yaml`：`Provider`、`timeout`、`temperature`、`maxTokens`、`retry` 等）；超时兜底 **`global.maxTimeout`**
 
 其中 `provider` 本身由 `apiConfig.provider` → `this.config.provider` → `aistream.llm.Provider` → `LLMFactory.resolveProvider({})` 解析。
 
@@ -43,4 +43,6 @@ await chatStream.execute(e, e.msg, {
 ## 相关
 
 - 实现：`lib/aistream/aistream.js` 中 `resolveLLMConfig`、`callAI`。
-- 工厂：`docs/FACTORY.md`；`cfg.getLLMConfig(provider)` 封装自 `LLMFactory.getProviderConfig`（去掉 `_clientClass`）。
+- 配置读取：`getAistreamConfigOptional()`（`lib/utils/aistream-config.js`）。
+- 工厂：`docs/FACTORY.md`；`cfg.getLLMConfig(provider)` 封装自 `LLMFactory.getProviderConfig`。
+- MCP / aistream 全量说明：`docs/reference/AISTREAM_AND_MCP.md`。

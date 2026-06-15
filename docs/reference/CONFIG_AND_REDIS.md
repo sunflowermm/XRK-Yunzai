@@ -33,7 +33,7 @@
 | `cfg.notice` | `notice.yaml`（iyuu、sct、feishu_webhook 等） |
 | `cfg.db` | `db.yaml` |
 | `cfg.monitor` | `monitor.yaml` |
-| `cfg.aistream` | `aistream.yaml` |
+| `cfg.aistream` | `aistream.yaml`；**`lib/` 模块读配置请用 `getAistreamConfigOptional()`**（见 [AISTREAM_AND_MCP.md](./AISTREAM_AND_MCP.md)） |
 | `cfg.llm` | 所有 LLM 提供商配置（由 LLMFactory 等提供） |
 | `cfg.masterQQ` | 从 other 归一化得到的主人 QQ 数组 |
 | `cfg.master` | 兼容用：`{ bot_uin: [masterQQ] }` |

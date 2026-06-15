@@ -33,10 +33,24 @@ Handler 签名：`(req, res, Bot) => void | Promise<void>`。
 | API | 说明 |
 |-----|------|
 | `cfg` | `lib/config/config.js` 单例；`cfg.getLLMConfig(provider)` 等 |
+| `getAistreamConfigOptional()` | `lib/utils/aistream-config.js`；**`lib/` 内读 aistream 的统一入口** |
 | `getServerConfigPath(port, name)` | 默认模板或 `data/server_bots/` 路径 |
 | `GLOBAL_CONFIG_NAMES` / `PORT_CONFIG_NAMES` | 全局 vs 端口级配置分类 |
 
 工厂配置后缀：`_llm`、`_compat_llm`（无 ASR/TTS 工厂）。
+
+---
+
+## AIStream / MCP
+
+| 符号 | 说明 |
+|------|------|
+| `Bot.StreamLoader` | 工作流加载器（`lib/aistream/loader.js` 单例） |
+| `StreamLoader.mcpServer` | MCP 工具服务实例 |
+| `MCPToolAdapter.getMCPServer()` | 等价于 `StreamLoader.mcpServer` |
+
+`lib/` 内读 aistream 配置用 `getAistreamConfigOptional()`，勿散落 `cfg?.aistream`。  
+勿使用已移除的全局 MCP 挂载。详见 [reference/AISTREAM_AND_MCP.md](reference/AISTREAM_AND_MCP.md)。
 
 ---
 
