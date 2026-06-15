@@ -22,6 +22,7 @@ alwaysApply: true
 | 路径 | 用途 | 实际实现 |
 |------|------|----------|
 | `lib/puppeteer/puppeteer.js` | genshin、earth-k-plugin、logier-plugin、rconsole-plugin 等 `import puppeteer from '../../../lib/puppeteer/puppeteer.js'` | 4 行 shim → `lib/renderer/puppeteer-compat.js` → `RendererLoader` |
+| `lib/plugins/config.js` | zmd-plugin、miao-plugin 等 `import makeConfig from '../../../lib/plugins/config.js'` | TRSS 兼容 `makeConfig()` → `config/<name>.yaml`；新插件用 CommonConfig |
 
 - **禁止**以「零引用」为由删除上述 shim；若需收敛，须全仓插件改 import 后再删。
 - `lib/renderer/puppeteer-compat.js` 为 runtime 与 shim 的共用实现，同样禁止删。

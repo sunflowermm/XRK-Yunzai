@@ -245,7 +245,7 @@ rule: [
 A: 在插件方法中，`this.e.bot` 或全局 `Bot` 对象可用。
 
 **Q: 如何访问配置？**
-A: 使用 `import cfg from '../../lib/config/config.js'` 导入配置。
+A: 框架级用 `cfg`（`import cfg from '../../lib/config/config.js'`）。**TRSS 历史插件**用 `lib/plugins/config.js` 的 `makeConfig()` 读写 `config/<name>.yaml`；**新插件**用 CommonConfig（见 [COMMONCONFIG_BASE.md](./COMMONCONFIG_BASE.md)）。
 
 **Q: 如何调用其他插件？**
 A: 使用 `Bot.em()` 触发事件，或直接调用插件方法。

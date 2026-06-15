@@ -36,6 +36,7 @@ Handler 签名：`(req, res, Bot) => void | Promise<void>`。
 | `getAistreamConfigOptional()` | `lib/utils/aistream-config.js`；**`lib/` 内读 aistream 的统一入口** |
 | `getServerConfigPath(port, name)` | 默认模板或 `data/server_bots/` 路径 |
 | `GLOBAL_CONFIG_NAMES` / `PORT_CONFIG_NAMES` | 全局 vs 端口级配置分类 |
+| `makeConfig()` | `lib/plugins/config.js`；**TRSS 第三方插件**读 `config/<name>.yaml`（兼容层，禁止删） |
 
 工厂配置后缀：`_llm`、`_compat_llm`（无 ASR/TTS 工厂）。
 

@@ -17,6 +17,8 @@ alwaysApply: false
 - 使用全局 `Bot`、`segment`；勿 `import Bot`、勿 `import { segment } from 'oicq'`。
 - `FileUtils` / `ObjectUtils`；禁止业务直连 `fs`。
 - 配置：`cfg` 或端口级 YAML；路径 `getServerConfigPath(port, name)`。
+- **历史插件 YAML**：`import makeConfig from '../../lib/plugins/config.js'`（`config/<name>.yaml`，TRSS 兼容，**禁止删**）。
+- **新插件配置**：CommonConfig（`plugins/<名>/commonconfig/`）。
 
 ## 工作流
 

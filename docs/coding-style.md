@@ -18,6 +18,7 @@
 | 配置路径 | `getServerConfigPath(port, name)`（`config-constants.js`） | 手写 `data/server_bots/...` 字符串 |
 | aistream（`lib/`） | `getAistreamConfigOptional()` | 散落 `cfg?.aistream` |
 | MCP | `StreamLoader.mcpServer` | 已移除的全局 MCP 挂载 |
+| 历史插件配置 | `lib/plugins/config.js` 的 `makeConfig()` | 删除兼容层（zmd-plugin 等依赖） |
 | 文件 I/O | `FileUtils`（含 `createReadStream` / `createWriteStream`） | 业务中 `fs.existsSync` / `import fs` |
 | 对象工具 | `ObjectUtils` 类型判断、合并、克隆 | 重复实现 `isPlainObject` 等 |
 | 状态 | **类字段** `cache = new Map()` 或 `init()` | constructor 里 `this.cache = new Map()` |

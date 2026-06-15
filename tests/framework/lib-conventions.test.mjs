@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const libRoot = path.join(root, 'lib');
@@ -123,6 +123,21 @@ describe('lib 底层约定', () => {
       const text = fs.readFileSync(file, 'utf8');
       assert.ok(!bad.test(text), `${path.relative(root, file)} 应使用裸名 Bot/cfg/segment 或 import cfg`);
     }
+  });
+
+  it('lib/plugins/config.js 保留 TRSS makeConfig 兼容', async () => {
+    const configPath = path.join(libRoot, 'plugins', 'config.js');
+    assert.ok(fs.existsSync(configPath), '缺少 lib/plugins/config.js');
+    const text = fs.readFileSync(configPath, 'utf8');
+    assert.match(text, /export default async function makeConfig/);
+    assert.match(text, /export async function watcher/);
+    assert.ok(!/from ['"]lodash['"]/.test(text));
+    assert.match(text, /ObjectUtils\.deepMerge/);
+    assert.match(text, /HotReloadBase\.createWatcher/);
+
+    const mod = await import(pathToFileURL(configPath).href);
+    assert.equal(typeof mod.default, 'function');
+    assert.equal(typeof mod.watcher, 'function');
   });
 
   it('lib 业务日志统一 Bot.makeLog（实现层 util/log 除外）', () => {

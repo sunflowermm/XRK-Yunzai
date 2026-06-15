@@ -60,6 +60,8 @@ export default class MyPlugin extends plugin {
 | 状态 | **类字段**存 Map/缓存；constructor 不 `new Map()` |
 | 全局 | 裸名 `Bot`、`segment`；勿 `import Bot` |
 | 文件 | `FileUtils`；配置 `getServerConfigPath` / `cfg` |
+| 历史 YAML 配置 | `lib/plugins/config.js` 的 `makeConfig()`（TRSS 兼容，**禁止删**） |
+| 新插件配置 | CommonConfig（`plugins/<名>/commonconfig/`） |
 | 热重载 | 监视用 `HotReloadBase`；实现 `async destroy()` |
 
 ## 工作流调用

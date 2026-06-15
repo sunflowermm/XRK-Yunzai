@@ -103,6 +103,10 @@ export default class MyConfig extends ConfigBase {
 
 注册入口：`plugins/system-plugin/commonconfig/`。
 
+## 历史插件配置（`lib/plugins/config.js`）
+
+TRSS / 传统 Yunzai 第三方插件（如 zmd-plugin）使用 `makeConfig(name, defaults)` 读写 **`config/<name>.yaml`**。新插件用 CommonConfig；**本模块为兼容层，禁止删除**。详见 `lib/plugins/README.md`。
+
 ## EventListener（`lib/listener/listener.js`）
 
 ```javascript

@@ -36,6 +36,7 @@ const DOC_FILES = [
   'docs/reference/CONFIG_AND_REDIS.md',
   'docs/reference/DEVICE.md',
   'lib/aistream/README.md',
+  'lib/plugins/README.md',
   'lib/factory/llm/README.md',
   'lib/utils/llm/README.md',
   'plugins/system-plugin/SYSTEM-PLUGIN.md',
