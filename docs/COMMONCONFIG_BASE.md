@@ -52,11 +52,20 @@
 - `required` 控制必填字段；`min/max/minLength/maxLength/pattern/enum` 直接用于校验。
 - 任意字段可添加 `label/description/placeholder/component/default` 帮助前端渲染。
 
-### 3. 类型标准化流程
-1. **读取**：`read()` 在解析 YAML/JSON 后立即调用 `cleanConfigData`，根据 schema 把每个字段转换为目标类型（数字、布尔、数组、对象等），确保缓存与 API 输出的数据结构统一。
-2. **写入**：`write()` 在 transform 与 validate 之前再次执行 `cleanConfigData`。这样即使前端传来字符串数字或 `'on'/'off'` 之类值，也能在落盘前被转换为正确的 YAML 类型。
-3. **API 层**：`plugins/<插件根>/http/config.js` 复用同一个 `cleanConfigData`，对局部 `set`/`write` 请求做相同的类型收敛，避免重复判断。
-4. **前端**：`www/xrk/app.js` 在可视化表单和 JSON 编辑模式中都通过 schema key 调用 `_normalizeConfigData`，保持与后端一致的类型约束，防止组件之间出现值冲突。
+### 3. 类型标准化与三层合并
+
+**读取合并顺序**（`ConfigBase.read()` / `mergeConfigLayers`）：
+
+1. `config/default_config/{name}.yaml` — 模板兜底  
+2. `data/server_bots/...` — 实际配置覆盖  
+3. `schema.fields[].default` — 新增字段缺省值（旧 yaml 无此键时 Web 不显示空值）  
+
+**写入**：`readStored()` 仅读 data 层再合并，避免把模板全量复制进 data。
+
+1. **读取**：`read()` 在三层合并后调用 `cleanConfigData`，根据 schema 做类型标准化。
+2. **写入**：`write()` 在 transform 与 validate 之前再次执行 `cleanConfigData`。
+3. **API 层**：`plugins/system-plugin/http/config.js` 复用同一套 `cleanConfigData` / `deepMergeConfig`。
+4. **前端**：`fillMissingSchemaDefaults` 仅作 flat 路径兜底；有效值以 API `read`/`flat` 为准。
 
 > 统一的标准化流程意味着任何一段配置数据，从 UI → API → 底层文件，始终使用同一份 schema 信息来决定真实数据类型，彻底消除“字符串数字”“真假值”以及数组/对象结构不一致的问题。
 

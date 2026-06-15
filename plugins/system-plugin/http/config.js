@@ -3,7 +3,7 @@
  * 使用 Bot.ConfigManager 提供配置读写
  */
 import cfg from '../../../lib/config/config.js';
-import { cleanConfigData, flattenStructure, flattenData, unflattenData } from '../../../lib/commonconfig/config-utils.js';
+import { cleanConfigData, flattenStructure, flattenData, unflattenData, deepMergeConfig } from '../../../lib/commonconfig/config-utils.js';
 
 function getConfigManager(Bot) {
   return Bot?.ConfigManager;
@@ -650,21 +650,22 @@ export default {
           let finalData = cleanedData;
           if (validate) {
             try {
-              // 读取现有配置
               let existingData = {};
               if (config.configFiles && childPath) {
-                if (typeof config.read === 'function') {
+                if (typeof config.readStored === 'function') {
+                  const all = await config.readStored(false);
+                  existingData = all?.[childPath] ?? {};
+                } else if (typeof config.read === 'function') {
                   existingData = await config.read(childPath) || {};
                 }
+              } else if (typeof config.readStored === 'function') {
+                existingData = await config.readStored(false) || {};
               } else {
                 existingData = await config.read() || {};
               }
-              
-              // 深度合并：新数据覆盖现有数据，但保留现有数据的其他字段
-          const { deepMergeConfig } = await import('../../../lib/commonconfig/config-utils.js');
+              // 仅合并 data 层，避免把 default_config 模板写入 data 文件
               finalData = deepMergeConfig(existingData, cleanedData, schema);
             } catch (e) {
-              // 如果读取失败，使用新数据（可能是首次创建）
               finalData = cleanedData;
             }
           }

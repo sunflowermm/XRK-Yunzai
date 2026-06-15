@@ -99,6 +99,7 @@ export function normalizeTemplatePath(path = '') {
 }
 
 export function buildDefaultsFromFields(fields = {}, cloneValueFn = cloneValue) {
+  // 与 lib/commonconfig/config-utils.js buildDefaultsFromSchema 语义对齐（前端无法直接 import lib）
   const result = {};
   Object.entries(fields).forEach(([key, schema]) => {
     if (schema.type === 'object' && schema.fields) {
@@ -127,7 +128,7 @@ export function formatGroupLabel(label) {
 
 /**
  * 按 flat-structure 补齐缺失的 schema 默认值（object / array / subform）
- * 避免「新增再删除」后 original 为 undefined 而当前值为 [] 仍显示脏状态
+ * 后端 read() 已通过 mergeConfigLayers 合并；此处兜底 flat 路径与脏状态检测。
  */
 export function fillMissingSchemaDefaults(flatSchema, values, cloneValueFn = cloneValue) {
   const filled = { ...(values ?? {}) };
