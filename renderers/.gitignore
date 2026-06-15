@@ -4,7 +4,5 @@
 !截图失败.jpg
 !puppeteer
 !puppeteer/**
-puppeteer/config_default.yaml
 !playwright
 !playwright/**
-playwright/config_default.yaml

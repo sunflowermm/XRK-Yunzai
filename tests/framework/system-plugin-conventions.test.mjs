@@ -91,4 +91,15 @@ describe('system-plugin 底层约定', () => {
       assert.equal(stray.length, 0, `不应存在 plugins/system-plugin/streams/ 工作流: ${stray.join(', ')}`);
     }
   });
+
+  it('commonconfig/shared LLM schema 必须存在（勿被 gitignore 排除）', () => {
+    const shared = path.join(SYSTEM_PLUGIN_DIR, 'commonconfig', 'shared');
+    for (const name of ['create-llm-factory-config.js', 'llm-provider-fields.js']) {
+      assert.ok(fs.existsSync(path.join(shared, name)), `缺少 commonconfig/shared/${name}`);
+    }
+    assert.ok(
+      fs.existsSync(path.join(SYSTEM_PLUGIN_DIR, 'commonconfig', 'deepseek_llm.js')),
+      '缺少 commonconfig/deepseek_llm.js'
+    );
+  });
 });
