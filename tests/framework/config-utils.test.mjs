@@ -141,3 +141,11 @@ describe('config-utils merge layers', () => {
     assert.deepEqual(unwrapped, [{ name: 'a' }]);
   });
 });
+
+describe('string-array-utils', () => {
+  it('mergeUniqueStrings keeps order and merges persisted extras', async () => {
+    const { mergeUniqueStrings } = await import('../../lib/utils/string-array-utils.js');
+    assert.deepEqual(mergeUniqueStrings(['a', 'b'], 'c'), ['a', 'b', 'c']);
+    assert.deepEqual(mergeUniqueStrings(['a'], ['a', 'b']), ['a', 'b']);
+  });
+});

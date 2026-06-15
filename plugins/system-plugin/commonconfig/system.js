@@ -5,6 +5,7 @@ import { getServerConfigPath, SERVER_BOTS_DIR, RENDERERS_DIR, DATA_DB_DEFAULT_RE
 import StreamLoader from '../../../lib/aistream/loader.js';
 import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
 import { mergeUniqueStrings } from '../../../lib/utils/string-array-utils.js';
+import { getAistreamConfigOptional } from '../../../lib/utils/aistream-config.js';
 
 /**
  * 系统配置管理（与 XRK-AGT 对齐）
@@ -2286,7 +2287,7 @@ export default class SystemConfig extends ConfigBase {
     for (const [name, meta] of Object.entries(this.configFiles)) {
       structure.configs[name] = {
         ...meta,
-        fields: (meta.schema && meta.schema.fields) || {}
+        fields: meta.schema?.fields || {}
       };
     }
 
@@ -2302,7 +2303,7 @@ export default class SystemConfig extends ConfigBase {
       const aistreamSchema = this.configFiles?.aistream?.schema?.fields;
       if (!aistreamSchema) return;
 
-      const snap = validateSnapshot || cfg?.aistream || {};
+      const snap = validateSnapshot || getAistreamConfigOptional();
       this._refreshAistreamMcpEnums(aistreamSchema.mcp?.fields, snap);
       this._refreshAistreamLlmProviderEnum(aistreamSchema.llm?.fields, snap);
     } catch (e) {
@@ -2315,8 +2316,7 @@ export default class SystemConfig extends ConfigBase {
 
     let workflowKeys = [];
     try {
-      const streams = StreamLoader.getStreamsByPriority?.() || [];
-      workflowKeys = streams
+      workflowKeys = StreamLoader.getStreamsByPriority()
         .filter((s) => !s.primaryStream && !s.secondaryStreams)
         .map((s) => s.name)
         .filter(Boolean);
@@ -2326,7 +2326,7 @@ export default class SystemConfig extends ConfigBase {
 
     let remoteServers = [];
     try {
-      remoteServers = StreamLoader.listRemoteMCPServers?.() || [];
+      remoteServers = StreamLoader.listRemoteMCPServers();
     } catch (e) {
       Bot.makeLog('warn', `[SystemConfig] 获取远程 MCP 列表失败: ${e.message}`, 'SystemConfig');
     }
@@ -2344,7 +2344,7 @@ export default class SystemConfig extends ConfigBase {
 
     let providers = [];
     try {
-      providers = LLMFactory.listProviders?.() || [];
+      providers = LLMFactory.listProviders();
     } catch (e) {
       Bot.makeLog('warn', `[SystemConfig] 获取 LLM Provider 列表失败: ${e.message}`, 'SystemConfig');
     }

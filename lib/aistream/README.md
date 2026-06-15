@@ -4,7 +4,7 @@
 
 | 文件 | 职责 |
 |------|------|
-| **loader.js** | `StreamLoader`：加载 `plugins/<插件>/stream/`；MCP（本体、内置 `mcpServers`、远程 `aistream.mcp.remote`）。 |
+| **loader.js** | `StreamLoader`：加载 `plugins/<插件>/stream/`；MCP（本体、内置 `mcpServers`、远程 `aistream.mcp.remote.mcpServers` JSON 块）。 |
 | **aistream.js** | `AIStream`：构造期默认配置与 **XRK-AGT** 对齐（仅 `enabled/temperature/maxTokens/topP/presencePenalty/frequencyPenalty`，不含 `model`/`baseUrl`/`apiKey`/`timeout`）；`resolveLLMConfig` 合并单次调用、工作流 `this.config`、`LLMFactory.getProviderConfig(provider)`、`cfg.aistream.llm`；`callAI` 返回 `{ text, usedReplyTool }` 或 `null`（见 `lib/utils/llm/llm-nonstream-reply.js`），`callAIStream` 使用 `LLMFactory.createClient` 与 `{ ...config, stream, streams }`。 |
 | **memory.js** / **workflow-manager.js** | 记忆与调度，见 [docs/reference/WORKFLOWS.md](../../docs/reference/WORKFLOWS.md)。 |
 
