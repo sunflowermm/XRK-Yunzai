@@ -18,6 +18,7 @@ import {
   makeFabricatorForwardMsg
 } from '../lib/message-fabricator.js';
 import { TOOL_ROUNDS_EXHAUSTED_USER_TEXT } from '../../../lib/utils/llm/llm-nonstream-reply.js';
+import { summarizeToolForHistory } from '../../../lib/utils/mcp-server.js';
 const EMOTIONS_DIR = resolveProjectPath(RESOURCES_AIIMAGES_DIR);
 const EMOTION_TYPES = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
 const IMAGE_SEND_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
@@ -42,6 +43,8 @@ function randomRange(min, max) {
 export default class ChatStream extends AIStream {
   static emotionImages = {};
   static messageHistory = new Map();
+  /** 本机写入（工具/【我】）在同一群内的单调序号，保证同毫秒内按执行顺序插入 */
+  static historyLocalSeqByGroup = new Map();
   static cleanupTimer = null;
   /** 识图 MCP 暂关（getMessageImages / recognizeImage 不注册） */
   static IMAGE_RECOGNITION_MCP_ENABLED = false;
@@ -51,6 +54,11 @@ export default class ChatStream extends AIStream {
   static GROUP_HISTORY_PROMPT_DEFAULT = 45;
   static GROUP_HISTORY_PROMPT_GLOBAL = 60;
   static GROUP_HISTORY_PROMPT_DEBUG = 120;
+  /** 已通过 reply/recordAIResponse 写入历史的对外工具，不再重复记工具摘要 */
+  static TOOL_HISTORY_SKIP = new Set([
+    'reply', 'at', 'emotion', 'send_file', 'send_image', 'poke',
+    'thumbUp', 'sign', 'emojiReaction', 'recall', 'forgeForward'
+  ]);
 
   constructor() {
     super({
@@ -237,6 +245,8 @@ export default class ChatStream extends AIStream {
       text: msg.message,
       isBot: !!msg.isBot,
       isTool: !!msg.isTool,
+      toolName: msg.toolName,
+      sortSeq: msg.sortSeq,
       hasImage: !!msg.hasImage,
       hasFile: !!msg.hasFile,
       hasFace: !!msg.hasFace,
@@ -1565,9 +1575,7 @@ export default class ChatStream extends AIStream {
           Math.max(parseInt(args.limit, 10) || 30, 1),
           ChatStream.GROUP_HISTORY_STORE_MAX
         );
-        const history = ChatStream._compactHistoryForPrompt(
-          ChatStream.messageHistory.get(e.group_id) || []
-        ).slice(-limit);
+        const history = ChatStream.getGroupHistoryForPrompt(e.group_id).slice(-limit);
         const data = {
           limit,
           count: history.length,
@@ -1850,7 +1858,7 @@ export default class ChatStream extends AIStream {
         nickname: nickname || '未知用户',
         message: message || '',
         message_id: messageId,
-        time: e.time || Date.now(),
+        time: ChatStream.normalizeHistoryTimeMs(e.time),
         platform: e.platform || 'onebot',
         hasImage,
         hasFile: !!segFlags.hasFile,
@@ -1860,14 +1868,7 @@ export default class ChatStream extends AIStream {
       };
 
       if (groupId && e.isGroup !== false) {
-        if (!ChatStream.messageHistory.has(groupId)) {
-          ChatStream.messageHistory.set(groupId, []);
-        }
-        const history = ChatStream.messageHistory.get(groupId);
-        history.push(msgData);
-        if (history.length > ChatStream.GROUP_HISTORY_STORE_MAX) {
-          ChatStream.messageHistory.set(groupId, history.slice(-ChatStream.GROUP_HISTORY_STORE_MAX));
-        }
+        ChatStream._pushGroupHistoryEntry(groupId, msgData);
       }
 
       Bot.makeLog('debug', `[ChatStream] recordMessage group=${groupId} userId=${userId} msgLen=${(message || '').length} messageId=${messageId}`, 'ChatStream');
@@ -1896,18 +1897,14 @@ export default class ChatStream extends AIStream {
       nickname: e.bot?.nickname || e.bot?.info?.nickname || e.bot?.name || 'Bot',
       message: cleanText || text, // 记录清理后的文本（不含图片内容标记）
       message_id: `local_${Date.now()}`,
-      time: Date.now(),
+      time: 0,
       platform: 'onebot',
       hasImage: false,
       isBot: true,
       imageContentMark: imageContent || undefined // 图片内容标记（如果存在）
     };
     if (e?.isGroup && e.group_id) {
-      const history = ChatStream.messageHistory.get(e.group_id) || [];
-      history.push(msgData);
-      if (history.length > ChatStream.GROUP_HISTORY_STORE_MAX) {
-        ChatStream.messageHistory.set(e.group_id, history.slice(-ChatStream.GROUP_HISTORY_STORE_MAX));
-      }
+      ChatStream._pushGroupHistoryEntry(e.group_id, msgData, { local: true });
     }
     if (imageContent) {
       Bot.makeLog('debug', `[ChatStream] recordAIResponse 提取图片内容标记: ${imageContent}`, 'ChatStream');
@@ -1925,21 +1922,91 @@ export default class ChatStream extends AIStream {
     }
   }
 
+  static _shouldRecordToolInHistory(toolName) {
+    const base = String(toolName || '').split('.').pop();
+    return base && !ChatStream.TOOL_HISTORY_SKIP.has(base);
+  }
+
+  static _dropGroupHistoryState(groupId) {
+    ChatStream.messageHistory.delete(groupId);
+    ChatStream.historyLocalSeqByGroup.delete(groupId);
+  }
+
+  /** OneBot 多为秒级 Unix；本机 Date.now 为毫秒，统一为毫秒再排序 */
+  static normalizeHistoryTimeMs(time) {
+    const n = Number(time);
+    if (!Number.isFinite(n) || n <= 0) return Date.now();
+    return n < 1e12 ? Math.floor(n * 1000) : Math.floor(n);
+  }
+
+  static _allocateLocalHistorySlot(groupId) {
+    const history = ChatStream.messageHistory.get(groupId) || [];
+    let maxT = 0;
+    for (const m of history) {
+      const t = ChatStream.normalizeHistoryTimeMs(m.time);
+      if (t > maxT) maxT = t;
+    }
+    const seq = (ChatStream.historyLocalSeqByGroup.get(groupId) || 0) + 1;
+    ChatStream.historyLocalSeqByGroup.set(groupId, seq);
+    return { time: Math.max(Date.now(), maxT + 1), sortSeq: seq };
+  }
+
+  static _prepareHistoryEntry(groupId, msgData, { local = false } = {}) {
+    const entry = { ...msgData };
+    if (local) {
+      Object.assign(entry, ChatStream._allocateLocalHistorySlot(groupId));
+    } else {
+      entry.time = ChatStream.normalizeHistoryTimeMs(entry.time);
+    }
+    return entry;
+  }
+
+  static _mergeAndStoreGroupHistory(groupId, entries) {
+    if (!groupId || !entries?.length) return;
+    if (!ChatStream.messageHistory.has(groupId)) {
+      ChatStream.messageHistory.set(groupId, []);
+    }
+    const history = ChatStream.messageHistory.get(groupId);
+    const merged = ChatStream._sortHistoryChronological(history.concat(entries));
+    ChatStream.messageHistory.set(
+      groupId,
+      merged.length > ChatStream.GROUP_HISTORY_STORE_MAX
+        ? merged.slice(-ChatStream.GROUP_HISTORY_STORE_MAX)
+        : merged
+    );
+  }
+
+  static _pushGroupHistoryEntry(groupId, msgData, { local = false } = {}) {
+    if (!groupId || !msgData) return;
+    const entry = ChatStream._prepareHistoryEntry(groupId, msgData, { local });
+    ChatStream._mergeAndStoreGroupHistory(groupId, [entry]);
+  }
+
   /**
-   * 工具结果仅写日志，不入群聊历史（避免 JSON 干扰模型复读）。
+   * 将工具调用摘要写入群聊历史（供下一轮 prompt 延续任务；reply 等对外工具跳过）。
    */
-  recordToolCallResult(e, toolName, result) {
+  recordToolCallResult(e, toolName, result, args = null) {
     if (!e?.isGroup || !e.group_id) return;
+    if (!ChatStream._shouldRecordToolInHistory(toolName)) return;
     try {
-      const preview =
-        result?.success && result?.raw
-          ? String(result.raw).slice(0, 500)
-          : result?.success && result?.data
-            ? JSON.stringify(result.data).slice(0, 500)
-            : String(result?.error || '已完成').slice(0, 500);
+      const summary = summarizeToolForHistory(toolName, result, args);
+      if (!summary?.trim()) return;
+      const msgData = {
+        user_id: e.self_id,
+        nickname: e.bot?.nickname || e.bot?.info?.nickname || e.bot?.name || 'Bot',
+        message: summary.trim(),
+        message_id: `tool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        time: 0,
+        platform: 'onebot',
+        hasImage: false,
+        isBot: true,
+        isTool: true,
+        toolName: String(toolName || '')
+      };
+      ChatStream._pushGroupHistoryEntry(e.group_id, msgData, { local: true });
       Bot.makeLog(
         'debug',
-        `[ChatStream] recordToolCallResult tool=${toolName} group=${e.group_id} preview=${preview}`,
+        `[ChatStream] recordToolCallResult tool=${toolName} group=${e.group_id} summaryLen=${summary.length}`,
         'ChatStream'
       );
     } catch (err) {
@@ -2039,7 +2106,8 @@ export default class ChatStream extends AIStream {
       '- 工具若表明已送达，勿再用 reply/at 重复实质相同的话。',
       '',
       '## 上下文说明',
-      '- 群聊记录格式：昵称(QQ)[ID:xxx]；**【我】= 你已对用户说过的话**，同一话题勿重复回答；优先对准 `[当前消息]`。',
+      '- **[群聊记录] 从上到下 = 时间由早到晚**，越靠下越新；最近发言在记录末尾附近。**只回应 `[当前消息]`**，勿答记录里很早的旧 @ 或已用【我】回过的内容。',
+      '- 群聊记录格式：昵称(QQ)[ID:xxx]；**【我】= 你已对用户说过的话**；【我·工具】= 已执行的工具步骤，**按时间穿插在对话里**（表示该问题已处理过），勿把摘要原样 reply。',
       '- 标签：[含图片] 表示有图（**识图 MCP 暂关**，见标签即可，勿调 getMessageImages/recognizeImage）；[含文件]、[含表情]、[合并转发] 同理。',
       '- 合并转发**仅一层**，内层不可读（协议限制，勿臆造内文）。',
       '- 读记录用 **readChatRecord**；下图片/文件/表情包到工作区用 **saveMessageAsset**；发图片用 **send_image**（勿 send_file）；发文档等用 **send_file**。',
@@ -2226,9 +2294,10 @@ export default class ChatStream extends AIStream {
     try {
       let rawHistory;
       try {
-        rawHistory = await getter(undefined, ChatStream.GROUP_HISTORY_SYNC_FETCH, true);
+        // reverseOrder=false：适配器按时间正序返回，便于与 recordMessage 合并
+        rawHistory = await getter(undefined, ChatStream.GROUP_HISTORY_SYNC_FETCH, false);
       } catch {
-        rawHistory = await getter(ChatStream.GROUP_HISTORY_SYNC_FETCH);
+        rawHistory = await getter(undefined, ChatStream.GROUP_HISTORY_SYNC_FETCH);
       }
 
       const history = ChatStream.messageHistory.get(groupId) || [];
@@ -2267,7 +2336,7 @@ export default class ChatStream extends AIStream {
           nickname,
           message: text || '',
           message_id: idStr,
-          time: msg.time || Date.now(),
+          time: ChatStream.normalizeHistoryTimeMs(msg.time),
           platform: 'onebot',
           hasImage,
           hasFile: segFlags.hasFile,
@@ -2279,13 +2348,7 @@ export default class ChatStream extends AIStream {
       }
 
       if (newMessages.length > 0) {
-        const merged = history.concat(newMessages);
-        const limited =
-          merged.length > ChatStream.GROUP_HISTORY_STORE_MAX
-            ? merged.slice(-ChatStream.GROUP_HISTORY_STORE_MAX)
-            : merged;
-        ChatStream.messageHistory.set(groupId, limited);
-
+        ChatStream._mergeAndStoreGroupHistory(groupId, newMessages);
       }
     } catch (error) {
       Bot.makeLog(
@@ -2318,13 +2381,39 @@ export default class ChatStream extends AIStream {
     return id.startsWith('local_') || id.startsWith('tool_') || /^\d{13}$/.test(id);
   }
 
-  /** 去掉工具记录、合并重复的【我】条目（本地临时 id vs 适配器真实 id） */
+  /** 按时间升序排列群聊历史（同毫秒用 sortSeq / message_id 兜底） */
+  static _sortHistoryChronological(history) {
+    if (!Array.isArray(history) || history.length <= 1) return history || [];
+    return [...history].sort((a, b) => {
+      const ta = ChatStream.normalizeHistoryTimeMs(a?.time);
+      const tb = ChatStream.normalizeHistoryTimeMs(b?.time);
+      if (ta !== tb) return ta - tb;
+      const sa = Number(a?.sortSeq) || 0;
+      const sb = Number(b?.sortSeq) || 0;
+      if (sa !== sb) return sa - sb;
+      const na = Number(a?.message_id);
+      const nb = Number(b?.message_id);
+      if (!Number.isNaN(na) && !Number.isNaN(nb) && na !== nb) return na - nb;
+      return String(a?.message_id ?? '').localeCompare(String(b?.message_id ?? ''));
+    });
+  }
+
+  /** 排序 + 去重压缩，供 prompt 与 readChatRecord 共用 */
+  static getGroupHistoryForPrompt(groupId) {
+    const raw = ChatStream.messageHistory.get(groupId) || [];
+    return ChatStream._compactHistoryForPrompt(ChatStream._sortHistoryChronological(raw));
+  }
+
+  /** 合并重复的【我】条目（本地临时 id vs 适配器真实 id）；保留【我·工具】摘要 */
   static _compactHistoryForPrompt(history) {
     if (!Array.isArray(history) || history.length === 0) return [];
-    const filtered = history.filter(m => !m.isTool);
     const byBotText = new Map();
     const result = [];
-    for (const msg of filtered) {
+    for (const msg of history) {
+      if (msg.isTool) {
+        result.push(msg);
+        continue;
+      }
       if (!msg.isBot) {
         result.push(msg);
         continue;
@@ -2358,8 +2447,12 @@ export default class ChatStream extends AIStream {
     const faceTag = msg.hasFace ? '[含表情]' : '';
     const forwardTag = msg.isForward ? '[合并转发]' : '';
     const toolLabel = msg.isTool && msg.toolName ? String(msg.toolName) : '';
-    const toolTag = msg.isTool ? (toolLabel ? `[工具·${toolLabel}]` : '[工具]') : '';
-    const tags = [imageTag, fileTag, faceTag, forwardTag, toolTag].filter(Boolean).join(' ');
+    const tags = [imageTag, fileTag, faceTag, forwardTag].filter(Boolean).join(' ');
+    if (msg.isBot && msg.isTool) {
+      const content = this._normalizeMessageText((msg.message || '').replace(/\n/g, ' '));
+      const label = toolLabel || '工具';
+      return `${tags ? tags + ' ' : ''}【我·工具·${label}】${content}`;
+    }
     if (msg.isBot) {
       const content = this._normalizeMessageText((msg.message || '').replace(/\n/g, ' '));
       return `${tags ? tags + ' ' : ''}【我】${content}`;
@@ -2379,8 +2472,7 @@ export default class ChatStream extends AIStream {
 
     await this.syncHistoryFromAdapter(e);
 
-    const rawHistory = ChatStream.messageHistory.get(e.group_id) || [];
-    const history = ChatStream._compactHistoryForPrompt(rawHistory);
+    const history = ChatStream.getGroupHistoryForPrompt(e.group_id);
     const historyLimit = debugDumpFullPrompt
       ? ChatStream.GROUP_HISTORY_PROMPT_DEBUG
       : (isGlobalTrigger ? ChatStream.GROUP_HISTORY_PROMPT_GLOBAL : ChatStream.GROUP_HISTORY_PROMPT_DEFAULT);
@@ -2404,7 +2496,7 @@ export default class ChatStream extends AIStream {
       const historyBody = recentMessages.map(msg => this._formatHistoryMessage(msg)).join('\n');
       const historyFooter = isGlobalTrigger
         ? ''
-        : '\n\n（说明：【我】= 你已回复过的内容，勿对同一话题重复作答；请优先回应 `[当前消息]`。）';
+        : '\n\n（说明：以上从上到下时间由早到晚；【我·工具】按执行顺序穿插，表示该步已完成；【我】= 你已回复；**只回应下方 `[当前消息]`**。）';
       const historyText = `${historyHeader}\n${historyBody}${historyFooter}`;
       mergedMessages.push({
         role: 'user',
@@ -2858,11 +2950,12 @@ export default class ChatStream extends AIStream {
   cleanupCache() {
     for (const [groupId, messages] of ChatStream.messageHistory.entries()) {
       if (!messages?.length) {
-        ChatStream.messageHistory.delete(groupId);
+        ChatStream._dropGroupHistoryState(groupId);
         continue;
       }
       if (messages.length > ChatStream.GROUP_HISTORY_STORE_MAX) {
-        ChatStream.messageHistory.set(groupId, messages.slice(-ChatStream.GROUP_HISTORY_STORE_MAX));
+        const sorted = ChatStream._sortHistoryChronological(messages);
+        ChatStream.messageHistory.set(groupId, sorted.slice(-ChatStream.GROUP_HISTORY_STORE_MAX));
       }
     }
   }
@@ -3028,7 +3121,7 @@ export default class ChatStream extends AIStream {
     try {
       // 清除聊天记录
       if (ChatStream.messageHistory.has(gid)) {
-        ChatStream.messageHistory.delete(gid);
+        ChatStream._dropGroupHistoryState(gid);
         result.cleared.history = true;
         Bot.makeLog('debug', `[ChatStream] clearConversation 清除聊天记录 group=${gid}`, 'ChatStream');
       }
