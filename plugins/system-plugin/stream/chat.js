@@ -6,7 +6,11 @@ import { BaseTools } from '../../../lib/utils/base-tools.js';
 import StreamLoader from '../../../lib/aistream/loader.js';
 import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
 import { prepareOpenAIChatVisionMessages } from '../../../lib/utils/llm/image-utils.js';
-import { resolveWorkspaceAbsFromContext } from '../../../lib/utils/agent-workspace-paths.js';
+import {
+  ensureAgentWorkspaceSync,
+  getConfiguredDefaultWorkspaceId,
+  resolveWorkspaceAbsFromContext
+} from '../../../lib/utils/agent-workspace-paths.js';
 import { resolveProjectPath, RESOURCES_AIIMAGES_DIR, DATA_DIR } from '../../../lib/config/config-constants.js';
 const EMOTIONS_DIR = resolveProjectPath(RESOURCES_AIIMAGES_DIR);
 const EMOTION_TYPES = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
@@ -60,14 +64,8 @@ export default class ChatStream extends AIStream {
    */
   async init() {
     await super.init();
+    ensureAgentWorkspaceSync(getConfiguredDefaultWorkspaceId());
 
-    try {
-      const { installMcpAuditHook } = await import('../lib/ai-workspace-context.js');
-      installMcpAuditHook(StreamLoader);
-    } catch (err) {
-      Bot.makeLog('debug', `[${this.name}] MCP 审计钩子: ${err?.message || err}`, 'ChatStream');
-    }
-    
     try {
       await this.loadEmotionImages();
       this.registerAllFunctions();

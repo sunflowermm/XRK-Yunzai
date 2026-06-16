@@ -1452,15 +1452,6 @@ export default class SystemConfig extends ConfigBase {
                   label: '默认工作区 ID',
                   default: 'default',
                   component: 'Input'
-                },
-                audit: {
-                  type: 'object',
-                  label: '工具审计',
-                  component: 'SubForm',
-                  fields: {
-                    enabled: { type: 'boolean', label: '启用 MCP 工具审计', default: true, component: 'Switch' },
-                    maxEntries: { type: 'number', label: '每工作区最大审计条数', min: 10, max: 500, default: 200, component: 'InputNumber' }
-                  }
                 }
               }
             },
@@ -1483,7 +1474,6 @@ export default class SystemConfig extends ConfigBase {
                 includeRules: { type: 'boolean', label: '包含 rules', default: true, component: 'Switch' },
                 includeAgentMd: { type: 'boolean', label: '注入工作区助手文件', default: true, component: 'Switch' },
                 includeSubagents: { type: 'boolean', label: '包含 subagents 清单', default: true, component: 'Switch' },
-                includeDiagnostics: { type: 'boolean', label: '包含诊断提示', default: false, component: 'Switch' },
                 maxTotalChars: { type: 'number', label: 'Prose 总字符上限（0=不限）', min: 0, default: 0, component: 'InputNumber' },
                 maxSkillsPromptChars: { type: 'number', label: 'Skills XML 字符上限', min: 1000, default: 30000, component: 'InputNumber' },
                 customSkillRoots: {

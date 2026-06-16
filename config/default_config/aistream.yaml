@@ -42,9 +42,6 @@ mcp:
 # Agent 文件工作区（tools / desktop MCP 的 cwd，控制台工作区预设）
 workspace:
   defaultId: default
-  audit:
-    enabled: true
-    maxEntries: 200
 
 # 工作区上下文 → system prompt（AGENTS / rules / skills / subagents）
 agentWorkspace:
@@ -54,9 +51,7 @@ agentWorkspace:
   includeRules: true
   includeAgentMd: true
   includeSubagents: true
-  includeDiagnostics: false
   maxTotalChars: 0
-  maxDiagnosticsChars: 2000
   contextFiles: []
   maxCandidatesPerRoot: 300
   maxSkillsLoadedPerSource: 200

@@ -232,7 +232,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
 
   const fileWorkspaceAbs = workspaceCtx.fileRootAbs || workspaceCtx.agentRootAbs;
   const restoreStreamWorkspace = applyRequestWorkspaceToStreams(Bot?.StreamLoader, fileWorkspaceAbs);
-  const auditWorkspaceId = workspaceCtx.presetId || null;
+  const consoleWorkspaceId = workspaceCtx.presetId || null;
 
   if (streamFlag) {
     if (workflowStreams?.length) Bot.makeLog('debug', `[AI] MCP 工具作用域: ${workflowStreams.join(', ')}`, 'HTTP');
@@ -243,7 +243,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
     Bot.makeLog('debug', `[AI] 非流式调用 chat()`, 'HTTP');
     try {
       const text = await runWithAiConsoleContext(
-        { workspaceId: auditWorkspaceId },
+        { workspaceId: consoleWorkspaceId },
         () => client.chat(transformedMessages, overrides)
       );
       const promptText = extractMessageText(messages);
@@ -328,7 +328,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
       }
     };
 
-    await runWithAiConsoleContext({ workspaceId: auditWorkspaceId }, () =>
+    await runWithAiConsoleContext({ workspaceId: consoleWorkspaceId }, () =>
       client.chatStream(transformedMessages, streamCallback, overrides)
     );
 

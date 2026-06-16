@@ -74,3 +74,13 @@ describe('agent-workspace-memory', () => {
     assert.match(data.rel, /memory\/\d{4}-\d{2}-\d{2}\.md/);
   });
 });
+
+describe('agent-workspace-section', () => {
+  it('空工作区目录（无 AGENTS.md）不抛 stat null', async () => {
+    const { buildAgentWorkspaceSection } = await import('../../lib/utils/agent-workspace.js');
+    const emptyWs = path.join(os.tmpdir(), `xrk-ws-empty-${Date.now()}`);
+    await FileUtils.ensureDir(emptyWs);
+    const section = await buildAgentWorkspaceSection({ root: emptyWs, includeAgentMd: true }, 'chat');
+    assert.equal(typeof section, 'string');
+  });
+});

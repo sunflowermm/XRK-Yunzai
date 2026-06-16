@@ -9,8 +9,6 @@ import {
   DEFAULT_WORKSPACE_ID,
   getAgentWorkspaceAbs,
   getAgentWorkspacesRoot,
-  getAgentsReadCandidates,
-  getAgentsWriteRel,
   getConfiguredDefaultWorkspaceId,
   getProjectRoot,
   normalizeWorkspaceId,
@@ -285,18 +283,16 @@ function resolveFileUnderRoot(fileRootAbs, relPath = '') {
 
 export function readWorkspaceAgents(agentRootAbs) {
   seedWorkspaceFromBundle(agentRootAbs);
-  for (const rel of getAgentsReadCandidates()) {
-    const abs = path.join(agentRootAbs, rel);
-    const result = readTextFileUnderWorkspaceRoot(agentRootAbs, abs);
-    if (result.ok) {
-      return { path: rel, content: result.content };
-    }
+  const abs = path.join(agentRootAbs, AGENTS_MD);
+  const result = readTextFileUnderWorkspaceRoot(agentRootAbs, abs);
+  if (result.ok) {
+    return { path: AGENTS_MD, content: result.content };
   }
-  return { path: getAgentsWriteRel(), content: '' };
+  return { path: AGENTS_MD, content: '' };
 }
 
 export function writeWorkspaceAgents(agentRootAbs, content = '') {
-  const rel = getAgentsWriteRel();
+  const rel = AGENTS_MD;
   const abs = path.join(agentRootAbs, rel);
   const rootReal = realpathSyncOrResolve(agentRootAbs);
   const dir = path.dirname(abs);
