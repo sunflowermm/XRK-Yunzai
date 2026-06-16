@@ -22,6 +22,7 @@ import {
   TOOL_ROUNDS_EXHAUSTED_USER_TEXT
 } from '../../../lib/utils/llm/llm-nonstream-reply.js';
 import { summarizeToolForHistory } from '../../../lib/utils/mcp-server.js';
+import { MCPToolAdapter } from '../../../lib/utils/llm/mcp-tool-adapter.js';
 const EMOTIONS_DIR = resolveProjectPath(RESOURCES_AIIMAGES_DIR);
 const EMOTION_TYPES = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
 const IMAGE_SEND_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
@@ -2600,13 +2601,36 @@ export default class ChatStream extends AIStream {
     return super.callAI(forApi, rest);
   }
 
-  /** assistant 正文是否可安全兜底发出（非 JSON / 非工具日志） */
-  static _isSafeOutgoingFallbackText(text) {
+  /** 是否像工具 JSON 泄漏（仅拦整段 JSON，允许 [回复:id]、[开心] 等协议文本） */
+  static _isLikelyToolJsonLeak(text) {
     const t = String(text ?? '').trim();
-    if (!t || t.length > 2000) return false;
-    if (/^\s*[\[{]/.test(t)) return false;
-    if (/"success"\s*:|"tool_call|"results"\s*:|"error"\s*:\s*\{/.test(t)) return false;
-    return true;
+    if (!t || t.length > 4000) return true;
+    if (/^\s*[\[{]/.test(t)) {
+      try {
+        JSON.parse(t);
+        return true;
+      } catch {
+        /* 以 [ 开头但非 JSON，如 [回复:123]、[开心] */
+      }
+    }
+    if (/"success"\s*:\s*(true|false)/.test(t) && /"data"\s*:/.test(t)) return true;
+    if (/"tool_calls"\s*:/.test(t)) return true;
+    return false;
+  }
+
+  static _resolveFallbackOutgoingText(...candidates) {
+    for (const raw of candidates) {
+      const t = String(raw ?? '').trim();
+      if (t && !ChatStream._isLikelyToolJsonLeak(t)) return t;
+    }
+    return '';
+  }
+
+  static _findReplyOpenAiToolName() {
+    for (const [openAi, mcp] of MCPToolAdapter._openAiToolNameToMcp.entries()) {
+      if (MCPToolAdapter.isReplySendOpenAiOrMcpName(mcp)) return openAi;
+    }
+    return MCPToolAdapter._baseSanitizeOpenAIToolName('chat.reply');
   }
 
   static _buildReplyRecoveryMessages(baseMessages, priorAssistantText) {
@@ -2626,11 +2650,13 @@ export default class ChatStream extends AIStream {
       `[ChatStream] 未调用 reply，触发补救轮 priorLen=${String(priorAssistantText ?? '').length}`,
       'ChatStream'
     );
+    const replyTool = ChatStream._findReplyOpenAiToolName();
     return this.callAI(recoveryMessages, {
       ...config,
       debugDumpFullPrompt,
       _debugDumpEvent: e,
-      maxToolRounds: Math.min(Number(config?.maxToolRounds) || 12, 4)
+      maxToolRounds: Math.min(Number(config?.maxToolRounds) || 12, 4),
+      tool_choice: { type: 'function', function: { name: replyTool } }
     });
   }
 
@@ -2652,12 +2678,19 @@ export default class ChatStream extends AIStream {
       return { llm: recovery, text: recovered ? this.stripMarkdownForOutgoing(recovered) : '' };
     }
 
-    if (text && ChatStream._isSafeOutgoingFallbackText(text)) {
-      Bot.makeLog('warn', `[ChatStream] reply 补救未成功，安全兜底发出 len=${text.length}`, 'ChatStream');
-      await this._processAndSendTextProtocol(e, text, { recordToHistory: true });
-    } else {
-      Bot.makeLog('warn', '[ChatStream] reply 补救未成功且无安全兜底正文', 'ChatStream');
+    const recoveryRaw = String(recovery?.text ?? '').trim();
+    const recoveryText = recoveryRaw ? this.stripMarkdownForOutgoing(recoveryRaw) : '';
+    const fallback = ChatStream._resolveFallbackOutgoingText(text, recoveryText);
+    if (fallback) {
+      Bot.makeLog('warn', `[ChatStream] reply 补救未成功，兜底发出 len=${fallback.length}`, 'ChatStream');
+      await this._processAndSendTextProtocol(e, fallback, {
+        recordToHistory: true,
+        messageId: e.message_id || e.real_id
+      });
+      return { llm, text: fallback };
     }
+
+    Bot.makeLog('warn', '[ChatStream] reply 补救未成功且无可用兜底正文', 'ChatStream');
     return { llm, text };
   }
 
