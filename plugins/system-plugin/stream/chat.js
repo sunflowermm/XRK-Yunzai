@@ -2626,6 +2626,31 @@ export default class ChatStream extends AIStream {
     return '';
   }
 
+  static _shouldTryForcedReplyToolChoice(resolvedConfig) {
+    const provider = String(resolvedConfig?.provider || '').toLowerCase();
+    const t =
+      resolvedConfig?.thinkingType ??
+      resolvedConfig?.thinking_type ??
+      resolvedConfig?.thinking;
+    // DeepSeek 客户端默认 thinking=enabled，不支持强制 tool_choice
+    if (provider.includes('deepseek')) {
+      if (t == null || t === '') return false;
+      const v = String(t).trim().toLowerCase();
+      return v === 'disabled' || v === 'false' || v === 'off';
+    }
+    if (t == null || t === '') return true;
+    const v = String(t).trim().toLowerCase();
+    return v === 'disabled' || v === 'false' || v === 'off';
+  }
+
+  /** 兜底发出前：去掉表情协议 tag，避免误触随机表情包 */
+  static _prepareFallbackOutgoingText(text) {
+    return String(text ?? '')
+      .replace(/\[(开心|惊讶|伤心|大笑|害怕|生气)\]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   static _findReplyOpenAiToolName() {
     for (const [openAi, mcp] of MCPToolAdapter._openAiToolNameToMcp.entries()) {
       if (MCPToolAdapter.isReplySendOpenAiOrMcpName(mcp)) return openAi;
@@ -2650,14 +2675,27 @@ export default class ChatStream extends AIStream {
       `[ChatStream] 未调用 reply，触发补救轮 priorLen=${String(priorAssistantText ?? '').length}`,
       'ChatStream'
     );
-    const replyTool = ChatStream._findReplyOpenAiToolName();
-    return this.callAI(recoveryMessages, {
+    const resolved = this.resolveLLMConfig(config);
+    const baseOpts = {
       ...config,
       debugDumpFullPrompt,
       _debugDumpEvent: e,
-      maxToolRounds: Math.min(Number(config?.maxToolRounds) || 12, 4),
-      tool_choice: { type: 'function', function: { name: replyTool } }
-    });
+      maxToolRounds: Math.min(Number(resolved.maxToolRounds) || 12, 4)
+    };
+
+    if (ChatStream._shouldTryForcedReplyToolChoice(resolved)) {
+      const replyTool = ChatStream._findReplyOpenAiToolName();
+      const forced = await this.callAI(recoveryMessages, {
+        ...baseOpts,
+        tool_choice: { type: 'function', function: { name: replyTool } }
+      });
+      if (forced != null) return forced;
+      Bot.makeLog('warn', '[ChatStream] 强制 tool_choice 无结果，改用 nudge 补救', 'ChatStream');
+    } else {
+      Bot.makeLog('debug', '[ChatStream] thinking 模式跳过 tool_choice，仅用 nudge 补救', 'ChatStream');
+    }
+
+    return this.callAI(recoveryMessages, baseOpts);
   }
 
   async _ensureUserVisibleReply(e, llm, text, messages, config, { debugDumpFullPrompt }) {
@@ -2680,12 +2718,15 @@ export default class ChatStream extends AIStream {
 
     const recoveryRaw = String(recovery?.text ?? '').trim();
     const recoveryText = recoveryRaw ? this.stripMarkdownForOutgoing(recoveryRaw) : '';
-    const fallback = ChatStream._resolveFallbackOutgoingText(text, recoveryText);
+    const fallback = ChatStream._prepareFallbackOutgoingText(
+      ChatStream._resolveFallbackOutgoingText(text, recoveryText)
+    );
     if (fallback) {
       Bot.makeLog('warn', `[ChatStream] reply 补救未成功，兜底发出 len=${fallback.length}`, 'ChatStream');
       await this._processAndSendTextProtocol(e, fallback, {
         recordToHistory: true,
-        messageId: e.message_id || e.real_id
+        messageId: e.message_id || e.real_id,
+        skipEmotionCheck: true
       });
       return { llm, text: fallback };
     }
