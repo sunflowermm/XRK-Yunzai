@@ -17,7 +17,10 @@ import {
   fabricatorContextFromEvent,
   makeFabricatorForwardMsg
 } from '../lib/message-fabricator.js';
-import { TOOL_ROUNDS_EXHAUSTED_USER_TEXT } from '../../../lib/utils/llm/llm-nonstream-reply.js';
+import {
+  REPLY_RECOVERY_NUDGE,
+  TOOL_ROUNDS_EXHAUSTED_USER_TEXT
+} from '../../../lib/utils/llm/llm-nonstream-reply.js';
 import { summarizeToolForHistory } from '../../../lib/utils/mcp-server.js';
 const EMOTIONS_DIR = resolveProjectPath(RESOURCES_AIIMAGES_DIR);
 const EMOTION_TYPES = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
@@ -2597,6 +2600,67 @@ export default class ChatStream extends AIStream {
     return super.callAI(forApi, rest);
   }
 
+  /** assistant 正文是否可安全兜底发出（非 JSON / 非工具日志） */
+  static _isSafeOutgoingFallbackText(text) {
+    const t = String(text ?? '').trim();
+    if (!t || t.length > 2000) return false;
+    if (/^\s*[\[{]/.test(t)) return false;
+    if (/"success"\s*:|"tool_call|"results"\s*:|"error"\s*:\s*\{/.test(t)) return false;
+    return true;
+  }
+
+  static _buildReplyRecoveryMessages(baseMessages, priorAssistantText) {
+    const msgs = Array.isArray(baseMessages) ? [...baseMessages] : [];
+    const prior = String(priorAssistantText ?? '').trim();
+    if (prior) {
+      msgs.push({ role: 'assistant', content: prior });
+    }
+    msgs.push({ role: 'user', content: REPLY_RECOVERY_NUDGE });
+    return msgs;
+  }
+
+  async _callAIReplyRecovery(e, baseMessages, config, { priorAssistantText, debugDumpFullPrompt }) {
+    const recoveryMessages = ChatStream._buildReplyRecoveryMessages(baseMessages, priorAssistantText);
+    Bot.makeLog(
+      'info',
+      `[ChatStream] 未调用 reply，触发补救轮 priorLen=${String(priorAssistantText ?? '').length}`,
+      'ChatStream'
+    );
+    return this.callAI(recoveryMessages, {
+      ...config,
+      debugDumpFullPrompt,
+      _debugDumpEvent: e,
+      maxToolRounds: Math.min(Number(config?.maxToolRounds) || 12, 4)
+    });
+  }
+
+  async _ensureUserVisibleReply(e, llm, text, messages, config, { debugDumpFullPrompt }) {
+    if (!e?.reply || llm?.usedReplyTool) return { llm, text };
+
+    if (llm?.toolRoundsExhausted) {
+      const notice = text || TOOL_ROUNDS_EXHAUSTED_USER_TEXT;
+      await this._processAndSendTextProtocol(e, notice, { recordToHistory: true });
+      return { llm, text: notice };
+    }
+
+    const recovery = await this._callAIReplyRecovery(e, messages, config, {
+      priorAssistantText: text,
+      debugDumpFullPrompt
+    });
+    if (recovery?.usedReplyTool) {
+      const recovered = String(recovery.text ?? '').trim();
+      return { llm: recovery, text: recovered ? this.stripMarkdownForOutgoing(recovered) : '' };
+    }
+
+    if (text && ChatStream._isSafeOutgoingFallbackText(text)) {
+      Bot.makeLog('warn', `[ChatStream] reply 补救未成功，安全兜底发出 len=${text.length}`, 'ChatStream');
+      await this._processAndSendTextProtocol(e, text, { recordToHistory: true });
+    } else {
+      Bot.makeLog('warn', '[ChatStream] reply 补救未成功且无安全兜底正文', 'ChatStream');
+    }
+    return { llm, text };
+  }
+
   async execute(e, messages, config) {
     let debugDumpFullPrompt = false;
     if (!Array.isArray(messages) && messages && typeof messages === 'object') {
@@ -2604,7 +2668,6 @@ export default class ChatStream extends AIStream {
     }
 
     try {
-      // 记录当前消息（统一记录逻辑）
       if (e) this.recordMessage(e);
 
       if (!Array.isArray(messages)) {
@@ -2619,22 +2682,16 @@ export default class ChatStream extends AIStream {
       if (Bot.StreamLoader) Bot.StreamLoader.currentEvent = e || null;
       this._hasSentEmotionThisTurn = false;
 
-      const llm = await this.callAI(messages, {
-        ...config,
-        debugDumpFullPrompt,
-        _debugDumpEvent: e
-      });
+      const callOpts = { ...config, debugDumpFullPrompt, _debugDumpEvent: e };
+      let llm = await this.callAI(messages, callOpts);
       if (llm == null) return null;
 
       let text = String(llm.text ?? '').trim();
-      if (text) {
-        text = this.stripMarkdownForOutgoing(text);
-      }
+      if (text) text = this.stripMarkdownForOutgoing(text);
 
-      if (llm.toolRoundsExhausted && !llm.usedReplyTool && e?.reply) {
-        const notice = text || TOOL_ROUNDS_EXHAUSTED_USER_TEXT;
-        await this._processAndSendTextProtocol(e, notice, { recordToHistory: true });
-      }
+      ({ llm, text } = await this._ensureUserVisibleReply(e, llm, text, messages, config, {
+        debugDumpFullPrompt
+      }));
 
       return text || '';
     } catch (error) {
