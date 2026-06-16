@@ -2,6 +2,7 @@ import path from 'path';
 import yaml from 'yaml';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
 import { ObjectUtils } from '../../../lib/utils/object-utils.js';
+import { respondFail } from '../../../lib/http/utils/helpers.js';
 
 /** 按点号路径更新嵌套对象的值 */
 function updateNestedValue(obj, pathStr, value) {
@@ -83,9 +84,9 @@ export default {
         } catch (error) {
           Bot.makeLog('error', '[Data Editor API] 文件读取失败', 'WriteAPI', error);
           if (error instanceof SyntaxError || error.name === 'YAMLParseError') {
-            return res.status(400).json({ success: false, message: '文件格式错误', error: error.message });
+            return res.status(400).json({ success: false, message: '文件格式错误' });
           }
-          res.status(500).json({ success: false, message: '文件读取失败', error: error.message });
+          return respondFail(res, 500, '文件读取失败', 'WriteAPI', error);
         }
       }
     },
@@ -148,11 +149,7 @@ export default {
                 ? JSON.parse(existingContent)
                 : yaml.parse(existingContent);
             } catch (error) {
-              return res.status(400).json({ 
-                success: false, 
-                message: '现有文件格式错误',
-                error: error.message 
-              });
+              return res.status(400).json({ success: false, message: '现有文件格式错误' });
             }
 
             switch (operation) {
@@ -216,11 +213,7 @@ export default {
           });
         } catch (error) {
           Bot.makeLog('error', '[Data Editor API] 文件写入失败', 'WriteAPI', error);
-          res.status(500).json({ 
-            success: false, 
-            message: '文件写入失败',
-            error: error.message 
-          });
+          return respondFail(res, 500, '文件写入失败', 'WriteAPI', error);
         }
       }
     }

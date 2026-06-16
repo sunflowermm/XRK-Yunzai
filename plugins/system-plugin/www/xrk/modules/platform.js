@@ -215,6 +215,13 @@ export function normalizeDebugRequestBody(apiId, body) {
         }
       }
     }
+    if (typeof next.file_ids === 'string' && next.file_ids.trim()) {
+      try {
+        next.file_ids = JSON.parse(next.file_ids);
+      } catch {
+        // 保持原值
+      }
+    }
   }
   return next;
 }

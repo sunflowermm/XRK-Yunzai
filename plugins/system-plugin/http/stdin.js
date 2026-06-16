@@ -2,6 +2,7 @@ import path from "path";
 import { fileURLToPath } from 'url';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
 import { resolveProjectPath, WWW_STDIN_DIR, WWW_MEDIA_DIR } from '../../../lib/config/config-constants.js';
+import { respondFail } from '../../../lib/http/utils/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -78,12 +79,7 @@ export default {
           const result = await stdinHandler.processCommand(command, user_info);
           res.json(result);
         } catch (error) {
-          res.status(500).json({
-            success: false,
-            code: 500,
-            error: error.message,
-            timestamp: Date.now()
-          });
+          return respondFail(res, 500, '命令执行失败', 'StdinAPI', error);
         }
       }
     },
@@ -123,12 +119,7 @@ export default {
             timestamp: Date.now()
           });
         } catch (error) {
-          res.status(500).json({
-            success: false,
-            code: 500,
-            error: error.message,
-            timestamp: Date.now()
-          });
+          return respondFail(res, 500, '事件触发失败', 'StdinAPI', error);
         }
       }
     }

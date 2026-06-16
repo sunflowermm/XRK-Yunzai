@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import si from 'systeminformation';
 import cfg from '../../../lib/config/config.js';
 import { collectBotInventory } from '../../../lib/http/utils/botInventory.js';
+import { respondFail } from '../../../lib/http/utils/helpers.js';
 
 const execAsync = promisify(exec);
 
@@ -352,10 +353,7 @@ export default {
           const response = await __buildSystemResponse(systemInfo, Bot, includeHist);
           res.json(response);
         } catch (error) {
-          res.status(500).json({
-            success: false,
-            error: error.message
-          });
+          return respondFail(res, 500, '获取系统状态失败', 'CoreAPI', error);
         }
       }
     },
@@ -471,10 +469,7 @@ export default {
             panels
           });
         } catch (error) {
-          res.status(500).json({
-            success: false,
-            error: error.message
-          });
+          return respondFail(res, 500, '获取系统状态失败', 'CoreAPI', error);
         }
       }
     }

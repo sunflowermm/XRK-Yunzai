@@ -2,6 +2,7 @@
  * 插件管理API（数据源：主进程 Bot.PluginsLoader，由 bot.js 在 load() 后挂载）
  * www/xrk 首页用 GET /api/plugins/summary
  */
+import { respondFail } from '../../../lib/http/utils/helpers.js';
 function getPluginListAndStats(Bot) {
   const PluginsLoader = Bot.PluginsLoader;
   if (!PluginsLoader) {
@@ -73,7 +74,7 @@ export default {
           await PluginsLoader.changePlugin(decodeURIComponent(key));
           res.json({ success: true, message: '插件重载成功' });
         } catch (error) {
-          res.status(500).json({ success: false, message: '插件重载失败', error: error.message });
+          return respondFail(res, 500, '插件重载失败', 'PluginAPI', error);
         }
       }
     },
@@ -119,7 +120,7 @@ export default {
             }))
           });
         } catch (error) {
-          res.status(500).json({ success: false, message: '获取插件摘要失败', error: error.message });
+          return respondFail(res, 500, '获取插件摘要失败', 'PluginAPI', error);
         }
       }
     },
@@ -135,7 +136,7 @@ export default {
             stats: { total: totalPlugins, withRules, withTasks, taskCount, totalLoadTime }
           });
         } catch (error) {
-          res.status(500).json({ success: false, message: '获取插件统计失败', error: error.message });
+          return respondFail(res, 500, '获取插件统计失败', 'PluginAPI', error);
         }
       }
     }

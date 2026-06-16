@@ -4,6 +4,7 @@
  */
 import cfg from '../../../lib/config/config.js';
 import { cleanConfigData, flattenStructure, flattenData, unflattenData, deepMergeConfig, resolveConfigSchema } from '../../../lib/commonconfig/config-utils.js';
+import { sanitizeErrorMessage } from '../../../lib/http/utils/helpers.js';
 
 function getConfigManager(Bot) {
   return Bot?.ConfigManager;
@@ -42,7 +43,6 @@ export default {
           res.status(500).json({
             success: false,
             message: '获取配置列表失败',
-            error: error.message
           });
         }
       }
@@ -75,7 +75,6 @@ export default {
           res.status(500).json({
             success: false,
             message: '获取配置结构失败',
-            error: error.message
           });
         }
       }
@@ -150,9 +149,7 @@ export default {
           res.status(500).json({
             success: false,
             message: '读取配置失败',
-            error: error.message,
             configName: errorName,
-            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
           });
         }
       }
@@ -233,9 +230,7 @@ export default {
           res.status(500).json({
             success: false,
             message: '写入配置失败',
-            error: error.message,
             configName: errorName,
-            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
           });
         }
       }
@@ -270,7 +265,6 @@ export default {
           res.status(500).json({
             success: false,
             message: '合并配置失败',
-            error: error.message
           });
         }
       }
@@ -310,7 +304,6 @@ export default {
           res.status(500).json({
             success: false,
             message: '删除配置失败',
-            error: error.message
           });
         }
       }
@@ -350,7 +343,6 @@ export default {
           res.status(500).json({
             success: false,
             message: '追加失败',
-            error: error.message
           });
         }
       }
@@ -397,7 +389,6 @@ export default {
           res.status(500).json({
             success: false,
             message: '移除失败',
-            error: error.message
           });
         }
       }
@@ -430,7 +421,6 @@ export default {
           res.status(500).json({
             success: false,
             message: '验证失败',
-            error: error.message
           });
         }
       }
@@ -462,7 +452,6 @@ export default {
           res.status(500).json({
             success: false,
             message: '备份失败',
-            error: error.message
           });
         }
       }
@@ -495,7 +484,6 @@ export default {
           res.status(500).json({
             success: false,
             message: '重置失败',
-            error: error.message
           });
         }
       }
@@ -516,7 +504,6 @@ export default {
           res.status(500).json({
             success: false,
             message: '清除缓存失败',
-            error: error.message
           });
         }
       }
@@ -560,7 +547,7 @@ export default {
           return res.json({ success: true, flat });
         } catch (error) {
           Bot.makeLog('warn', `[config] flat-structure ${name} 异常: ${error.message}`, 'ConfigAPI');
-          return res.json({ success: true, flat: [], message: error.message || '获取结构异常，已返回空' });
+          return res.json({ success: true, flat: [], message: sanitizeErrorMessage(error, '获取结构异常，已返回空') });
         }
       }
     },
@@ -593,7 +580,7 @@ export default {
           return res.json({ success: true, flat });
         } catch (error) {
           Bot.makeLog('warn', `[config] flat ${name} 异常: ${error.message}`, 'ConfigAPI');
-          return res.json({ success: true, flat: {}, message: error.message || '读取失败，已返回空数据' });
+          return res.json({ success: true, flat: {}, message: sanitizeErrorMessage(error, '读取失败，已返回空数据') });
         }
       }
     },
@@ -683,7 +670,6 @@ export default {
           res.status(500).json({
             success: false,
             message: '批量设置失败',
-            error: error.message
           });
         }
       }

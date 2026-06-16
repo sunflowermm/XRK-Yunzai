@@ -10,6 +10,14 @@ import {
   DATA_MEDIA_DIR,
   TEMP_HTML_DIR,
 } from '../../../lib/config/config-constants.js';
+import { respondFail } from '../../../lib/http/utils/helpers.js';
+import {
+  registerUploadedFile,
+  deleteUploadedFile,
+  getUploadedFileSync,
+  listUploadedFiles,
+  getUploadedFileEntries,
+} from '../../../lib/http/utils/uploadedFiles.js';
 
 const uploadDir = resolveProjectPath(DATA_UPLOADS_DIR);
 const mediaDir = resolveProjectPath(DATA_MEDIA_DIR);
@@ -18,7 +26,6 @@ const UPLOAD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const MEDIA_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const TEMP_HTML_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
-const fileMap = new Map();
 
 /** 拼装 file_url 的 baseUrl，优先配置再请求头 */
 function getBaseUrl(req, Bot) {
@@ -143,7 +150,7 @@ export default {
               upload_time: Date.now()
             };
 
-            fileMap.set(fileId, fileInfo);
+            registerUploadedFile(fileInfo);
             uploadedFiles.push(fileInfo);
           }
 
@@ -185,13 +192,7 @@ export default {
             });
           }
         } catch (error) {
-          Bot.makeLog('error', `文件上传处理失败: ${error.message}`, 'FilesAPI');
-          res.status(500).json({ 
-            success: false, 
-            message: '文件上传失败',
-            error: error.message,
-            code: 500
-          });
+          return respondFail(res, 500, '文件上传失败', 'FilesAPI', error);
         }
       }
     },
@@ -201,7 +202,7 @@ export default {
       path: '/api/file/:id',
       handler: async (req, res, Bot) => {
         const { id } = req.params;
-        const fileInfo = fileMap.get(id);
+        const fileInfo = getUploadedFileSync(id);
 
         if (!fileInfo) {
           try {
@@ -221,7 +222,7 @@ export default {
         }
 
         if (!FileUtils.existsSync(fileInfo.path)) {
-          fileMap.delete(id);
+          deleteUploadedFile(id);
           return notFound(res);
         }
         res.sendFile(fileInfo.path);
@@ -233,12 +234,12 @@ export default {
       path: '/api/file/download/:id',
       handler: async (req, res, Bot) => {
         const { id } = req.params;
-        const fileInfo = fileMap.get(id);
+        const fileInfo = getUploadedFileSync(id);
 
         if (!fileInfo) return notFound(res);
 
         if (!FileUtils.existsSync(fileInfo.path)) {
-          fileMap.delete(id);
+          deleteUploadedFile(id);
           return notFound(res);
         }
         res.download(fileInfo.path, fileInfo.name);
@@ -250,12 +251,12 @@ export default {
       path: '/api/file/preview/:id',
       handler: async (req, res, Bot) => {
         const { id } = req.params;
-        const fileInfo = fileMap.get(id);
+        const fileInfo = getUploadedFileSync(id);
 
         if (!fileInfo || !fileInfo.is_media) return notFound(res, '预览不可用');
 
         if (!FileUtils.existsSync(fileInfo.path)) {
-          fileMap.delete(id);
+          deleteUploadedFile(id);
           return notFound(res);
         }
         res.setHeader('Content-Type', fileInfo.mime);
@@ -270,12 +271,12 @@ export default {
       handler: async (req, res, Bot) => {
 
         const { id } = req.params;
-        const fileInfo = fileMap.get(id);
+        const fileInfo = getUploadedFileSync(id);
 
         if (fileInfo) {
           try {
             await FileUtils.unlink(fileInfo.path);
-            fileMap.delete(id);
+            deleteUploadedFile(id);
           } catch (err) {
             Bot.makeLog('error', `删除文件失败: ${err.message}`, 'FilesAPI');
           }
@@ -295,7 +296,7 @@ export default {
       path: '/api/files',
       handler: async (req, res, Bot) => {
 
-        const files = Array.from(fileMap.values()).map(f => ({
+        const files = listUploadedFiles().map(f => ({
           id: f.id,
           name: f.name,
           url: f.url,
@@ -360,7 +361,7 @@ export default {
             upload_time: Date.now()
           };
 
-          fileMap.set(fileId, fileInfo);
+          registerUploadedFile(fileInfo);
 
           const results = [{
             type: isMedia ? 'image' : 'file',
@@ -385,13 +386,7 @@ export default {
             timestamp: Date.now()
           });
         } catch (error) {
-          Bot.makeLog('error', `Base64文件上传失败: ${error.message}`, 'FilesAPI');
-          res.status(500).json({ 
-            success: false, 
-            message: '文件上传失败',
-            error: error.message,
-            code: 500
-          });
+          return respondFail(res, 500, '文件上传失败', 'FilesAPI', error);
         }
       }
     }
@@ -400,11 +395,11 @@ export default {
   init(app, Bot) {
     setInterval(async () => {
       const now = Date.now();
-      for (const [id, info] of fileMap) {
+      for (const [id, info] of getUploadedFileEntries()) {
         if (now - info.upload_time > UPLOAD_MAX_AGE_MS) {
           try {
             await FileUtils.unlink(info.path);
-            fileMap.delete(id);
+            deleteUploadedFile(id);
           } catch (err) {
             Bot.makeLog('debug', `[files] 清理过期上传失败 id=${id}: ${err?.message || err}`, 'FilesAPI');
           }

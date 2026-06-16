@@ -454,7 +454,7 @@ async function handleAiStream(req, res, Bot) {
       if (delta) res.write('data: ' + JSON.stringify({ delta }) + '\n\n');
     });
   } catch (err) {
-    res.write('data: ' + JSON.stringify({ error: err.message || '流式输出失败' }) + '\n\n');
+    res.write('data: ' + JSON.stringify({ error: '流式输出失败' }) + '\n\n');
   }
   res.write('data: [DONE]\n\n');
   res.end();

@@ -1,13 +1,14 @@
 /**
  * MCP HTTP API：统一通过 MCP 暴露工具列表与 JSON-RPC 调用
  */
+import { respondFail, sanitizeErrorMessage } from '../../../lib/http/utils/helpers.js';
 
 const getMCPServer = () => Bot.StreamLoader?.mcpServer;
 
 function requireMCP(res) {
   const mcpServer = getMCPServer();
   if (!mcpServer) {
-    res.status(503).json({ success: false, error: 'MCP服务未启用' });
+    res.status(503).json({ success: false, message: 'MCP 服务未启用' });
     return null;
   }
   return mcpServer;
@@ -17,11 +18,8 @@ function success(res, data) {
   res.json({ success: true, ...data });
 }
 
-function errorRes(res, err, code = 500) {
-  res.status(code).json({
-    success: false,
-    error: err?.message || String(err)
-  });
+function errorRes(res, err, code = 500, fallback = 'MCP 请求失败') {
+  return respondFail(res, code, sanitizeErrorMessage(err, fallback), 'MCPAPI', err);
 }
 
 export default {

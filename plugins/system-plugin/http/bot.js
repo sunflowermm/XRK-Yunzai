@@ -1,15 +1,13 @@
 /**
  * 机器人管理API
- * 提供机器人状态查询、消息发送、好友群组列表等功能
  */
 import {
   normalizeTargetId,
-  normalizeSendMessage,
   normalizeMessageType,
-  parseAdapterSendError,
+  buildSendMessage,
   resolveSendBot,
-  validateSendTarget,
 } from '../../../lib/http/utils/messageSend.js';
+import { respondFail, sanitizeErrorMessage } from '../../../lib/http/utils/helpers.js';
 
 export default {
   name: 'bot',
@@ -53,8 +51,7 @@ export default {
           return res.status(404).json({ success: false, message: '机器人不存在' });
         }
 
-        const friends = bot.fl ? Array.from(bot.fl.values()) : [];
-        res.json({ success: true, friends });
+        res.json({ success: true, friends: bot.fl ? Array.from(bot.fl.values()) : [] });
       }
     },
 
@@ -69,8 +66,7 @@ export default {
           return res.status(404).json({ success: false, message: '机器人不存在' });
         }
 
-        const groups = bot.gl ? Array.from(bot.gl.values()) : [];
-        res.json({ success: true, groups });
+        res.json({ success: true, groups: bot.gl ? Array.from(bot.gl.values()) : [] });
       }
     },
 
@@ -78,12 +74,22 @@ export default {
       method: 'POST',
       path: '/api/message/send',
       handler: async (req, res, Bot) => {
-        const { bot_id, type, target_id, message } = req.body ?? {};
+        const body = req.body ?? {};
+        const { bot_id, type, target_id, message, file_id, file_ids } = body;
 
-        if (!type || target_id == null || target_id === '' || message == null) {
+        if (!type || target_id == null || target_id === '') {
           return res.status(400).json({
             success: false,
-            message: '缺少必要参数：type、target_id、message'
+            message: '缺少必要参数：type、target_id'
+          });
+        }
+
+        const hasContent = message != null && message !== ''
+          || file_id || (file_ids != null && (Array.isArray(file_ids) ? file_ids.length : file_ids));
+        if (!hasContent) {
+          return res.status(400).json({
+            success: false,
+            message: '请提供 message 或 file_id/file_ids（先上传图片）'
           });
         }
 
@@ -95,15 +101,6 @@ export default {
           });
         }
 
-        const processedMessage = normalizeSendMessage(message);
-        if (processedMessage == null || processedMessage === '') {
-          return res.status(400).json({
-            success: false,
-            message: '消息内容不能为空'
-          });
-        }
-
-        const targetId = normalizeTargetId(target_id);
         const resolved = resolveSendBot(Bot, bot_id);
         if (resolved.error) {
           return res.status(resolved.status || 400).json({
@@ -113,22 +110,25 @@ export default {
         }
 
         const { botId } = resolved;
-        const targetCheck = validateSendTarget(Bot, resolved.bot, msgType, targetId);
+        const targetId = normalizeTargetId(target_id);
+
+        let processedMessage;
+        try {
+          processedMessage = await buildSendMessage(body);
+        } catch (error) {
+          return respondFail(res, error.status || 400, error.message || '消息格式无效', 'BotAPI', error);
+        }
+
+        if (processedMessage == null || processedMessage === '') {
+          return res.status(400).json({ success: false, message: '消息内容不能为空' });
+        }
 
         try {
-          let sendResult;
-          if (msgType === 'private') {
-            sendResult = await Bot.sendFriendMsg(botId, targetId, processedMessage);
-          } else {
-            sendResult = await Bot.sendGroupMsg(botId, targetId, processedMessage);
-          }
+          const sendResult = msgType === 'private'
+            ? await Bot.sendFriendMsg(botId, targetId, processedMessage)
+            : await Bot.sendGroupMsg(botId, targetId, processedMessage);
 
           const messageId = sendResult?.message_id ?? sendResult?.data?.message_id;
-          const result = {
-            message_id: messageId,
-            time: Date.now() / 1000,
-            raw_message: processedMessage
-          };
 
           Bot.em('message.send', {
             bot_id: botId,
@@ -142,19 +142,17 @@ export default {
           res.json({
             success: true,
             message_id: messageId,
-            results: [result],
-            timestamp: Date.now(),
-            ...(targetCheck.warn ? { warn: targetCheck.warn } : {})
+            results: [{ message_id: messageId, time: Date.now() / 1000, raw_message: processedMessage }],
+            timestamp: Date.now()
           });
         } catch (error) {
-          const detail = parseAdapterSendError(error);
-          Bot.makeLog('warn', `[message/send] ${msgType} ${targetId}: ${detail}`, 'BotAPI');
-          res.status(500).json({
-            success: false,
-            message: '发送失败',
-            error: detail,
-            ...(targetCheck.warn ? { warn: targetCheck.warn } : {})
-          });
+          return respondFail(
+            res,
+            500,
+            sanitizeErrorMessage(error, '发送失败'),
+            'BotAPI',
+            error
+          );
         }
       }
     },
@@ -163,7 +161,6 @@ export default {
       method: 'POST',
       path: '/api/bot/:uin/control',
       handler: async (req, res, Bot) => {
-
         const { uin } = req.params;
         const { action } = req.body;
 
@@ -185,38 +182,22 @@ export default {
               res.status(400).json({ success: false, message: '不支持的操作' });
           }
         } catch (error) {
-          res.status(500).json({
-            success: false,
-            message: '操作失败',
-            error: error.message
-          });
+          return respondFail(res, 500, '操作失败', 'BotAPI', error);
         }
       }
     }
   ],
 
-  // WebSocket处理器
   ws: {
     messages: [(conn, req, Bot) => {
       const messageListener = (data) => {
-        conn.sendMsg(JSON.stringify({
-          type: 'message',
-          data,
-          timestamp: Date.now()
-        }));
+        conn.sendMsg(JSON.stringify({ type: 'message', data, timestamp: Date.now() }));
       };
-
       const sendListener = (data) => {
-        conn.sendMsg(JSON.stringify({
-          type: 'message.send',
-          data,
-          timestamp: Date.now()
-        }));
+        conn.sendMsg(JSON.stringify({ type: 'message.send', data, timestamp: Date.now() }));
       };
-
       Bot.on('message', messageListener);
       Bot.on('message.send', sendListener);
-
       conn.on('close', () => {
         Bot.off('message', messageListener);
         Bot.off('message.send', sendListener);
