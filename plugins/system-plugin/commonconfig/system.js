@@ -1440,6 +1440,61 @@ export default class SystemConfig extends ConfigBase {
                   }
                 }
               }
+            },
+            workspace: {
+              type: 'object',
+              label: 'Agent 文件工作区',
+              description: 'tools / desktop 的文件 cwd；控制台工作区来自 data/ai-workspace/*',
+              component: 'SubForm',
+              fields: {
+                defaultId: {
+                  type: 'string',
+                  label: '默认工作区 ID',
+                  default: 'default',
+                  component: 'Input'
+                },
+                audit: {
+                  type: 'object',
+                  label: '工具审计',
+                  component: 'SubForm',
+                  fields: {
+                    enabled: { type: 'boolean', label: '启用 MCP 工具审计', default: true, component: 'Switch' },
+                    maxEntries: { type: 'number', label: '每工作区最大审计条数', min: 10, max: 500, default: 200, component: 'InputNumber' }
+                  }
+                }
+              }
+            },
+            agentWorkspace: {
+              type: 'object',
+              label: 'Agent 工作区上下文（Prompt 注入）',
+              description: '注入 data/ai-workspace 的 AGENTS/SOUL/memory、项目 rules/skills、subagents',
+              component: 'SubForm',
+              fields: {
+                enabled: { type: 'boolean', label: '启用注入', default: true, component: 'Switch' },
+                root: { type: 'string', label: 'Prompt 注入根目录', description: '留空=data/ai-workspace/{defaultId}', default: '', component: 'Input' },
+                streams: {
+                  type: 'array',
+                  label: '仅对这些工作流/入口注入',
+                  description: '留空=全部；可填 chat、tools、v3 等',
+                  itemType: 'string',
+                  default: [],
+                  component: 'MultiSelect'
+                },
+                includeRules: { type: 'boolean', label: '包含 rules', default: true, component: 'Switch' },
+                includeAgentMd: { type: 'boolean', label: '注入工作区助手文件', default: true, component: 'Switch' },
+                includeSubagents: { type: 'boolean', label: '包含 subagents 清单', default: true, component: 'Switch' },
+                includeDiagnostics: { type: 'boolean', label: '包含诊断提示', default: false, component: 'Switch' },
+                maxTotalChars: { type: 'number', label: 'Prose 总字符上限（0=不限）', min: 0, default: 0, component: 'InputNumber' },
+                maxSkillsPromptChars: { type: 'number', label: 'Skills XML 字符上限', min: 1000, default: 30000, component: 'InputNumber' },
+                customSkillRoots: {
+                  type: 'array',
+                  label: '技能根目录',
+                  description: '相对项目根；默认 skills/standard/core 与 skills/standard',
+                  itemType: 'string',
+                  default: ['skills/standard/core', 'skills/standard'],
+                  component: 'ArrayForm'
+                }
+              }
             }
           }
         }

@@ -1,5 +1,11 @@
 *
 !.gitignore
+!ai-workspace/
+ai-workspace/*
+!ai-workspace/.gitkeep
+!ai/
+ai/*
+!ai/.gitkeep
 fonts/
 !fonts
 !fonts/Genshin.ttf

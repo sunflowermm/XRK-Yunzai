@@ -7,14 +7,14 @@ import AIStream from '../../../lib/aistream/aistream.js';
 import path from 'path';
 import { BaseTools } from '../../../lib/utils/base-tools.js';
 import { InputValidator } from '../../../lib/utils/input-validator.js';
-import { getDefaultDesktopDirSync } from '../../../lib/utils/user-dirs.js';
 import { getAistreamConfigOptional } from '../../../lib/utils/aistream-config.js';
+import { resolveConfiguredWorkspace } from '../lib/ai-workspace-runtime.js';
 import { exec } from '../../../lib/utils/exec-async.js';
 
 const IS_WINDOWS = process.platform === 'win32';
 
 export default class ToolsStream extends AIStream {
-  workspace = getDefaultDesktopDirSync();
+  workspace = resolveConfiguredWorkspace('');
   fileToolsCfg = {
     maxReadChars: 500_000,
     grepMaxResults: 100,
@@ -61,7 +61,9 @@ export default class ToolsStream extends AIStream {
           : 200_000
     };
     if (typeof fileCfg.workspace === 'string' && fileCfg.workspace.trim()) {
-      this.workspace = fileCfg.workspace.trim();
+      this.workspace = resolveConfiguredWorkspace(fileCfg.workspace);
+    } else {
+      this.workspace = resolveConfiguredWorkspace('');
     }
   }
 

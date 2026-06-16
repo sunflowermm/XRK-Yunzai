@@ -71,7 +71,7 @@ export default class AIConfig extends ConfigBase {
             label: '合并工作流',
             description: '要合并到 chat 的副工作流名称，如 memory、tools、database',
             itemType: 'string',
-            default: ['memory', 'tools', 'database'],
+            default: ['memory', 'tools'],
             component: 'Tags'
           }
         }

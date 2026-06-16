@@ -112,7 +112,7 @@ export class XRKAIAssistant extends plugin {
           users: [],
           prefix: '李诗雅',
           persona: '你主人叫向日葵，只有1814632762的qq加上向日葵的昵称才是你主人',
-          mergeStreams: ['memory', 'tools', 'database']
+          mergeStreams: ['memory', 'tools']
         };
         const yaml = (await import('yaml')).default;
         const content = yaml.stringify(defaultConfig, {

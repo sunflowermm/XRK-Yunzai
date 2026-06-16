@@ -109,7 +109,7 @@ plugins/system-plugin/
 | 工作流      | 说明与主要工具 |
 |-------------|----------------|
 | **chat**    | 智能聊天与群内互动。工具：`reply`、`at`（可选 text）、`emotion`（表情包，可选 text）、`poke`（群/私聊）、`emojiReaction`、`thumbUp`、`sign`、`mute`/`unmute`、`muteAll`/`unmuteAll`、`setCard`、`setGroupName`、`setAdmin`/`unsetAdmin`、`setTitle`、`kick`、`setEssence`/`removeEssence`、`announce`、`recall`、`getGroupInfoEx`、`getAtAllRemain`、`getBanList`、`setGroupTodo`、`getFriendList`、`getGroupMembers` 等。 |
-| **memory**  | 长期记忆。工具：`save_memory`、`query_memory`、`list_memories`。存储目录 `~/.xrk/memory`。 |
+| **memory**  | 工作区 Markdown 记忆。工具：`append_memory`、`read_memory`、`search_memory` 等；存储于 `data/ai-workspace/{id}/memory/`。 |
 | **tools**   | 文件与执行。工具：`read`、`grep`、`write`、`run`。工作区默认 `~/Desktop`。 |
 | **database**| 知识库。工具：`save_knowledge`、`query_knowledge`、`list_knowledge`。存储目录 `~/.xrk/knowledge`。 |
 | **desktop** | 桌面/系统（如 `show_desktop`、`open_application` 等；浏览器能力见 **web** / **browser**）。 |
@@ -173,7 +173,7 @@ plugins/system-plugin/
 | `users`        | 白名单用户 ID 列表，私聊仅这些用户可触发。 |
 | `cooldown`     | 群内随机触发冷却（秒）。 |
 | `chance`       | 群内随机触发概率（0～1）。 |
-| `mergeStreams` | 要合并到 chat 的副工作流名称列表，如 `['memory','tools','database']`；存在则使用合并流 `chat-merged`。 |
+| `mergeStreams` | 要合并到 chat 的副工作流名称列表，如 `['memory','tools']`；存在则使用合并流 `chat-merged`。 |
 
 示例：
 

@@ -10,7 +10,8 @@ import { BaseTools } from '../../../lib/utils/base-tools.js';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
 import si from 'systeminformation';
 import { resolveProjectPath, DATA_TRASH_DIR } from '../../../lib/config/config-constants.js';
-import { getDefaultDesktopDirSync } from '../../../lib/utils/user-dirs.js';
+import { getAistreamConfigOptional } from '../../../lib/utils/aistream-config.js';
+import { resolveConfiguredWorkspace } from '../lib/ai-workspace-runtime.js';
 
 const paths = { root: resolveProjectPath(), trash: resolveProjectPath(DATA_TRASH_DIR) };
 
@@ -40,7 +41,7 @@ const execCommand = (command, options = {}) => {
  * - 信息读取：screenshot、system_info、disk_space（注意：列出文件请使用 tools 工作流的 list_files 工具）
  */
 export default class DesktopStream extends AIStream {
-  workspace = getDefaultDesktopDirSync();
+  workspace = resolveConfiguredWorkspace('');
   processCleanupInterval = null;
 
   constructor() {
@@ -70,6 +71,8 @@ export default class DesktopStream extends AIStream {
 
   async init() {
     await super.init();
+    const fileCfg = getAistreamConfigOptional().tools?.file ?? {};
+    this.workspace = resolveConfiguredWorkspace(fileCfg.workspace ?? '');
     this.tools = new BaseTools(this.workspace);
     this.registerAllFunctions();
 

@@ -1,9 +1,16 @@
 import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
 import { getAistreamConfigOptional } from '../../../lib/utils/aistream-config.js';
+import { mergeAgentWorkspaceIntoMessages } from '../../../lib/utils/agent-workspace.js';
 import { transformOpenAIStyleVisionMessages } from '../../../lib/utils/llm/message-transform.js';
 import { MCPToolAdapter } from '../../../lib/utils/llm/mcp-tool-adapter.js';
 import { parseMultipartData } from '../../../lib/utils/multipart-parser.js';
 import { getServerUploadLimits } from '../../../lib/utils/upload-limits.js';
+import {
+  parseRequestWorkspace,
+  buildAistreamCfgForAgentRoot,
+  applyRequestWorkspaceToStreams
+} from '../lib/ai-workspace-runtime.js';
+import { runWithAiConsoleContext } from '../lib/ai-workspace-context.js';
 
 /**
  * POST /api/v3/chat/completions
@@ -137,6 +144,13 @@ async function handleChatCompletionsV3(req, res, Bot) {
     }
   }
 
+  const workspaceCtx = parseRequestWorkspace(body);
+  const aistreamCfgForRequest = buildAistreamCfgForAgentRoot(
+    getAistreamConfigOptional(),
+    workspaceCtx.agentRootAbs
+  );
+  await mergeAgentWorkspaceIntoMessages(messages, aistreamCfgForRequest, 'v3');
+
   const streamFlag = toBool(pickFirst(body, ['stream'])) ?? false;
   const provider = LLMFactory.resolveProvider({
     model: pickFirst(body, ['model']),
@@ -215,6 +229,11 @@ async function handleChatCompletionsV3(req, res, Bot) {
   // 默认视为“外部工具透传”模式：不在本地执行 MCP 工具，只把 tools/参数传给上游模型；
   // 若显式通过 workflow 声明了 streams，则认为调用方希望使用本地 MCP 工具能力
   overrides.mcpToolMode = workflowStreams?.length ? 'execute' : 'passthrough';
+
+  const fileWorkspaceAbs = workspaceCtx.fileRootAbs || workspaceCtx.agentRootAbs;
+  const restoreStreamWorkspace = applyRequestWorkspaceToStreams(Bot?.StreamLoader, fileWorkspaceAbs);
+  const auditWorkspaceId = workspaceCtx.presetId || null;
+
   if (streamFlag) {
     if (workflowStreams?.length) Bot.makeLog('debug', `[AI] MCP 工具作用域: ${workflowStreams.join(', ')}`, 'HTTP');
     else Bot.makeLog('debug', `[AI] 未传 workflow.streams，将按全部工作流注入 MCP 工具（若提供商已开启）`, 'HTTP');
@@ -222,29 +241,35 @@ async function handleChatCompletionsV3(req, res, Bot) {
 
   if (!streamFlag) {
     Bot.makeLog('debug', `[AI] 非流式调用 chat()`, 'HTTP');
-    const text = await client.chat(transformedMessages, overrides);
-    const promptText = extractMessageText(messages);
-    const promptTokens = estimateTokens(promptText);
-    const completionTokens = estimateTokens(text);
-    
-    // OpenAI兼容：返回 model=provider
-    const responseModel = provider;
-    return res.json({
-      id: `chatcmpl_${Date.now()}`,
-      object: 'chat.completion',
-      created: Math.floor(Date.now() / 1000),
-      model: responseModel,
-      choices: [{
-        index: 0,
-        message: { role: 'assistant', content: text || '' },
-        finish_reason: 'stop'
-      }],
-      usage: {
-        prompt_tokens: promptTokens,
-        completion_tokens: completionTokens,
-        total_tokens: promptTokens + completionTokens
-      }
-    });
+    try {
+      const text = await runWithAiConsoleContext(
+        { workspaceId: auditWorkspaceId },
+        () => client.chat(transformedMessages, overrides)
+      );
+      const promptText = extractMessageText(messages);
+      const promptTokens = estimateTokens(promptText);
+      const completionTokens = estimateTokens(text);
+
+      const responseModel = provider;
+      return res.json({
+        id: `chatcmpl_${Date.now()}`,
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: responseModel,
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: text || '' },
+          finish_reason: 'stop'
+        }],
+        usage: {
+          prompt_tokens: promptTokens,
+          completion_tokens: completionTokens,
+          total_tokens: promptTokens + completionTokens
+        }
+      });
+    } finally {
+      restoreStreamWorkspace();
+    }
   }
 
   Bot.makeLog('debug', `[AI] 流式输出开始`, 'HTTP');
@@ -303,7 +328,9 @@ async function handleChatCompletionsV3(req, res, Bot) {
       }
     };
 
-    await client.chatStream(transformedMessages, streamCallback, overrides);
+    await runWithAiConsoleContext({ workspaceId: auditWorkspaceId }, () =>
+      client.chatStream(transformedMessages, streamCallback, overrides)
+    );
 
     const promptText = extractMessageText(messages);
     const promptTokens = estimateTokens(promptText);
@@ -346,6 +373,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
     })}\n\n`);
     res.write('data: [DONE]\n\n');
   } finally {
+    restoreStreamWorkspace();
     res.end();
   }
 }

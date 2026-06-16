@@ -130,7 +130,7 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
-# Yunzai data
+# XRK-Yunzai specific
 dump.rdb
 config/test/*
 !config/test/default.yaml

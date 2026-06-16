@@ -1147,12 +1147,26 @@ Bot.adapter.push(
       })
     }
 
-    setGroupTodo(data, content) {
-      Bot.makeLog("info", `设置群代办：${content}`, `${data.self_id} => ${data.group_id}`, true)
-      return data.bot.sendApi("set_group_todo", {
+    setGroupTodo(data, message_id) {
+      Bot.makeLog('info', `设置群待办：${message_id}`, `${data.self_id} => ${data.group_id}`, true);
+      return data.bot.sendApi('set_group_todo', {
         group_id: data.group_id,
-        content
-      })
+        message_id: String(message_id)
+      });
+    }
+
+    completeGroupTodo(data, message_id) {
+      return data.bot.sendApi('complete_group_todo', {
+        group_id: data.group_id,
+        message_id: String(message_id)
+      });
+    }
+
+    cancelGroupTodo(data, message_id) {
+      return data.bot.sendApi('cancel_group_todo', {
+        group_id: data.group_id,
+        message_id: String(message_id)
+      });
     }
 
     setGroupRemark(data, remark) {
@@ -1755,6 +1769,8 @@ Bot.adapter.push(
         getChatHistory: this.getGroupMsgHistory.bind(this, i),
         getHonorInfo: this.getGroupHonorInfo.bind(this, i),
         getEssence: this.getEssenceMsg.bind(this, i),
+        setEssenceMessage: (message_id) => this.setEssenceMsg(i, message_id),
+        removeEssenceMessage: (message_id) => this.deleteEssenceMsg(i, message_id),
         getMemberArray: this.getMemberArray.bind(this, i),
         getMemberList: this.getMemberList.bind(this, i),
         getMemberMap: this.getMemberMap.bind(this, i),
@@ -1775,6 +1791,8 @@ Bot.adapter.push(
         getAtAllRemain: this.getGroupAtAllRemain.bind(this, i),
         getBanList: this.getGroupBanList.bind(this, i),
         setTodo: this.setGroupTodo.bind(this, i),
+        completeTodo: (message_id) => this.completeGroupTodo(i, message_id),
+        cancelTodo: (message_id) => this.cancelGroupTodo(i, message_id),
         setRemark: this.setGroupRemark.bind(this, i),
         setAddOption: this.setGroupAddOption.bind(this, i),
         setBotAddOption: this.setGroupBotAddOption.bind(this, i),
@@ -1801,9 +1819,11 @@ Bot.adapter.push(
         fetchCustomFace: (face_id) => this.fetchCustomFace(i, face_id),
         getAiCharacters: () => this.getAiCharacters(i),
         getAnnouncements: () => this.getGroupAnnouncements(i),
-        setAnnouncement: (content, pinned, show_edit_card, show_popup, require_confirmation) => 
+        sendNotice: (content, opts = {}) =>
+          this.setGroupAnnouncement(i, content, null, opts.pinned, opts.show_edit_card, opts.show_popup, opts.require_confirmation),
+        setAnnouncement: (content, pinned, show_edit_card, show_popup, require_confirmation) =>
           this.setGroupAnnouncement(i, content, null, pinned, show_edit_card, show_popup, require_confirmation),
-        deleteAnnouncement: (announcement_id) => 
+        deleteAnnouncement: (announcement_id) =>
           this.deleteGroupAnnouncement(i, announcement_id),
         get is_owner() {
           const botMemberInfo = (data.bot.gml.get(group_id) || new Map()).get(data.self_id)

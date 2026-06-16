@@ -1,258 +1,150 @@
 /**
- * 记忆系统工作流
- * 业务层：plugins/system-plugin/stream/
- * 使用文件存储，不依赖 MemoryManager
+ * 工作区 memory/*.md 受限读写
  */
 import AIStream from '../../../lib/aistream/aistream.js';
-import path from 'path';
-import { FileUtils } from '../../../lib/utils/file-utils.js';
-import { filterMemoriesForEvent, getMemoryBaseDir, userMemoryFile } from '../../../lib/aistream/memory-file-context.js';
+import {
+  appendWorkspaceMemory,
+  listWorkspaceMemoryFiles,
+  readWorkspaceMemory,
+  searchWorkspaceMemory,
+  writeWorkspaceMemory
+} from '../../../lib/utils/agent-workspace-memory.js';
+import { resolveWorkspaceAbsFromContext } from '../../../lib/utils/agent-workspace-paths.js';
 
 export default class MemoryStream extends AIStream {
-  memoryDir = getMemoryBaseDir();
-  memories = new Map();
-
   constructor() {
     super({
       name: 'memory',
-      description: '记忆系统工作流插件',
-      version: '1.0.5',
+      description: '工作区 Markdown 记忆',
+      version: '2.0.0',
       author: 'XRK',
       priority: 1,
-      config: { enabled: true, temperature: 0.7, maxTokens: 2000 }
+      config: { enabled: true }
     });
   }
 
   async init() {
     await super.init();
-    await FileUtils.ensureDir(this.memoryDir);
     this.registerAllFunctions();
-    await this.loadMemories();
+  }
+
+  _scopeFromContext(context = {}) {
+    const e = context?.e;
+    return {
+      userId: e?.user_id ?? e?.user?.id ?? null,
+      groupId: e?.group_id ?? null,
+      scene: e?.group_id ? 'group' : (e?.user_id ? 'private' : 'default')
+    };
   }
 
   registerAllFunctions() {
-    this.registerMCPTool('save_memory', {
-      description: '【重要】当用户说出希望被记住的内容时调用此工具，将信息持久化到长期记忆。适用场景：用户说“记住/记一下/别忘了/帮我记着”、提到个人偏好（口味、习惯、生日）、约定（下次要做的事）、重要信息（名字、关系、地址）、或明确要求“以后要记得”。content 填一句简洁完整的记忆句子，不要只填关键词。',
+    this.registerMCPTool('read_memory', {
+      description: '读取 memory/MEMORY.md、当日流水或群/用户 scoped 文件。',
       inputSchema: {
         type: 'object',
-        properties: { content: { type: 'string', description: '一句完整可读的记忆内容，例如：用户不喜欢吃辣；用户生日是3月15日；约定下周六一起看电影' } },
+        properties: {
+          target: { type: 'string', description: 'MEMORY | today | group | user' }
+        },
+        required: []
+      },
+      handler: async (args = {}, context = {}) => {
+        const ws = resolveWorkspaceAbsFromContext(context);
+        const data = await readWorkspaceMemory(ws, args.target || 'MEMORY', this._scopeFromContext(context));
+        return { success: true, data };
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('append_memory', {
+      description: '向工作区记忆文件追加内容。用户说「记住」时使用。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          content: { type: 'string' },
+          target: { type: 'string', description: 'MEMORY | today | group | user' }
+        },
         required: ['content']
       },
       handler: async (args = {}, context = {}) => {
-        const { content } = args;
-        if (!content) return { success: false, error: '记忆内容不能为空' };
-        const memoryId = await this.saveMemory(content, context);
-        return {
-          success: true,
-          data: { memoryId, message: '记忆保存成功', content: content.slice(0, 100) }
-        };
+        const { content, target } = args;
+        if (!content?.trim()) return { success: false, error: '记忆内容不能为空' };
+        const ws = resolveWorkspaceAbsFromContext(context);
+        const scope = this._scopeFromContext(context);
+        let memTarget = target || 'MEMORY';
+        if (!target && scope.scene === 'group') memTarget = 'group';
+        try {
+          const data = await appendWorkspaceMemory(ws, content, { target: memTarget, ...scope });
+          return { success: true, data: { ...data, message: '记忆已追加' } };
+        } catch (err) {
+          return { success: false, error: err?.message || String(err) };
+        }
       },
       enabled: true
     });
 
-    this.registerMCPTool('query_memory', {
-      description: '根据关键词从长期记忆中检索相关内容。当需要“回忆/之前记过/你记得吗/查一下记忆”或回答与用户过去偏好、约定、个人信息相关的问题时，先调用此工具用 1～3 个关键词查询，再根据返回的记忆回复。keyword 用与主题相关的词，如：生日、口味、约定、名字。',
+    this.registerMCPTool('write_memory', {
+      description: '整文件覆盖指定记忆文件（不可覆盖 MEMORY.md）。',
       inputSchema: {
         type: 'object',
-        properties: { keyword: { type: 'string', description: '检索关键词，如：生日、不吃辣、约定、昵称' } },
+        properties: {
+          content: { type: 'string' },
+          target: { type: 'string' }
+        },
+        required: ['content', 'target']
+      },
+      handler: async (args = {}, context = {}) => {
+        const { content, target } = args;
+        if (!target || target === 'MEMORY') {
+          return { success: false, error: 'MEMORY.md 请用 append_memory' };
+        }
+        const ws = resolveWorkspaceAbsFromContext(context);
+        try {
+          const data = await writeWorkspaceMemory(ws, content, { target, ...this._scopeFromContext(context) });
+          return { success: true, data };
+        } catch (err) {
+          return { success: false, error: err?.message || String(err) };
+        }
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('list_memory_files', {
+      description: '列出 memory/ 下允许的 Markdown 文件。',
+      inputSchema: { type: 'object', properties: {}, required: [] },
+      handler: async (_args = {}, context = {}) => {
+        const files = listWorkspaceMemoryFiles(resolveWorkspaceAbsFromContext(context));
+        return { success: true, data: { files, count: files.length } };
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('search_memory', {
+      description: '在 memory/*.md 中按关键词检索。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          keyword: { type: 'string' },
+          limit: { type: 'number' }
+        },
         required: ['keyword']
       },
       handler: async (args = {}, context = {}) => {
-        const { keyword } = args;
-        if (!keyword) return { success: false, error: '关键词不能为空' };
-        const memories = await this.queryMemories(keyword, context);
-        return {
-          success: true,
-          data: { keyword, memories, count: memories.length }
-        };
+        if (!args.keyword?.trim()) return { success: false, error: '关键词不能为空' };
+        const hits = await searchWorkspaceMemory(
+          resolveWorkspaceAbsFromContext(context),
+          args.keyword,
+          args.limit ?? 20
+        );
+        return { success: true, data: { keyword: args.keyword, hits, count: hits.length } };
       },
       enabled: true
     });
-
-    this.registerMCPTool('list_memories', {
-      description: '列出当前用户在当前场景（群聊/私聊）下已保存的全部长期记忆。当用户问“你记得我什么/我有哪些记忆/看看你记了什么/记忆列表”时调用，无需参数。',
-      inputSchema: { type: 'object', properties: {}, required: [] },
-      handler: async (_args = {}, context = {}) => {
-        const memories = await this.listMemories(context);
-        return { success: true, data: { memories, count: memories.length } };
-      },
-      enabled: true
-    });
-
-    this.registerMCPTool('delete_memory', {
-      description: '按记忆ID删除一条长期记忆。当用户说“删掉这条/忘记这个/取消记忆/那条记错了”并指向某条记忆时，先 list_memories 或 query_memory 拿到对应记忆的 id，再调用此工具传入该 id。',
-      inputSchema: {
-        type: 'object',
-        properties: { id: { type: 'string', description: '要删除的记忆条目的 id，从 list_memories 或 query_memory 返回结果中获取' } },
-        required: ['id']
-      },
-      handler: async (args = {}, context = {}) => {
-        const { id } = args;
-        if (!id) return { success: false, error: '记忆ID不能为空' };
-        const success = await this.deleteMemory(id, context);
-        return {
-          success: true,
-          data: { id, message: success ? '记忆删除成功' : '记忆删除失败' }
-        };
-      },
-      enabled: true
-    });
-  }
-
-  getUserId(context) {
-    return context?.e?.user_id || context?.e?.user?.id || 'default';
-  }
-
-  getScene(context) {
-    return context?.e?.group_id ? 'group' : (context?.e?.user_id ? 'private' : 'default');
-  }
-
-  _userFile(userId) {
-    return userMemoryFile(userId);
-  }
-
-  async loadMemories() {
-    try {
-      const files = FileUtils.readDirSync(this.memoryDir);
-      for (const file of files) {
-        if (!file.endsWith('.json')) continue;
-        const fullPath = path.join(this.memoryDir, file);
-        try {
-          const data = await FileUtils.readFile(fullPath);
-          if (!data) continue;
-          const list = JSON.parse(data);
-          if (!Array.isArray(list)) continue;
-          for (const m of list) this.memories.set(String(m.id), m);
-        } catch {
-          // 单文件损坏不影响其它
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  async saveMemory(content, context) {
-    const userId = this.getUserId(context);
-    const scene = this.getScene(context);
-    const memoryId = String(Date.now());
-    const memory = {
-      id: memoryId,
-      content,
-      userId,
-      scene,
-      groupId: context?.e?.group_id ?? null,
-      timestamp: Date.now(),
-      createdAt: new Date().toISOString()
-    };
-    this.memories.set(memoryId, memory);
-    const userFile = this._userFile(userId);
-    let list = [];
-    try {
-      const data = await FileUtils.readFile(userFile);
-      if (data) list = JSON.parse(data);
-    } catch {
-      // new file
-    }
-    list.unshift(memory);
-    await FileUtils.writeFile(userFile, JSON.stringify(list, null, 2));
-    return memoryId;
-  }
-
-  async queryMemories(keyword, context) {
-    const userId = this.getUserId(context);
-    const userFile = this._userFile(userId);
-    let list = [];
-    try {
-      const data = await FileUtils.readFile(userFile);
-      if (!data) return [];
-      list = JSON.parse(data);
-    } catch {
-      return [];
-    }
-    const kw = (keyword || '').toLowerCase();
-    const groupId = context?.e?.group_id ?? null;
-
-    const scored = list
-      .filter(m => (m.userId === userId || !userId))
-      .filter(m => filterMemoriesForEvent(m, context?.e))
-      .map(m => {
-        const text = (m.content || '').toLowerCase();
-        let score = 0;
-        if (kw) {
-          if (text === kw) score = 100;
-          else if (text.includes(kw)) score = 80 + Math.min(20, kw.length);
-          else {
-            const set = new Set(text);
-            let overlap = 0;
-            for (const ch of kw) if (set.has(ch)) overlap++;
-            score = (overlap / Math.max(1, kw.length)) * 60;
-          }
-        }
-        // 区域记忆（同群）优先于全局/其它场景
-        if (groupId && m.groupId && String(m.groupId) === String(groupId)) {
-          score += 15;
-        }
-        return { m, score };
-      })
-      .sort((a, b) => b.score - a.score || (b.m.timestamp - a.m.timestamp))
-      .map(x => x.m);
-
-    return scored.slice(0, 50);
-  }
-
-  async listMemories(context) {
-    const userId = this.getUserId(context);
-    const userFile = this._userFile(userId);
-    let list = [];
-    try {
-      const data = await FileUtils.readFile(userFile);
-      if (!data) return [];
-      list = JSON.parse(data);
-    } catch {
-      return [];
-    }
-    const groupId = context?.e?.group_id ?? null;
-    return list
-      .filter(m => (m.userId === userId || !userId) && filterMemoriesForEvent(m, context?.e))
-      .sort((a, b) => {
-        const aScoped = groupId && a.groupId && String(a.groupId) === String(groupId);
-        const bScoped = groupId && b.groupId && String(b.groupId) === String(groupId);
-        if (aScoped && !bScoped) return -1;
-        if (!aScoped && bScoped) return 1;
-        return (b.timestamp || 0) - (a.timestamp || 0);
-      })
-      .slice(0, 100);
-  }
-
-  async deleteMemory(id, context) {
-    const userId = this.getUserId(context);
-    const userFile = this._userFile(userId);
-    let list = [];
-    try {
-      const data = await FileUtils.readFile(userFile);
-      if (!data) return false;
-      list = JSON.parse(data);
-    } catch {
-      return false;
-    }
-    const before = list.length;
-    list = list.filter(m => String(m.id) !== String(id));
-    if (list.length === before) return false;
-    await FileUtils.writeFile(userFile, JSON.stringify(list, null, 2));
-    this.memories.delete(String(id));
-    return true;
   }
 
   buildSystemPrompt() {
     return [
-      '你具备长期记忆能力，可以跨会话记住与用户相关的内容。',
-      '· 用户说“记住/记一下/别忘了”或提到偏好、约定、重要信息时，使用 save_memory 保存。',
-      '· 回答“你记得吗/之前记过什么”或需要回忆时，先用 query_memory 按关键词查，再结合结果回复。',
-      '· 用户问“我有哪些记忆”时用 list_memories；要删除某条记忆时用 delete_memory 并传入该条 id。',
-      '记忆按用户与场景（群/私聊）隔离，同时区分全局记忆与区域记忆：',
-      '· 区域记忆：在群聊中保存的记忆仅绑定当前群（groupId），更适合记录本群相关的梗与约定。',
-      '· 全局记忆：在私聊中保存的记忆不绑定群，可在所有场景中被引用，例如主人称呼、口味偏好等。'
+      '工作区 memory/*.md 可跨会话保留事实；写入用 append_memory，检索用 search_memory。',
+      '勿用 tools.write 改 memory/；勿写密钥。'
     ].join('\n');
   }
 
