@@ -264,7 +264,7 @@ export default class ChatStream extends AIStream {
           if (!ok) throw new Error('写入工作区失败');
           return absPath;
         }
-        if (d.file && FileUtils.fileExists(d.file)) {
+        if (d.file && FileUtils.existsSync(d.file)) {
           const ok = await FileUtils.copyFile(d.file, absPath);
           if (!ok) throw new Error('复制到工作区失败');
           return absPath;
@@ -274,7 +274,7 @@ export default class ChatStream extends AIStream {
         const result = await e.bot.sendApi('get_file', { file: fileRef });
         const d = result?.data || {};
         const local = d.file || d.path;
-        if (local && FileUtils.fileExists(local)) {
+        if (local && FileUtils.existsSync(local)) {
           const ok = await FileUtils.copyFile(local, absPath);
           if (!ok) throw new Error('复制到工作区失败');
           return absPath;
@@ -464,7 +464,7 @@ export default class ChatStream extends AIStream {
           } catch (err) {
             return { success: false, error: err.message || '路径无效' };
           }
-          if (!FileUtils.fileExists(absPath)) {
+          if (!FileUtils.existsSync(absPath)) {
             return { success: false, error: `文件不存在: ${filePath}` };
           }
           const st = FileUtils.statSync(absPath);
