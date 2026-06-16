@@ -17,6 +17,7 @@ import {
   fabricatorContextFromEvent,
   makeFabricatorForwardMsg
 } from '../lib/message-fabricator.js';
+import { TOOL_ROUNDS_EXHAUSTED_USER_TEXT } from '../../../lib/utils/llm/llm-nonstream-reply.js';
 const EMOTIONS_DIR = resolveProjectPath(RESOURCES_AIIMAGES_DIR);
 const EMOTION_TYPES = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
 const IMAGE_SEND_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
@@ -61,14 +62,14 @@ export default class ChatStream extends AIStream {
       config: {
         enabled: true,
         temperature: 0.8,
-        maxTokens: 6000,
+        maxTokens: 8000,
         topP: 0.9,
         presencePenalty: 0.6,
         frequencyPenalty: 0.6,
         /** 多工具同轮时顺序执行，降低「reply 与远程 MCP 抢跑」导致的重复铺垫 */
         parallel_tool_calls: false,
-        /** 未调 `*.reply` 时转发最后一轮正文；已调则不再 send（见 `unpackFactoryChatRaw` / `packNonStreamReturn`） */
-        forwardAssistantText: true
+        /** 写 docx / 搜索 / run 等多步任务；模型端点可再覆盖 */
+        maxToolRounds: 12
       }
     });
   }
@@ -441,13 +442,6 @@ export default class ChatStream extends AIStream {
             return {
               success: false,
               error: '清理 Markdown 后无可发送正文（请勿用标题/代码块/表格等作为主要回复），请用纯文本并遵守文本协议再调用 reply'
-            };
-          }
-          if (ChatStream.isLikelyToolOutputLeak(filteredContent)) {
-            return {
-              success: false,
-              error:
-                'content 像是工具返回的 JSON/命令日志，不能原样发给用户。请用中文口语概括结果（例如 pip 被系统禁止时说明缺 python-docx、可改用 pandoc），勿粘贴 output/command/JSON 字段。'
             };
           }
           const { totalSent, allSentContent } = await this._processAndSendTextProtocol(e, filteredContent, {
@@ -2545,16 +2539,9 @@ export default class ChatStream extends AIStream {
         text = this.stripMarkdownForOutgoing(text);
       }
 
-      if (this.config.forwardAssistantText !== false && text && e?.reply && !llm.usedReplyTool) {
-        if (ChatStream.isLikelyToolOutputLeak(text)) {
-          Bot.makeLog(
-            'warn',
-            `[ChatStream] 跳过 forwardAssistantText：正文疑似工具 JSON 泄漏 len=${text.length}`,
-            'ChatStream'
-          );
-        } else {
-          await this.sendMessages(e, text);
-        }
+      if (llm.toolRoundsExhausted && !llm.usedReplyTool && e?.reply) {
+        const notice = text || TOOL_ROUNDS_EXHAUSTED_USER_TEXT;
+        await this._processAndSendTextProtocol(e, notice, { recordToHistory: true });
       }
 
       return text || '';
@@ -2703,24 +2690,6 @@ export default class ChatStream extends AIStream {
     const { masked, tokens } = ChatStream._protectProtocolMarkers(text);
     const stripped = ChatStream._stripMarkdownCore(masked);
     return ChatStream._restoreProtocolMarkers(stripped, tokens).trim();
-  }
-
-  /** 拦截 tools.run/read/list 等 JSON 或命令日志误发到 QQ */
-  static isLikelyToolOutputLeak(text) {
-    if (!text || typeof text !== 'string') return false;
-    const t = text.trim();
-    if (t.length < 24) return false;
-    if (/"maxCommandOutputChars"\s*:/.test(t)) return true;
-    if (/"maxReadChars"\s*:/.test(t)) return true;
-    if (/"message"\s*:\s*"命令执行完成"/.test(t)) return true;
-    if (/^[^"{]*",\s*"output"\s*:/.test(t)) return true;
-    if (/"command"\s*:/.test(t) && /"output"\s*:/.test(t) && /"stderr"\s*:/.test(t)) return true;
-    if (/^\{\s*"filePath"\s*:/.test(t) && /"content"\s*:/.test(t)) return true;
-    if (/^\{\s*"path"\s*:/.test(t) && /"items"\s*:\s*\[/.test(t)) return true;
-    if (/externally-managed-environment|break-system-packages|PEP 668/i.test(t) && /"output"\s*:/.test(t)) {
-      return true;
-    }
-    return false;
   }
 
   static _isImageLikePath(filePath) {
@@ -2884,19 +2853,6 @@ export default class ChatStream extends AIStream {
     }
     
     return { replyId, segments: mergedSegments };
-  }
-
-  async sendMessages(e, cleanText) {
-    if (!cleanText || !cleanText.trim() || !e?.reply) return;
-
-    const filteredText = this.stripMarkdownForOutgoing(cleanText);
-    if (!filteredText) return;
-
-    await this._processAndSendTextProtocol(e, filteredText, {
-      messageId: null,
-      recordToHistory: true,
-      updateReplyContents: true
-    });
   }
 
   cleanupCache() {

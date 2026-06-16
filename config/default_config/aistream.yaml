@@ -150,6 +150,7 @@ tools:
   file:
     workspace: ""
     maxReadChars: 500000
+    readRawPreviewChars: 20000
     grepMaxResults: 100
     runEnabled: true
     runTimeoutMs: 120000

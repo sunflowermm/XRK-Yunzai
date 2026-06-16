@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { isPathInside, realpathSyncOrResolve } from '../../../lib/utils/path-guards.js';
+import { expandHomePath } from '../../../lib/utils/workspace-run-command.js';
 import { readTextFileUnderWorkspaceRoot } from '../../../lib/utils/safe-workspace-read.js';
 import { BaseTools } from '../../../lib/utils/base-tools.js';
 import {
@@ -25,11 +25,7 @@ const BUILTIN_PROJECT = {
 
 function resolvePathInput(raw, projectRoot) {
   if (raw == null || String(raw).trim() === '') return projectRoot;
-  let w = String(raw).trim();
-  if (w.startsWith('~')) {
-    w = path.join(os.homedir(), w.slice(1).replace(/^[\\/]/, '') || '');
-    return path.normalize(w);
-  }
+  const w = expandHomePath(String(raw).trim());
   if (path.isAbsolute(w)) return path.normalize(w);
   return path.resolve(projectRoot, w);
 }

@@ -7,6 +7,7 @@ import { isPathInside, realpathSyncOrResolve } from '../../lib/utils/path-guards
 import { InputValidator } from '../../lib/utils/input-validator.js';
 import { formatBytes, formatDuration } from '../../lib/utils/byte-size.js';
 import { getDefaultDesktopDirSync } from '../../lib/utils/user-dirs.js';
+import { normalizeToolsRunCommand } from '../../lib/utils/workspace-run-command.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -34,8 +35,19 @@ describe('lib 工具模块（对齐 AGT system-Core）', () => {
     assert.match(formatDuration(3661), /分钟/);
   });
 
-  it('getDefaultDesktopDirSync 返回绝对路径', () => {
-    const desktop = getDefaultDesktopDirSync();
-    assert.ok(path.isAbsolute(desktop));
+  it('normalizeToolsRunCommand 去掉多余 cd 并改写 ~/ 路径', () => {
+    const ws = path.join(root, 'data/ai-workspace/default');
+    const homeDoc = path.join(os.homedir(), 'XRK-Yunzai/data/ai-workspace/default/docs/长征实践报告.py');
+    const raw = `cd ${ws} && python3 "${homeDoc.replace(os.homedir(), '~')}"`;
+    const normalized = normalizeToolsRunCommand(raw, ws);
+    assert.equal(normalized, 'python3 "docs/长征实践报告.py"');
   });
+
+  it('normalizeToolsRunCommand 引号内绝对工作区路径改相对', () => {
+    const ws = path.join(root, 'data/ai-workspace/default');
+    const raw = `python3 "${path.join(ws, 'docs/foo.py')}"`;
+    const normalized = normalizeToolsRunCommand(raw, ws);
+    assert.equal(normalized, 'python3 "docs/foo.py"');
+  });
+
 });

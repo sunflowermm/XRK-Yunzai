@@ -10,6 +10,7 @@ import { InputValidator } from '../../../lib/utils/input-validator.js';
 import { getAistreamConfigOptional } from '../../../lib/utils/aistream-config.js';
 import { resolveConfiguredWorkspace } from '../lib/ai-workspace-runtime.js';
 import { exec } from '../../../lib/utils/exec-async.js';
+import { normalizeToolsRunCommand } from '../../../lib/utils/workspace-run-command.js';
 
 const IS_WINDOWS = process.platform === 'win32';
 
@@ -17,6 +18,7 @@ export default class ToolsStream extends AIStream {
   workspace = resolveConfiguredWorkspace('');
   fileToolsCfg = {
     maxReadChars: 500_000,
+    readRawPreviewChars: 20_000,
     grepMaxResults: 100,
     runEnabled: true,
     runTimeoutMs: 120_000,
@@ -27,7 +29,7 @@ export default class ToolsStream extends AIStream {
     super({
       name: 'tools',
       description: '基础工具工作流（read/grep/write/delete_file/modify_file/list_files/run）',
-      version: '1.0.6',
+      version: '1.0.7',
       author: 'XRK',
       priority: 200,
       config: {
@@ -50,6 +52,10 @@ export default class ToolsStream extends AIStream {
         typeof fileCfg.grepMaxResults === 'number' && Number.isFinite(fileCfg.grepMaxResults)
           ? Math.min(500, Math.max(1, Math.floor(fileCfg.grepMaxResults)))
           : 100,
+      readRawPreviewChars:
+        typeof fileCfg.readRawPreviewChars === 'number' && Number.isFinite(fileCfg.readRawPreviewChars)
+          ? Math.max(2000, Math.floor(fileCfg.readRawPreviewChars))
+          : 20_000,
       runEnabled: fileCfg.runEnabled !== false,
       runTimeoutMs:
         typeof fileCfg.runTimeoutMs === 'number' && Number.isFinite(fileCfg.runTimeoutMs)
@@ -95,10 +101,10 @@ export default class ToolsStream extends AIStream {
             content = content.slice(0, maxChars);
             truncated = true;
           }
-          const previewLimit = 4000;
+          const previewLimit = Math.min(this.fileToolsCfg.readRawPreviewChars, maxChars);
           const preview =
             typeof content === 'string' && content.length > previewLimit
-              ? `${content.slice(0, previewLimit)}\n…(预览截断，完整 ${content.length} 字符)`
+              ? `${content.slice(0, previewLimit)}\n…(预览截断，完整 ${content.length} 字符；可用 grep 查片段)`
               : content;
           const rawLines = [
             `文件: ${result.path}`,
@@ -265,7 +271,8 @@ export default class ToolsStream extends AIStream {
     });
 
     this.registerMCPTool('run', {
-      description: '在工作区目录下执行 shell 命令。Windows 支持 CMD/PowerShell；Linux/macOS 使用 /bin/sh。',
+      description:
+        '在工作区根目录（cwd）执行 shell 命令。路径请用相对路径（如 docs/foo.py），勿写 cd 到工作区、勿用引号包裹的 ~/绝对路径。Windows 支持 CMD/PowerShell；Linux/macOS 使用 /bin/sh。',
       inputSchema: {
         type: 'object',
         properties: { command: { type: 'string', description: '要执行的命令' } },
@@ -278,7 +285,9 @@ export default class ToolsStream extends AIStream {
         const { command } = args;
         if (!command) return { success: false, error: '命令不能为空' };
         try {
-          const { output, stderr } = await this.executeCommand(command);
+          const safeCommand = InputValidator.validateCommand(command);
+          const normalized = normalizeToolsRunCommand(safeCommand, this.workspace);
+          const { output, stderr } = await this.executeCommand(normalized);
           const maxOut = this.fileToolsCfg.maxCommandOutputChars;
           let out = output;
           let truncated = false;
@@ -287,7 +296,10 @@ export default class ToolsStream extends AIStream {
             truncated = true;
           }
           const errPart = stderr ? String(stderr).slice(0, maxOut) : '';
-          const rawParts = [`命令: ${command}`, `平台: ${process.platform}`];
+          const rawParts = [`命令: ${normalized}`, `平台: ${process.platform}`];
+          if (normalized !== safeCommand.trim()) {
+            rawParts.unshift(`原始命令: ${safeCommand.trim()}`);
+          }
           if (out) rawParts.push(`输出:\n${out}`);
           if (errPart) rawParts.push(`stderr:\n${errPart}`);
           if (truncated) rawParts.push(`(stdout 已截断至 ${maxOut} 字符)`);
@@ -295,7 +307,8 @@ export default class ToolsStream extends AIStream {
             success: true,
             raw: rawParts.join('\n\n'),
             data: {
-              command,
+              command: normalized,
+              originalCommand: safeCommand.trim(),
               output: out,
               stderr: errPart,
               truncated,
@@ -324,7 +337,6 @@ export default class ToolsStream extends AIStream {
   async executeCommand(command) {
     const safeCommand = InputValidator.validateCommand(command);
     const timeout = this.fileToolsCfg.runTimeoutMs;
-    const fullCommand = this.buildFullCommand(safeCommand, this.workspace);
     const opts = {
       maxBuffer: 10 * 1024 * 1024,
       cwd: this.workspace,
@@ -336,26 +348,25 @@ export default class ToolsStream extends AIStream {
     } else {
       opts.shell = '/bin/sh';
     }
-    const { stdout, stderr } = await exec(fullCommand, opts);
+    const runCommand = this.buildFullCommand(safeCommand, this.workspace);
+    const { stdout, stderr } = await exec(runCommand, opts);
     return { output: (stdout ?? '').trim(), stderr: (stderr ?? '').trim() };
   }
 
   buildFullCommand(command, workspace) {
     const isPowerShellCmd = /^(Get-|Set-|New-|Remove-|Test-|Invoke-|Start-|Stop-)/i.test(command);
-    if (IS_WINDOWS) {
+    if (IS_WINDOWS && isPowerShellCmd) {
       const ws = workspace.replace(/'/g, "''");
-      return isPowerShellCmd
-        ? `powershell -NoProfile -Command "Set-Location '${ws}'; ${command.replace(/"/g, '`"')}"`
-        : `cd /d "${workspace}" && ${command}`;
+      return `powershell -NoProfile -Command "Set-Location '${ws}'; ${command.replace(/"/g, '`"')}"`;
     }
-    const ws = workspace.replace(/'/g, `'\\''`);
-    return `cd '${ws}' && ${command}`;
+    return command;
   }
 
   buildSystemPrompt() {
     return `【基础工具说明】
 MCP：read / grep / write / delete_file / modify_file / list_files / run
 当前工作区：${this.workspace}
+run 已在工作区根目录执行；命令内用相对路径（docs/、output/），勿 cd 到工作区、勿用 "~/…" 引号路径。
 read 受 maxReadChars 截断；run 受 aistream.tools.file 开关与超时约束。`;
   }
 }
