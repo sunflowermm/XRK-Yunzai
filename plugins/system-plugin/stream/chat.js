@@ -42,11 +42,14 @@ export default class ChatStream extends AIStream {
   static emotionImages = {};
   static messageHistory = new Map();
   static cleanupTimer = null;
-  /** 单轮对话识图缓存 / 去重（url -> tool result） */
-  static _visionResultCache = new Map();
-  static _visionInflight = new Map();
-  static _visionCallCount = 0;
-  static VISION_MAX_PER_TURN = 5;
+  /** 识图 MCP 暂关（getMessageImages / recognizeImage 不注册） */
+  static IMAGE_RECOGNITION_MCP_ENABLED = false;
+  /** 群聊历史：内存保留 / 适配器拉取 / 注入 LLM 条数 */
+  static GROUP_HISTORY_STORE_MAX = 120;
+  static GROUP_HISTORY_SYNC_FETCH = 120;
+  static GROUP_HISTORY_PROMPT_DEFAULT = 45;
+  static GROUP_HISTORY_PROMPT_GLOBAL = 60;
+  static GROUP_HISTORY_PROMPT_DEBUG = 120;
 
   constructor() {
     super({
@@ -1537,12 +1540,12 @@ export default class ChatStream extends AIStream {
     });
 
     this.registerMCPTool('readChatRecord', {
-      description: '读取群聊记录（结构化 JSON）。合并转发仅一层摘要，内层不可展开（框架协议限制）。messageId 可选查单条；limit 默认 15。',
+      description: '读取群聊记录（结构化 JSON）。合并转发仅一层摘要，内层不可展开（框架协议限制）。messageId 可选查单条；limit 默认 30。',
       inputSchema: {
         type: 'object',
         properties: {
           messageId: { type: 'number', description: '可选，查单条消息详情' },
-          limit: { type: 'number', description: '最近条数 1-50，默认 15' }
+          limit: { type: 'number', description: `最近条数 1-${ChatStream.GROUP_HISTORY_STORE_MAX}，默认 30` }
         },
         required: []
       },
@@ -1564,8 +1567,13 @@ export default class ChatStream extends AIStream {
             raw: this._queryToolRawDetail(`消息 ${msgId}（仅一层）`, data, e)
           };
         }
-        const limit = Math.min(Math.max(parseInt(args.limit, 10) || 15, 1), 50);
-        const history = (ChatStream.messageHistory.get(e.group_id) || []).slice(-limit);
+        const limit = Math.min(
+          Math.max(parseInt(args.limit, 10) || 30, 1),
+          ChatStream.GROUP_HISTORY_STORE_MAX
+        );
+        const history = ChatStream._compactHistoryForPrompt(
+          ChatStream.messageHistory.get(e.group_id) || []
+        ).slice(-limit);
         const data = {
           limit,
           count: history.length,
@@ -1638,153 +1646,6 @@ export default class ChatStream extends AIStream {
       enabled: true
     });
 
-    this.registerMCPTool('getMessageImages', {
-      description: '获取消息中的图片URL列表。messageId 必填（见记录[ID:xxx]，数字）。无描述时可先本工具再 recognizeImage。',
-      inputSchema: {
-        type: 'object',
-        properties: { messageId: { type: 'number' } },
-        required: ['messageId']
-      },
-      handler: async (args = {}, context = {}) => {
-        const e = context.e;
-        if (!e) {
-          return { success: false, error: '事件对象不存在' };
-        }
-
-        const msgId = String(args.messageId ?? '').trim();
-        if (!msgId) {
-          return { success: false, error: '消息ID不能为空' };
-        }
-
-        try {
-          const messageData = await this._fetchMessageById(e, msgId);
-          if (!messageData) {
-            return { success: false, error: '无法获取消息，消息可能不存在或已过期' };
-          }
-
-          const images = this._extractMessageAssets(messageData.message)
-            .filter(a => a.type === 'image')
-            .map(a => a.url || a.file)
-            .filter(Boolean);
-
-          if (images.length === 0 && messageData.raw_message) {
-            const cqImageRegex = /\[CQ:image,file=([^\]]+)\]/g;
-            let match;
-            while ((match = cqImageRegex.exec(messageData.raw_message)) !== null) {
-              const fileParam = match[1];
-              const urlMatch = fileParam.match(/url=([^,]+)/);
-              if (urlMatch) images.push(urlMatch[1]);
-            }
-          }
-
-          if (images.length === 0) {
-            return { success: false, error: '该消息中没有图片' };
-          }
-
-          const data = {
-              messageId: msgId,
-              images,
-              imageCount: images.length,
-              sender: messageData.sender?.nickname || messageData.sender?.user_id || '未知',
-              time: messageData.time || Date.now()
-            };
-          const raw = this._queryToolRaw(`消息 ${msgId} 的图片URL列表（共 ${images.length} 张）`, data);
-          const result = { success: true, data, raw };
-          Bot.makeLog('debug', `[ChatStream] getMessageImages messageId=${msgId} imageCount=${images.length}`, 'ChatStream');
-          return result;
-        } catch (error) {
-          Bot.makeLog('error', `[ChatStream] getMessageImages 异常: ${error.message}`, 'ChatStream');
-          return { success: false, error: error.message };
-        }
-      },
-      enabled: true
-    });
-
-    this.registerMCPTool('recognizeImage', {
-      description: '识别图片内容返回描述。imageUrl 必填（通常来自 getMessageImages）；每张图同一会话只调一次，勿重复调用。',
-      inputSchema: {
-        type: 'object',
-        properties: { imageUrl: { type: 'string' }, prompt: { type: 'string' } },
-        required: ['imageUrl']
-      },
-      handler: async (args = {}, context = {}) => {
-        const e = context.e;
-        if (!e) {
-          return { success: false, error: '事件对象不存在' };
-        }
-
-        const imageUrl = String(args.imageUrl ?? '').trim();
-        if (!imageUrl) {
-          return { success: false, error: '图片URL不能为空' };
-        }
-
-        if (ChatStream._visionResultCache.has(imageUrl)) {
-          return ChatStream._visionResultCache.get(imageUrl);
-        }
-        if (ChatStream._visionInflight.has(imageUrl)) {
-          return ChatStream._visionInflight.get(imageUrl);
-        }
-
-        if (ChatStream._visionCallCount >= ChatStream.VISION_MAX_PER_TURN) {
-          return {
-            success: false,
-            error: `本轮识图已达上限（${ChatStream.VISION_MAX_PER_TURN} 次），请根据已有识图结果用 reply 回复用户`
-          };
-        }
-        ChatStream._visionCallCount += 1;
-
-        const prompt = String(args.prompt ?? '').trim() || '请详细描述这张图片的内容，包括主要对象、场景、文字（如果有）、颜色、风格等。';
-
-        const task = (async () => {
-          try {
-            const recognitionMessages = [
-              {
-                role: 'system',
-                content: '你是专业的图片识别助手。只输出对图片的中文描述，不要调用任何工具。'
-              },
-              {
-                role: 'user',
-                content: {
-                  text: prompt,
-                  images: [imageUrl]
-                }
-              }
-            ];
-
-            // 子调用必须关闭 MCP，否则会递归触发 recognizeImage
-            const llm = await this.callAI(recognitionMessages, { enableTools: false });
-
-            if (llm == null || !String(llm.text ?? '').trim()) {
-              return { success: false, error: 'AI识别失败，未返回结果' };
-            }
-
-            const description = llm.text.trim();
-            const result = {
-              success: true,
-              data: { description, prompt },
-              raw: `识图完成。描述：${description}\n请用 reply 告知用户，勿再调用 recognizeImage。`
-            };
-            Bot.makeLog(
-              'debug',
-              `[ChatStream] recognizeImage 成功 descriptionLen=${description.length}`,
-              'ChatStream'
-            );
-            ChatStream._visionResultCache.set(imageUrl, result);
-            return result;
-          } catch (error) {
-            Bot.makeLog('error', `[ChatStream] recognizeImage 异常: ${error.message}`, 'ChatStream');
-            return { success: false, error: error.message };
-          } finally {
-            ChatStream._visionInflight.delete(imageUrl);
-          }
-        })();
-
-        ChatStream._visionInflight.set(imageUrl, task);
-        return task;
-      },
-      enabled: true
-    });
-
     this.registerMCPTool('forgeForward', {
       description:
         '整活向：伪造合并转发聊天记录并发到当前会话。messages 为结构化数组；或 batch 字符串（QQ|昵称|内容|时间，多条用||）。QQ 可用 me/我/bot/机器人；内容支持 [图片:url] [视频:url] 与 \\n。仅玩梗/情景再现，勿造谣。',
@@ -1845,6 +1706,97 @@ export default class ChatStream extends AIStream {
             return { success: false, error: err?.message || '伪造消息失败' };
           }
         });
+      },
+      enabled: true
+    });
+
+    if (ChatStream.IMAGE_RECOGNITION_MCP_ENABLED) {
+      this._registerImageRecognitionTools();
+    }
+  }
+
+  _registerImageRecognitionTools() {
+    this.registerMCPTool('getMessageImages', {
+      description: '获取消息中的图片URL列表。messageId 必填（见记录[ID:xxx]）。',
+      inputSchema: {
+        type: 'object',
+        properties: { messageId: { type: 'number' } },
+        required: ['messageId']
+      },
+      handler: async (args = {}, context = {}) => {
+        const e = context.e;
+        if (!e) return { success: false, error: '事件对象不存在' };
+        const msgId = String(args.messageId ?? '').trim();
+        if (!msgId) return { success: false, error: '消息ID不能为空' };
+        try {
+          const messageData = await this._fetchMessageById(e, msgId);
+          if (!messageData) {
+            return { success: false, error: '无法获取消息，消息可能不存在或已过期' };
+          }
+          const images = this._extractMessageAssets(messageData.message)
+            .filter(a => a.type === 'image')
+            .map(a => a.url || a.file)
+            .filter(Boolean);
+          if (images.length === 0 && messageData.raw_message) {
+            const cqImageRegex = /\[CQ:image,file=([^\]]+)\]/g;
+            let match;
+            while ((match = cqImageRegex.exec(messageData.raw_message)) !== null) {
+              const urlMatch = match[1].match(/url=([^,]+)/);
+              if (urlMatch) images.push(urlMatch[1]);
+            }
+          }
+          if (images.length === 0) {
+            return { success: false, error: '该消息中没有图片' };
+          }
+          const data = {
+            messageId: msgId,
+            images,
+            imageCount: images.length,
+            sender: messageData.sender?.nickname || messageData.sender?.user_id || '未知',
+            time: messageData.time || Date.now()
+          };
+          return { success: true, data, raw: this._queryToolRaw(`消息 ${msgId} 的图片URL`, data) };
+        } catch (error) {
+          return { success: false, error: error.message };
+        }
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('recognizeImage', {
+      description: '识别图片内容。imageUrl 必填；每张图同一会话只调一次。',
+      inputSchema: {
+        type: 'object',
+        properties: { imageUrl: { type: 'string' }, prompt: { type: 'string' } },
+        required: ['imageUrl']
+      },
+      handler: async (args = {}, context = {}) => {
+        if (!context.e) return { success: false, error: '事件对象不存在' };
+        const imageUrl = String(args.imageUrl ?? '').trim();
+        if (!imageUrl) return { success: false, error: '图片URL不能为空' };
+        const prompt =
+          String(args.prompt ?? '').trim() ||
+          '请详细描述这张图片的内容，包括主要对象、场景、文字（如果有）、颜色、风格等。';
+        try {
+          const llm = await this.callAI(
+            [
+              { role: 'system', content: '你是图片识别助手。只输出中文描述，不要调用工具。' },
+              { role: 'user', content: { text: prompt, images: [imageUrl] } }
+            ],
+            { enableTools: false }
+          );
+          if (llm == null || !String(llm.text ?? '').trim()) {
+            return { success: false, error: 'AI识别失败，未返回结果' };
+          }
+          const description = llm.text.trim();
+          return {
+            success: true,
+            data: { description, prompt },
+            raw: `识图完成。描述：${description}\n请用 reply 告知用户。`
+          };
+        } catch (error) {
+          return { success: false, error: error.message };
+        }
       },
       enabled: true
     });
@@ -1919,8 +1871,8 @@ export default class ChatStream extends AIStream {
         }
         const history = ChatStream.messageHistory.get(groupId);
         history.push(msgData);
-        if (history.length > 50) {
-          ChatStream.messageHistory.set(groupId, history.slice(-50));
+        if (history.length > ChatStream.GROUP_HISTORY_STORE_MAX) {
+          ChatStream.messageHistory.set(groupId, history.slice(-ChatStream.GROUP_HISTORY_STORE_MAX));
         }
       }
 
@@ -1949,7 +1901,7 @@ export default class ChatStream extends AIStream {
       user_id: e.self_id,
       nickname: e.bot?.nickname || e.bot?.info?.nickname || e.bot?.name || 'Bot',
       message: cleanText || text, // 记录清理后的文本（不含图片内容标记）
-      message_id: Date.now().toString(),
+      message_id: `local_${Date.now()}`,
       time: Date.now(),
       platform: 'onebot',
       hasImage: false,
@@ -1959,7 +1911,9 @@ export default class ChatStream extends AIStream {
     if (e?.isGroup && e.group_id) {
       const history = ChatStream.messageHistory.get(e.group_id) || [];
       history.push(msgData);
-      if (history.length > 50) ChatStream.messageHistory.set(e.group_id, history.slice(-50));
+      if (history.length > ChatStream.GROUP_HISTORY_STORE_MAX) {
+        ChatStream.messageHistory.set(e.group_id, history.slice(-ChatStream.GROUP_HISTORY_STORE_MAX));
+      }
     }
     if (imageContent) {
       Bot.makeLog('debug', `[ChatStream] recordAIResponse 提取图片内容标记: ${imageContent}`, 'ChatStream');
@@ -1978,50 +1932,22 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 记录工具调用结果到聊天记录
+   * 工具结果仅写日志，不入群聊历史（避免 JSON 干扰模型复读）。
    */
   recordToolCallResult(e, toolName, result) {
     if (!e?.isGroup || !e.group_id) return;
-
     try {
-      const groupId = String(e.group_id);
-      const history = ChatStream.messageHistory.get(groupId) || [];
-      
-      // 完整的结果文本（用于日志）
-      const fullResultText = ChatStream._sanitizeTextForAI(
-        result?.success && result?.data
-          ? JSON.stringify(result.data)
-          : (result?.error || '已完成')
+      const preview =
+        result?.success && result?.raw
+          ? String(result.raw).slice(0, 500)
+          : result?.success && result?.data
+            ? JSON.stringify(result.data).slice(0, 500)
+            : String(result?.error || '已完成').slice(0, 500);
+      Bot.makeLog(
+        'debug',
+        `[ChatStream] recordToolCallResult tool=${toolName} group=${e.group_id} preview=${preview}`,
+        'ChatStream'
       );
-      
-      // 存储到历史记录的结果文本（限制长度，避免历史记录过大）
-      const MAX_STORED_RESULT_LENGTH = 2000;
-      const resultText = fullResultText.length > MAX_STORED_RESULT_LENGTH
-        ? fullResultText.slice(0, MAX_STORED_RESULT_LENGTH) + `...[截断 ${fullResultText.length} 字符]`
-        : fullResultText;
-      
-      // 工具调用记录：只记录结果，不暴露工具名格式，避免AI误解
-      const msgData = {
-        user_id: e.self_id,
-        nickname: e.bot?.nickname || e.bot?.info?.nickname || e.bot?.name || 'Bot',
-        message: resultText, // 存储截断后的结果文本
-        message_id: `tool_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-        time: Date.now(),
-        platform: 'onebot',
-        hasImage: false,
-        isBot: true,
-        isTool: true,
-        toolName,
-        toolResult: result
-      };
-
-      history.push(msgData);
-      if (history.length > 50) {
-        ChatStream.messageHistory.set(groupId, history.slice(-50));
-      }
-
-      // 日志输出完整内容
-      Bot.makeLog('debug', `[ChatStream] recordToolCallResult tool=${toolName} group=${groupId} resultLen=${fullResultText.length} result=${fullResultText}`, 'ChatStream');
     } catch (err) {
       Bot.makeLog('debug', `[ChatStream] recordToolCallResult 异常: ${err?.message}`, 'ChatStream');
     }
@@ -2119,8 +2045,9 @@ export default class ChatStream extends AIStream {
       '- 工具若表明已送达，勿再用 reply/at 重复实质相同的话。',
       '',
       '## 上下文说明',
-      '- 群聊记录格式：昵称(QQ)[ID:xxx]；「【我】」为你已发内容，勿复读。',
-      '- 标签：[含图片]、[含文件]、[含表情]、[合并转发] 表示消息类型；合并转发**仅一层**，内层不可读（协议限制，勿臆造内文）。',
+      '- 群聊记录格式：昵称(QQ)[ID:xxx]；**【我】= 你已对用户说过的话**，同一话题勿重复回答；优先对准 `[当前消息]`。',
+      '- 标签：[含图片] 表示有图（**识图 MCP 暂关**，见标签即可，勿调 getMessageImages/recognizeImage）；[含文件]、[含表情]、[合并转发] 同理。',
+      '- 合并转发**仅一层**，内层不可读（协议限制，勿臆造内文）。',
       '- 读记录用 **readChatRecord**；下图片/文件/表情包到工作区用 **saveMessageAsset**；发图片用 **send_image**（勿 send_file）；发文档等用 **send_file**。',
       '- 内置情绪图用 reply 的 `[开心]` 等标签，勿把表情包当文件发。',
       '- 下文「文件记忆」「会话记忆」为摘要，可引用，勿整段照搬。',
@@ -2305,9 +2232,9 @@ export default class ChatStream extends AIStream {
     try {
       let rawHistory;
       try {
-        rawHistory = await getter(undefined, 50, true);
+        rawHistory = await getter(undefined, ChatStream.GROUP_HISTORY_SYNC_FETCH, true);
       } catch {
-        rawHistory = await getter(50);
+        rawHistory = await getter(ChatStream.GROUP_HISTORY_SYNC_FETCH);
       }
 
       const history = ChatStream.messageHistory.get(groupId) || [];
@@ -2339,7 +2266,8 @@ export default class ChatStream extends AIStream {
         const hasImage = segFlags.hasImage;
         // 确保 user_id 始终存在，QQ号是唯一标识
         const userId = msg.user_id ?? sender.user_id ?? '未知QQ';
-        
+        const isBot = String(userId) === String(e.self_id);
+
         newMessages.push({
           user_id: userId,
           nickname,
@@ -2350,14 +2278,18 @@ export default class ChatStream extends AIStream {
           hasImage,
           hasFile: segFlags.hasFile,
           hasFace: segFlags.hasFace,
-          isForward: segFlags.isForward
+          isForward: segFlags.isForward,
+          isBot
         });
         existingIds.add(idStr); // 添加到已存在集合，避免重复
       }
 
       if (newMessages.length > 0) {
         const merged = history.concat(newMessages);
-        const limited = merged.length > 50 ? merged.slice(-50) : merged;
+        const limited =
+          merged.length > ChatStream.GROUP_HISTORY_STORE_MAX
+            ? merged.slice(-ChatStream.GROUP_HISTORY_STORE_MAX)
+            : merged;
         ChatStream.messageHistory.set(groupId, limited);
 
       }
@@ -2387,6 +2319,44 @@ export default class ChatStream extends AIStream {
    * @param {Object} msg - 消息对象
    * @returns {string} 格式化后的文本
    */
+  static _isEphemeralBotMessageId(messageId) {
+    const id = String(messageId ?? '');
+    return id.startsWith('local_') || id.startsWith('tool_') || /^\d{13}$/.test(id);
+  }
+
+  /** 去掉工具记录、合并重复的【我】条目（本地临时 id vs 适配器真实 id） */
+  static _compactHistoryForPrompt(history) {
+    if (!Array.isArray(history) || history.length === 0) return [];
+    const filtered = history.filter(m => !m.isTool);
+    const byBotText = new Map();
+    const result = [];
+    for (const msg of filtered) {
+      if (!msg.isBot) {
+        result.push(msg);
+        continue;
+      }
+      const key = ChatStream._sanitizeTextForAI(String(msg.message || '').trim()).slice(0, 300);
+      if (!key) {
+        result.push(msg);
+        continue;
+      }
+      const prev = byBotText.get(key);
+      if (!prev) {
+        byBotText.set(key, msg);
+        result.push(msg);
+        continue;
+      }
+      const prevEphemeral = ChatStream._isEphemeralBotMessageId(prev.message_id);
+      const curEphemeral = ChatStream._isEphemeralBotMessageId(msg.message_id);
+      if (prevEphemeral && !curEphemeral) {
+        const idx = result.indexOf(prev);
+        if (idx >= 0) result[idx] = msg;
+        byBotText.set(key, msg);
+      }
+    }
+    return result;
+  }
+
   _formatHistoryMessage(msg) {
     const msgId = msg.message_id || msg.real_id || '未知';
     const imageTag = msg.hasImage ? '[含图片]' : '';
@@ -2409,13 +2379,17 @@ export default class ChatStream extends AIStream {
   async mergeMessageHistory(messages, e) {
     if (!e?.isGroup || messages.length < 2) return messages;
 
-    await this.syncHistoryFromAdapter(e);
-
     const userMessage = messages[messages.length - 1];
     const isGlobalTrigger = userMessage.content?.isGlobalTrigger || false;
     const debugDumpFullPrompt = userMessage.content?.debugDumpFullPrompt || false;
-    const history = ChatStream.messageHistory.get(e.group_id) || [];
-    const historyLimit = debugDumpFullPrompt ? 50 : (isGlobalTrigger ? 15 : 10);
+
+    await this.syncHistoryFromAdapter(e);
+
+    const rawHistory = ChatStream.messageHistory.get(e.group_id) || [];
+    const history = ChatStream._compactHistoryForPrompt(rawHistory);
+    const historyLimit = debugDumpFullPrompt
+      ? ChatStream.GROUP_HISTORY_PROMPT_DEBUG
+      : (isGlobalTrigger ? ChatStream.GROUP_HISTORY_PROMPT_GLOBAL : ChatStream.GROUP_HISTORY_PROMPT_DEFAULT);
     const historyHeader = debugDumpFullPrompt
       ? `[群聊·最近${historyLimit}条]`
       : '[群聊记录]';
@@ -2433,11 +2407,15 @@ export default class ChatStream extends AIStream {
     const recentMessages = filteredHistory.slice(-historyLimit);
 
     if (recentMessages.length > 0) {
-      const historyText = `${historyHeader}\n${recentMessages.map(msg => this._formatHistoryMessage(msg)).join('\n')}`;
+      const historyBody = recentMessages.map(msg => this._formatHistoryMessage(msg)).join('\n');
+      const historyFooter = isGlobalTrigger
+        ? ''
+        : '\n\n（说明：【我】= 你已回复过的内容，勿对同一话题重复作答；请优先回应 `[当前消息]`。）';
+      const historyText = `${historyHeader}\n${historyBody}${historyFooter}`;
       mergedMessages.push({
         role: 'user',
         content: isGlobalTrigger
-          ? `${historyText}\n\n请像群里真人一样接一两句：对准气氛或某条发言，可吐槽玩梗；勿全文总结、勿逐条点评。`
+          ? `${historyText}\n\n请像群里真人一样接一两句：对准气氛或某条发言，可吐槽玩梗；勿全文总结、勿逐条点评、勿重复【我】已说过的话。`
           : historyText
       });
     }
@@ -2554,9 +2532,6 @@ export default class ChatStream extends AIStream {
 
       if (Bot.StreamLoader) Bot.StreamLoader.currentEvent = e || null;
       this._hasSentEmotionThisTurn = false;
-      ChatStream._visionResultCache.clear();
-      ChatStream._visionInflight.clear();
-      ChatStream._visionCallCount = 0;
 
       const llm = await this.callAI(messages, {
         ...config,
@@ -2930,8 +2905,8 @@ export default class ChatStream extends AIStream {
         ChatStream.messageHistory.delete(groupId);
         continue;
       }
-      if (messages.length > 50) {
-        ChatStream.messageHistory.set(groupId, messages.slice(-50));
+      if (messages.length > ChatStream.GROUP_HISTORY_STORE_MAX) {
+        ChatStream.messageHistory.set(groupId, messages.slice(-ChatStream.GROUP_HISTORY_STORE_MAX));
       }
     }
   }
