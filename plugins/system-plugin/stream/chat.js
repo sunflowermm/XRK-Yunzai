@@ -12,8 +12,14 @@ import {
   resolveWorkspaceAbsFromContext
 } from '../../../lib/utils/agent-workspace-paths.js';
 import { resolveProjectPath, RESOURCES_AIIMAGES_DIR, DATA_DIR } from '../../../lib/config/config-constants.js';
+import {
+  buildFabricatorMsgList,
+  fabricatorContextFromEvent,
+  makeFabricatorForwardMsg
+} from '../lib/message-fabricator.js';
 const EMOTIONS_DIR = resolveProjectPath(RESOURCES_AIIMAGES_DIR);
 const EMOTION_TYPES = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
+const IMAGE_SEND_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
 
 // 表情回应映射
 const EMOJI_REACTIONS = {
@@ -36,6 +42,11 @@ export default class ChatStream extends AIStream {
   static emotionImages = {};
   static messageHistory = new Map();
   static cleanupTimer = null;
+  /** 单轮对话识图缓存 / 去重（url -> tool result） */
+  static _visionResultCache = new Map();
+  static _visionInflight = new Map();
+  static _visionCallCount = 0;
+  static VISION_MAX_PER_TURN = 5;
 
   constructor() {
     super({
@@ -313,7 +324,8 @@ export default class ChatStream extends AIStream {
   _queryToolRaw(description, data) {
     const MAX_DATA_LEN = 4000;
     const dataStr = data != null ? (typeof data === 'string' ? data : JSON.stringify(data)) : '{}';
-    const truncated = dataStr.length > MAX_DATA_LEN ? dataStr.slice(0, MAX_DATA_LEN) + '\n...[已截断]' : dataStr;
+    const sanitized = ChatStream._sanitizeTextForAI(dataStr);
+    const truncated = sanitized.length > MAX_DATA_LEN ? sanitized.slice(0, MAX_DATA_LEN) + '\n...[已截断]' : sanitized;
     return `已获取${description}。根据 data 回复，勿再调用。\n\ndata:\n${truncated}`;
   }
 
@@ -321,7 +333,8 @@ export default class ChatStream extends AIStream {
   _queryToolRawDetail(description, data, e) {
     const MAX_DATA_LEN = 4000;
     const dataStr = data != null ? (typeof data === 'string' ? data : JSON.stringify(data)) : '{}';
-    const truncated = dataStr.length > MAX_DATA_LEN ? dataStr.slice(0, MAX_DATA_LEN) + '\n...[已截断]' : dataStr;
+    const sanitized = ChatStream._sanitizeTextForAI(dataStr);
+    const truncated = sanitized.length > MAX_DATA_LEN ? sanitized.slice(0, MAX_DATA_LEN) + '\n...[已截断]' : sanitized;
     const head = e?.isGroup && e?.group_id
       ? `你已在群 ${e.group_id} 获取${description}。根据 data 回复，勿再调用。`
       : e?.user_id
@@ -427,6 +440,13 @@ export default class ChatStream extends AIStream {
               error: '清理 Markdown 后无可发送正文（请勿用标题/代码块/表格等作为主要回复），请用纯文本并遵守文本协议再调用 reply'
             };
           }
+          if (ChatStream.isLikelyToolOutputLeak(filteredContent)) {
+            return {
+              success: false,
+              error:
+                'content 像是工具返回的 JSON/命令日志，不能原样发给用户。请用中文口语概括结果（例如 pip 被系统禁止时说明缺 python-docx、可改用 pandoc），勿粘贴 output/command/JSON 字段。'
+            };
+          }
           const { totalSent, allSentContent } = await this._processAndSendTextProtocol(e, filteredContent, {
             messageId: args.messageId,
             recordToHistory: true,
@@ -442,7 +462,7 @@ export default class ChatStream extends AIStream {
     });
 
     this.registerMCPTool('send_file', {
-      description: '向当前会话发送文件（图片、文档、压缩包等）。filePath 为 Agent 工作区内路径（相对或绝对）；可选 name 为显示文件名。',
+      description: '向当前会话发送非图片类文件（文档、压缩包等）。图片/表情包请用 send_image。filePath 为工作区内路径。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -471,6 +491,9 @@ export default class ChatStream extends AIStream {
           if (!st?.isFile()) {
             return { success: false, error: '路径不是文件' };
           }
+          if (ChatStream._isImageLikePath(absPath)) {
+            return { success: false, error: '图片/表情包请用 send_image（segment 发图），勿用 send_file' };
+          }
           const displayName = String(args.name ?? path.basename(absPath)).trim() || path.basename(absPath);
           const sender = e?.group_id ? e.group : e?.friend;
           if (!sender?.sendFile) {
@@ -480,7 +503,55 @@ export default class ChatStream extends AIStream {
           const where = e.group_id ? `群 ${e.group_id}` : `用户 ${e.user_id}(私聊)`;
           return {
             success: true,
-            raw: `你已在${where}发送文件「${displayName}」（${absPath}）。无话可说则空返回。`
+            raw: `你已在${where}发送文件「${displayName}」。无话可说则空返回。`
+          };
+        });
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('send_image', {
+      description: '向当前会话发送图片或表情包（segment.image）。filePath 为工作区内图片路径；GIF/PNG/JPG 等均走本工具，勿用 send_file。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          filePath: { type: 'string', description: '工作区内图片路径' }
+        },
+        required: ['filePath']
+      },
+      handler: async (args = {}, context = {}) => {
+        const e = context.e;
+        const filePath = String(args.filePath ?? '').trim();
+        if (!filePath) return { success: false, error: 'filePath 不能为空' };
+        const workspace = resolveWorkspaceAbsFromContext(context);
+        const baseTools = new BaseTools(workspace);
+        return this._wrapHandler(async () => {
+          let absPath;
+          try {
+            absPath = baseTools.resolvePathInWorkspace(filePath);
+          } catch (err) {
+            return { success: false, error: err.message || '路径无效' };
+          }
+          if (!FileUtils.existsSync(absPath)) {
+            return { success: false, error: `文件不存在: ${filePath}` };
+          }
+          const st = FileUtils.statSync(absPath);
+          if (!st?.isFile()) {
+            return { success: false, error: '路径不是文件' };
+          }
+          if (!ChatStream._isImageLikePath(absPath)) {
+            return { success: false, error: '非图片文件请用 send_file' };
+          }
+          if (!e?.reply) {
+            return { success: false, error: '当前环境无法发送消息' };
+          }
+          await e.reply([segment.image(absPath)]);
+          const where = e.group_id ? `群 ${e.group_id}` : `用户 ${e.user_id}(私聊)`;
+          const name = path.basename(absPath);
+          this.recordAIResponse(e, `[图片:${name}]`);
+          return {
+            success: true,
+            raw: `你已在${where}发送图片「${name}」。无话可说则空返回。`
           };
         });
       },
@@ -1555,11 +1626,11 @@ export default class ChatStream extends AIStream {
             workspacePath: relPath,
             absolutePath: absPath
           };
-          return {
-            success: true,
-            data,
-            raw: `已保存到工作区 ${relPath}，可用 send_file 发送。data:\n${JSON.stringify(data)}`
-          };
+          const hint =
+            asset.type === 'image' || asset.type === 'mface'
+              ? `已保存到 ${relPath}。发图/表情包请用 send_image（勿 send_file）；内置情绪图用 reply 的 [开心] 等。`
+              : `已保存到 ${relPath}。发非图片文件用 send_file。`;
+          return { success: true, data, raw: hint };
         } catch (err) {
           return { success: false, error: err.message };
         }
@@ -1630,7 +1701,7 @@ export default class ChatStream extends AIStream {
     });
 
     this.registerMCPTool('recognizeImage', {
-      description: '识别图片内容返回描述。imageUrl 必填；prompt 可选。常与 getMessageImages 配合。',
+      description: '识别图片内容返回描述。imageUrl 必填（通常来自 getMessageImages）；每张图同一会话只调一次，勿重复调用。',
       inputSchema: {
         type: 'object',
         properties: { imageUrl: { type: 'string' }, prompt: { type: 'string' } },
@@ -1647,48 +1718,133 @@ export default class ChatStream extends AIStream {
           return { success: false, error: '图片URL不能为空' };
         }
 
+        if (ChatStream._visionResultCache.has(imageUrl)) {
+          return ChatStream._visionResultCache.get(imageUrl);
+        }
+        if (ChatStream._visionInflight.has(imageUrl)) {
+          return ChatStream._visionInflight.get(imageUrl);
+        }
+
+        if (ChatStream._visionCallCount >= ChatStream.VISION_MAX_PER_TURN) {
+          return {
+            success: false,
+            error: `本轮识图已达上限（${ChatStream.VISION_MAX_PER_TURN} 次），请根据已有识图结果用 reply 回复用户`
+          };
+        }
+        ChatStream._visionCallCount += 1;
+
         const prompt = String(args.prompt ?? '').trim() || '请详细描述这张图片的内容，包括主要对象、场景、文字（如果有）、颜色、风格等。';
 
-        try {
-          // 构造多模态消息格式：{ text, images }
-          // 工厂会自动通过 transformMessagesWithVision 转换为 OpenAI 风格的 content 数组
-          const recognitionMessages = [
-            {
-              role: 'system',
-              content: '你是一个专业的图片识别助手。请根据用户提供的图片，详细描述图片的内容。'
-            },
-            {
-              role: 'user',
-              content: {
-                text: prompt,
-                images: [imageUrl] // 图片URL，工厂会自动处理转换
+        const task = (async () => {
+          try {
+            const recognitionMessages = [
+              {
+                role: 'system',
+                content: '你是专业的图片识别助手。只输出对图片的中文描述，不要调用任何工具。'
+              },
+              {
+                role: 'user',
+                content: {
+                  text: prompt,
+                  images: [imageUrl]
+                }
               }
+            ];
+
+            // 子调用必须关闭 MCP，否则会递归触发 recognizeImage
+            const llm = await this.callAI(recognitionMessages, { enableTools: false });
+
+            if (llm == null || !String(llm.text ?? '').trim()) {
+              return { success: false, error: 'AI识别失败，未返回结果' };
             }
-          ];
 
-          // 调用AI识别（使用当前工作流的配置）
-          const config = this.resolveLLMConfig({});
-          const llm = await this.callAI(recognitionMessages, config);
-
-          if (llm == null || !String(llm.text ?? '').trim()) {
-            return { success: false, error: 'AI识别失败，未返回结果' };
-          }
-
-          const recognitionResult = llm.text.trim();
-
-          const data = {
-              imageUrl,
-              description: recognitionResult.trim(),
-              prompt
+            const description = llm.text.trim();
+            const result = {
+              success: true,
+              data: { description, prompt },
+              raw: `识图完成。描述：${description}\n请用 reply 告知用户，勿再调用 recognizeImage。`
             };
-          const raw = this._queryToolRaw('该图片的识别结果', data);
-          const result = { success: true, data, raw };
-          Bot.makeLog('debug', `[ChatStream] recognizeImage 成功识别图片 imageUrl=${imageUrl} descriptionLen=${recognitionResult.trim().length}`, 'ChatStream');
-          return result;
-        } catch (error) {
-          Bot.makeLog('error', `[ChatStream] recognizeImage 异常: ${error.message}`, 'ChatStream');
-          return { success: false, error: error.message };
+            Bot.makeLog(
+              'debug',
+              `[ChatStream] recognizeImage 成功 descriptionLen=${description.length}`,
+              'ChatStream'
+            );
+            ChatStream._visionResultCache.set(imageUrl, result);
+            return result;
+          } catch (error) {
+            Bot.makeLog('error', `[ChatStream] recognizeImage 异常: ${error.message}`, 'ChatStream');
+            return { success: false, error: error.message };
+          } finally {
+            ChatStream._visionInflight.delete(imageUrl);
+          }
+        })();
+
+        ChatStream._visionInflight.set(imageUrl, task);
+        return task;
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('forgeForward', {
+      description:
+        '整活向：伪造合并转发聊天记录并发到当前会话。messages 为结构化数组；或 batch 字符串（QQ|昵称|内容|时间，多条用||）。QQ 可用 me/我/bot/机器人；内容支持 [图片:url] [视频:url] 与 \\n。仅玩梗/情景再现，勿造谣。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          messages: {
+            type: 'array',
+            description: '推荐：结构化消息列表',
+            items: {
+              type: 'object',
+              properties: {
+                qq: { type: 'string', description: 'QQ 或 me/我/bot/机器人' },
+                nickname: { type: 'string' },
+                content: { type: 'string', description: '文字；[图片:url]；\\n 换行' },
+                time: { type: 'string', description: '可选：-5分钟、刚刚、14:30 等' }
+              },
+              required: ['qq', 'nickname', 'content']
+            }
+          },
+          batch: {
+            type: 'string',
+            description: '与 #制造消息 相同：qq|昵称|内容|时间，多条用 ||'
+          }
         }
+      },
+      handler: async (args = {}, context = {}) => {
+        const e = context.e;
+        if (!e?.reply) return { success: false, error: '当前环境无法发送消息' };
+        const hasBatch = String(args.batch ?? '').trim().length > 0;
+        const hasMessages = Array.isArray(args.messages) && args.messages.length > 0;
+        if (!hasBatch && !hasMessages) {
+          return { success: false, error: '请提供 messages 数组或 batch 字符串' };
+        }
+        if (hasBatch && hasMessages) {
+          return { success: false, error: 'messages 与 batch 二选一' };
+        }
+
+        return this._wrapHandler(async () => {
+          try {
+            const ctx = fabricatorContextFromEvent(e);
+            const msgList = buildFabricatorMsgList(hasBatch ? String(args.batch).trim() : args.messages, ctx);
+            const forwardMsg = await makeFabricatorForwardMsg(e, msgList);
+            if (!forwardMsg) {
+              return { success: false, error: '当前环境不支持合并转发' };
+            }
+            await e.reply(forwardMsg);
+            const where = e.group_id ? `群 ${e.group_id}` : `用户 ${e.user_id}(私聊)`;
+            const preview = msgList
+              .map((m, i) => `${i + 1}. ${m.nickname}(${m.user_id}): ${ChatStream._fabricatorPreview(m.message)}`)
+              .join('\n');
+            this.recordAIResponse(e, `[伪造转发·${msgList.length}条]\n${preview}`);
+            return {
+              success: true,
+              raw: `你已在${where}发送合并转发（共 ${msgList.length} 条）。用户可见。可说「整活完毕」之类收尾，勿重复 forgeForward。`
+            };
+          } catch (err) {
+            return { success: false, error: err?.message || '伪造消息失败' };
+          }
+        });
       },
       enabled: true
     });
@@ -1832,9 +1988,11 @@ export default class ChatStream extends AIStream {
       const history = ChatStream.messageHistory.get(groupId) || [];
       
       // 完整的结果文本（用于日志）
-      const fullResultText = result?.success && result?.data
-        ? JSON.stringify(result.data)
-        : (result?.error || '已完成');
+      const fullResultText = ChatStream._sanitizeTextForAI(
+        result?.success && result?.data
+          ? JSON.stringify(result.data)
+          : (result?.error || '已完成')
+      );
       
       // 存储到历史记录的结果文本（限制长度，避免历史记录过大）
       const MAX_STORED_RESULT_LENGTH = 2000;
@@ -1926,7 +2084,13 @@ export default class ChatStream extends AIStream {
     let clean = text;
     // 把整段或嵌入的转发 CQ 简化为「[合并转发·仅一层]」
     clean = clean.replace(/\[CQ:forward,[^\]]*]/g, '[合并转发·仅一层]');
-    // 未来如有其它复杂 CQ 类型（如合并转发、文件等），可以在这里按需追加规则
+    clean = clean.replace(/base64:\/\/[A-Za-z0-9+/=]+/gi, '[base64已省略]');
+    clean = clean.replace(/data:[^;]+;base64,[A-Za-z0-9+/=]+/gi, '[内联图片]');
+    clean = clean.replace(
+      /\[CQ:image[^\]]*url=https:\/\/multimedia\.nt\.qq\.com\.cn\/download\?[^\]]+\]/gi,
+      '[图片]'
+    );
+    clean = clean.replace(/https:\/\/multimedia\.nt\.qq\.com\.cn\/download\?[^\s"'\]}]+/gi, '[QQ图片链接]');
     // 压缩多余空白
     clean = clean.replace(/\s+/g, ' ').trim();
     return clean;
@@ -1957,7 +2121,8 @@ export default class ChatStream extends AIStream {
       '## 上下文说明',
       '- 群聊记录格式：昵称(QQ)[ID:xxx]；「【我】」为你已发内容，勿复读。',
       '- 标签：[含图片]、[含文件]、[含表情]、[合并转发] 表示消息类型；合并转发**仅一层**，内层不可读（协议限制，勿臆造内文）。',
-      '- 读记录用 **readChatRecord**；下图片/文件/表情包到工作区用 **saveMessageAsset**；从工作区发给用户用 **send_file**。',
+      '- 读记录用 **readChatRecord**；下图片/文件/表情包到工作区用 **saveMessageAsset**；发图片用 **send_image**（勿 send_file）；发文档等用 **send_file**。',
+      '- 内置情绪图用 reply 的 `[开心]` 等标签，勿把表情包当文件发。',
       '- 下文「文件记忆」「会话记忆」为摘要，可引用，勿整段照搬。',
       '',
       '## 说话方式（人性化）',
@@ -1970,10 +2135,12 @@ export default class ChatStream extends AIStream {
       '- 分句：`|` 或 `｜` 分段发送。',
       '- 表情：`[开心][惊讶][伤心][大笑][害怕][生气]`（每轮至多一处）。引用：`[回复:消息ID]`。@人：`[CQ:at,qq=QQ]`。仅记录：`[图片内容:描述]`。',
       '- **勿写 Markdown**（#标题、**粗体**、代码块、表格等）。用户可见内容会先剥离 Markdown；若剥完后没有可读正文则该条不会发出。',
+      '- **勿把 tools.run/read/list 的 JSON 或英文日志原样粘贴进 reply**；给用户看的只能是中文口语总结。',
       '- 勿在 content 里伪造「工具名+括号参数」式的伪调用。',
       '',
       '## 工具',
       '- 具体名称与参数以接口下发的 tools 为准；含对外发送、群资料与成员、图片、群管与表情回应等。',
+      '- **forgeForward**：伪造合并转发聊天记录（整活/情景再现）。messages 或 batch（QQ|昵称|内容|时间，|| 分隔）；QQ 用 me/我/bot；内容可 [图片:url] [视频:url]。玩梗可以，勿冒充真人造谣。',
       '- **群管/公告/精华/待办/禁言/踢人等**需机器人为群主或管理员，否则工具会拒绝。',
       '',
       '## 外部工具（占卜 / 远程 MCP）',
@@ -2387,6 +2554,9 @@ export default class ChatStream extends AIStream {
 
       if (Bot.StreamLoader) Bot.StreamLoader.currentEvent = e || null;
       this._hasSentEmotionThisTurn = false;
+      ChatStream._visionResultCache.clear();
+      ChatStream._visionInflight.clear();
+      ChatStream._visionCallCount = 0;
 
       const llm = await this.callAI(messages, {
         ...config,
@@ -2401,7 +2571,15 @@ export default class ChatStream extends AIStream {
       }
 
       if (this.config.forwardAssistantText !== false && text && e?.reply && !llm.usedReplyTool) {
-        await this.sendMessages(e, text);
+        if (ChatStream.isLikelyToolOutputLeak(text)) {
+          Bot.makeLog(
+            'warn',
+            `[ChatStream] 跳过 forwardAssistantText：正文疑似工具 JSON 泄漏 len=${text.length}`,
+            'ChatStream'
+          );
+        } else {
+          await this.sendMessages(e, text);
+        }
       }
 
       return text || '';
@@ -2550,6 +2728,53 @@ export default class ChatStream extends AIStream {
     const { masked, tokens } = ChatStream._protectProtocolMarkers(text);
     const stripped = ChatStream._stripMarkdownCore(masked);
     return ChatStream._restoreProtocolMarkers(stripped, tokens).trim();
+  }
+
+  /** 拦截 tools.run/read/list 等 JSON 或命令日志误发到 QQ */
+  static isLikelyToolOutputLeak(text) {
+    if (!text || typeof text !== 'string') return false;
+    const t = text.trim();
+    if (t.length < 24) return false;
+    if (/"maxCommandOutputChars"\s*:/.test(t)) return true;
+    if (/"maxReadChars"\s*:/.test(t)) return true;
+    if (/"message"\s*:\s*"命令执行完成"/.test(t)) return true;
+    if (/^[^"{]*",\s*"output"\s*:/.test(t)) return true;
+    if (/"command"\s*:/.test(t) && /"output"\s*:/.test(t) && /"stderr"\s*:/.test(t)) return true;
+    if (/^\{\s*"filePath"\s*:/.test(t) && /"content"\s*:/.test(t)) return true;
+    if (/^\{\s*"path"\s*:/.test(t) && /"items"\s*:\s*\[/.test(t)) return true;
+    if (/externally-managed-environment|break-system-packages|PEP 668/i.test(t) && /"output"\s*:/.test(t)) {
+      return true;
+    }
+    return false;
+  }
+
+  static _isImageLikePath(filePath) {
+    const ext = path.extname(String(filePath ?? '')).toLowerCase();
+    return IMAGE_SEND_EXTS.has(ext);
+  }
+
+  /** 伪造转发记录预览（不把 URL/base64 灌进历史） */
+  static _fabricatorPreview(message) {
+    if (typeof message === 'string') {
+      return ChatStream._sanitizeTextForAI(message.replace(/\n/g, ' ')).slice(0, 80);
+    }
+    if (!Array.isArray(message)) return '[媒体]';
+    const parts = [];
+    for (const seg of message) {
+      if (typeof seg === 'string') parts.push(seg);
+      else if (seg?.type === 'image') parts.push('[图片]');
+      else if (seg?.type === 'video') parts.push('[视频]');
+    }
+    const joined = parts.join('').replace(/\n/g, ' ').trim();
+    return joined ? joined.slice(0, 80) : '[媒体]';
+  }
+
+  /** 工具返回 / 聊天记录注入 AI 前脱敏（省略 base64、长图链） */
+  static _sanitizeTextForAI(text) {
+    if (!text || typeof text !== 'string') return '';
+    return text
+      .replace(/base64:\/\/[A-Za-z0-9+/=]+/gi, 'base64://…')
+      .replace(/data:[^;]+;base64,[A-Za-z0-9+/=]+/gi, '[内联图片]');
   }
 
   /** 协议片段占位，避免被 Markdown 规则误伤（含表情、[CQ]、[回复]、[图片内容:]） */

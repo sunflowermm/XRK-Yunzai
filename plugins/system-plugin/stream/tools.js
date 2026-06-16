@@ -95,8 +95,20 @@ export default class ToolsStream extends AIStream {
             content = content.slice(0, maxChars);
             truncated = true;
           }
+          const previewLimit = 4000;
+          const preview =
+            typeof content === 'string' && content.length > previewLimit
+              ? `${content.slice(0, previewLimit)}\n…(预览截断，完整 ${content.length} 字符)`
+              : content;
+          const rawLines = [
+            `文件: ${result.path}`,
+            `大小: ${result.content.length} 字符${truncated ? `（已截断至 ${maxChars}）` : ''}`,
+            '',
+            preview
+          ];
           return {
             success: true,
+            raw: rawLines.join('\n'),
             data: {
               filePath: result.path,
               fileName: path.basename(result.path),
@@ -240,8 +252,10 @@ export default class ToolsStream extends AIStream {
         const { dirPath = null, includeHidden = false, type = 'all' } = args;
         const result = await this.tools.listDir(dirPath, { includeHidden, type });
         if (result.success) {
+          const lines = result.items.map((item) => `- ${item.name} (${item.type || 'file'})`);
           return {
             success: true,
+            raw: `目录: ${result.path}\n共 ${result.items.length} 项:\n${lines.join('\n')}`,
             data: { path: result.path, items: result.items, count: result.items.length }
           };
         }
@@ -272,15 +286,19 @@ export default class ToolsStream extends AIStream {
             out = out.slice(0, maxOut);
             truncated = true;
           }
+          const errPart = stderr ? String(stderr).slice(0, maxOut) : '';
+          const rawParts = [`命令: ${command}`, `平台: ${process.platform}`];
+          if (out) rawParts.push(`输出:\n${out}`);
+          if (errPart) rawParts.push(`stderr:\n${errPart}`);
+          if (truncated) rawParts.push(`(stdout 已截断至 ${maxOut} 字符)`);
           return {
             success: true,
+            raw: rawParts.join('\n\n'),
             data: {
               command,
               output: out,
-              stderr: stderr ? String(stderr).slice(0, maxOut) : '',
-              message: '命令执行完成',
+              stderr: errPart,
               truncated,
-              maxCommandOutputChars: maxOut,
               platform: process.platform
             }
           };
