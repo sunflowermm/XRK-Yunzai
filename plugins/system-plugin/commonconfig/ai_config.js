@@ -69,7 +69,7 @@ export default class AIConfig extends ConfigBase {
           mergeStreams: {
             type: 'array',
             label: '合并工作流',
-            description: '要合并到 chat 的副工作流名称，如 memory、tools、database',
+            description: '可选合并到 chat 的副工作流（memory、tools、database 等）；web、browser 由框架白名单自动包含',
             itemType: 'string',
             default: ['memory', 'tools'],
             component: 'Tags'

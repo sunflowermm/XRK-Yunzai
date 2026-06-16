@@ -2,7 +2,7 @@ import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
 import { getAistreamConfigOptional } from '../../../lib/utils/aistream-config.js';
 import { mergeAgentWorkspaceIntoMessages } from '../../../lib/utils/agent-workspace.js';
 import { transformOpenAIStyleVisionMessages } from '../../../lib/utils/llm/message-transform.js';
-import { MCPToolAdapter } from '../../../lib/utils/llm/mcp-tool-adapter.js';
+import { expandChatToolStreamWhitelist } from '../../../lib/aistream/chat-tool-streams.js';
 import { parseMultipartData } from '../../../lib/utils/multipart-parser.js';
 import { getServerUploadLimits } from '../../../lib/utils/upload-limits.js';
 import {
@@ -214,20 +214,9 @@ async function handleChatCompletionsV3(req, res, Bot) {
     ];
     workflowStreams = list.length ? [...new Set(list)] : null;
   }
-  // 当传了 workflow.streams 时，自动合并第三方 MCP（如 12306-mcp）的 stream，使 web 对话可用其工具
-  if (workflowStreams?.length && Bot) {
-    const mcpServer = MCPToolAdapter.getMCPServer();
-    const workflowNames = new Set((Bot.StreamLoader?.getAllStreams?.() ?? []).map(s => s.name));
-    const allMcpStreams = mcpServer ? mcpServer.listStreams() : [];
-    const thirdParty = allMcpStreams.filter(name => !workflowNames.has(name));
-    if (thirdParty.length) {
-      workflowStreams = [...new Set([...workflowStreams, ...thirdParty])];
-      Bot.makeLog('debug', `[AI] MCP 工具已合并第三方: ${thirdParty.join(', ')}`, 'HTTP');
-    }
+  if (workflowStreams?.length) {
+    overrides.streams = expandChatToolStreamWhitelist(workflowStreams);
   }
-  if (workflowStreams?.length) overrides.streams = workflowStreams;
-  // 默认视为“外部工具透传”模式：不在本地执行 MCP 工具，只把 tools/参数传给上游模型；
-  // 若显式通过 workflow 声明了 streams，则认为调用方希望使用本地 MCP 工具能力
   overrides.mcpToolMode = workflowStreams?.length ? 'execute' : 'passthrough';
 
   const fileWorkspaceAbs = workspaceCtx.fileRootAbs || workspaceCtx.agentRootAbs;
@@ -235,8 +224,11 @@ async function handleChatCompletionsV3(req, res, Bot) {
   const consoleWorkspaceId = workspaceCtx.presetId || null;
 
   if (streamFlag) {
-    if (workflowStreams?.length) Bot.makeLog('debug', `[AI] MCP 工具作用域: ${workflowStreams.join(', ')}`, 'HTTP');
-    else Bot.makeLog('debug', `[AI] 未传 workflow.streams，将按全部工作流注入 MCP 工具（若提供商已开启）`, 'HTTP');
+    if (workflowStreams?.length) {
+      Bot.makeLog('debug', `[AI] MCP 工具白名单: [${overrides.streams?.join(', ') ?? ''}]`, 'HTTP');
+    } else {
+      Bot.makeLog('debug', '[AI] 未传 workflow，MCP passthrough', 'HTTP');
+    }
   }
 
   if (!streamFlag) {

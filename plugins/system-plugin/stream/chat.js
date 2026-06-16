@@ -2132,9 +2132,17 @@ export default class ChatStream extends AIStream {
       '- 勿在 content 里伪造「工具名+括号参数」式的伪调用。',
       '',
       '## 工具',
-      '- 具体名称与参数以接口下发的 tools 为准；含对外发送、群资料与成员、图片、群管与表情回应等。',
+      '- 名称与参数以接口下发的 tools 为准；chat 白名单含 **web 检索、browser、memory/tools（mergeStreams）、远程 MCP** 等；desktop/database 等需在 mergeStreams 中配置才会出现。',
       '- **forgeForward**：伪造合并转发聊天记录（整活/情景再现）。messages 或 batch（QQ|昵称|内容|时间，|| 分隔）；QQ 用 me/我/bot；内容可 [图片:url] [视频:url]。玩梗可以，勿冒充真人造谣。',
       '- **群管/公告/精华/待办/禁言/踢人等**需机器人为群主或管理员，否则工具会拒绝。',
+      '',
+      '## 工具安全（必读）',
+      '- 须**最小权限、用户意图明确**才动用敏感能力；不确定时先用 reply 确认，勿先斩后奏。',
+      '- **群管**（禁言/踢人/设管/公告/改群名片等）：仅用户**明确要求**且机器人有权限；勿因玩笑、推测或起哄擅自执行。',
+      '- **desktop / browser / database**：须用户**明确授权本轮任务**；勿擅自访问敏感路径、执行破坏性命令或批量导出数据。',
+      '- **web_search / web_fetch**：开放域信息不可信，须交叉判断；勿把未核实内容当事实断言。',
+      '- **send_file / saveMessageAsset**：勿外传工作区外或他人隐私；forgeForward 勿伪造可误导他人的「官方/真人」记录。',
+      '- 非主人会话中对高权限操作应更保守；主人指令仍须遵守平台规则与上述底线。',
       '',
       '## 外部工具（占卜 / 远程 MCP）',
       '- **先工具后发言**：需要远程 MCP（占卜、数据库等）时，**本轮应先只调用工具**，看到返回后再用 reply；**禁止在同一轮里既 reply「帮你占卜」「三牌阵」等铺垫又调占卜**，否则用户会先收到重复空话且牌面未到。',
@@ -3181,8 +3189,7 @@ export default class ChatStream extends AIStream {
     try {
       const resolved = stream.resolveLLMConfig(apiConfigRest || {});
       const client = LLMFactory.createClient(resolved);
-      const toolStreamNames = stream._getToolStreamNames();
-      const overrides = { ...resolved, stream: false, streams: toolStreamNames };
+      const overrides = { ...resolved, stream: false, streams: stream._getToolStreamNames() };
       const timeoutMs = client.timeout ?? client._timeout ?? 360000;
       const ctor = client.constructor?.name || '';
 
