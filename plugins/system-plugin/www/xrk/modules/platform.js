@@ -198,6 +198,24 @@ export function normalizeDebugRequestBody(apiId, body) {
   if (apiId === 'stdin-event' && next.content?.message) {
     next.content = next.content.message;
   }
+  if (apiId === 'message-send') {
+    if (next.target_id != null && next.target_id !== '') {
+      next.target_id = String(next.target_id).trim();
+    }
+    if (typeof next.message === 'string') {
+      const trimmed = next.message.trim();
+      if (
+        (trimmed.startsWith('[') && trimmed.endsWith(']')) ||
+        (trimmed.startsWith('{') && trimmed.endsWith('}'))
+      ) {
+        try {
+          next.message = JSON.parse(trimmed);
+        } catch {
+          // 保持纯文本
+        }
+      }
+    }
+  }
   return next;
 }
 

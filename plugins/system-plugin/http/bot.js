@@ -2,6 +2,15 @@
  * 机器人管理API
  * 提供机器人状态查询、消息发送、好友群组列表等功能
  */
+import {
+  normalizeTargetId,
+  normalizeSendMessage,
+  normalizeMessageType,
+  parseAdapterSendError,
+  resolveSendBot,
+  validateSendTarget,
+} from '../../../lib/http/utils/messageSend.js';
+
 export default {
   name: 'bot',
   dsc: '机器人管理与消息API',
@@ -39,7 +48,7 @@ export default {
       handler: async (req, res, Bot) => {
         const { uin } = req.params;
         const bot = Bot.bots[uin];
-        
+
         if (!bot) {
           return res.status(404).json({ success: false, message: '机器人不存在' });
         }
@@ -50,12 +59,12 @@ export default {
     },
 
     {
-      method: 'GET', 
+      method: 'GET',
       path: '/api/bot/:uin/groups',
       handler: async (req, res, Bot) => {
         const { uin } = req.params;
         const bot = Bot.bots[uin];
-        
+
         if (!bot) {
           return res.status(404).json({ success: false, message: '机器人不存在' });
         }
@@ -69,51 +78,52 @@ export default {
       method: 'POST',
       path: '/api/message/send',
       handler: async (req, res, Bot) => {
+        const { bot_id, type, target_id, message } = req.body ?? {};
 
-        const { bot_id, type, target_id, message } = req.body;
-
-        if (!type || !target_id || !message) {
-          return res.status(400).json({ 
-            success: false, 
-            message: '缺少必要参数' 
+        if (!type || target_id == null || target_id === '' || message == null) {
+          return res.status(400).json({
+            success: false,
+            message: '缺少必要参数：type、target_id、message'
           });
         }
 
+        const msgType = normalizeMessageType(type);
+        if (msgType !== 'private' && msgType !== 'group') {
+          return res.status(400).json({
+            success: false,
+            message: '不支持的消息类型，请使用 private/group'
+          });
+        }
+
+        const processedMessage = normalizeSendMessage(message);
+        if (processedMessage == null || processedMessage === '') {
+          return res.status(400).json({
+            success: false,
+            message: '消息内容不能为空'
+          });
+        }
+
+        const targetId = normalizeTargetId(target_id);
+        const resolved = resolveSendBot(Bot, bot_id);
+        if (resolved.error) {
+          return res.status(resolved.status || 400).json({
+            success: false,
+            message: resolved.error
+          });
+        }
+
+        const { botId } = resolved;
+        const targetCheck = validateSendTarget(Bot, resolved.bot, msgType, targetId);
+
         try {
-          let processedMessage = message;
-          if (typeof message === 'string') {
-            try {
-              const parsed = JSON.parse(message);
-              if (Array.isArray(parsed)) {
-                processedMessage = parsed;
-              }
-            } catch {
-              processedMessage = message;
-            }
-          }
-
-          // 发送消息
           let sendResult;
-          if (type === 'private' || type === 'friend') {
-            if (bot_id) {
-              sendResult = await Bot.sendFriendMsg(bot_id, target_id, processedMessage);
-            } else {
-              sendResult = await Bot.pickFriend(target_id).sendMsg(processedMessage);
-            }
-          } else if (type === 'group') {
-            if (bot_id) {
-              sendResult = await Bot.sendGroupMsg(bot_id, target_id, processedMessage);
-            } else {
-              sendResult = await Bot.pickGroup(target_id).sendMsg(processedMessage);
-            }
+          if (msgType === 'private') {
+            sendResult = await Bot.sendFriendMsg(botId, targetId, processedMessage);
           } else {
-            return res.status(400).json({ 
-              success: false, 
-              message: '不支持的消息类型' 
-            });
+            sendResult = await Bot.sendGroupMsg(botId, targetId, processedMessage);
           }
 
-          const messageId = sendResult && sendResult.message_id;
+          const messageId = sendResult?.message_id ?? sendResult?.data?.message_id;
           const result = {
             message_id: messageId,
             time: Date.now() / 1000,
@@ -121,25 +131,29 @@ export default {
           };
 
           Bot.em('message.send', {
-            bot_id: bot_id || Bot.uin[0],
-            type,
-            target_id,
+            bot_id: botId,
+            type: msgType,
+            target_id: targetId,
             message: processedMessage,
             message_id: messageId,
             time: Math.floor(Date.now() / 1000)
           });
 
-          res.json({ 
-            success: true, 
+          res.json({
+            success: true,
             message_id: messageId,
             results: [result],
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            ...(targetCheck.warn ? { warn: targetCheck.warn } : {})
           });
         } catch (error) {
-          res.status(500).json({ 
-            success: false, 
+          const detail = parseAdapterSendError(error);
+          Bot.makeLog('warn', `[message/send] ${msgType} ${targetId}: ${detail}`, 'BotAPI');
+          res.status(500).json({
+            success: false,
             message: '发送失败',
-            error: error.message 
+            error: detail,
+            ...(targetCheck.warn ? { warn: targetCheck.warn } : {})
           });
         }
       }
@@ -152,7 +166,7 @@ export default {
 
         const { uin } = req.params;
         const { action } = req.body;
-        
+
         if (!Bot.bots[uin]) {
           return res.status(404).json({ success: false, message: '机器人不存在' });
         }
@@ -160,21 +174,21 @@ export default {
         try {
           switch (action) {
             case 'shutdown':
-              await redis.set(`Yz:shutdown:${uin}`, 'true');
+              await global.redis.set(`Yz:shutdown:${uin}`, 'true');
               res.json({ success: true, message: '已关机' });
               break;
             case 'startup':
-              await redis.del(`Yz:shutdown:${uin}`);
+              await global.redis.del(`Yz:shutdown:${uin}`);
               res.json({ success: true, message: '已开机' });
               break;
             default:
               res.status(400).json({ success: false, message: '不支持的操作' });
           }
         } catch (error) {
-          res.status(500).json({ 
-            success: false, 
+          res.status(500).json({
+            success: false,
             message: '操作失败',
-            error: error.message 
+            error: error.message
           });
         }
       }

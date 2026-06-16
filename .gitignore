@@ -171,6 +171,8 @@ desktop.ini
 
 # Editor files
 .vscode/
+*.code-workspace
+.cursor/rules/xrk-dev-workspace.mdc
 .idea/
 .claude/
 .trae/
