@@ -2,6 +2,30 @@ import path from "node:path"
 import { ulid } from "ulid"
 import { resolveOutboundFile } from "../../../lib/utils/outbound-media.js"
 
+/** gml 成员 Map：统一以 string QQ 为键，读取时兼容历史 number 键 */
+function gmlMemberGet(map, userId) {
+  if (!map || userId == null || userId === "") return undefined
+  if (map.has(userId)) return map.get(userId)
+  const s = String(userId)
+  if (map.has(s)) return map.get(s)
+  const n = Number(userId)
+  if (Number.isFinite(n) && map.has(n)) return map.get(n)
+  return undefined
+}
+
+function gmlMemberSet(map, userId, info) {
+  if (!map || userId == null || userId === "") return
+  map.set(String(userId), info)
+}
+
+function gmlMemberDelete(map, userId) {
+  if (!map || userId == null || userId === "") return
+  map.delete(userId)
+  map.delete(String(userId))
+  const n = Number(userId)
+  if (Number.isFinite(n)) map.delete(n)
+}
+
 Bot.adapter.push(
   new (class OneBotv11Adapter {
     id = "QQ"
@@ -662,7 +686,7 @@ Bot.adapter.push(
       const memberArray = await this.getMemberArray(data);
       for (const i of memberArray) {
         if (i.user_id !== undefined) {
-          map.set(i.user_id, i);
+          gmlMemberSet(map, i.user_id, i)
         }
       }
       data.bot.gml.set(data.group_id, map);
@@ -704,7 +728,7 @@ Bot.adapter.push(
         }
 
         if (info) {
-          gml.set(data.user_id, info);
+          gmlMemberSet(gml, data.user_id, info)
         }
 
         return info;
@@ -812,7 +836,7 @@ Bot.adapter.push(
       const memberArray = await this.getGuildMemberArray(data);
       for (const i of memberArray) {
         if (i.user_id !== undefined) {
-          map.set(i.user_id, i);
+          gmlMemberSet(map, i.user_id, i)
         }
       }
       data.bot.gml.set(data.group_id, map);
@@ -1780,7 +1804,7 @@ Bot.adapter.push(
       }
 
       const gmlMap = data.bot.gml.get(gid) ?? data.bot.gml.get(group_id)
-      const memberInfo = (gmlMap || new Map()).get(user_id) || {}
+      const memberInfo = gmlMemberGet(gmlMap, user_id) || {}
       const i = {
         ...memberInfo,
         ...data,
@@ -1921,11 +1945,11 @@ Bot.adapter.push(
         deleteAnnouncement: (announcement_id) =>
           this.deleteGroupAnnouncement(i, announcement_id),
         get is_owner() {
-          const botMemberInfo = (data.bot.gml.get(group_id) || new Map()).get(data.self_id)
+          const botMemberInfo = gmlMemberGet(data.bot.gml.get(group_id), data.self_id)
           return botMemberInfo && botMemberInfo.role === "owner"
         },
         get is_admin() {
-          const botMemberInfo = (data.bot.gml.get(group_id) || new Map()).get(data.self_id)
+          const botMemberInfo = gmlMemberGet(data.bot.gml.get(group_id), data.self_id)
           return botMemberInfo && (botMemberInfo.role === "admin" || botMemberInfo.role === "owner")
         },
       }
@@ -2307,7 +2331,7 @@ Bot.adapter.push(
       }
 
       const memberMap = data.bot.gml.get(data.group_id)
-      const memberInfo = memberMap && memberMap.get(data.user_id)
+      const memberInfo = gmlMemberGet(memberMap, data.user_id)
       const friendInfo = data.bot.fl.get(data.user_id)
       if (memberInfo) {
         data.sender.nickname ||= memberInfo.nickname || memberInfo.card
@@ -2376,7 +2400,7 @@ Bot.adapter.push(
       let user_name = data.sender.card || data.sender.nickname
       
       const memberMap = data.bot.gml.get(data.group_id)
-      const user = (memberMap && memberMap.get(data.user_id)) || data.bot.fl.get(data.user_id)
+      const user = gmlMemberGet(memberMap, data.user_id) || data.bot.fl.get(data.user_id)
       user_name = user_name || (user && (user.card || user.nickname))
       
       Bot.makeLog(
@@ -2502,7 +2526,7 @@ Bot.adapter.push(
           } else {
             data.bot.pickGroup(data.group_id).getInfo()
             const memberMap = data.bot.gml.get(data.group_id)
-            memberMap && memberMap.delete(data.user_id)
+            gmlMemberDelete(memberMap, data.user_id)
           }
           break
         }

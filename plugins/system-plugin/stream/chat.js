@@ -1811,9 +1811,12 @@ export default class ChatStream extends AIStream {
 
   getBotRole(e) {
     if (!e.isGroup) return '成员';
-    const member = e.group?.pickMember(e.self_id);
+    const group = e.group;
+    if (group?.is_owner) return '群主';
+    if (group?.is_admin) return '管理员';
+    const member = group?.pickMember?.(e.self_id);
     const roleValue = member?.role;
-    return roleValue === 'owner' ? '群主' : 
+    return roleValue === 'owner' ? '群主' :
            roleValue === 'admin' ? '管理员' : '成员';
   }
 
