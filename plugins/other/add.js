@@ -5,7 +5,9 @@ import crypto from "crypto"
 import { FileUtils } from "../../lib/utils/file-utils.js"
 import {
   isHttpRef,
+  isEntryMediaRelPath,
   readImageBuffer,
+  persistEntryMedia,
 } from "../../lib/utils/outbound-media.js"
 
 const ENTRY_MEDIA_TYPES = new Set(['image', 'video', 'record'])
@@ -341,6 +343,7 @@ export class add extends plugin {
       const buffer = await readImageBuffer(
         typeof imgUrl === 'object' && imgUrl !== null ? imgUrl : { url: imgUrl },
         this._bindSendApi(),
+        { persist: true },
       )
       if (!buffer?.length) return { success: false, error: '下载图片失败' }
 
@@ -798,7 +801,7 @@ export class add extends plugin {
   async getImageHash(imgUrl) {
     try {
       const refs = typeof imgUrl === 'object' && imgUrl !== null ? imgUrl : { url: imgUrl }
-      const buffer = await readImageBuffer(refs, this._bindSendApi())
+      const buffer = await readImageBuffer(refs, this._bindSendApi(), { persist: true })
       if (!buffer?.length) return null
       return crypto.createHash('md5').update(buffer).digest('hex')
     } catch (err) {
@@ -953,17 +956,6 @@ export class add extends plugin {
       
       if (!contextData.messages?.length) return this.reply("添加错误：没有添加内容")
 
-      try {
-        const finalized = []
-        for (const msg of contextData.messages) {
-          finalized.push(await this.transformSegments(msg, 'store', { root: false }))
-        }
-        contextData.messages = finalized
-      } catch (err) {
-        logger.error(`添加词条内容失败: ${err}`)
-        return this.reply(`添加失败：${err.message || '媒体本地化失败，请重新发送图片'}`)
-      }
-
       messageMap[this.group_id] || (messageMap[this.group_id] = new Map())
       
       const storageKey = this.isFuzzy ? `[模糊]${this.keyWord}` : this.keyWord
@@ -1021,40 +1013,19 @@ export class add extends plugin {
     await FileUtils.writeFile(path.join(this.messageJsonDir, `${this.group_id}.json`), JSON.stringify(obj, "", "\t"))
   }
 
-  /** 保存文件到 messageJsonDir，返回相对路径；失败返回 null（不再存 URL） */
+  /** 保存文件到 messageJsonDir，返回相对路径；失败返回 null（不存 URL） */
   async saveFile(data) {
     try {
-      const fileRef = String(data.file ?? '').trim()
-      const urlRef = String(data.url ?? '').trim()
-
-      for (const ref of [fileRef, urlRef]) {
-        if (!ref || isHttpRef(ref) || ref.startsWith('base64://')) continue
-        if (ref.includes('/')) {
-          const inJson = path.join(this.messageJsonDir, ref)
-          if (await Bot.fsStat(inJson)) return ref
-        }
-        if (await Bot.fsStat(ref)) {
-          const rel = `${this.group_id}/${data.type}/${path.basename(ref)}`
-          const dest = path.join(this.messageJsonDir, rel)
-          await Bot.mkdir(path.dirname(dest))
-          if (await FileUtils.copyFile(ref, dest)) return rel
-        }
+      const rel = await persistEntryMedia(data, {
+        baseDir: this.messageJsonDir,
+        groupId: this.group_id,
+        sendApi: this._bindSendApi(),
+      })
+      if (!rel) {
+        const hint = String(data.file ?? data.url ?? '').slice(0, 80)
+        logger.error(`保存文件失败: 无法下载媒体 ${hint}`)
       }
-
-      const buffer = await readImageBuffer({ file: data.file, url: data.url }, this._bindSendApi())
-      if (!buffer?.length) {
-        logger.error(`保存文件失败: 无法下载媒体 ${String(fileRef || urlRef).slice(0, 80)}`)
-        return null
-      }
-
-      const file = await Bot.fileType({ ...data, file: buffer })
-      if (!Buffer.isBuffer(file.buffer)) return null
-
-      file.name = `${this.group_id}/${data.type}/${file.name}`
-      file.path = path.join(this.messageJsonDir, file.name)
-      await Bot.mkdir(path.dirname(file.path))
-      await FileUtils.writeFileBuffer(file.path, file.buffer)
-      return file.name
+      return rel
     } catch (err) {
       logger.error(`保存文件失败: ${err}`)
       return null
