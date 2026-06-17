@@ -338,7 +338,10 @@ export class add extends plugin {
   /** 添加图片违禁词 */
   async addImageBannedWord(imgUrl, groupId) {
     try {
-      const buffer = await this._fetchRemoteMediaBuffer(imgUrl)
+      const buffer = await readImageBuffer(
+        typeof imgUrl === 'object' && imgUrl !== null ? imgUrl : { url: imgUrl },
+        this._bindSendApi(),
+      )
       if (!buffer?.length) return { success: false, error: '下载图片失败' }
 
       const hash = crypto.createHash('md5').update(buffer).digest('hex')
@@ -794,7 +797,8 @@ export class add extends plugin {
   /** 获取图片hash */
   async getImageHash(imgUrl) {
     try {
-      const buffer = await readImageBuffer(imgUrl, this._bindSendApi())
+      const refs = typeof imgUrl === 'object' && imgUrl !== null ? imgUrl : { url: imgUrl }
+      const buffer = await readImageBuffer(refs, this._bindSendApi())
       if (!buffer?.length) return null
       return crypto.createHash('md5').update(buffer).digest('hex')
     } catch (err) {
@@ -808,15 +812,22 @@ export class add extends plugin {
     return (action, params) => this.e.bot.sendApi(action, params)
   }
 
-  /** 词条媒体是否仍需本地化（HTTP 直链或本地文件缺失） */
+  /** 词条媒体是否已落盘到 messageJson（相对路径 group/type/file） */
+  async isEntryMediaPersisted(item) {
+    const fileRef = String(item?.file ?? '').trim()
+    if (!fileRef || isHttpRef(fileRef) || fileRef.startsWith('base64://')) return false
+    if (!fileRef.includes('/')) return false
+    return Bot.fsStat(path.join(this.messageJsonDir, fileRef))
+  }
+
+  /** 词条媒体是否仍需本地化（未写入 messageJson 的 HTTP / NapCat 临时引用） */
   async needsMediaLocalization(item) {
     if (!ENTRY_MEDIA_TYPES.has(item.type)) return false
-    const ref = String(item.file || item.url || '').trim()
-    if (!ref || ref.startsWith('base64://')) return false
-    if (isHttpRef(ref)) return true
-    const localPath = path.join(this.messageJsonDir, ref)
-    if (await Bot.fsStat(localPath)) return false
-    if (item.file && await Bot.fsStat(item.file)) return false
+    const fileRef = String(item.file ?? '').trim()
+    const urlRef = String(item.url ?? '').trim()
+    if (!fileRef && !urlRef) return false
+    if (fileRef.startsWith('base64://')) return false
+    if (await this.isEntryMediaPersisted(item)) return false
     return true
   }
 
@@ -942,6 +953,17 @@ export class add extends plugin {
       
       if (!contextData.messages?.length) return this.reply("添加错误：没有添加内容")
 
+      try {
+        const finalized = []
+        for (const msg of contextData.messages) {
+          finalized.push(await this.transformSegments(msg, 'store', { root: false }))
+        }
+        contextData.messages = finalized
+      } catch (err) {
+        logger.error(`添加词条内容失败: ${err}`)
+        return this.reply(`添加失败：${err.message || '媒体本地化失败，请重新发送图片'}`)
+      }
+
       messageMap[this.group_id] || (messageMap[this.group_id] = new Map())
       
       const storageKey = this.isFuzzy ? `[模糊]${this.keyWord}` : this.keyWord
@@ -1002,12 +1024,15 @@ export class add extends plugin {
   /** 保存文件到 messageJsonDir，返回相对路径；失败返回 null（不再存 URL） */
   async saveFile(data) {
     try {
-      const ref = data.file || data.url
-      if (!ref) return null
+      const fileRef = String(data.file ?? '').trim()
+      const urlRef = String(data.url ?? '').trim()
 
-      if (typeof ref === 'string' && !/^https?:\/\//i.test(ref) && !ref.startsWith('base64://')) {
-        const local = path.join(this.messageJsonDir, ref)
-        if (await Bot.fsStat(local)) return ref
+      for (const ref of [fileRef, urlRef]) {
+        if (!ref || isHttpRef(ref) || ref.startsWith('base64://')) continue
+        if (ref.includes('/')) {
+          const inJson = path.join(this.messageJsonDir, ref)
+          if (await Bot.fsStat(inJson)) return ref
+        }
         if (await Bot.fsStat(ref)) {
           const rel = `${this.group_id}/${data.type}/${path.basename(ref)}`
           const dest = path.join(this.messageJsonDir, rel)
@@ -1016,11 +1041,9 @@ export class add extends plugin {
         }
       }
 
-      const buffer = Buffer.isBuffer(ref)
-        ? ref
-        : await readImageBuffer({ file: data.file, url: data.url }, this._bindSendApi())
+      const buffer = await readImageBuffer({ file: data.file, url: data.url }, this._bindSendApi())
       if (!buffer?.length) {
-        logger.error(`保存文件失败: 无法下载媒体 ${String(ref).slice(0, 80)}`)
+        logger.error(`保存文件失败: 无法下载媒体 ${String(fileRef || urlRef).slice(0, 80)}`)
         return null
       }
 
@@ -1140,7 +1163,7 @@ export class add extends plugin {
     if (!ref || isHttpRef(ref)) return null
     const localPath = path.join(this.messageJsonDir, ref)
     if (await Bot.fsStat(localPath)) return localPath
-    if (await Bot.fsStat(ref)) return ref
+    if (!ref.includes('/')) return ref
     return null
   }
 
