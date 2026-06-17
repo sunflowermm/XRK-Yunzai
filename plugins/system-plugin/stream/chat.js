@@ -2,6 +2,7 @@ import path from 'path';
 import AIStream from '../../../lib/aistream/aistream.js';
 import BotUtil from '../../../lib/util.js';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
+import { isQqMultimediaUrl, resolveQqImageViaApi } from '../../../lib/utils/outbound-media.js';
 import { BaseTools } from '../../../lib/utils/base-tools.js';
 import StreamLoader from '../../../lib/aistream/loader.js';
 import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
@@ -297,8 +298,23 @@ export default class ChatStream extends AIStream {
   async _downloadMessageAssetToWorkspace(e, workspace, asset, relPath) {
     const baseTools = new BaseTools(workspace);
     const absPath = baseTools.resolvePathInWorkspace(relPath);
+    const fileRef = asset.file ? String(asset.file) : null;
     const url = asset.url && /^https?:\/\//i.test(String(asset.url)) ? String(asset.url) : null;
-    if (url) {
+    const sendApi = e.bot?.sendApi ? (action, params) => e.bot.sendApi(action, params) : undefined;
+
+    if ((asset.type === 'image' || asset.type === 'mface') && sendApi && fileRef) {
+      const viaApi = await resolveQqImageViaApi(sendApi, fileRef);
+      if (viaApi?.startsWith('file://')) {
+        const local = viaApi.replace(/^file:\/\//, '');
+        if (FileUtils.existsSync(local)) {
+          const ok = await FileUtils.copyFile(local, absPath);
+          if (!ok) throw new Error('复制到工作区失败');
+          return absPath;
+        }
+      }
+    }
+
+    if (url && !(isQqMultimediaUrl(url) && sendApi && fileRef)) {
       const resp = await fetch(url);
       if (!resp.ok) throw new Error(`下载失败 HTTP ${resp.status}`);
       const buf = Buffer.from(await resp.arrayBuffer());
@@ -306,7 +322,6 @@ export default class ChatStream extends AIStream {
       if (!ok) throw new Error('写入工作区失败');
       return absPath;
     }
-    const fileRef = asset.file ? String(asset.file) : null;
     if (fileRef && e.bot?.sendApi) {
       if (asset.type === 'image' || asset.type === 'mface') {
         const result = await e.bot.sendApi('get_image', { file: fileRef });
