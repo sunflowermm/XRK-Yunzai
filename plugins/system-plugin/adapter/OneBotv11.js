@@ -225,19 +225,96 @@ Bot.adapter.push(
     }
 
     /**
+     * 统一消息段：兼容 { type, data } 与 NapCat 扁平 { type, file, url, ... }
+     */
+    normalizeMsgSegment(seg) {
+      if (!seg || typeof seg !== "object") {
+        return { type: "text", text: String(seg ?? "") }
+      }
+      if (seg.data && typeof seg.data === "object" && !Array.isArray(seg.data)) {
+        return { ...seg.data, type: seg.type }
+      }
+      const { type, data: _data, ...fields } = seg
+      return { type, ...fields }
+    }
+
+    /** 从 raw_message CQ 串解析（get_msg 仅返回字符串时的兜底） */
+    parseCQMsg(raw) {
+      const text = String(raw ?? "")
+      if (!text.includes("[CQ:")) return [{ type: "text", text }]
+      const segments = []
+      const re = /\[CQ:([\w]+),([^\]]+)\]/g
+      let last = 0
+      let m
+      while ((m = re.exec(text)) !== null) {
+        if (m.index > last) {
+          const chunk = text.slice(last, m.index)
+          if (chunk) segments.push({ type: "text", text: chunk })
+        }
+        const type = m[1]
+        const body = m[2]
+        const seg = { type }
+        if (type === "image" || type === "mface") {
+          seg.file = body.match(/(?:^|,)file=([^,]+)/)?.[1]
+          seg.url = body.match(/url=(https?:\/\/[^,\]]+)/)?.[1]
+          const sub = body.match(/(?:^|,)sub_type=(\d+)/)?.[1]
+          if (sub != null) seg.sub_type = Number(sub)
+          seg.summary = body.match(/(?:^|,)summary=([^,]+)/)?.[1]
+        } else {
+          for (const part of body.split(",")) {
+            const eq = part.indexOf("=")
+            if (eq === -1) continue
+            seg[part.slice(0, eq).trim()] = part.slice(eq + 1).trim()
+          }
+        }
+        segments.push(seg)
+        last = m.index + m[0].length
+      }
+      if (last < text.length) {
+        const tail = text.slice(last)
+        if (tail) segments.push({ type: "text", text: tail })
+      }
+      return segments.length ? segments : [{ type: "text", text }]
+    }
+
+    /**
      * 解析消息内容
      */
     parseMsg(msg) {
       const array = []
-      for (const i of Array.isArray(msg) ? msg : [msg])
-        if (typeof i === "object") array.push({ ...i.data, type: i.type })
-        else array.push({ type: "text", text: String(i) })
+      for (const i of Array.isArray(msg) ? msg : [msg]) {
+        if (typeof i === "object" && i !== null) {
+          array.push(this.normalizeMsgSegment(i))
+        } else {
+          const s = String(i)
+          if (s.includes("[CQ:")) {
+            array.push(...this.parseCQMsg(s))
+          } else {
+            array.push({ type: "text", text: s })
+          }
+        }
+      }
       return array
     }
 
     async getMsg(data, message_id) {
-      const msg = (await data.bot.sendApi("get_msg", { message_id })).data
-      if (msg.message) msg.message = this.parseMsg(msg.message)
+      const res = await data.bot.sendApi("get_msg", { message_id })
+      const msg = res?.data
+      if (!msg) return null
+      if (msg.message) {
+        msg.message = this.parseMsg(msg.message)
+        const onlyTextCq = msg.message.length === 1
+          && msg.message[0]?.type === "text"
+          && msg.message[0].text?.includes("[CQ:")
+        const imageBroken = msg.message.some(
+          (s) => s.type === "image" && !s.file && !s.url,
+        )
+        if ((onlyTextCq || imageBroken) && msg.raw_message) {
+          msg.message = this.parseCQMsg(msg.raw_message)
+        }
+      } else if (msg.raw_message) {
+        msg.message = this.parseCQMsg(msg.raw_message)
+      }
       return msg
     }
 
