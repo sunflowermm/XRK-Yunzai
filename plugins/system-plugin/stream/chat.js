@@ -23,12 +23,12 @@ import {
 import { summarizeToolForHistory } from '../../../lib/utils/mcp-server.js';
 import {
   contentHasGroupAt,
+  EMOTION_TYPES,
   parseReplyContentSegments,
   replyContentForbidden,
   segmentsToDisplayText
 } from '../../../lib/utils/chat-reply-protocol.js';
 const EMOTIONS_DIR = resolveProjectPath(RESOURCES_AIIMAGES_DIR);
-const EMOTION_TYPES = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
 const IMAGE_SEND_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
 
 // 表情回应映射
@@ -47,7 +47,7 @@ function randomRange(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-/** 聊天工作流：群管/互动/消息管理；发文字仅 reply（content 协议见 lib/utils/chat-reply-protocol.js） */
+/** 聊天工作流：群管/互动；对用户说话仅 reply + emotion（协议见 lib/utils/chat-reply-protocol.js） */
 export default class ChatStream extends AIStream {
   static emotionImages = {};
   static messageHistory = new Map();
@@ -64,7 +64,7 @@ export default class ChatStream extends AIStream {
   static GROUP_HISTORY_PROMPT_DEBUG = 120;
   /** 已通过 reply/recordAIResponse 写入历史的对外工具，不再重复记工具摘要 */
   static TOOL_HISTORY_SKIP = new Set([
-    'reply', 'send_file', 'send_image', 'poke',
+    'reply', 'emotion', 'send_file', 'send_image', 'poke',
     'thumbUp', 'sign', 'emojiReaction', 'recall', 'forgeForward'
   ]);
   static TOOL_DELIVERED_FOOTER = '已送达。';
@@ -427,7 +427,7 @@ export default class ChatStream extends AIStream {
     });
 
     this.registerMCPTool('reply', {
-      description: '向用户发消息（唯一文字入口）。content：| 分句；[开心]等表情；[回复:消息ID]；群聊 [at:QQ]。禁止 @QQ/@昵称。',
+      description: '发文字消息（用户可见）。content：| 分句；[回复:消息ID]；群聊 [at:数字QQ]（可多个、句中）。禁止 @QQ/@昵称。发表情包用 emotion。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -444,6 +444,28 @@ export default class ChatStream extends AIStream {
             content: args.content,
             messageId: args.messageId
           });
+        });
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('emotion', {
+      description: '发表情包图片（resources/aiimages 随机一张）。emotionType：开心、惊讶、伤心、大笑、害怕、生气；可选 text 同条附言。一轮最多一次。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          emotionType: { type: 'string', enum: EMOTION_TYPES },
+          text: { type: 'string', description: '可选附言' }
+        },
+        required: ['emotionType']
+      },
+      handler: async (args = {}, context = {}) => {
+        const e = context.e;
+        if (!e?.reply) return { success: false, error: '当前环境无法发送' };
+        const t = String(args.emotionType ?? '').trim();
+        if (!EMOTION_TYPES.includes(t)) return { success: false, error: '无效表情类型' };
+        return this._wrapHandler(async () => {
+          return this._sendEmotionImage(e, t, String(args.text ?? '').trim());
         });
       },
       enabled: true
@@ -1573,7 +1595,7 @@ export default class ChatStream extends AIStream {
           };
           const hint =
             asset.type === 'image' || asset.type === 'mface'
-              ? `已保存到 ${relPath}。发图/表情包请用 send_image（勿 send_file）；内置情绪图用 reply 的 [开心] 等。`
+              ? `已保存到 ${relPath}。发图用 send_image；内置表情包用 emotion。`
               : `已保存到 ${relPath}。发非图片文件用 send_file。`;
           return { success: true, data, raw: hint };
         } catch (err) {
@@ -2034,13 +2056,13 @@ export default class ChatStream extends AIStream {
       `${botName}｜QQ ${e.self_id}｜群 ${e.group_id}｜${botRole}｜${dateStr}`,
       persona + masterNote,
       '',
-      '## reply（唯一发文字）',
-      '- 用户只看 **reply**；assistant 正文不可见。',
-      '- **content**：`|` 分句 · `[开心]`等表情 · `[回复:消息ID]` · 群聊 `[at:数字QQ]`（可多个、可句中）',
-      '- 禁止 `@QQ` / `@昵称`。只答 `[当前消息]`。',
+      '## 对用户说话（assistant 正文群里不可见）',
+      '- **reply**：文字。`|` 分句 · `[回复:消息ID]` · 群聊 `[at:数字QQ]`',
+      '- **emotion**：发表情包图（开心/惊讶/伤心/大笑/害怕/生气），可选 text 附言',
+      '- 禁止 `@QQ`/`@昵称`。只答 `[当前消息]`。',
       '',
-      '## 其它',
-      '- 记录 `昵称(QQ)[ID:xxx]` 取 QQ/消息ID · send_image · send_file'
+      '## 记录',
+      '- `昵称(QQ)[ID:xxx]` → QQ/消息ID · send_image · send_file'
     ];
     return lines.join('\n');
   }
@@ -2521,6 +2543,38 @@ export default class ChatStream extends AIStream {
       .trim();
   }
 
+  async _sendEmotionImage(e, emotionType, text = '') {
+    if (this._hasSentEmotionThisTurn) {
+      return { success: true, raw: ChatStream.actionAck('本轮已发过表情包，未重复发送') };
+    }
+    const image = this.getRandomEmotionImage(emotionType);
+    if (!image) {
+      return {
+        success: false,
+        error: `表情包(${emotionType})暂无图片，请检查 resources/aiimages/${emotionType}/`
+      };
+    }
+    const seg = segment;
+    const body = String(text ?? '').trim();
+    if (body) {
+      const forbidden = replyContentForbidden(body);
+      if (forbidden) return { success: false, error: forbidden };
+      const filtered = this.stripMarkdownForOutgoing(body);
+      if (!filtered) return { success: false, error: '附言清理后为空' };
+      await e.reply([seg.image(image), filtered]);
+      this.recordAIResponse(e, filtered);
+      this._hasSentEmotionThisTurn = true;
+      return {
+        success: true,
+        raw: ChatStream.actionAck(`[表情包:${emotionType}] ${filtered}`)
+      };
+    }
+    await e.reply(seg.image(image));
+    this.recordAIResponse(e, '');
+    this._hasSentEmotionThisTurn = true;
+    return { success: true, raw: ChatStream.actionAck(`[表情包:${emotionType}]`) };
+  }
+
   async _sendUserVisibleText(e, { content = '', messageId } = {}) {
     const rawContent = String(content ?? '').trim();
     if (!rawContent) return { success: false, error: 'content 不能为空' };
@@ -2565,8 +2619,7 @@ export default class ChatStream extends AIStream {
       Bot.makeLog('warn', `[ChatStream] 未调用 reply，框架兜底发出 len=${fallback.length}`, 'ChatStream');
       await this._processAndSendTextProtocol(e, fallback, {
         recordToHistory: true,
-        messageId: e.message_id || e.real_id,
-        skipEmotionCheck: true
+        messageId: e.message_id || e.real_id
       });
       return { llm, text: fallback };
     }
@@ -2614,11 +2667,10 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 文本协议处理与发送：分句（| 或 ｜）、表情、CQ、图片内容标记；限制一轮一次表情包。
-   * @returns {Promise<{totalSent: number, allSentContent: string[]}>}
+   * 文本协议：分句（|）、[回复:ID]、[at:QQ]、[图片内容:]
    */
   async _processAndSendTextProtocol(e, content, options = {}) {
-    const { messageId, recordToHistory = true, updateReplyContents = true, skipEmotionCheck = false } = options;
+    const { messageId, recordToHistory = true, updateReplyContents = true } = options;
     if (!e?.reply || !content?.trim()) {
       return { totalSent: 0, allSentContent: [] };
     }
@@ -2632,7 +2684,6 @@ export default class ChatStream extends AIStream {
     const seg = segment;
     let totalSent = 0;
     const allSentContent = [];
-    let hasEmotionInThisContent = false; // 检查当前内容中是否有表情包
 
     for (let i = 0; i < messages.length; i++) {
       let msg = messages[i];
@@ -2642,38 +2693,11 @@ export default class ChatStream extends AIStream {
       const { imageContent, text: afterImageMark } = this.parseImageContentMark(msg);
       msg = afterImageMark;
 
-      // 提取表情标记
-      const { emotion, text: afterEmotion } = this.parseTextProtocolEmotion(msg);
-      msg = afterEmotion;
-
-      // 解析CQ码和回复标记
       const { replyId, segments: parsedSegments } = parseReplyContentSegments(msg);
-      let segments = parsedSegments;
-
-      // ⚠️ 重要：处理表情包 - 一次聊天最好只发一次表情包
-      if (emotion) {
-        if (!skipEmotionCheck && this._hasSentEmotionThisTurn) {
-          Bot.makeLog('debug', `[ChatStream] _processAndSendTextProtocol 跳过重复表情包 emotion=${emotion}`, 'ChatStream');
-          hasEmotionInThisContent = true;
-        } else {
-          // 首次发送表情包，允许发送
-          const image = this.getRandomEmotionImage(emotion);
-          if (image) {
-            segments = segments.length > 0 ? [seg.image(image), ...segments] : [seg.image(image)];
-            if (!skipEmotionCheck) {
-              this._hasSentEmotionThisTurn = true;
-            }
-            hasEmotionInThisContent = true;
-          }
-        }
-      }
-
-      // 确定回复ID：优先使用content中的[回复:消息ID]，其次使用messageId参数
+      const segments = parsedSegments;
       const finalReplyId = replyId || messageId;
 
-      // 发送消息（图片内容标记已被移除，用户看不到）
       const sentContent = segmentsToDisplayText(segments, msg);
-      
       if (finalReplyId) {
         const replySegment = seg.reply(finalReplyId);
         await e.reply(segments.length > 0 ? [replySegment, ...segments] : [replySegment, ' ']);
@@ -2706,23 +2730,6 @@ export default class ChatStream extends AIStream {
     return { totalSent, allSentContent };
   }
 
-  /**
-   * 解析文本协议：提取 [开心]/[惊讶] 等表情标签，返回 { emotion, text }
-   */
-  parseTextProtocolEmotion(text) {
-    const emotionRegex = /\[(开心|惊讶|伤心|大笑|害怕|生气)\]/;
-    const match = text.match(emotionRegex);
-    if (!match || !EMOTION_TYPES.includes(match[1])) return { emotion: null, text };
-    return {
-      emotion: match[1],
-      text: text.replace(emotionRegex, '').trim()
-    };
-  }
-
-  /**
-   * 解析图片内容标记：提取 [图片内容:描述]，返回 { imageContent, text }
-   * 此标记不会被用户看见，仅记录到聊天历史
-   */
   parseImageContentMark(text) {
     const imageContentRegex = /\[图片内容:([^\]]+)\]/g;
     const matches = [];
@@ -2782,7 +2789,7 @@ export default class ChatStream extends AIStream {
   static _protectProtocolMarkers(text) {
     const tokens = [];
     const re =
-      /(\[(?:开心|惊讶|伤心|大笑|害怕|生气)\]|(?:\[图片内容:[^\]]+\])|(?:\[回复:(?:ID:)?\d+\])|(?:\[CQ:[^\]]+\]))/g;
+      /(\[at:\d{5,10}\]|(?:\[图片内容:[^\]]+\])|(?:\[回复:(?:ID:)?\d+\])|(?:\[CQ:[^\]]+\]))/gi;
     const masked = text.replace(re, (full) => {
       const i = tokens.length;
       tokens.push(full);
