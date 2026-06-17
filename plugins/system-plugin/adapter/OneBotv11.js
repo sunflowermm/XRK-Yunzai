@@ -59,7 +59,7 @@ Bot.adapter.push(
     }
 
     /**
-     * 转换文件为 base64 或本地路径（禁止 HTTP 直链）
+     * 转换文件为 base64、本地路径或稳定 HTTP；QQ 临时图链经 get_image 解析
      */
     async makeFile(file, opts = {}) {
       const { sendApi, ...rest } = opts

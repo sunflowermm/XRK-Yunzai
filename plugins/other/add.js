@@ -5,7 +5,7 @@ import crypto from "crypto"
 import { FileUtils } from "../../lib/utils/file-utils.js"
 import {
   isHttpRef,
-  resolveQqImageViaApi,
+  readPersistableMediaBuffer,
 } from "../../lib/utils/outbound-media.js"
 
 const ENTRY_MEDIA_TYPES = new Set(['image', 'video', 'record'])
@@ -794,7 +794,7 @@ export class add extends plugin {
   /** 获取图片hash */
   async getImageHash(imgUrl) {
     try {
-      const buffer = await this._fetchRemoteMediaBuffer(imgUrl)
+      const buffer = await readPersistableMediaBuffer(imgUrl, this._bindSendApi())
       if (!buffer?.length) return null
       return crypto.createHash('md5').update(buffer).digest('hex')
     } catch (err) {
@@ -808,44 +808,16 @@ export class add extends plugin {
     return (action, params) => this.e.bot.sendApi(action, params)
   }
 
-  /** 入站媒体一次性落盘：仅 get_image，禁止 HTTP 直链持久化 */
-  async _fetchRemoteMediaBuffer(ref) {
-    const source = String(ref ?? '').trim()
-    if (!source) return null
-    if (isHttpRef(source)) {
-      const sendApi = this._bindSendApi()
-      if (!sendApi) return null
-      const viaApi = await resolveQqImageViaApi(sendApi, source)
-      if (viaApi?.startsWith('file://')) {
-        const local = viaApi.replace(/^file:\/\//, '')
-        if (await Bot.fsStat(local)) {
-          const buf = await FileUtils.readFileBuffer(local)
-          if (buf?.length) return buf
-        }
-      }
-      if (viaApi?.startsWith('base64://')) {
-        return Buffer.from(viaApi.slice(9), 'base64')
-      }
-      return null
-    }
-    if (source.startsWith('base64://')) {
-      return Buffer.from(source.slice(9), 'base64')
-    }
-    const buf = await FileUtils.readFileBuffer(source)
-    return buf?.length ? buf : null
-  }
-
-  /** 词条媒体是否仍需本地化（NapCat 常同时带 file+url 且均为 CDN） */
+  /** 词条媒体是否仍需本地化（HTTP 直链或本地文件缺失） */
   async needsMediaLocalization(item) {
-    if (!['image', 'video', 'record'].includes(item.type)) return false
+    if (!ENTRY_MEDIA_TYPES.has(item.type)) return false
     const ref = String(item.file || item.url || '').trim()
-    if (!ref) return false
-    if (ref.startsWith('base64://')) return false
-    if (/^https?:\/\//i.test(ref)) return true
+    if (!ref || ref.startsWith('base64://')) return false
+    if (isHttpRef(ref)) return true
     const localPath = path.join(this.messageJsonDir, ref)
     if (await Bot.fsStat(localPath)) return false
     if (item.file && await Bot.fsStat(item.file)) return false
-    return Boolean(item.url && /^https?:\/\//i.test(String(item.url)))
+    return true
   }
 
   /** 群号key */
@@ -1044,7 +1016,9 @@ export class add extends plugin {
         }
       }
 
-      const buffer = Buffer.isBuffer(ref) ? ref : await this._fetchRemoteMediaBuffer(ref)
+      const buffer = Buffer.isBuffer(ref)
+        ? ref
+        : await readPersistableMediaBuffer({ file: data.file, url: data.url }, this._bindSendApi())
       if (!buffer?.length) {
         logger.error(`保存文件失败: 无法下载媒体 ${String(ref).slice(0, 80)}`)
         return null
@@ -1160,7 +1134,7 @@ export class add extends plugin {
     return out
   }
 
-  /** 解析词条本地媒体路径；直链一律视为无效 */
+  /** 解析词条本地媒体路径（仅相对/绝对本地路径，不含 HTTP） */
   async resolveEntryMediaPath(item) {
     const ref = String(item?.file ?? '').trim()
     if (!ref || isHttpRef(ref)) return null

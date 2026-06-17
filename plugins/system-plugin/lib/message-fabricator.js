@@ -116,9 +116,7 @@ export function processFabricatorContent(content) {
 
   for (const seg of segments) {
     if (seg.start > lastEnd) pushTextLines(text.substring(lastEnd, seg.start));
-    if (/^https?:\/\//i.test(String(seg.value ?? ''))) {
-      pushTextLines('[图片:请使用本地路径，不支持 HTTP 直链]');
-    } else if (seg.type === 'image') processedContent.push(segment.image(seg.value));
+    if (seg.type === 'image') processedContent.push(segment.image(seg.value));
     else if (seg.type === 'video') processedContent.push(segment.video(seg.value));
     lastEnd = seg.end;
   }

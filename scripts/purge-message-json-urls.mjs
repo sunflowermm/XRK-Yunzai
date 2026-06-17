@@ -1,5 +1,5 @@
 /**
- * 清理 data/messageJson 中带 HTTP 直链的媒体段，并删除因此变空的词条回复。
+ * 清理 data/messageJson 中带 HTTP 直链（含 QQ 临时图床）的媒体段，并删除因此变空的词条回复。
  * 用法：node scripts/purge-message-json-urls.mjs [--dry-run]
  */
 import fs from 'node:fs';

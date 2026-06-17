@@ -2,7 +2,7 @@ import path from 'path';
 import AIStream from '../../../lib/aistream/aistream.js';
 import BotUtil from '../../../lib/util.js';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
-import { copyQqImageToPath } from '../../../lib/utils/outbound-media.js';
+import { materializeMediaRefToPath } from '../../../lib/utils/outbound-media.js';
 import { BaseTools } from '../../../lib/utils/base-tools.js';
 import StreamLoader from '../../../lib/aistream/loader.js';
 import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
@@ -298,15 +298,20 @@ export default class ChatStream extends AIStream {
   async _downloadMessageAssetToWorkspace(e, workspace, asset, relPath) {
     const baseTools = new BaseTools(workspace);
     const absPath = baseTools.resolvePathInWorkspace(relPath);
-    const fileRef = asset.file ? String(asset.file) : null;
+    const fileRef = String(asset.file || asset.url || '').trim() || null;
     const sendApi = e.bot?.sendApi ? (action, params) => e.bot.sendApi(action, params) : undefined;
 
-    if ((asset.type === 'image' || asset.type === 'mface') && fileRef && sendApi) {
-      if (await copyQqImageToPath(fileRef, absPath, sendApi)) {
+    if (asset.type === 'face') {
+      throw new Error('内置 QQ 表情（face）无法下载；请让用户发图片或自定义表情包（mface）');
+    }
+
+    if ((asset.type === 'image' || asset.type === 'mface') && (asset.file || asset.url)) {
+      if (await materializeMediaRefToPath({ file: asset.file, url: asset.url }, absPath, sendApi)) {
         return absPath;
       }
     }
-    if (fileRef && e.bot?.sendApi && asset.type === 'file') {
+
+    if (fileRef && sendApi && asset.type === 'file') {
       const result = await e.bot.sendApi('get_file', { file: fileRef });
       const d = result?.data || {};
       const local = d.file || d.path;
@@ -316,10 +321,8 @@ export default class ChatStream extends AIStream {
         return absPath;
       }
     }
-    if (asset.type === 'face') {
-      throw new Error('内置 QQ 表情（face）无法下载；请让用户发图片或自定义表情包（mface）');
-    }
-    throw new Error('无法获取可下载的资源（不支持 HTTP 直链，且无可用本地文件）');
+
+    throw new Error('无法获取可下载的资源（QQ 临时链可能已过期，或缺少本地文件）');
   }
 
   async _wrapHandler(fn, delay = 300) {
