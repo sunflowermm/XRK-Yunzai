@@ -11,7 +11,7 @@ description: QQ/群聊 Agent：NapCat 能力、回复、发文件、记忆与刷
 
 | MCP | NapCat 分类 / API |
 |-----|-------------------|
-| reply / at | 消息接口 `send_msg` |
+| reply | 消息接口 `send_msg`（唯一发文字；content 含 `[at:QQ]`、`[开心]` 等） |
 | poke | 核心 `send_poke` |
 | send_file | 群组/私聊 `sendFile` + 工作区路径 |
 | saveMessageAsset | `get_msg` + 下载到工作区 `downloads/` |

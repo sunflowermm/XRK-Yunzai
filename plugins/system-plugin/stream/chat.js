@@ -18,11 +18,15 @@ import {
   makeFabricatorForwardMsg
 } from '../lib/message-fabricator.js';
 import {
-  REPLY_RECOVERY_NUDGE,
   TOOL_ROUNDS_EXHAUSTED_USER_TEXT
 } from '../../../lib/utils/llm/llm-nonstream-reply.js';
 import { summarizeToolForHistory } from '../../../lib/utils/mcp-server.js';
-import { MCPToolAdapter } from '../../../lib/utils/llm/mcp-tool-adapter.js';
+import {
+  contentHasGroupAt,
+  parseReplyContentSegments,
+  replyContentForbidden,
+  segmentsToDisplayText
+} from '../../../lib/utils/chat-reply-protocol.js';
 const EMOTIONS_DIR = resolveProjectPath(RESOURCES_AIIMAGES_DIR);
 const EMOTION_TYPES = ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'];
 const IMAGE_SEND_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
@@ -43,7 +47,7 @@ function randomRange(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-/** 聊天工作流：群管/互动/表情/消息管理，MCP 工具 at、poke、emojiReaction、mute、setCard、recall 等 */
+/** 聊天工作流：群管/互动/消息管理；发文字仅 reply（content 协议见 lib/utils/chat-reply-protocol.js） */
 export default class ChatStream extends AIStream {
   static emotionImages = {};
   static messageHistory = new Map();
@@ -60,11 +64,10 @@ export default class ChatStream extends AIStream {
   static GROUP_HISTORY_PROMPT_DEBUG = 120;
   /** 已通过 reply/recordAIResponse 写入历史的对外工具，不再重复记工具摘要 */
   static TOOL_HISTORY_SKIP = new Set([
-    'reply', 'at', 'emotion', 'send_file', 'send_image', 'poke',
+    'reply', 'send_file', 'send_image', 'poke',
     'thumbUp', 'sign', 'emojiReaction', 'recall', 'forgeForward'
   ]);
-  /** 对外发送类工具返回末尾：提醒模型勿重复同主题 */
-  static TOOL_DELIVERED_FOOTER = '以上内容已送达用户；同主题勿再发送相似内容，除非用户追问。';
+  static TOOL_DELIVERED_FOOTER = '已送达。';
 
   static formatSessionWhere(e) {
     if (e?.group_id) return `群 ${e.group_id}`;
@@ -84,53 +87,7 @@ export default class ChatStream extends AIStream {
   static actionAck(detail) {
     const line = String(detail ?? '').trim();
     if (!line) return ChatStream.TOOL_DELIVERED_FOOTER;
-    return `${line}\n${ChatStream.TOOL_DELIVERED_FOOTER}`;
-  }
-
-  static isValidAtQq(qq) {
-    return /^\d{5,10}$/.test(String(qq ?? '').trim());
-  }
-
-  /** 将 segment 列表转为 AI 可读的发送摘要（含真 @ 的 QQ 号） */
-  static _segmentsToDisplayText(segments, fallback = '') {
-    if (!Array.isArray(segments) || !segments.length) return fallback;
-    const parts = segments.map((s) => {
-      if (typeof s === 'string') return s;
-      const type = s?.type;
-      if (type === 'at') {
-        const qq = s.qq ?? s.data?.qq ?? s.data?.uid ?? '';
-        return qq ? `@${qq}` : '';
-      }
-      if (type === 'text') return s.text ?? s.data?.text ?? '';
-      if (type === 'image') return '[图片]';
-      return '';
-    });
-    const joined = parts.join('').trim();
-    return joined || fallback;
-  }
-
-  static _parseCqParams(params) {
-    const paramObj = {};
-    if (!params) return paramObj;
-    for (const p of params.split(',')) {
-      const eq = p.indexOf('=');
-      if (eq <= 0) continue;
-      paramObj[p.slice(0, eq).trim()] = p.slice(eq + 1).trim();
-    }
-    return paramObj;
-  }
-
-  static _mergeAdjacentTextSegments(segments) {
-    const merged = [];
-    for (const current of segments) {
-      const last = merged[merged.length - 1];
-      if (typeof current === 'string' && typeof last === 'string') {
-        merged[merged.length - 1] = last + current;
-      } else {
-        merged.push(current);
-      }
-    }
-    return merged;
+    return `${line} ${ChatStream.TOOL_DELIVERED_FOOTER}`;
   }
 
   constructor() {
@@ -431,43 +388,6 @@ export default class ChatStream extends AIStream {
   }
 
   registerAllFunctions() {
-    this.registerMCPTool('at', {
-      description: '群聊真@成员。qq 必填（数字）；可选 text 与@同条发出。需要@人时优先用本工具，勿在 reply 里写 @QQ 或 @昵称。',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          qq: { type: 'number', description: '群成员QQ号（必填，数字）' },
-          text: { type: 'string', description: '可选，与@同条发出' }
-        },
-        required: ['qq']
-      },
-      handler: async (args = {}, context = {}) => {
-        const groupCheck = this._requireGroup(context);
-        if (groupCheck) return groupCheck;
-
-        const qq = String(args.qq || '').trim();
-        if (!qq) return { success: false, error: 'QQ号不能为空' };
-
-        const text = String(args.text ?? '').trim();
-        return this._wrapHandler(async () => {
-          const seg = segment;
-          if (text) {
-            await context.e.reply([seg.at(qq), ' ', text]);
-          } else {
-            await context.e.reply([seg.at(qq)]);
-          }
-          const sentContent = text ? `@${qq} ${text}` : `@${qq}`;
-          this.recordAIResponse(context.e, sentContent);
-          const gid = context.e?.group_id;
-          const detail = gid
-            ? `你已在群 ${gid} @了 ${qq}${text ? ' 并发送：' + text : ''}`
-            : `你已@了 ${qq}${text ? ' 并发送：' + text : ''}`;
-          return { success: true, raw: ChatStream.actionAck(detail) };
-        }, 200);
-      },
-      enabled: true
-    });
-
     this.registerMCPTool('poke', {
       description: '戳一戳对方。群聊戳成员，私聊戳好友。qq 不填则当前说话人。用户可见。',
       inputSchema: {
@@ -500,47 +420,30 @@ export default class ChatStream extends AIStream {
             return { success: false, error: '当前环境不支持戳一戳' };
           }
           const where = e.isGroup && e.group_id ? `群 ${e.group_id}` : '私聊';
-          return { success: true, raw: `你已对 ${targetQq} 戳一戳（当前会话：${where}）。${ChatStream.TOOL_DELIVERED_FOOTER}` };
+          return { success: true, raw: ChatStream.actionAck(`你已对 ${targetQq} 戳一戳（当前会话：${where}）。`) };
         });
       },
       enabled: true
     });
 
     this.registerMCPTool('reply', {
-      description: '向当前会话发文字（用户可见）。| 或 ｜ 分句；[开心]等表情；[回复:消息ID] 引用。群聊@人请用 at 工具，勿在 content 写 @。勿 Markdown。',
+      description: '向用户发消息（唯一文字入口）。content：| 分句；[开心]等表情；[回复:消息ID]；群聊 [at:QQ]。禁止 @QQ/@昵称。',
       inputSchema: {
         type: 'object',
         properties: {
-          messageId: { type: 'number', description: '可选，引用该消息ID（数字）' },
-          content: { type: 'string', description: '纯文本 + 协议标签；@人请用 at 工具，勿写 @QQ/@昵称' }
+          messageId: { type: 'number', description: '可选，引用消息 ID' },
+          content: { type: 'string', description: '正文（必填）' }
         },
         required: ['content']
       },
       handler: async (args = {}, context = {}) => {
         const e = context.e;
         if (!e?.reply) return { success: false, error: '当前环境无法发送消息' };
-        const content = String(args.content ?? '').trim();
-        if (!content) return { success: false, error: 'content 不能为空' };
         return this._wrapHandler(async () => {
-          const filteredContent = this.stripMarkdownForOutgoing(content);
-          if (!filteredContent) {
-            return {
-              success: false,
-              error: '清理 Markdown 后无可发送正文（请勿用标题/代码块/表格等作为主要回复），请用纯文本并遵守文本协议再调用 reply'
-            };
-          }
-          const { totalSent, allSentContent } = await this._processAndSendTextProtocol(e, filteredContent, {
-            messageId: args.messageId,
-            recordToHistory: true,
-            updateReplyContents: true
+          return this._sendUserVisibleText(e, {
+            content: args.content,
+            messageId: args.messageId
           });
-          if (totalSent < 1) {
-            return { success: false, error: '未能发出任何可见消息，请检查 content 与文本协议' };
-          }
-          return {
-            success: true,
-            raw: ChatStream.formatDeliveredAck(ChatStream.formatSessionWhere(e), allSentContent)
-          };
         });
       },
       enabled: true
@@ -588,7 +491,7 @@ export default class ChatStream extends AIStream {
           const where = e.group_id ? `群 ${e.group_id}` : `用户 ${e.user_id}(私聊)`;
           return {
             success: true,
-            raw: `你已在${where}发送文件「${displayName}」。${ChatStream.TOOL_DELIVERED_FOOTER}`
+            raw: ChatStream.actionAck(`你已在${where}发送文件「${displayName}」`)
           };
         });
       },
@@ -636,7 +539,7 @@ export default class ChatStream extends AIStream {
           this.recordAIResponse(e, `[图片:${name}]`);
           return {
             success: true,
-            raw: `你已在${where}发送图片「${name}」。${ChatStream.TOOL_DELIVERED_FOOTER}`
+            raw: ChatStream.actionAck(`你已在${where}发送图片「${name}」`)
           };
         });
       },
@@ -720,56 +623,10 @@ export default class ChatStream extends AIStream {
           }
           await BotUtil.sleep(200);
           const gid = e.group_id;
-          return { success: true, raw: `你已在群 ${gid} 对消息 ${msgId} 发送了 ${emojiType} 表情回应。${ChatStream.TOOL_DELIVERED_FOOTER}` };
+          return { success: true, raw: ChatStream.actionAck(`你已在群 ${gid} 对消息 ${msgId} 发送了 ${emojiType} 表情回应。`) };
         } catch (error) {
           return { success: false, error: error.message };
         }
-      },
-      enabled: true
-    });
-
-    this.registerMCPTool('emotion', {
-      description: '发表情包，可选文字同条发出。emotionType：开心、惊讶、伤心、大笑、害怕、生气。用户可见。一轮最多一次。',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          emotionType: { type: 'string', description: '必填', enum: ['开心', '惊讶', '伤心', '大笑', '害怕', '生气'] },
-          text: { type: 'string', description: '可选' }
-        },
-        required: ['emotionType']
-      },
-      handler: async (args = {}, context = {}) => {
-        const e = context.e;
-        if (!e?.reply) return { success: false, error: '当前环境无法发送' };
-        const t = String(args.emotionType || '').trim();
-        if (!EMOTION_TYPES.includes(t)) return { success: false, error: '无效表情类型' };
-        
-        // ⚠️ 重要：检查是否已发送过表情包
-        if (this._hasSentEmotionThisTurn) {
-          Bot.makeLog('debug', `[ChatStream] emotion 工具调用被跳过（本轮已发送过表情包） emotionType=${t}`, 'ChatStream');
-          // 这里不要返回 error：LLM 很容易把 error 当成“需要重试”，导致刷屏式重复 tool_calls
-          // 改为“成功但跳过”，并明确告知不要再调用
-          return { success: true, raw: ChatStream.actionAck('本轮已发过表情包，未重复发送') };
-        }
-        const image = this.getRandomEmotionImage(t);
-        if (!image) return { success: false, error: '该表情暂无可用图片' };
-        const text = String(args.text ?? '').trim();
-        return this._wrapHandler(async () => {
-          const seg = segment;
-          if (text) {
-            await e.reply([seg.image(image), text]);
-          } else {
-            await e.reply(seg.image(image));
-          }
-          // 标记已发送表情包
-          this._hasSentEmotionThisTurn = true;
-          // 记录到历史
-          const sentText = text || '';
-          this.recordAIResponse(e, sentText || '');
-          const where = e.group_id ? `群 ${e.group_id}` : `用户 ${e.user_id}(私聊)`;
-          const part = sentText ? `表情包(${t})及文字：${sentText}` : `表情包(${t})`;
-          return { success: true, raw: `你已在${where}发送${part}。${ChatStream.TOOL_DELIVERED_FOOTER}` };
-        });
       },
       enabled: true
     });
@@ -797,7 +654,7 @@ export default class ChatStream extends AIStream {
         return this._wrapHandler(async () => {
           await member.thumbUp(thumbCount);
           const gid = context.e.group_id;
-          return { success: true, raw: `你已成功在群 ${gid} 给 ${args.qq} 点赞 ${thumbCount} 下。${ChatStream.TOOL_DELIVERED_FOOTER}` };
+          return { success: true, raw: ChatStream.actionAck(`你已成功在群 ${gid} 给 ${args.qq} 点赞 ${thumbCount} 下。`) };
         });
       },
       enabled: true
@@ -813,7 +670,7 @@ export default class ChatStream extends AIStream {
         return this._wrapHandler(async () => {
           await context.e.group.sign();
           const gid = context.e.group_id;
-          return { success: true, raw: `你已在群 ${gid} 签到成功。${ChatStream.TOOL_DELIVERED_FOOTER}` };
+          return { success: true, raw: ChatStream.actionAck(`你已在群 ${gid} 签到成功。`) };
         });
       },
       enabled: true
@@ -833,7 +690,7 @@ export default class ChatStream extends AIStream {
         return this._wrapHandler(async () => {
           await context.e.group.muteMember(args.qq, args.duration);
           const gid = context.e.group_id;
-          return { success: true, raw: `你已成功在群 ${gid} 禁言 ${args.qq} ${args.duration} 秒。${ChatStream.TOOL_DELIVERED_FOOTER}` };
+          return { success: true, raw: ChatStream.actionAck(`你已成功在群 ${gid} 禁言 ${args.qq} ${args.duration} 秒。`) };
         });
       },
       enabled: true
@@ -853,7 +710,7 @@ export default class ChatStream extends AIStream {
         return this._wrapHandler(async () => {
           await context.e.group.muteMember(args.qq, 0);
           const gid = context.e.group_id;
-          return { success: true, raw: `你已成功在群 ${gid} 解除 ${args.qq} 的禁言。${ChatStream.TOOL_DELIVERED_FOOTER}` };
+          return { success: true, raw: ChatStream.actionAck(`你已成功在群 ${gid} 解除 ${args.qq} 的禁言。`) };
         });
       },
       enabled: true
@@ -869,7 +726,7 @@ export default class ChatStream extends AIStream {
         return this._wrapHandler(async () => {
           await context.e.group.muteAll(true);
           const gid = context.e.group_id;
-          return { success: true, raw: `你已成功在群 ${gid} 开启全员禁言。${ChatStream.TOOL_DELIVERED_FOOTER}` };
+          return { success: true, raw: ChatStream.actionAck(`你已成功在群 ${gid} 开启全员禁言。`) };
         });
       },
       enabled: true
@@ -885,7 +742,7 @@ export default class ChatStream extends AIStream {
         return this._wrapHandler(async () => {
           await context.e.group.muteAll(false);
           const gid = context.e.group_id;
-          return { success: true, raw: `你已成功在群 ${gid} 解除全员禁言。${ChatStream.TOOL_DELIVERED_FOOTER}` };
+          return { success: true, raw: ChatStream.actionAck(`你已成功在群 ${gid} 解除全员禁言。`) };
         });
       },
       enabled: true
@@ -921,7 +778,7 @@ export default class ChatStream extends AIStream {
           const gid = context.e.group_id;
           const selfId = String(context.e.self_id || context.e.bot?.uin || '');
           const who = targetQq === selfId ? '自己' : targetQq;
-          return { success: true, raw: `你已成功在群 ${gid} 将 ${who} 的名片改为「${args.card}」。${ChatStream.TOOL_DELIVERED_FOOTER}` };
+          return { success: true, raw: ChatStream.actionAck(`你已成功在群 ${gid} 将 ${who} 的名片改为「${args.card}」。`) };
         });
       },
       enabled: true
@@ -941,7 +798,7 @@ export default class ChatStream extends AIStream {
         return this._wrapHandler(async () => {
           await context.e.group.setName(args.name);
           const gid = context.e.group_id;
-          return { success: true, raw: `你已成功将群 ${gid} 的群名改为「${args.name}」。${ChatStream.TOOL_DELIVERED_FOOTER}` };
+          return { success: true, raw: ChatStream.actionAck(`你已成功将群 ${gid} 的群名改为「${args.name}」。`) };
         });
       },
       enabled: true
@@ -961,7 +818,7 @@ export default class ChatStream extends AIStream {
         return this._wrapHandler(async () => {
           await context.e.group.setAdmin(args.qq, true);
           const gid = context.e.group_id;
-          return { success: true, raw: `你已成功在群 ${gid} 设置 ${args.qq} 为管理员。${ChatStream.TOOL_DELIVERED_FOOTER}` };
+          return { success: true, raw: ChatStream.actionAck(`你已成功在群 ${gid} 设置 ${args.qq} 为管理员。`) };
         });
       },
       enabled: true
@@ -981,7 +838,7 @@ export default class ChatStream extends AIStream {
         return this._wrapHandler(async () => {
           await context.e.group.setAdmin(args.qq, false);
           const gid = context.e.group_id;
-          return { success: true, raw: `你已成功在群 ${gid} 取消 ${args.qq} 的管理员。${ChatStream.TOOL_DELIVERED_FOOTER}` };
+          return { success: true, raw: ChatStream.actionAck(`你已成功在群 ${gid} 取消 ${args.qq} 的管理员。`) };
         });
       },
       enabled: true
@@ -1002,7 +859,7 @@ export default class ChatStream extends AIStream {
           await context.e.group.setTitle(args.qq, args.title, args.duration || -1);
           const gid = context.e.group_id;
           const dur = args.duration && args.duration > 0 ? `，持续 ${args.duration} 秒` : '';
-          return { success: true, raw: `你已成功在群 ${gid} 为 ${args.qq} 设置专属头衔「${args.title}」${dur}。${ChatStream.TOOL_DELIVERED_FOOTER}` };
+          return { success: true, raw: ChatStream.actionAck(`你已成功在群 ${gid} 为 ${args.qq} 设置专属头衔「${args.title}」${dur}。`) };
         });
       },
       enabled: true
@@ -1023,7 +880,7 @@ export default class ChatStream extends AIStream {
           await context.e.group.kickMember(args.qq, args.reject || false);
           const gid = context.e.group_id;
           const extra = args.reject ? ' 并拒绝其再次申请' : '';
-          return { success: true, raw: `你已成功在群 ${gid} 踢出 ${args.qq}${extra}。${ChatStream.TOOL_DELIVERED_FOOTER}` };
+          return { success: true, raw: ChatStream.actionAck(`你已成功在群 ${gid} 踢出 ${args.qq}${extra}。`) };
         });
       },
       enabled: true
@@ -1056,7 +913,7 @@ export default class ChatStream extends AIStream {
           } else {
             return { success: false, error: 'API不可用' };
           }
-          return { success: true, raw: `你已成功在群 ${gid} 将消息 ${msgId} 设为精华。${ChatStream.TOOL_DELIVERED_FOOTER}` };
+          return { success: true, raw: ChatStream.actionAck(`你已成功在群 ${gid} 将消息 ${msgId} 设为精华。`) };
         });
       },
       enabled: true
@@ -1089,7 +946,7 @@ export default class ChatStream extends AIStream {
           } else {
             return { success: false, error: 'API不可用' };
           }
-          return { success: true, raw: `你已成功在群 ${gid} 取消消息 ${msgId} 的精华。${ChatStream.TOOL_DELIVERED_FOOTER}` };
+          return { success: true, raw: ChatStream.actionAck(`你已成功在群 ${gid} 取消消息 ${msgId} 的精华。`) };
         });
       },
       enabled: true
@@ -1124,7 +981,7 @@ export default class ChatStream extends AIStream {
           } else {
             return { success: false, error: 'API不可用' };
           }
-          return { success: true, raw: `你已成功在群 ${gid} 发送公告。${ChatStream.TOOL_DELIVERED_FOOTER}` };
+          return { success: true, raw: ChatStream.actionAck(`你已成功在群 ${gid} 发送公告。`) };
         });
       },
       enabled: true
@@ -1201,11 +1058,11 @@ export default class ChatStream extends AIStream {
             if (context.e.isGroup && context.e.group) {
               await context.e.group.recallMsg(args.msgId);
               const gid = context.e.group_id;
-              return { success: true, raw: `你已成功在群 ${gid} 撤回消息 ${args.msgId}。${ChatStream.TOOL_DELIVERED_FOOTER}` };
+              return { success: true, raw: ChatStream.actionAck(`你已成功在群 ${gid} 撤回消息 ${args.msgId}。`) };
             } else if (context.e.bot) {
               await context.e.bot.sendApi('delete_msg', { message_id: args.msgId });
               const uid = context.e.user_id;
-              return { success: true, raw: `你已成功在与 ${uid} 的私聊中撤回消息 ${args.msgId}。${ChatStream.TOOL_DELIVERED_FOOTER}` };
+              return { success: true, raw: ChatStream.actionAck(`你已成功在与 ${uid} 的私聊中撤回消息 ${args.msgId}。`) };
             }
             return { success: false, error: '无法撤回' };
           });
@@ -1318,7 +1175,7 @@ export default class ChatStream extends AIStream {
           if (e.bot?.sendApi) {
             await e.bot.sendApi('set_group_todo', { group_id: e.group_id, message_id: msgId });
             const gid = e.group_id;
-            return { success: true, raw: `你已成功在群 ${gid} 将消息 ${msgId} 设为群待办。${ChatStream.TOOL_DELIVERED_FOOTER}` };
+            return { success: true, raw: ChatStream.actionAck(`你已成功在群 ${gid} 将消息 ${msgId} 设为群待办。`) };
           }
           return { success: false, error: 'API不可用' };
         });
@@ -1345,7 +1202,7 @@ export default class ChatStream extends AIStream {
           } else {
             await e.bot.sendApi('complete_group_todo', { group_id: e.group_id, message_id: msgId });
           }
-          return { success: true, raw: `你已在群 ${e.group_id} 完成消息 ${msgId} 的群待办。` };
+          return { success: true, raw: ChatStream.actionAck(`你已在群 ${e.group_id} 完成消息 ${msgId} 的群待办。`) };
         });
       },
       enabled: true
@@ -1370,7 +1227,7 @@ export default class ChatStream extends AIStream {
           } else {
             await e.bot.sendApi('cancel_group_todo', { group_id: e.group_id, message_id: msgId });
           }
-          return { success: true, raw: `你已在群 ${e.group_id} 取消消息 ${msgId} 的群待办。` };
+          return { success: true, raw: ChatStream.actionAck(`你已在群 ${e.group_id} 取消消息 ${msgId} 的群待办。`) };
         });
       },
       enabled: true
@@ -2177,30 +2034,13 @@ export default class ChatStream extends AIStream {
       `${botName}｜QQ ${e.self_id}｜群 ${e.group_id}｜${botRole}｜${dateStr}`,
       persona + masterNote,
       '',
-      '## 群聊三原则',
-      '1. **用户只看工具**：要说出口 → 调 **reply**（或 at/poke 等）；assistant 正文群里看不见。',
-      '2. **只答当前**：[群聊记录] 上旧下新，**只回应 `[当前消息]`**；【我】= 你已说过 → 同话题勿再 reply，除非用户追问。',
-      '3. **看回执再发**：reply/at 返回会列出已发正文；已送达则勿重复相似内容。',
+      '## reply（唯一发文字）',
+      '- 用户只看 **reply**；assistant 正文不可见。',
+      '- **content**：`|` 分句 · `[开心]`等表情 · `[回复:消息ID]` · 群聊 `[at:数字QQ]`（可多个、可句中）',
+      '- 禁止 `@QQ` / `@昵称`。只答 `[当前消息]`。',
       '',
-      '## reply 怎么写',
-      '- 分句：`|` 或 `｜`；表情：`[开心]` 等（每轮至多一处）；引用：`[回复:消息ID]`。',
-      '- 纯文本，勿 Markdown；勿粘贴工具 JSON；勿伪造「工具名(参数)」。',
-      '',
-      '## @人（二选一，勿混用假@）',
-      '- **推荐**：`at` 工具 → `qq` 填记录里的数字 QQ，可选 `text`。',
-      '- **可选**：reply 的 content 以 `[CQ:at,qq=QQ号]` 开头再接正文。',
-      '- **禁止**：reply 里写 `@123456789` 或 `@昵称` —— 只是假@，对方无提醒。',
-      '',
-      '## 记录与工具',
-      '- 记录里 `昵称(QQ)[ID:xxx]` 取 QQ 与消息 ID；读记录 **readChatRecord**；发图 **send_image**，发文件 **send_file**。',
-      '- [含图片]/[含文件]/[合并转发] 仅作标签；识图 MCP 暂关。forgeForward 仅整活，勿造谣。',
-      '- 群管类工具需机器人为群主/管理员。browser/desktop/database 须用户明确授权再用。',
-      '',
-      '## 远程 MCP（占卜等）',
-      '- 先调工具、看返回，再 reply 解读；同一话题占卜只调一次；解读须忠实工具原文，勿虚构牌面。',
-      '',
-      '## 语气',
-      '- 像群友接话，少客服腔；有人 @ 你或点名时优先答那句。'
+      '## 其它',
+      '- 记录 `昵称(QQ)[ID:xxx]` 取 QQ/消息ID · send_image · send_file'
     ];
     return lines.join('\n');
   }
@@ -2673,87 +2513,45 @@ export default class ChatStream extends AIStream {
     return false;
   }
 
-  static _resolveFallbackOutgoingText(...candidates) {
-    for (const raw of candidates) {
-      const t = String(raw ?? '').trim();
-      if (t && !ChatStream._isLikelyToolJsonLeak(t)) return t;
-    }
-    return '';
-  }
-
-  static _shouldTryForcedReplyToolChoice(resolvedConfig) {
-    const provider = String(resolvedConfig?.provider || '').toLowerCase();
-    const t =
-      resolvedConfig?.thinkingType ??
-      resolvedConfig?.thinking_type ??
-      resolvedConfig?.thinking;
-    // DeepSeek 客户端默认 thinking=enabled，不支持强制 tool_choice
-    if (provider.includes('deepseek')) {
-      if (t == null || t === '') return false;
-      const v = String(t).trim().toLowerCase();
-      return v === 'disabled' || v === 'false' || v === 'off';
-    }
-    if (t == null || t === '') return true;
-    const v = String(t).trim().toLowerCase();
-    return v === 'disabled' || v === 'false' || v === 'off';
-  }
-
-  /** 兜底发出前：去掉表情协议 tag，避免误触随机表情包 */
   static _prepareFallbackOutgoingText(text) {
     return String(text ?? '')
       .replace(/\[(开心|惊讶|伤心|大笑|害怕|生气)\]/g, '')
+      .replace(/\[at:\d{5,10}\]/gi, '')
       .replace(/\s+/g, ' ')
       .trim();
   }
 
-  static _findReplyOpenAiToolName() {
-    for (const [openAi, mcp] of MCPToolAdapter._openAiToolNameToMcp.entries()) {
-      if (MCPToolAdapter.isReplySendOpenAiOrMcpName(mcp)) return openAi;
-    }
-    return MCPToolAdapter._baseSanitizeOpenAIToolName('chat.reply');
-  }
+  async _sendUserVisibleText(e, { content = '', messageId } = {}) {
+    const rawContent = String(content ?? '').trim();
+    if (!rawContent) return { success: false, error: 'content 不能为空' };
 
-  static _buildReplyRecoveryMessages(baseMessages, priorAssistantText) {
-    const msgs = Array.isArray(baseMessages) ? [...baseMessages] : [];
-    const prior = String(priorAssistantText ?? '').trim();
-    if (prior) {
-      msgs.push({ role: 'assistant', content: prior });
+    const filteredContent = this.stripMarkdownForOutgoing(rawContent);
+    if (!filteredContent) {
+      return { success: false, error: '清理 Markdown 后无可发送正文' };
     }
-    msgs.push({ role: 'user', content: REPLY_RECOVERY_NUDGE });
-    return msgs;
-  }
 
-  async _callAIReplyRecovery(e, baseMessages, config, { priorAssistantText, debugDumpFullPrompt }) {
-    const recoveryMessages = ChatStream._buildReplyRecoveryMessages(baseMessages, priorAssistantText);
-    Bot.makeLog(
-      'info',
-      `[ChatStream] 未调用 reply，触发补救轮 priorLen=${String(priorAssistantText ?? '').length}`,
-      'ChatStream'
-    );
-    const resolved = this.resolveLLMConfig(config);
-    const baseOpts = {
-      ...config,
-      debugDumpFullPrompt,
-      _debugDumpEvent: e,
-      maxToolRounds: Math.min(Number(resolved.maxToolRounds) || 12, 4)
+    const forbidden = replyContentForbidden(filteredContent);
+    if (forbidden) return { success: false, error: forbidden };
+
+    if (contentHasGroupAt(filteredContent) && !e?.isGroup) {
+      return { success: false, error: '[at:QQ] 仅群聊可用' };
+    }
+
+    const { totalSent, allSentContent } = await this._processAndSendTextProtocol(e, filteredContent, {
+      messageId,
+      recordToHistory: true,
+      updateReplyContents: true
+    });
+    if (totalSent < 1) {
+      return { success: false, error: '未能发出任何可见消息，请检查 content 与文本协议' };
+    }
+    return {
+      success: true,
+      raw: ChatStream.formatDeliveredAck(ChatStream.formatSessionWhere(e), allSentContent)
     };
-
-    if (ChatStream._shouldTryForcedReplyToolChoice(resolved)) {
-      const replyTool = ChatStream._findReplyOpenAiToolName();
-      const forced = await this.callAI(recoveryMessages, {
-        ...baseOpts,
-        tool_choice: { type: 'function', function: { name: replyTool } }
-      });
-      if (forced != null) return forced;
-      Bot.makeLog('warn', '[ChatStream] 强制 tool_choice 无结果，改用 nudge 补救', 'ChatStream');
-    } else {
-      Bot.makeLog('debug', '[ChatStream] thinking 模式跳过 tool_choice，仅用 nudge 补救', 'ChatStream');
-    }
-
-    return this.callAI(recoveryMessages, baseOpts);
   }
 
-  async _ensureUserVisibleReply(e, llm, text, messages, config, { debugDumpFullPrompt }) {
+  async _ensureUserVisibleReply(e, llm, text) {
     if (!e?.reply || llm?.usedReplyTool) return { llm, text };
 
     if (llm?.toolRoundsExhausted) {
@@ -2762,22 +2560,9 @@ export default class ChatStream extends AIStream {
       return { llm, text: notice };
     }
 
-    const recovery = await this._callAIReplyRecovery(e, messages, config, {
-      priorAssistantText: text,
-      debugDumpFullPrompt
-    });
-    if (recovery?.usedReplyTool) {
-      const recovered = String(recovery.text ?? '').trim();
-      return { llm: recovery, text: recovered ? this.stripMarkdownForOutgoing(recovered) : '' };
-    }
-
-    const recoveryRaw = String(recovery?.text ?? '').trim();
-    const recoveryText = recoveryRaw ? this.stripMarkdownForOutgoing(recoveryRaw) : '';
-    const fallback = ChatStream._prepareFallbackOutgoingText(
-      ChatStream._resolveFallbackOutgoingText(text, recoveryText)
-    );
-    if (fallback) {
-      Bot.makeLog('warn', `[ChatStream] reply 补救未成功，兜底发出 len=${fallback.length}`, 'ChatStream');
+    const fallback = ChatStream._prepareFallbackOutgoingText(text);
+    if (fallback && !ChatStream._isLikelyToolJsonLeak(fallback)) {
+      Bot.makeLog('warn', `[ChatStream] 未调用 reply，框架兜底发出 len=${fallback.length}`, 'ChatStream');
       await this._processAndSendTextProtocol(e, fallback, {
         recordToHistory: true,
         messageId: e.message_id || e.real_id,
@@ -2785,8 +2570,6 @@ export default class ChatStream extends AIStream {
       });
       return { llm, text: fallback };
     }
-
-    Bot.makeLog('warn', '[ChatStream] reply 补救未成功且无可用兜底正文', 'ChatStream');
     return { llm, text };
   }
 
@@ -2818,9 +2601,7 @@ export default class ChatStream extends AIStream {
       let text = String(llm.text ?? '').trim();
       if (text) text = this.stripMarkdownForOutgoing(text);
 
-      ({ llm, text } = await this._ensureUserVisibleReply(e, llm, text, messages, config, {
-        debugDumpFullPrompt
-      }));
+      ({ llm, text } = await this._ensureUserVisibleReply(e, llm, text));
 
       return text || '';
     } catch (error) {
@@ -2866,7 +2647,7 @@ export default class ChatStream extends AIStream {
       msg = afterEmotion;
 
       // 解析CQ码和回复标记
-      const { replyId, segments: parsedSegments } = this.parseCQToSegments(msg, e);
+      const { replyId, segments: parsedSegments } = parseReplyContentSegments(msg);
       let segments = parsedSegments;
 
       // ⚠️ 重要：处理表情包 - 一次聊天最好只发一次表情包
@@ -2891,7 +2672,7 @@ export default class ChatStream extends AIStream {
       const finalReplyId = replyId || messageId;
 
       // 发送消息（图片内容标记已被移除，用户看不到）
-      const sentContent = ChatStream._segmentsToDisplayText(segments, msg);
+      const sentContent = segmentsToDisplayText(segments, msg);
       
       if (finalReplyId) {
         const replySegment = seg.reply(finalReplyId);
@@ -3061,50 +2842,6 @@ export default class ChatStream extends AIStream {
     clean = clean.replace(/\n{3,}/g, '\n\n');
     clean = clean.split('\n').map((line) => line.trim()).join('\n');
     return clean.trim();
-  }
-
-  parseCQToSegments(text, _e) {
-    let replyId = null;
-    let work = String(text ?? '');
-
-    const replyShortMatch = work.match(/\[回复:(?:ID:)?(\d+)\]/);
-    if (replyShortMatch) {
-      replyId = replyShortMatch[1];
-      work = work.replace(/\[回复:(?:ID:)?\d+\]/g, '').trim();
-    }
-    const replyMatch = work.match(/\[CQ:reply,id=(\d+)\]/);
-    if (replyMatch) {
-      replyId = replyId || replyMatch[1];
-      work = work.replace(/\[CQ:reply,id=\d+\]/g, '').trim();
-    }
-
-    const segments = [];
-    const seg = segment;
-    const cqPattern = /\[CQ:(\w+)(?:,([^\]]+))?\]/g;
-    let lastIndex = 0;
-    let match;
-
-    while ((match = cqPattern.exec(work)) !== null) {
-      if (match.index > lastIndex) {
-        const textBefore = work.slice(lastIndex, match.index);
-        if (textBefore.trim()) segments.push(textBefore);
-      }
-      lastIndex = match.index + match[0].length;
-      const type = match[1];
-      const paramObj = ChatStream._parseCqParams(match[2]);
-      if (type === 'at' && ChatStream.isValidAtQq(paramObj.qq)) {
-        segments.push(seg.at(paramObj.qq));
-      } else if (type === 'image' && paramObj.file) {
-        segments.push(seg.image(paramObj.file));
-      }
-    }
-
-    if (lastIndex < work.length) {
-      const textAfter = work.slice(lastIndex);
-      if (textAfter.trim()) segments.push(textAfter);
-    }
-
-    return { replyId, segments: ChatStream._mergeAdjacentTextSegments(segments) };
   }
 
   cleanupCache() {
