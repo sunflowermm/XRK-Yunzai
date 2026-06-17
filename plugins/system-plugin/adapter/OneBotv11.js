@@ -26,6 +26,41 @@ function gmlMemberDelete(map, userId) {
   if (Number.isFinite(n)) map.delete(n)
 }
 
+/** 兼容把“裸字节数组”当消息段传入的历史插件：推断为 image.file(base64://...) */
+function tryCoerceBareBytesSegment(seg) {
+  if (!seg || typeof seg !== "object") return null
+  if (seg.type) return null
+  const data = seg.data
+  if (!data) return null
+
+  let buf = null
+  if (Buffer.isBuffer(data)) {
+    buf = data
+  } else if (data instanceof Uint8Array) {
+    buf = Buffer.from(data)
+  } else if (typeof data === "object") {
+    // 形如 {0:255,1:216,...}（JSON 化的 Buffer）
+    const keys = Object.keys(data)
+    if (keys.length > 0 && keys.length <= 10_000_000 && keys.every(k => /^\d+$/.test(k))) {
+      const maxKey = Math.max(...keys.map(k => Number(k)))
+      if (maxKey + 1 === keys.length) {
+        const arr = new Uint8Array(keys.length)
+        for (let i = 0; i < keys.length; i++) {
+          const v = data[i]
+          if (typeof v !== "number") return null
+          arr[i] = v & 0xff
+        }
+        buf = Buffer.from(arr)
+      }
+    }
+  }
+
+  if (!buf?.length) return null
+
+  // 只做最小兜底：交给 OneBot 的 image 段处理
+  return { type: "image", data: { file: `base64://${buf.toString("base64")}` } }
+}
+
 Bot.adapter.push(
   new (class OneBotv11Adapter {
     id = "QQ"
@@ -106,6 +141,10 @@ Bot.adapter.push(
       for (let i of msg) {
         if (typeof i !== "object") i = { type: "text", data: { text: i } }
         else if (!i.data) i = { type: i.type, data: { ...i, type: undefined } }
+        else {
+          const coerced = tryCoerceBareBytesSegment(i)
+          if (coerced) i = coerced
+        }
 
         switch (i.type) {
           case "at":
