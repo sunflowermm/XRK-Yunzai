@@ -303,13 +303,10 @@ Bot.adapter.push(
       if (!msg) return null
       if (msg.message) {
         msg.message = this.parseMsg(msg.message)
-        const onlyTextCq = msg.message.length === 1
+        const cqInText = msg.message.length === 1
           && msg.message[0]?.type === "text"
-          && msg.message[0].text?.includes("[CQ:")
-        const imageBroken = msg.message.some(
-          (s) => s.type === "image" && !s.file && !s.url,
-        )
-        if ((onlyTextCq || imageBroken) && msg.raw_message) {
+          && String(msg.message[0].text).includes("[CQ:")
+        if (cqInText && msg.raw_message) {
           msg.message = this.parseCQMsg(msg.raw_message)
         }
       } else if (msg.raw_message) {

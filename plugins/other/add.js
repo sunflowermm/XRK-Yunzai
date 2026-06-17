@@ -5,7 +5,7 @@ import crypto from "crypto"
 import { FileUtils } from "../../lib/utils/file-utils.js"
 import {
   isHttpRef,
-  readPersistableMediaBuffer,
+  readImageBuffer,
 } from "../../lib/utils/outbound-media.js"
 
 const ENTRY_MEDIA_TYPES = new Set(['image', 'video', 'record'])
@@ -794,7 +794,7 @@ export class add extends plugin {
   /** 获取图片hash */
   async getImageHash(imgUrl) {
     try {
-      const buffer = await readPersistableMediaBuffer(imgUrl, this._bindSendApi())
+      const buffer = await readImageBuffer(imgUrl, this._bindSendApi())
       if (!buffer?.length) return null
       return crypto.createHash('md5').update(buffer).digest('hex')
     } catch (err) {
@@ -1018,7 +1018,7 @@ export class add extends plugin {
 
       const buffer = Buffer.isBuffer(ref)
         ? ref
-        : await readPersistableMediaBuffer({ file: data.file, url: data.url }, this._bindSendApi())
+        : await readImageBuffer({ file: data.file, url: data.url }, this._bindSendApi())
       if (!buffer?.length) {
         logger.error(`保存文件失败: 无法下载媒体 ${String(ref).slice(0, 80)}`)
         return null

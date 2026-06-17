@@ -2059,12 +2059,12 @@ export default class ChatStream extends AIStream {
           continue;
         }
         if (seg.type === 'image') {
-          const url = seg.url || seg.data?.url || seg.data?.file;
-          if (!url) continue;
+          const ref = seg.file || seg.url || seg.data?.file || seg.data?.url;
+          if (!ref) continue;
           if (inReplyRegion) {
-            replyImages.push(url);
+            replyImages.push(ref);
           } else {
-            images.push(url);
+            images.push(ref);
           }
         }
       }
@@ -2077,7 +2077,7 @@ export default class ChatStream extends AIStream {
         if (reply && Array.isArray(reply.message)) {
           for (const seg of reply.message) {
             if (seg.type === 'image') {
-              const ref = seg.file || seg.data?.file || seg.url || seg.data?.url;
+              const ref = seg.file || seg.url || seg.data?.file || seg.data?.url;
               if (ref) replyImages.push(ref);
             }
           }
