@@ -15,6 +15,9 @@ const PROVIDER_IDS = WEB_SEARCH_PROVIDERS.map((p) => p.id);
  * Web 能力（web_fetch + web_search）挂载为 MCP
  */
 export default class WebStream extends AIStream {
+  /** @type {ReturnType<typeof buildWebFetchRuntime>} */
+  webFetchRuntime;
+
   /** @type {ReturnType<typeof buildWebSearchRuntime>} */
   webSearchRuntime;
 
@@ -37,12 +40,14 @@ export default class WebStream extends AIStream {
   }
 
   async init() {
+    this.webFetchRuntime = buildWebFetchRuntime();
     this.webSearchRuntime = buildWebSearchRuntime();
     await super.init();
     this.registerWebTools();
   }
 
   registerWebTools() {
+    const runtimeBase = () => this.webFetchRuntime;
     const searchRuntime = () => this.webSearchRuntime;
 
     this.registerMCPTool('web_search', {
@@ -174,8 +179,7 @@ export default class WebStream extends AIStream {
         required: ['url']
       },
       handler: async (args = {}) => {
-        // 每次请求重建 runtime，避免 init 后修改 aistream.yaml 不生效
-        const rt = buildWebFetchRuntime();
+        const rt = runtimeBase();
         const url = typeof args.url === 'string' ? args.url.trim() : '';
         if (!url) return { success: false, error: 'url required' };
 

@@ -86,9 +86,9 @@ export const AISTREAM_CRAWL_FIELDS = {
       pinDns: { type: 'boolean', label: 'DNS 钉扎（SSRF）', default: true, component: 'Switch' },
       readabilityEnabled: { type: 'boolean', label: 'Readability 提取', default: true, component: 'Switch' },
       userAgent: { type: 'string', label: 'User-Agent', default: '', component: 'Input' },
-      firecrawlApiKey: { type: 'string', label: 'Firecrawl API Key', description: '填写后默认启用直连失败时的 Firecrawl 回退', default: '', component: 'InputPassword' },
+      firecrawlApiKey: { type: 'string', label: 'Firecrawl API Key', default: '', component: 'InputPassword' },
       firecrawlBaseUrl: { type: 'string', label: 'Firecrawl Base URL', default: 'https://api.firecrawl.dev', component: 'Input' },
-      firecrawlEnabled: { type: 'boolean', label: '启用 Firecrawl 回退', description: '有 Key 时默认 true；设为 false 可强制关闭', default: false, component: 'Switch' }
+      firecrawlEnabled: { type: 'boolean', label: '启用 Firecrawl 回退', default: false, component: 'Switch' }
     }
   },
   webSearch: {
