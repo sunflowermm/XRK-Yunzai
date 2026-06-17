@@ -77,7 +77,7 @@ crawl:
     userAgent: ""
     firecrawlApiKey: ""
     firecrawlBaseUrl: "https://api.firecrawl.dev"
-    firecrawlEnabled: false
+    # firecrawlEnabled 省略：有 Key 即启用回退；data 层显式 false 可关闭
   webSearch:
     enabled: true
     provider: ""
