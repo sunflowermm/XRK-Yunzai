@@ -63,6 +63,75 @@ export default class ChatStream extends AIStream {
     'reply', 'at', 'emotion', 'send_file', 'send_image', 'poke',
     'thumbUp', 'sign', 'emojiReaction', 'recall', 'forgeForward'
   ]);
+  /** 对外发送类工具返回末尾：提醒模型勿重复同主题 */
+  static TOOL_DELIVERED_FOOTER = '以上内容已送达用户；同主题勿再发送相似内容，除非用户追问。';
+
+  static formatSessionWhere(e) {
+    if (e?.group_id) return `群 ${e.group_id}`;
+    if (e?.user_id) return `用户 ${e.user_id}(私聊)`;
+    return '当前会话';
+  }
+
+  static formatDeliveredAck(where, sentLines) {
+    const items = (Array.isArray(sentLines) ? sentLines : [sentLines]).map((s) => String(s ?? '').trim()).filter(Boolean);
+    if (!items.length) {
+      return `未向${where}发送可见正文。\n${ChatStream.TOOL_DELIVERED_FOOTER}`;
+    }
+    const body = items.map((c, i) => `${i + 1}. ${c}`).join('\n');
+    return `你已在${where}发送以下内容（共${items.length}条）：\n${body}\n${ChatStream.TOOL_DELIVERED_FOOTER}`;
+  }
+
+  static actionAck(detail) {
+    const line = String(detail ?? '').trim();
+    if (!line) return ChatStream.TOOL_DELIVERED_FOOTER;
+    return `${line}\n${ChatStream.TOOL_DELIVERED_FOOTER}`;
+  }
+
+  static isValidAtQq(qq) {
+    return /^\d{5,10}$/.test(String(qq ?? '').trim());
+  }
+
+  /** 将 segment 列表转为 AI 可读的发送摘要（含真 @ 的 QQ 号） */
+  static _segmentsToDisplayText(segments, fallback = '') {
+    if (!Array.isArray(segments) || !segments.length) return fallback;
+    const parts = segments.map((s) => {
+      if (typeof s === 'string') return s;
+      const type = s?.type;
+      if (type === 'at') {
+        const qq = s.qq ?? s.data?.qq ?? s.data?.uid ?? '';
+        return qq ? `@${qq}` : '';
+      }
+      if (type === 'text') return s.text ?? s.data?.text ?? '';
+      if (type === 'image') return '[图片]';
+      return '';
+    });
+    const joined = parts.join('').trim();
+    return joined || fallback;
+  }
+
+  static _parseCqParams(params) {
+    const paramObj = {};
+    if (!params) return paramObj;
+    for (const p of params.split(',')) {
+      const eq = p.indexOf('=');
+      if (eq <= 0) continue;
+      paramObj[p.slice(0, eq).trim()] = p.slice(eq + 1).trim();
+    }
+    return paramObj;
+  }
+
+  static _mergeAdjacentTextSegments(segments) {
+    const merged = [];
+    for (const current of segments) {
+      const last = merged[merged.length - 1];
+      if (typeof current === 'string' && typeof last === 'string') {
+        merged[merged.length - 1] = last + current;
+      } else {
+        merged.push(current);
+      }
+    }
+    return merged;
+  }
 
   constructor() {
     super({
@@ -363,7 +432,7 @@ export default class ChatStream extends AIStream {
 
   registerAllFunctions() {
     this.registerMCPTool('at', {
-      description: '群聊@成员，可选附带文字。用户可见。仅群聊。',
+      description: '群聊真@成员。qq 必填（数字）；可选 text 与@同条发出。需要@人时优先用本工具，勿在 reply 里写 @QQ 或 @昵称。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -390,8 +459,10 @@ export default class ChatStream extends AIStream {
           const sentContent = text ? `@${qq} ${text}` : `@${qq}`;
           this.recordAIResponse(context.e, sentContent);
           const gid = context.e?.group_id;
-          const detail = gid ? `你已在群 ${gid} @了 ${qq}${text ? ' 并发送：' + text : ''}` : `你已@了 ${qq}${text ? ' 并发送：' + text : ''}`;
-          return { success: true, raw: `${detail}。无话可说则空返回。` };
+          const detail = gid
+            ? `你已在群 ${gid} @了 ${qq}${text ? ' 并发送：' + text : ''}`
+            : `你已@了 ${qq}${text ? ' 并发送：' + text : ''}`;
+          return { success: true, raw: ChatStream.actionAck(detail) };
         }, 200);
       },
       enabled: true
@@ -429,19 +500,19 @@ export default class ChatStream extends AIStream {
             return { success: false, error: '当前环境不支持戳一戳' };
           }
           const where = e.isGroup && e.group_id ? `群 ${e.group_id}` : '私聊';
-          return { success: true, raw: `你已对 ${targetQq} 戳一戳（当前会话：${where}）。无话可说则空返回。` };
+          return { success: true, raw: `你已对 ${targetQq} 戳一戳（当前会话：${where}）。${ChatStream.TOOL_DELIVERED_FOOTER}` };
         });
       },
       enabled: true
     });
 
     this.registerMCPTool('reply', {
-      description: '发送消息到当前会话，用户可见。content 用纯文本 + 文本协议（| 分句、[开心]、[CQ:at]、[回复:id]、[图片内容:]）；勿 Markdown；若全是 Markdown 壳则无法发出。',
+      description: '向当前会话发文字（用户可见）。| 或 ｜ 分句；[开心]等表情；[回复:消息ID] 引用。群聊@人请用 at 工具，勿在 content 写 @。勿 Markdown。',
       inputSchema: {
         type: 'object',
         properties: {
           messageId: { type: 'number', description: '可选，引用该消息ID（数字）' },
-          content: { type: 'string', description: '必填。支持|分句、[开心]等、[CQ:at,qq=]、[回复:id]' }
+          content: { type: 'string', description: '纯文本 + 协议标签；@人请用 at 工具，勿写 @QQ/@昵称' }
         },
         required: ['content']
       },
@@ -463,10 +534,13 @@ export default class ChatStream extends AIStream {
             recordToHistory: true,
             updateReplyContents: true
           });
-          const lines = allSentContent.map((c, i) => `${i + 1}. ${c}`).join('\n');
-          const where = e.group_id ? `群 ${e.group_id}` : `用户 ${e.user_id}(私聊)`;
-          const detail = `你已在${where}发送以下内容（共${totalSent}条）：\n${lines}`;
-          return { success: true, raw: `${detail}。无话可说则空返回。` };
+          if (totalSent < 1) {
+            return { success: false, error: '未能发出任何可见消息，请检查 content 与文本协议' };
+          }
+          return {
+            success: true,
+            raw: ChatStream.formatDeliveredAck(ChatStream.formatSessionWhere(e), allSentContent)
+          };
         });
       },
       enabled: true
@@ -514,7 +588,7 @@ export default class ChatStream extends AIStream {
           const where = e.group_id ? `群 ${e.group_id}` : `用户 ${e.user_id}(私聊)`;
           return {
             success: true,
-            raw: `你已在${where}发送文件「${displayName}」。无话可说则空返回。`
+            raw: `你已在${where}发送文件「${displayName}」。${ChatStream.TOOL_DELIVERED_FOOTER}`
           };
         });
       },
@@ -562,7 +636,7 @@ export default class ChatStream extends AIStream {
           this.recordAIResponse(e, `[图片:${name}]`);
           return {
             success: true,
-            raw: `你已在${where}发送图片「${name}」。无话可说则空返回。`
+            raw: `你已在${where}发送图片「${name}」。${ChatStream.TOOL_DELIVERED_FOOTER}`
           };
         });
       },
@@ -646,7 +720,7 @@ export default class ChatStream extends AIStream {
           }
           await BotUtil.sleep(200);
           const gid = e.group_id;
-          return { success: true, raw: `你已在群 ${gid} 对消息 ${msgId} 发送了 ${emojiType} 表情回应。无话可说则空返回。` };
+          return { success: true, raw: `你已在群 ${gid} 对消息 ${msgId} 发送了 ${emojiType} 表情回应。${ChatStream.TOOL_DELIVERED_FOOTER}` };
         } catch (error) {
           return { success: false, error: error.message };
         }
@@ -675,7 +749,7 @@ export default class ChatStream extends AIStream {
           Bot.makeLog('debug', `[ChatStream] emotion 工具调用被跳过（本轮已发送过表情包） emotionType=${t}`, 'ChatStream');
           // 这里不要返回 error：LLM 很容易把 error 当成“需要重试”，导致刷屏式重复 tool_calls
           // 改为“成功但跳过”，并明确告知不要再调用
-          return { success: true, raw: '本轮已发过表情包，未重复发送。无话可说则空返回。' };
+          return { success: true, raw: ChatStream.actionAck('本轮已发过表情包，未重复发送') };
         }
         const image = this.getRandomEmotionImage(t);
         if (!image) return { success: false, error: '该表情暂无可用图片' };
@@ -694,7 +768,7 @@ export default class ChatStream extends AIStream {
           this.recordAIResponse(e, sentText || '');
           const where = e.group_id ? `群 ${e.group_id}` : `用户 ${e.user_id}(私聊)`;
           const part = sentText ? `表情包(${t})及文字：${sentText}` : `表情包(${t})`;
-          return { success: true, raw: `你已在${where}发送${part}。无话可说则空返回。` };
+          return { success: true, raw: `你已在${where}发送${part}。${ChatStream.TOOL_DELIVERED_FOOTER}` };
         });
       },
       enabled: true
@@ -723,7 +797,7 @@ export default class ChatStream extends AIStream {
         return this._wrapHandler(async () => {
           await member.thumbUp(thumbCount);
           const gid = context.e.group_id;
-          return { success: true, raw: `你已成功在群 ${gid} 给 ${args.qq} 点赞 ${thumbCount} 下。无话可说则空返回。` };
+          return { success: true, raw: `你已成功在群 ${gid} 给 ${args.qq} 点赞 ${thumbCount} 下。${ChatStream.TOOL_DELIVERED_FOOTER}` };
         });
       },
       enabled: true
@@ -739,7 +813,7 @@ export default class ChatStream extends AIStream {
         return this._wrapHandler(async () => {
           await context.e.group.sign();
           const gid = context.e.group_id;
-          return { success: true, raw: `你已在群 ${gid} 签到成功。无话可说则空返回。` };
+          return { success: true, raw: `你已在群 ${gid} 签到成功。${ChatStream.TOOL_DELIVERED_FOOTER}` };
         });
       },
       enabled: true
@@ -759,7 +833,7 @@ export default class ChatStream extends AIStream {
         return this._wrapHandler(async () => {
           await context.e.group.muteMember(args.qq, args.duration);
           const gid = context.e.group_id;
-          return { success: true, raw: `你已成功在群 ${gid} 禁言 ${args.qq} ${args.duration} 秒。无话可说则空返回。` };
+          return { success: true, raw: `你已成功在群 ${gid} 禁言 ${args.qq} ${args.duration} 秒。${ChatStream.TOOL_DELIVERED_FOOTER}` };
         });
       },
       enabled: true
@@ -779,7 +853,7 @@ export default class ChatStream extends AIStream {
         return this._wrapHandler(async () => {
           await context.e.group.muteMember(args.qq, 0);
           const gid = context.e.group_id;
-          return { success: true, raw: `你已成功在群 ${gid} 解除 ${args.qq} 的禁言。无话可说则空返回。` };
+          return { success: true, raw: `你已成功在群 ${gid} 解除 ${args.qq} 的禁言。${ChatStream.TOOL_DELIVERED_FOOTER}` };
         });
       },
       enabled: true
@@ -795,7 +869,7 @@ export default class ChatStream extends AIStream {
         return this._wrapHandler(async () => {
           await context.e.group.muteAll(true);
           const gid = context.e.group_id;
-          return { success: true, raw: `你已成功在群 ${gid} 开启全员禁言。无话可说则空返回。` };
+          return { success: true, raw: `你已成功在群 ${gid} 开启全员禁言。${ChatStream.TOOL_DELIVERED_FOOTER}` };
         });
       },
       enabled: true
@@ -811,7 +885,7 @@ export default class ChatStream extends AIStream {
         return this._wrapHandler(async () => {
           await context.e.group.muteAll(false);
           const gid = context.e.group_id;
-          return { success: true, raw: `你已成功在群 ${gid} 解除全员禁言。无话可说则空返回。` };
+          return { success: true, raw: `你已成功在群 ${gid} 解除全员禁言。${ChatStream.TOOL_DELIVERED_FOOTER}` };
         });
       },
       enabled: true
@@ -847,7 +921,7 @@ export default class ChatStream extends AIStream {
           const gid = context.e.group_id;
           const selfId = String(context.e.self_id || context.e.bot?.uin || '');
           const who = targetQq === selfId ? '自己' : targetQq;
-          return { success: true, raw: `你已成功在群 ${gid} 将 ${who} 的名片改为「${args.card}」。无话可说则空返回。` };
+          return { success: true, raw: `你已成功在群 ${gid} 将 ${who} 的名片改为「${args.card}」。${ChatStream.TOOL_DELIVERED_FOOTER}` };
         });
       },
       enabled: true
@@ -867,7 +941,7 @@ export default class ChatStream extends AIStream {
         return this._wrapHandler(async () => {
           await context.e.group.setName(args.name);
           const gid = context.e.group_id;
-          return { success: true, raw: `你已成功将群 ${gid} 的群名改为「${args.name}」。无话可说则空返回。` };
+          return { success: true, raw: `你已成功将群 ${gid} 的群名改为「${args.name}」。${ChatStream.TOOL_DELIVERED_FOOTER}` };
         });
       },
       enabled: true
@@ -887,7 +961,7 @@ export default class ChatStream extends AIStream {
         return this._wrapHandler(async () => {
           await context.e.group.setAdmin(args.qq, true);
           const gid = context.e.group_id;
-          return { success: true, raw: `你已成功在群 ${gid} 设置 ${args.qq} 为管理员。无话可说则空返回。` };
+          return { success: true, raw: `你已成功在群 ${gid} 设置 ${args.qq} 为管理员。${ChatStream.TOOL_DELIVERED_FOOTER}` };
         });
       },
       enabled: true
@@ -907,7 +981,7 @@ export default class ChatStream extends AIStream {
         return this._wrapHandler(async () => {
           await context.e.group.setAdmin(args.qq, false);
           const gid = context.e.group_id;
-          return { success: true, raw: `你已成功在群 ${gid} 取消 ${args.qq} 的管理员。无话可说则空返回。` };
+          return { success: true, raw: `你已成功在群 ${gid} 取消 ${args.qq} 的管理员。${ChatStream.TOOL_DELIVERED_FOOTER}` };
         });
       },
       enabled: true
@@ -928,7 +1002,7 @@ export default class ChatStream extends AIStream {
           await context.e.group.setTitle(args.qq, args.title, args.duration || -1);
           const gid = context.e.group_id;
           const dur = args.duration && args.duration > 0 ? `，持续 ${args.duration} 秒` : '';
-          return { success: true, raw: `你已成功在群 ${gid} 为 ${args.qq} 设置专属头衔「${args.title}」${dur}。无话可说则空返回。` };
+          return { success: true, raw: `你已成功在群 ${gid} 为 ${args.qq} 设置专属头衔「${args.title}」${dur}。${ChatStream.TOOL_DELIVERED_FOOTER}` };
         });
       },
       enabled: true
@@ -949,7 +1023,7 @@ export default class ChatStream extends AIStream {
           await context.e.group.kickMember(args.qq, args.reject || false);
           const gid = context.e.group_id;
           const extra = args.reject ? ' 并拒绝其再次申请' : '';
-          return { success: true, raw: `你已成功在群 ${gid} 踢出 ${args.qq}${extra}。无话可说则空返回。` };
+          return { success: true, raw: `你已成功在群 ${gid} 踢出 ${args.qq}${extra}。${ChatStream.TOOL_DELIVERED_FOOTER}` };
         });
       },
       enabled: true
@@ -982,7 +1056,7 @@ export default class ChatStream extends AIStream {
           } else {
             return { success: false, error: 'API不可用' };
           }
-          return { success: true, raw: `你已成功在群 ${gid} 将消息 ${msgId} 设为精华。无话可说则空返回。` };
+          return { success: true, raw: `你已成功在群 ${gid} 将消息 ${msgId} 设为精华。${ChatStream.TOOL_DELIVERED_FOOTER}` };
         });
       },
       enabled: true
@@ -1015,7 +1089,7 @@ export default class ChatStream extends AIStream {
           } else {
             return { success: false, error: 'API不可用' };
           }
-          return { success: true, raw: `你已成功在群 ${gid} 取消消息 ${msgId} 的精华。无话可说则空返回。` };
+          return { success: true, raw: `你已成功在群 ${gid} 取消消息 ${msgId} 的精华。${ChatStream.TOOL_DELIVERED_FOOTER}` };
         });
       },
       enabled: true
@@ -1050,7 +1124,7 @@ export default class ChatStream extends AIStream {
           } else {
             return { success: false, error: 'API不可用' };
           }
-          return { success: true, raw: `你已成功在群 ${gid} 发送公告。无话可说则空返回。` };
+          return { success: true, raw: `你已成功在群 ${gid} 发送公告。${ChatStream.TOOL_DELIVERED_FOOTER}` };
         });
       },
       enabled: true
@@ -1127,11 +1201,11 @@ export default class ChatStream extends AIStream {
             if (context.e.isGroup && context.e.group) {
               await context.e.group.recallMsg(args.msgId);
               const gid = context.e.group_id;
-              return { success: true, raw: `你已成功在群 ${gid} 撤回消息 ${args.msgId}。无话可说则空返回。` };
+              return { success: true, raw: `你已成功在群 ${gid} 撤回消息 ${args.msgId}。${ChatStream.TOOL_DELIVERED_FOOTER}` };
             } else if (context.e.bot) {
               await context.e.bot.sendApi('delete_msg', { message_id: args.msgId });
               const uid = context.e.user_id;
-              return { success: true, raw: `你已成功在与 ${uid} 的私聊中撤回消息 ${args.msgId}。无话可说则空返回。` };
+              return { success: true, raw: `你已成功在与 ${uid} 的私聊中撤回消息 ${args.msgId}。${ChatStream.TOOL_DELIVERED_FOOTER}` };
             }
             return { success: false, error: '无法撤回' };
           });
@@ -1244,7 +1318,7 @@ export default class ChatStream extends AIStream {
           if (e.bot?.sendApi) {
             await e.bot.sendApi('set_group_todo', { group_id: e.group_id, message_id: msgId });
             const gid = e.group_id;
-            return { success: true, raw: `你已成功在群 ${gid} 将消息 ${msgId} 设为群待办。无话可说则空返回。` };
+            return { success: true, raw: `你已成功在群 ${gid} 将消息 ${msgId} 设为群待办。${ChatStream.TOOL_DELIVERED_FOOTER}` };
           }
           return { success: false, error: 'API不可用' };
         });
@@ -2100,60 +2174,33 @@ export default class ChatStream extends AIStream {
 
     const lines = [
       `# ${botName}`,
-      `${botName}｜QQ ${e.self_id}｜群 ${e.group_id}｜身份 ${botRole}｜${dateStr}`,
+      `${botName}｜QQ ${e.self_id}｜群 ${e.group_id}｜${botRole}｜${dateStr}`,
       persona + masterNote,
       '',
-      '## 可见性与输出',
-      '- 用户仅能看到工具发出的内容（reply / at / emotion / poke 等）；**assistant 直连正文对用户不可见**。',
-      '- 要让用户看到的内容必须出现在 **reply** 里；正文只适合简短自问自答式推理。',
-      '- **工具（占卜/MCP）返回后的下一轮**：必须把口语解读写进 **reply**（可用 `|` 分多条）；若只在正文里写长篇解读、不调 reply，群里就只会停在占卜前那一两句铺垫。',
-      '- 工具若表明已送达，勿再用 reply/at 重复实质相同的话。',
+      '## 群聊三原则',
+      '1. **用户只看工具**：要说出口 → 调 **reply**（或 at/poke 等）；assistant 正文群里看不见。',
+      '2. **只答当前**：[群聊记录] 上旧下新，**只回应 `[当前消息]`**；【我】= 你已说过 → 同话题勿再 reply，除非用户追问。',
+      '3. **看回执再发**：reply/at 返回会列出已发正文；已送达则勿重复相似内容。',
       '',
-      '## 上下文说明',
-      '- **[群聊记录] 从上到下 = 时间由早到晚**，越靠下越新；最近发言在记录末尾附近。**只回应 `[当前消息]`**，勿答记录里很早的旧 @ 或已用【我】回过的内容。',
-      '- 群聊记录格式：昵称(QQ)[ID:xxx]；**【我】= 你已对用户说过的话**；【我·工具】= 已执行的工具步骤，**按时间穿插在对话里**（表示该问题已处理过），勿把摘要原样 reply。',
-      '- 标签：[含图片] 表示有图（**识图 MCP 暂关**，见标签即可，勿调 getMessageImages/recognizeImage）；[含文件]、[含表情]、[合并转发] 同理。',
-      '- 合并转发**仅一层**，内层不可读（协议限制，勿臆造内文）。',
-      '- 读记录用 **readChatRecord**；下图片/文件/表情包到工作区用 **saveMessageAsset**；发图片用 **send_image**（勿 send_file）；发文档等用 **send_file**。',
-      '- 内置情绪图用 reply 的 `[开心]` 等标签，勿把表情包当文件发。',
-      '- 下文「文件记忆」「会话记忆」为摘要，可引用，勿整段照搬。',
+      '## reply 怎么写',
+      '- 分句：`|` 或 `｜`；表情：`[开心]` 等（每轮至多一处）；引用：`[回复:消息ID]`。',
+      '- 纯文本，勿 Markdown；勿粘贴工具 JSON；勿伪造「工具名(参数)」。',
       '',
-      '## 说话方式（人性化）',
-      '- 同时看「群聊记录」与「当前消息」：谁在什么语境下说话（玩笑、吐槽、求助），你就用什么口吻接，别自说自话。',
-      '- 有人 @ 你、点名或明确问你，优先对准那句话答；否则可以顺着话题插一句，不必强行总结全文。',
-      '- 少用汇报腔（「综上所述」「三点如下」）、少用万能客服句（「很高兴为您服务」）；长短跟话题走，能说人话别说套话。',
-      '- 人设与记忆当底色自然带出来，不要像在读清单。',
+      '## @人（二选一，勿混用假@）',
+      '- **推荐**：`at` 工具 → `qq` 填记录里的数字 QQ，可选 `text`。',
+      '- **可选**：reply 的 content 以 `[CQ:at,qq=QQ号]` 开头再接正文。',
+      '- **禁止**：reply 里写 `@123456789` 或 `@昵称` —— 只是假@，对方无提醒。',
       '',
-      '## 文本协议（reply 的 content）',
-      '- 分句：`|` 或 `｜` 分段发送。',
-      '- 表情：`[开心][惊讶][伤心][大笑][害怕][生气]`（每轮至多一处）。引用：`[回复:消息ID]`。@人：`[CQ:at,qq=QQ]`。仅记录：`[图片内容:描述]`。',
-      '- **勿写 Markdown**（#标题、**粗体**、代码块、表格等）。用户可见内容会先剥离 Markdown；若剥完后没有可读正文则该条不会发出。',
-      '- **勿把 tools.run/read/list 的 JSON 或英文日志原样粘贴进 reply**；给用户看的只能是中文口语总结。',
-      '- 勿在 content 里伪造「工具名+括号参数」式的伪调用。',
+      '## 记录与工具',
+      '- 记录里 `昵称(QQ)[ID:xxx]` 取 QQ 与消息 ID；读记录 **readChatRecord**；发图 **send_image**，发文件 **send_file**。',
+      '- [含图片]/[含文件]/[合并转发] 仅作标签；识图 MCP 暂关。forgeForward 仅整活，勿造谣。',
+      '- 群管类工具需机器人为群主/管理员。browser/desktop/database 须用户明确授权再用。',
       '',
-      '## 工具',
-      '- 名称与参数以接口下发的 tools 为准；chat 白名单含 **web 检索、browser、memory/tools（mergeStreams）、远程 MCP** 等；desktop/database 等需在 mergeStreams 中配置才会出现。',
-      '- **forgeForward**：伪造合并转发聊天记录（整活/情景再现）。messages 或 batch（QQ|昵称|内容|时间，|| 分隔）；QQ 用 me/我/bot；内容可 [图片:url] [视频:url]。玩梗可以，勿冒充真人造谣。',
-      '- **群管/公告/精华/待办/禁言/踢人等**需机器人为群主或管理员，否则工具会拒绝。',
+      '## 远程 MCP（占卜等）',
+      '- 先调工具、看返回，再 reply 解读；同一话题占卜只调一次；解读须忠实工具原文，勿虚构牌面。',
       '',
-      '## 工具安全（必读）',
-      '- 须**最小权限、用户意图明确**才动用敏感能力；不确定时先用 reply 确认，勿先斩后奏。',
-      '- **群管**（禁言/踢人/设管/公告/改群名片等）：仅用户**明确要求**且机器人有权限；勿因玩笑、推测或起哄擅自执行。',
-      '- **desktop / browser / database**：须用户**明确授权本轮任务**；勿擅自访问敏感路径、执行破坏性命令或批量导出数据。',
-      '- **web_search / web_fetch**：开放域信息不可信，须交叉判断；勿把未核实内容当事实断言。',
-      '- **send_file / saveMessageAsset**：勿外传工作区外或他人隐私；forgeForward 勿伪造可误导他人的「官方/真人」记录。',
-      '- 非主人会话中对高权限操作应更保守；主人指令仍须遵守平台规则与上述底线。',
-      '',
-      '## 外部工具（占卜 / 远程 MCP）',
-      '- **先工具后发言**：需要远程 MCP（占卜、数据库等）时，**本轮应先只调用工具**，看到返回后再用 reply；**禁止在同一轮里既 reply「帮你占卜」「三牌阵」等铺垫又调占卜**，否则用户会先收到重复空话且牌面未到。',
-      '- **一问一局**：同一话题占卜类工具 **只调用一次**，除非用户明确要求再来一局。',
-      '- **结果忠实**：解读必须与工具返回文本中的 **牌名、阵位、正/逆位** 一致，只可翻译成口语；**禁止凭空虚构另一副牌或与其它轮次结果混用**。',
-      '- **少废话**：勿用多条 reply 重复同一寓意（如反复「勉为其难帮你占卜」「就选三牌阵」）；铺垫一句即可。',
-      '- 勿把工具返回的长篇 Markdown **仅**粘贴进 assistant 正文；给用户看的解读只能走 **reply**。',
-      '',
-      '## 约束',
-      '- 勿 Markdown；勿在正文里手写 poke/at 调用语法；勿无必要刷屏复读（用户明确要求除外）。',
-      '- 勿依赖固定开场白或复读上一句自己的回复；用户可见的话一律走 reply，语气要像群里真人。'
+      '## 语气',
+      '- 像群友接话，少客服腔；有人 @ 你或点名时优先答那句。'
     ];
     return lines.join('\n');
   }
@@ -2844,9 +2891,7 @@ export default class ChatStream extends AIStream {
       const finalReplyId = replyId || messageId;
 
       // 发送消息（图片内容标记已被移除，用户看不到）
-      const sentContent = segments.length > 0 
-        ? segments.map(s => s.type === 'text' ? s.text : '').join('') 
-        : msg;
+      const sentContent = ChatStream._segmentsToDisplayText(segments, msg);
       
       if (finalReplyId) {
         const replySegment = seg.reply(finalReplyId);
@@ -3018,72 +3063,48 @@ export default class ChatStream extends AIStream {
     return clean.trim();
   }
 
-  parseCQToSegments(text, e) {
-    const segments = [];
+  parseCQToSegments(text, _e) {
     let replyId = null;
+    let work = String(text ?? '');
 
-    // [回复:消息ID] 或 [回复:ID:消息ID]
-    const replyShortMatch = text.match(/\[回复:(?:ID:)?(\d+)\]/);
+    const replyShortMatch = work.match(/\[回复:(?:ID:)?(\d+)\]/);
     if (replyShortMatch) {
       replyId = replyShortMatch[1];
-      text = text.replace(/\[回复:(?:ID:)?\d+\]/g, '').trim();
+      work = work.replace(/\[回复:(?:ID:)?\d+\]/g, '').trim();
     }
-    const replyMatch = text.match(/\[CQ:reply,id=(\d+)\]/);
+    const replyMatch = work.match(/\[CQ:reply,id=(\d+)\]/);
     if (replyMatch) {
       replyId = replyId || replyMatch[1];
-      text = text.replace(/\[CQ:reply,id=\d+\]/g, '').trim();
+      work = work.replace(/\[CQ:reply,id=\d+\]/g, '').trim();
     }
 
-    const cqPattern = /\[CQ:(\w+)(?:,([^\]]+))?\]/g;
-    let match;
-    let currentIndex = 0;
+    const segments = [];
     const seg = segment;
-    while ((match = cqPattern.exec(text)) !== null) {
-      const [full, type, params] = match;
-      if (match.index > currentIndex) {
-        const textBefore = text.slice(currentIndex, match.index);
+    const cqPattern = /\[CQ:(\w+)(?:,([^\]]+))?\]/g;
+    let lastIndex = 0;
+    let match;
+
+    while ((match = cqPattern.exec(work)) !== null) {
+      if (match.index > lastIndex) {
+        const textBefore = work.slice(lastIndex, match.index);
         if (textBefore.trim()) segments.push(textBefore);
       }
-      currentIndex = match.index + full.length;
-      const paramObj = {};
-      if (params) {
-        params.split(',').forEach(p => {
-          const [key, value] = p.split('=');
-          if (key && value) paramObj[key.trim()] = value.trim();
-        });
-      }
-      if (type === 'at' && paramObj.qq) {
-        if (e.isGroup) {
-          const history = ChatStream.messageHistory.get(e.group_id) || [];
-          const userExists = history.some(msg => String(msg.user_id) === String(paramObj.qq));
-          if (userExists || e.isMaster) segments.push(seg.at(paramObj.qq));
-        } else {
-          segments.push(seg.at(paramObj.qq));
-        }
+      lastIndex = match.index + match[0].length;
+      const type = match[1];
+      const paramObj = ChatStream._parseCqParams(match[2]);
+      if (type === 'at' && ChatStream.isValidAtQq(paramObj.qq)) {
+        segments.push(seg.at(paramObj.qq));
       } else if (type === 'image' && paramObj.file) {
         segments.push(seg.image(paramObj.file));
       }
     }
 
-    if (currentIndex < text.length) {
-      const textAfter = text.slice(currentIndex);
-      if (textAfter.trim()) {
-        segments.push(textAfter);
-      }
+    if (lastIndex < work.length) {
+      const textAfter = work.slice(lastIndex);
+      if (textAfter.trim()) segments.push(textAfter);
     }
 
-    const mergedSegments = [];
-    for (let i = 0; i < segments.length; i++) {
-      const current = segments[i];
-      const last = mergedSegments[mergedSegments.length - 1];
-      if (typeof current === 'string' && typeof last === 'string') {
-        mergedSegments[mergedSegments.length - 1] = last + current;
-      } else {
-        mergedSegments.push(current);
-      }
-    }
-    
-    return { replyId, segments: mergedSegments };
+    return { replyId, segments: ChatStream._mergeAdjacentTextSegments(segments) };
   }
 
   cleanupCache() {
