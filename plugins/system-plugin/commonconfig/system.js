@@ -5,6 +5,11 @@ import { getServerConfigPath, SERVER_BOTS_DIR, RENDERERS_DIR, DATA_DB_DEFAULT_RE
 import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
 import { mergeUniqueStrings } from '../../../lib/utils/string-array-utils.js';
 import { getAistreamConfigOptional } from '../../../lib/utils/aistream-config.js';
+import {
+  AGENT_WORKSPACE_SUPPLEMENT_FIELDS,
+  AISTREAM_CRAWL_FIELDS,
+  AISTREAM_TOOLS_FIELDS
+} from './shared/aistream-supplement-fields.js';
 
 /**
  * 系统配置管理（与 XRK-AGT 对齐）
@@ -593,6 +598,18 @@ export default class SystemConfig extends ConfigBase {
                     }
                   }
                 },
+                hsts: {
+                  type: 'object',
+                  label: 'HSTS配置',
+                  description: 'HTTP 严格传输安全（security 段，与 https.hsts 独立）',
+                  component: 'SubForm',
+                  fields: {
+                    enabled: { type: 'boolean', label: '启用 HSTS', default: false, component: 'Switch' },
+                    maxAge: { type: 'number', label: '有效期（秒）', min: 0, default: 31536000, component: 'InputNumber' },
+                    includeSubDomains: { type: 'boolean', label: '包含子域名', default: true, component: 'Switch' },
+                    preload: { type: 'boolean', label: '允许预加载', default: false, component: 'Switch' }
+                  }
+                },
                 hiddenFiles: {
                   type: 'array',
                   label: '隐藏文件模式',
@@ -683,11 +700,27 @@ export default class SystemConfig extends ConfigBase {
                     }
                   }
                 },
+                uiCookie: {
+                  type: 'object',
+                  label: '同源 UI Cookie',
+                  description: '同源前端携带 Cookie 时可免 API Key',
+                  component: 'SubForm',
+                  fields: {
+                    enabled: { type: 'boolean', label: '启用', default: false, component: 'Switch' },
+                    pathPrefix: { type: 'string', label: '路径前缀', default: '/xrk', component: 'Input' },
+                    name: { type: 'string', label: 'Cookie 名称', default: 'xrk_ui', component: 'Input' },
+                    value: { type: 'string', label: 'Cookie 值', default: '1', component: 'Input' },
+                    allowPublicSameOrigin: { type: 'boolean', label: '同源免 API Key', default: false, component: 'Switch' },
+                    httpOnly: { type: 'boolean', label: 'HttpOnly', default: true, component: 'Switch' },
+                    sameSite: { type: 'string', label: 'SameSite', enum: ['strict', 'lax', 'none'], default: 'lax', component: 'Select' },
+                    maxAgeMs: { type: 'number', label: 'Max-Age（毫秒）', min: 0, default: 86400000, component: 'InputNumber' }
+                  }
+                },
                 whitelist: {
                   type: 'array',
                   label: '白名单路径',
                   itemType: 'string',
-                  default: ['/', '/favicon.ico', '/health', '/status', '/robots.txt', '/media/*', '/uploads/*'],
+                  default: ['/', '/favicon.ico', '/health', '/status', '/robots.txt', '/xrk', '/media/*', '/uploads/*', '/device'],
                   component: 'Tags'
                 }
               }
@@ -794,6 +827,12 @@ export default class SystemConfig extends ConfigBase {
                   label: '文件上传',
                   default: '100mb',
                   component: 'Input'
+                },
+                multipart: {
+                  type: 'string',
+                  label: 'Multipart 总大小',
+                  default: '100mb',
+                  component: 'Input'
                 }
               }
             },
@@ -843,6 +882,14 @@ export default class SystemConfig extends ConfigBase {
                   label: '记录错误',
                   default: true,
                   component: 'Switch'
+                },
+                maxErrorDetailsLen: {
+                  type: 'number',
+                  label: '错误详情最大长度',
+                  description: '错误 JSON 输出截断长度',
+                  min: 100,
+                  default: 1500,
+                  component: 'InputNumber'
                 },
                 debug: {
                   type: 'boolean',
@@ -1483,8 +1530,23 @@ export default class SystemConfig extends ConfigBase {
                   itemType: 'string',
                   default: ['skills/standard/core', 'skills/standard'],
                   component: 'ArrayForm'
-                }
+                },
+                ...AGENT_WORKSPACE_SUPPLEMENT_FIELDS
               }
+            },
+            crawl: {
+              type: 'object',
+              label: 'Crawl 配置',
+              description: 'web_fetch / web_search / browser MCP',
+              component: 'SubForm',
+              fields: AISTREAM_CRAWL_FIELDS
+            },
+            tools: {
+              type: 'object',
+              label: 'Tools 配置',
+              description: 'tools 工作流文件与命令工具限额',
+              component: 'SubForm',
+              fields: AISTREAM_TOOLS_FIELDS
             }
           }
         }
@@ -1853,6 +1915,14 @@ export default class SystemConfig extends ConfigBase {
         },
         schema: {
           fields: {
+            name: {
+              type: 'string',
+              label: '渲染引擎',
+              description: 'puppeteer 或 playwright；对应 data/server_bots/{port}/renderer.yaml',
+              enum: ['puppeteer', 'playwright'],
+              default: 'puppeteer',
+              component: 'Select'
+            },
             puppeteer: {
               type: 'object',
               label: 'Puppeteer配置',

@@ -7,7 +7,7 @@ import AIStream from '../../../lib/aistream/aistream.js';
 import path from 'path';
 import { BaseTools } from '../../../lib/utils/base-tools.js';
 import { InputValidator } from '../../../lib/utils/input-validator.js';
-import { getAistreamConfigOptional } from '../../../lib/utils/aistream-config.js';
+import { resolveToolsFileRuntime } from '../../../lib/utils/tools-file-config.js';
 import { resolveConfiguredWorkspace } from '../lib/ai-workspace-runtime.js';
 import { exec } from '../../../lib/utils/exec-async.js';
 import { normalizeToolsRunCommand } from '../../../lib/utils/workspace-run-command.js';
@@ -16,14 +16,7 @@ const IS_WINDOWS = process.platform === 'win32';
 
 export default class ToolsStream extends AIStream {
   workspace = resolveConfiguredWorkspace('');
-  fileToolsCfg = {
-    maxReadChars: 500_000,
-    readRawPreviewChars: 20_000,
-    grepMaxResults: 100,
-    runEnabled: true,
-    runTimeoutMs: 120_000,
-    maxCommandOutputChars: 200_000
-  };
+  fileToolsCfg = resolveToolsFileRuntime();
 
   constructor() {
     super({
@@ -42,35 +35,8 @@ export default class ToolsStream extends AIStream {
   }
 
   applyFileToolsConfig() {
-    const fileCfg = getAistreamConfigOptional().tools?.file ?? {};
-    this.fileToolsCfg = {
-      maxReadChars:
-        typeof fileCfg.maxReadChars === 'number' && Number.isFinite(fileCfg.maxReadChars)
-          ? Math.max(1000, Math.floor(fileCfg.maxReadChars))
-          : 500_000,
-      grepMaxResults:
-        typeof fileCfg.grepMaxResults === 'number' && Number.isFinite(fileCfg.grepMaxResults)
-          ? Math.min(500, Math.max(1, Math.floor(fileCfg.grepMaxResults)))
-          : 100,
-      readRawPreviewChars:
-        typeof fileCfg.readRawPreviewChars === 'number' && Number.isFinite(fileCfg.readRawPreviewChars)
-          ? Math.max(2000, Math.floor(fileCfg.readRawPreviewChars))
-          : 20_000,
-      runEnabled: fileCfg.runEnabled !== false,
-      runTimeoutMs:
-        typeof fileCfg.runTimeoutMs === 'number' && Number.isFinite(fileCfg.runTimeoutMs)
-          ? Math.max(1000, Math.floor(fileCfg.runTimeoutMs))
-          : 120_000,
-      maxCommandOutputChars:
-        typeof fileCfg.maxCommandOutputChars === 'number' && Number.isFinite(fileCfg.maxCommandOutputChars)
-          ? Math.max(1000, Math.floor(fileCfg.maxCommandOutputChars))
-          : 200_000
-    };
-    if (typeof fileCfg.workspace === 'string' && fileCfg.workspace.trim()) {
-      this.workspace = resolveConfiguredWorkspace(fileCfg.workspace);
-    } else {
-      this.workspace = resolveConfiguredWorkspace('');
-    }
+    this.fileToolsCfg = resolveToolsFileRuntime();
+    this.workspace = resolveConfiguredWorkspace(this.fileToolsCfg.workspace);
   }
 
   async init() {
