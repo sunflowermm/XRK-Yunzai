@@ -2,7 +2,7 @@ import path from 'path';
 import AIStream from '../../../lib/aistream/aistream.js';
 import BotUtil from '../../../lib/util.js';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
-import { isQqMultimediaUrl, resolveQqImageViaApi } from '../../../lib/utils/outbound-media.js';
+import { copyQqImageToPath } from '../../../lib/utils/outbound-media.js';
 import { BaseTools } from '../../../lib/utils/base-tools.js';
 import StreamLoader from '../../../lib/aistream/loader.js';
 import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
@@ -299,70 +299,27 @@ export default class ChatStream extends AIStream {
     const baseTools = new BaseTools(workspace);
     const absPath = baseTools.resolvePathInWorkspace(relPath);
     const fileRef = asset.file ? String(asset.file) : null;
-    const url = asset.url && /^https?:\/\//i.test(String(asset.url)) ? String(asset.url) : null;
     const sendApi = e.bot?.sendApi ? (action, params) => e.bot.sendApi(action, params) : undefined;
 
-    if ((asset.type === 'image' || asset.type === 'mface') && sendApi && fileRef) {
-      const viaApi = await resolveQqImageViaApi(sendApi, fileRef);
-      if (viaApi?.startsWith('file://')) {
-        const local = viaApi.replace(/^file:\/\//, '');
-        if (FileUtils.existsSync(local)) {
-          const ok = await FileUtils.copyFile(local, absPath);
-          if (!ok) throw new Error('复制到工作区失败');
-          return absPath;
-        }
+    if ((asset.type === 'image' || asset.type === 'mface') && fileRef && sendApi) {
+      if (await copyQqImageToPath(fileRef, absPath, sendApi)) {
+        return absPath;
       }
     }
-
-    if (url && !(isQqMultimediaUrl(url) && sendApi && fileRef)) {
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`下载失败 HTTP ${resp.status}`);
-      const buf = Buffer.from(await resp.arrayBuffer());
-      const ok = await FileUtils.writeFileBuffer(absPath, buf);
-      if (!ok) throw new Error('写入工作区失败');
-      return absPath;
-    }
-    if (fileRef && e.bot?.sendApi) {
-      if (asset.type === 'image' || asset.type === 'mface') {
-        const result = await e.bot.sendApi('get_image', { file: fileRef });
-        const d = result?.data || {};
-        if (d.url && /^https?:\/\//i.test(d.url)) {
-          const resp = await fetch(d.url);
-          if (!resp.ok) throw new Error(`get_image 下载失败 HTTP ${resp.status}`);
-          const buf = Buffer.from(await resp.arrayBuffer());
-          const ok = await FileUtils.writeFileBuffer(absPath, buf);
-          if (!ok) throw new Error('写入工作区失败');
-          return absPath;
-        }
-        if (d.file && FileUtils.existsSync(d.file)) {
-          const ok = await FileUtils.copyFile(d.file, absPath);
-          if (!ok) throw new Error('复制到工作区失败');
-          return absPath;
-        }
-      }
-      if (asset.type === 'file') {
-        const result = await e.bot.sendApi('get_file', { file: fileRef });
-        const d = result?.data || {};
-        const local = d.file || d.path;
-        if (local && FileUtils.existsSync(local)) {
-          const ok = await FileUtils.copyFile(local, absPath);
-          if (!ok) throw new Error('复制到工作区失败');
-          return absPath;
-        }
-        if (d.url && /^https?:\/\//i.test(d.url)) {
-          const resp = await fetch(d.url);
-          if (!resp.ok) throw new Error(`get_file 下载失败 HTTP ${resp.status}`);
-          const buf = Buffer.from(await resp.arrayBuffer());
-          const ok = await FileUtils.writeFileBuffer(absPath, buf);
-          if (!ok) throw new Error('写入工作区失败');
-          return absPath;
-        }
+    if (fileRef && e.bot?.sendApi && asset.type === 'file') {
+      const result = await e.bot.sendApi('get_file', { file: fileRef });
+      const d = result?.data || {};
+      const local = d.file || d.path;
+      if (local && FileUtils.existsSync(local)) {
+        const ok = await FileUtils.copyFile(local, absPath);
+        if (!ok) throw new Error('复制到工作区失败');
+        return absPath;
       }
     }
     if (asset.type === 'face') {
       throw new Error('内置 QQ 表情（face）无法下载；请让用户发图片或自定义表情包（mface）');
     }
-    throw new Error('无法获取可下载的资源（无 URL 或协议不支持）');
+    throw new Error('无法获取可下载的资源（不支持 HTTP 直链，且无可用本地文件）');
   }
 
   async _wrapHandler(fn, delay = 300) {

@@ -4,6 +4,12 @@ import lodash from "lodash"
 import crypto from "crypto"
 import { FileUtils } from "../../lib/utils/file-utils.js"
 import {
+  isHttpRef,
+  resolveQqImageViaApi,
+} from "../../lib/utils/outbound-media.js"
+
+const ENTRY_MEDIA_TYPES = new Set(['image', 'video', 'record'])
+import {
   resolveProjectPath,
   DATA_MESSAGE_JSON_DIR,
   DATA_BANNED_WORDS_DIR,
@@ -332,20 +338,17 @@ export class add extends plugin {
   /** 添加图片违禁词 */
   async addImageBannedWord(imgUrl, groupId) {
     try {
-      const hash = await this.getImageHash(imgUrl)
-      if (!hash) return { success: false, error: '获取图片hash失败' }
-      
+      const buffer = await this._fetchRemoteMediaBuffer(imgUrl)
+      if (!buffer?.length) return { success: false, error: '下载图片失败' }
+
+      const hash = crypto.createHash('md5').update(buffer).digest('hex')
       const groupImgPath = path.join(this.bannedImagesDir, String(groupId))
       await Bot.mkdir(groupImgPath)
-      
-      const response = await fetch(imgUrl)
-      if (!response.ok) return { success: false, error: '下载图片失败' }
-      
-      const buffer = await response.arrayBuffer()
-      const ext = imgUrl.match(/\.(jpg|jpeg|png|gif|webp)/i)?.[1] || 'jpg'
+
+      const ext = String(imgUrl).match(/\.(jpg|jpeg|png|gif|webp)/i)?.[1] || 'jpg'
       const filePath = path.join(groupImgPath, `${hash}.${ext}`)
 
-      await FileUtils.writeFileBuffer(filePath, Buffer.from(buffer))
+      await FileUtils.writeFileBuffer(filePath, buffer)
       
       bannedWordsMap[groupId].images.set(hash, {
         path: filePath,
@@ -791,15 +794,58 @@ export class add extends plugin {
   /** 获取图片hash */
   async getImageHash(imgUrl) {
     try {
-      const response = await fetch(imgUrl)
-      if (!response.ok) return null
-      
-      const buffer = await response.arrayBuffer()
-      return crypto.createHash('md5').update(Buffer.from(buffer)).digest('hex')
+      const buffer = await this._fetchRemoteMediaBuffer(imgUrl)
+      if (!buffer?.length) return null
+      return crypto.createHash('md5').update(buffer).digest('hex')
     } catch (err) {
       logger.error(`获取图片hash失败: ${err}`)
       return null
     }
+  }
+
+  _bindSendApi() {
+    if (!this.e?.bot?.sendApi) return undefined
+    return (action, params) => this.e.bot.sendApi(action, params)
+  }
+
+  /** 入站媒体一次性落盘：仅 get_image，禁止 HTTP 直链持久化 */
+  async _fetchRemoteMediaBuffer(ref) {
+    const source = String(ref ?? '').trim()
+    if (!source) return null
+    if (isHttpRef(source)) {
+      const sendApi = this._bindSendApi()
+      if (!sendApi) return null
+      const viaApi = await resolveQqImageViaApi(sendApi, source)
+      if (viaApi?.startsWith('file://')) {
+        const local = viaApi.replace(/^file:\/\//, '')
+        if (await Bot.fsStat(local)) {
+          const buf = await FileUtils.readFileBuffer(local)
+          if (buf?.length) return buf
+        }
+      }
+      if (viaApi?.startsWith('base64://')) {
+        return Buffer.from(viaApi.slice(9), 'base64')
+      }
+      return null
+    }
+    if (source.startsWith('base64://')) {
+      return Buffer.from(source.slice(9), 'base64')
+    }
+    const buf = await FileUtils.readFileBuffer(source)
+    return buf?.length ? buf : null
+  }
+
+  /** 词条媒体是否仍需本地化（NapCat 常同时带 file+url 且均为 CDN） */
+  async needsMediaLocalization(item) {
+    if (!['image', 'video', 'record'].includes(item.type)) return false
+    const ref = String(item.file || item.url || '').trim()
+    if (!ref) return false
+    if (ref.startsWith('base64://')) return false
+    if (/^https?:\/\//i.test(ref)) return true
+    const localPath = path.join(this.messageJsonDir, ref)
+    if (await Bot.fsStat(localPath)) return false
+    if (item.file && await Bot.fsStat(item.file)) return false
+    return Boolean(item.url && /^https?:\/\//i.test(String(item.url)))
   }
 
   /** 群号key */
@@ -981,21 +1027,41 @@ export class add extends plugin {
     await FileUtils.writeFile(path.join(this.messageJsonDir, `${this.group_id}.json`), JSON.stringify(obj, "", "\t"))
   }
 
-  /** 保存文件 */
+  /** 保存文件到 messageJsonDir，返回相对路径；失败返回 null（不再存 URL） */
   async saveFile(data) {
     try {
-      const file = await Bot.fileType({ ...data, file: data.url })
-      if (Buffer.isBuffer(file.buffer)) {
-        file.name = `${this.group_id}/${data.type}/${file.name}`
-        file.path = path.join(this.messageJsonDir, file.name)
-        await Bot.mkdir(path.dirname(file.path))
-        await FileUtils.writeFileBuffer(file.path, file.buffer)
-        return file.name
+      const ref = data.file || data.url
+      if (!ref) return null
+
+      if (typeof ref === 'string' && !/^https?:\/\//i.test(ref) && !ref.startsWith('base64://')) {
+        const local = path.join(this.messageJsonDir, ref)
+        if (await Bot.fsStat(local)) return ref
+        if (await Bot.fsStat(ref)) {
+          const rel = `${this.group_id}/${data.type}/${path.basename(ref)}`
+          const dest = path.join(this.messageJsonDir, rel)
+          await Bot.mkdir(path.dirname(dest))
+          if (await FileUtils.copyFile(ref, dest)) return rel
+        }
       }
+
+      const buffer = Buffer.isBuffer(ref) ? ref : await this._fetchRemoteMediaBuffer(ref)
+      if (!buffer?.length) {
+        logger.error(`保存文件失败: 无法下载媒体 ${String(ref).slice(0, 80)}`)
+        return null
+      }
+
+      const file = await Bot.fileType({ ...data, file: buffer })
+      if (!Buffer.isBuffer(file.buffer)) return null
+
+      file.name = `${this.group_id}/${data.type}/${file.name}`
+      file.path = path.join(this.messageJsonDir, file.name)
+      await Bot.mkdir(path.dirname(file.path))
+      await FileUtils.writeFileBuffer(file.path, file.buffer)
+      return file.name
     } catch (err) {
       logger.error(`保存文件失败: ${err}`)
+      return null
     }
-    return data.url
   }
 
   /** 获取 getForwardMsg（兼容群/私聊/事件直挂） */
@@ -1076,26 +1142,32 @@ export class add extends plugin {
       }
 
       const item = { ...seg }
-      if (mode === 'store' && item.url && !item.file) {
-        item.file = await this.saveFile(item)
+      if (mode === 'store' && await this.needsMediaLocalization(item)) {
+        const saved = await this.saveFile(item)
+        if (!saved) throw new Error(`${item.type} 本地化失败，请重新发送`)
+        item.file = saved
         delete item.url
         delete item.fid
-      } else if (mode === 'send' && item.file) {
+      } else if (mode === 'send' && ENTRY_MEDIA_TYPES.has(item.type)) {
         const localPath = await this.resolveEntryMediaPath(item)
-        if (localPath) item.file = localPath
+        if (!localPath) continue
+        item.file = localPath
+        delete item.url
+        delete item.fid
       }
       out.push(item)
     }
     return out
   }
 
-  /** 解析词条存储的媒体本地路径 */
+  /** 解析词条本地媒体路径；直链一律视为无效 */
   async resolveEntryMediaPath(item) {
-    if (!item?.file) return item?.url || null
-    const localPath = path.join(this.messageJsonDir, item.file)
+    const ref = String(item?.file ?? '').trim()
+    if (!ref || isHttpRef(ref)) return null
+    const localPath = path.join(this.messageJsonDir, ref)
     if (await Bot.fsStat(localPath)) return localPath
-    if (await Bot.fsStat(item.file)) return item.file
-    return item?.url || null
+    if (await Bot.fsStat(ref)) return ref
+    return null
   }
 
   /** 获取关键词消息 */

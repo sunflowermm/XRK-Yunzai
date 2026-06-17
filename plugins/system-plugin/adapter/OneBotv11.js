@@ -59,7 +59,7 @@ Bot.adapter.push(
     }
 
     /**
-     * 转换文件为 base64 或本地路径（QQ CDN URL 经 get_image 解析，避免 NapCat 下载 400）
+     * 转换文件为 base64 或本地路径（禁止 HTTP 直链）
      */
     async makeFile(file, opts = {}) {
       const { sendApi, ...rest } = opts
