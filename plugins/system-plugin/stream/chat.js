@@ -969,12 +969,15 @@ export default class ChatStream extends AIStream {
           const e = context.e;
           const gid = e.group_id;
           const group = e.group;
-          if (group?.setAnnouncement) {
-            await group.setAnnouncement(content);
+          const image = args.image ? String(args.image).trim() : undefined;
+          if (group?.sendNotice) {
+            await group.sendNotice(content, { image });
+          } else if (group?.setAnnouncement) {
+            await group.setAnnouncement(content, undefined, undefined, undefined, undefined, image);
           } else if (e.bot?.sendApi) {
-            const params = { group_id: e.group_id, content };
-            if (args.image) params.image = String(args.image).trim();
-            await e.bot.sendApi('set_group_announcement', params);
+            const params = { group_id: String(e.group_id), content };
+            if (image) params.image = image;
+            await e.bot.sendApi('_send_group_notice', params);
           } else {
             return { success: false, error: 'API不可用' };
           }
@@ -1231,7 +1234,7 @@ export default class ChatStream extends AIStream {
     });
 
     this.registerMCPTool('listAnnouncements', {
-      description: '获取当前群公告列表（NapCat get_group_announcements）。仅群聊。',
+      description: '获取当前群公告列表（NapCat _get_group_notice）。仅群聊。',
       inputSchema: { type: 'object', properties: {}, required: [] },
       handler: async (_args = {}, context = {}) => {
         const groupCheck = this._requireGroup(context);
@@ -1241,7 +1244,7 @@ export default class ChatStream extends AIStream {
         if (e.group?.getAnnouncements) {
           data = await e.group.getAnnouncements();
         } else {
-          data = await e.bot.sendApi('get_group_announcements', { group_id: String(e.group_id) });
+          data = await e.bot.sendApi('_get_group_notice', { group_id: String(e.group_id) });
         }
         return { success: true, raw: this._queryToolRawDetail('群公告列表', data, e) };
       },

@@ -1680,7 +1680,7 @@ Bot.adapter.push(
     }
 
     /**
-     * Napcat API: 获取群公告列表
+     * NapCat API: 获取群公告列表（_get_group_notice）
      * @param {Object} data - Bot数据对象
      * @param {string|number} group_id - 群ID（可选，默认使用 data.group_id）
      * @returns {Promise} API响应
@@ -1688,35 +1688,37 @@ Bot.adapter.push(
     getGroupAnnouncements(data, group_id) {
       const targetGroupId = group_id || data.group_id;
       Bot.makeLog("debug", `获取群公告列表：${targetGroupId}`, data.self_id);
-      return data.bot.sendApi("get_group_announcements", {
+      return data.bot.sendApi("_get_group_notice", {
         group_id: String(targetGroupId),
       });
     }
 
     /**
-     * Napcat API: 设置群公告
+     * NapCat API: 发送群公告（_send_group_notice）
      * @param {Object} data - Bot数据对象
      * @param {string} content - 公告内容
      * @param {string|number} group_id - 群ID（可选，默认使用 data.group_id）
-     * @param {boolean} pinned - 是否置顶（可选，默认 false）
-     * @param {boolean} show_edit_card - 是否显示编辑名片（可选，默认 false）
-     * @param {boolean} show_popup - 是否弹窗显示（可选，默认 false）
-     * @param {boolean} require_confirmation - 是否需要确认（可选，默认 false）
+     * @param {boolean} pinned - 是否置顶（可选）
+     * @param {boolean} _show_edit_card - 保留参数，NapCat 无对应字段
+     * @param {boolean} _show_popup - 保留参数，NapCat 无对应字段
+     * @param {boolean} require_confirmation - 是否需要成员确认（映射 confirm_required）
+     * @param {string} [image] - 公告配图 URL（可选）
      * @returns {Promise} API响应
      */
-    async setGroupAnnouncement(data, content, group_id, pinned, show_edit_card, show_popup, require_confirmation) {
+    async setGroupAnnouncement(data, content, group_id, pinned, _show_edit_card, _show_popup, require_confirmation, image) {
       try {
         const targetGroupId = group_id || data.group_id;
         const params = {
           group_id: String(targetGroupId),
           content: String(content),
         };
-        if (pinned !== undefined) params.pinned = Boolean(pinned);
-        if (show_edit_card !== undefined) params.show_edit_card = Boolean(show_edit_card);
-        if (show_popup !== undefined) params.show_popup = Boolean(show_popup);
-        if (require_confirmation !== undefined) params.require_confirmation = Boolean(require_confirmation);
+        if (image) params.image = String(image);
+        if (pinned !== undefined) params.pinned = pinned ? 1 : 0;
+        if (require_confirmation !== undefined) {
+          params.confirm_required = require_confirmation ? 1 : 0;
+        }
         Bot.makeLog("info", `设置群公告：${content}`, `${data.self_id} => ${targetGroupId}`);
-        return await data.bot.sendApi("set_group_announcement", params).catch(error => {
+        return await data.bot.sendApi("_send_group_notice", params).catch(error => {
           Bot.makeLog("warn", `设置群公告失败: ${error.message}`, data.self_id);
           return { success: false, error: error.message };
         });
@@ -1727,19 +1729,19 @@ Bot.adapter.push(
     }
 
     /**
-     * Napcat API: 删除群公告
+     * NapCat API: 删除群公告（_del_group_notice）
      * @param {Object} data - Bot数据对象
-     * @param {string|number} announcement_id - 公告ID
+     * @param {string|number} notice_id - 公告ID（notice_id）
      * @param {string|number} group_id - 群ID（可选，默认使用 data.group_id）
      * @returns {Promise} API响应
      */
-    async deleteGroupAnnouncement(data, announcement_id, group_id) {
+    async deleteGroupAnnouncement(data, notice_id, group_id) {
       try {
         const targetGroupId = group_id || data.group_id;
-        Bot.makeLog("info", `删除群公告：${announcement_id}`, `${data.self_id} => ${targetGroupId}`);
-        return await data.bot.sendApi("delete_group_announcement", {
+        Bot.makeLog("info", `删除群公告：${notice_id}`, `${data.self_id} => ${targetGroupId}`);
+        return await data.bot.sendApi("_del_group_notice", {
           group_id: String(targetGroupId),
-          announcement_id: String(announcement_id),
+          notice_id: String(notice_id),
         }).catch(error => {
           Bot.makeLog("warn", `删除群公告失败: ${error.message}`, data.self_id);
           return { success: false, error: error.message };
@@ -1939,9 +1941,18 @@ Bot.adapter.push(
         getAiCharacters: () => this.getAiCharacters(i),
         getAnnouncements: () => this.getGroupAnnouncements(i),
         sendNotice: (content, opts = {}) =>
-          this.setGroupAnnouncement(i, content, null, opts.pinned, opts.show_edit_card, opts.show_popup, opts.require_confirmation),
-        setAnnouncement: (content, pinned, show_edit_card, show_popup, require_confirmation) =>
-          this.setGroupAnnouncement(i, content, null, pinned, show_edit_card, show_popup, require_confirmation),
+          this.setGroupAnnouncement(
+            i,
+            content,
+            null,
+            opts.pinned,
+            opts.show_edit_card,
+            opts.show_popup,
+            opts.require_confirmation,
+            opts.image
+          ),
+        setAnnouncement: (content, pinned, show_edit_card, show_popup, require_confirmation, image) =>
+          this.setGroupAnnouncement(i, content, null, pinned, show_edit_card, show_popup, require_confirmation, image),
         deleteAnnouncement: (announcement_id) =>
           this.deleteGroupAnnouncement(i, announcement_id),
         get is_owner() {
