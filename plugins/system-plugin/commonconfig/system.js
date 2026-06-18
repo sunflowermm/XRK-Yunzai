@@ -1526,9 +1526,9 @@ export default class SystemConfig extends ConfigBase {
                 customSkillRoots: {
                   type: 'array',
                   label: '技能根目录',
-                  description: '相对项目根；默认 skills/standard/core 与 skills/standard',
+                  description: '相对工作区根（默认 skills，由 seed 从 skills/standard 复制）',
                   itemType: 'string',
-                  default: ['skills/standard/core', 'skills/standard'],
+                  default: ['skills'],
                   component: 'ArrayForm'
                 },
                 ...AGENT_WORKSPACE_SUPPLEMENT_FIELDS

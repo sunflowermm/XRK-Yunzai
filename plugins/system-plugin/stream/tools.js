@@ -273,11 +273,11 @@ export default class ToolsStream extends AIStream {
     });
 
     this.registerMCPTool('list_files', {
-      description: '列出目录内容。maxDepth>1 时递归子目录，返回 relPath 相对工作区路径。',
+      description: '列出工作区目录。dirPath 相对工作区根（用 . 或 skills/foo），勿加 data/ai-workspace/ 前缀。maxDepth 为递归层数（整数，默认 1）。',
       inputSchema: {
         type: 'object',
         properties: {
-          dirPath: { type: 'string', description: '目录路径（可选，默认工作区根）' },
+          dirPath: { type: 'string', description: '相对工作区根，默认 .（当前工作区根）' },
           includeHidden: { type: 'boolean', default: false },
           type: { type: 'string', enum: ['all', 'files', 'dirs'], default: 'all' },
           maxDepth: { type: 'integer', description: '递归深度，1=仅当前层', default: 1 }
@@ -287,13 +287,17 @@ export default class ToolsStream extends AIStream {
         const { dirPath = null, includeHidden = false, type = 'all', maxDepth = 1 } = args;
         const result = await this.tools.listDir(dirPath, { includeHidden, type, maxDepth });
         if (result.success) {
+          const wsRoot = this.workspace;
           const lines = result.items.map((item) =>
             `- ${item.relPath || item.name} (${item.type || 'file'}${item.size != null ? `, ${item.size}B` : ''})`
           );
+          const emptyHint = result.items.length === 0
+            ? '\n（目录为空或不存在子项；list_files 的 dirPath 相对工作区根，勿重复 data/ai-workspace/ 前缀）'
+            : '';
           return {
             success: true,
-            raw: `目录: ${result.path}\n深度: ${result.maxDepth}\n共 ${result.items.length} 项:\n${lines.join('\n')}`,
-            data: { path: result.path, items: result.items, count: result.items.length, maxDepth: result.maxDepth }
+            raw: `工作区根: ${wsRoot}\n目录: ${result.path}\n深度: ${result.maxDepth}\n共 ${result.items.length} 项:${emptyHint}\n${lines.join('\n')}`,
+            data: { workspaceRoot: wsRoot, path: result.path, items: result.items, count: result.items.length, maxDepth: result.maxDepth }
           };
         }
         return { success: false, error: result.error };
@@ -394,10 +398,9 @@ export default class ToolsStream extends AIStream {
   }
 
   buildSystemPrompt() {
-    return `【基础工具说明】
-MCP：read / grep / search_replace / write / modify_file / list_files / run / delete_file
-工作区：${this.workspace}
-改代码：grep 定位 → read(startLine,endLine) → search_replace；整文件用 write。
-list_files 默认仅当前层；需子目录时传 maxDepth（正整数）。read 行号从 1 起。`;
+    return `【基础工具】read / grep / search_replace / write / modify_file / list_files / run / delete_file
+工作区 cwd: ${this.workspace}
+list_files dirPath 相对工作区根：. 列根目录，skills/… 列技能；勿写 data/ai-workspace/ 或绝对路径。
+改代码：grep → read(startLine,endLine) → search_replace。read 行号从 1 起。`;
   }
 }

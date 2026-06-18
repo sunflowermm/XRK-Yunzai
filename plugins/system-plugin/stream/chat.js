@@ -2034,7 +2034,11 @@ export default class ChatStream extends AIStream {
       '- 禁止 `@QQ`/`@昵称`。只答 `[当前消息]`。',
       '',
       '## 记录',
-      '- `昵称(QQ)[ID:xxx]` → QQ/消息ID · send_image · send_file'
+      '- `昵称(QQ)[ID:xxx]` → QQ/消息ID · send_image · send_file',
+      '',
+      '## 工作区',
+      '- 下文「可用能力」为 MCP 说明；「Workspace context」含 AGENTS / rules / skills。',
+      '- skills 的 `<location>` 相对工作区根，用 read 加载 SKILL.md。'
     ];
     return lines.join('\n');
   }

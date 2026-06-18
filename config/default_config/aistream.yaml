@@ -59,8 +59,7 @@ agentWorkspace:
   maxSkillsPromptChars: 30000
   maxSkillFileBytes: 256000
   customSkillRoots:
-    - "skills/standard/core"
-    - "skills/standard"
+    - "skills"
   maxRulesChars: 12000
   maxAgentMdChars: 12000
 
