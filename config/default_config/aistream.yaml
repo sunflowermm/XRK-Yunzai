@@ -143,7 +143,6 @@ crawl:
     screenshotFontFiles: []
     ssrfPolicy:
       allowPrivateNetwork: false
-      dangerouslyAllowPrivateNetwork: false
 
 # 工具子系统（与 tools 工作流 file 配置对齐）
 tools:

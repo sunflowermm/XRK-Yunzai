@@ -164,8 +164,7 @@ export const AISTREAM_CRAWL_FIELDS = {
         label: 'SSRF 策略',
         component: 'SubForm',
         fields: {
-          allowPrivateNetwork: { type: 'boolean', label: '允许内网', default: false, component: 'Switch' },
-          dangerouslyAllowPrivateNetwork: { type: 'boolean', label: '危险：强制允许内网', default: false, component: 'Switch' }
+          allowPrivateNetwork: { type: 'boolean', label: '允许内网（慎用）', description: '开启后 browser/web_fetch 可访问私网地址', default: false, component: 'Switch' }
         }
       }
     }

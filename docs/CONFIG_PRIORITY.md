@@ -18,7 +18,7 @@
 
 | 常用写法 | 说明 |
 |---------|------|
-| `model` / `chatModel` | 模型名 |
+| `model`（`chatModel` 仅读别名，合并为 `model`） | 模型名 |
 | `maxTokens` / `max_tokens` / `max_completion_tokens` | 最大输出 |
 | `topP` / `top_p` | top_p |
 | `presencePenalty` / `presence_penalty` | presence_penalty |

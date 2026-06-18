@@ -196,7 +196,7 @@ function baseProviderEntryFields(options = {}) {
     },
     maxTokens: {
       type: 'number',
-      label: 'max_tokens / maxTokens',
+      label: 'maxTokens',
       description: 'Anthropic 必填 max_tokens；OpenAI/o 系列经 tokenField 映射 max_completion_tokens；MiMo 默认 max_completion_tokens',
       min: 1,
       component: 'InputNumber'

@@ -395,10 +395,9 @@ export default class ToolsStream extends AIStream {
 
   buildSystemPrompt() {
     return `【基础工具说明】
-MCP：read（可按行） / grep（可带上下文） / search_replace（定向补丁） / write / modify_file / list_files / run / delete_file
-当前工作区：${this.workspace}
-改代码推荐：grep 定位 → read(startLine,endLine) 看上下文 → search_replace(oldText,newText) 精确改；整文件用 write。
-modify_file 仅 append/prepend/单行 line；勿用已移除的 replace 整文件模式。
-list_files 可 maxDepth 递归；read 行号从 1 开始，返回带 N| 前缀。`;
+MCP：read / grep / search_replace / write / modify_file / list_files / run / delete_file
+工作区：${this.workspace}
+改代码：grep 定位 → read(startLine,endLine) → search_replace；整文件用 write。
+list_files 默认仅当前层；需子目录时传 maxDepth（正整数）。read 行号从 1 起。`;
   }
 }

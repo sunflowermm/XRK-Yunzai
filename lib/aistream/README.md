@@ -18,7 +18,7 @@
 按字段 **pick** 顺序：**单次 apiConfig → 工作流 `this.config` → `LLMFactory.getProviderConfig(provider)` → `getAistreamConfigOptional().llm`**；超时兜底 **`global.maxTimeout`**。
 
 - **连接**：`apiKey`、`baseUrl`、`timeout`、`proxy`
-- **生成**：`model`、`chatModel`、`maxTokens`、`topP`、`presencePenalty`、`frequencyPenalty`、`temperature`
+- **生成**：`model`、`maxTokens`、`topP`、`presencePenalty`、`frequencyPenalty`、`temperature`（旧 YAML 的 `chatModel` 仍可读，合并进 `model`）
 - **工具与流**：`enableTools`、`enableStream`、`tool_choice`、`parallel_tool_calls`、`maxToolRounds`、`mcpToolMode`
 - **扩展**：`headers`、`extraBody`
 
