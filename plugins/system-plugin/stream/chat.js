@@ -22,6 +22,7 @@ import {
   TOOL_ROUNDS_EXHAUSTED_USER_TEXT
 } from '../../../lib/utils/llm/llm-nonstream-reply.js';
 import { summarizeToolForHistory } from '../../../lib/utils/mcp-server.js';
+import { runWithStreamRequestContext, getStreamRequestContext } from '../../../lib/aistream/stream-request-context.js';
 import {
   contentHasGroupAt,
   EMOTION_TYPES,
@@ -31,6 +32,7 @@ import {
 } from '../../../lib/utils/chat-reply-protocol.js';
 import {
   actionAck,
+  createUserVisibleTurnState,
   describeEmotionSent,
   formatDeliveredAck,
   formatEmotionDeliveredAck,
@@ -65,14 +67,6 @@ export default class ChatStream extends AIStream {
   /** 本机写入（工具/【我】）在同一群内的单调序号，保证同毫秒内按执行顺序插入 */
   static historyLocalSeqByGroup = new Map();
   static cleanupTimer = null;
-  /** 本轮是否已发过表情包（handler 去重，避免 QQ 重复消息） */
-  _hasSentEmotionThisTurn = false;
-  /** 本轮最近一次表情包摘要，供 skip 回执描述 */
-  _lastEmotionSummary = '';
-  /** 本轮是否已通过 reply 发出文字 */
-  _hasSentReplyThisTurn = false;
-  /** 本轮 reply 已发正文摘要 */
-  _lastReplySummary = '';
   /** 识图 MCP 暂关（getMessageImages / recognizeImage 不注册） */
   static IMAGE_RECOGNITION_MCP_ENABLED = false;
   /** 群聊历史：内存保留 / 适配器拉取 / 注入 LLM 条数 */
@@ -414,7 +408,7 @@ export default class ChatStream extends AIStream {
           return this._sendUserVisibleText(e, {
             content: args.content,
             messageId: args.messageId
-          });
+          }, context);
         });
       },
       enabled: true
@@ -436,7 +430,7 @@ export default class ChatStream extends AIStream {
         const t = String(args.emotionType ?? '').trim();
         if (!EMOTION_TYPES.includes(t)) return { success: false, error: '无效表情类型' };
         return this._wrapHandler(async () => {
-          return this._sendEmotionImage(e, t, String(args.text ?? '').trim());
+          return this._sendEmotionImage(e, t, String(args.text ?? '').trim(), context);
         });
       },
       enabled: true
@@ -2521,12 +2515,20 @@ export default class ChatStream extends AIStream {
       .trim();
   }
 
-  async _sendEmotionImage(e, emotionType, text = '') {
+  _getUserVisibleTurnState(context) {
+    const turn = context?.turnState ?? getStreamRequestContext()?.turnState;
+    if (turn) return turn;
+    Bot.makeLog('warn', '[ChatStream] 无请求级 turnState，用户可见去重可能失效', 'ChatStream');
+    return createUserVisibleTurnState();
+  }
+
+  async _sendEmotionImage(e, emotionType, text = '', context = {}) {
+    const turn = this._getUserVisibleTurnState(context);
     const where = formatSessionWhere(e);
-    if (this._hasSentEmotionThisTurn) {
+    if (turn.hasSentEmotion) {
       return {
         success: true,
-        raw: formatEmotionSkippedAck(where, this._lastEmotionSummary)
+        raw: formatEmotionSkippedAck(where, turn.lastEmotionSummary)
       };
     }
     const image = this.getRandomEmotionImage(emotionType);
@@ -2545,8 +2547,8 @@ export default class ChatStream extends AIStream {
       if (!filtered) return { success: false, error: '附言清理后为空' };
       await e.reply([seg.image(image), filtered]);
       this.recordAIResponse(e, filtered);
-      this._hasSentEmotionThisTurn = true;
-      this._lastEmotionSummary = describeEmotionSent(emotionType, filtered);
+      turn.hasSentEmotion = true;
+      turn.lastEmotionSummary = describeEmotionSent(emotionType, filtered);
       return {
         success: true,
         raw: formatEmotionDeliveredAck(where, emotionType, filtered)
@@ -2554,12 +2556,13 @@ export default class ChatStream extends AIStream {
     }
     await e.reply(seg.image(image));
     this.recordAIResponse(e, '');
-    this._hasSentEmotionThisTurn = true;
-    this._lastEmotionSummary = describeEmotionSent(emotionType, '');
+    turn.hasSentEmotion = true;
+    turn.lastEmotionSummary = describeEmotionSent(emotionType, '');
     return { success: true, raw: formatEmotionDeliveredAck(where, emotionType, '') };
   }
 
-  async _sendUserVisibleText(e, { content = '', messageId } = {}) {
+  async _sendUserVisibleText(e, { content = '', messageId } = {}, context = {}) {
+    const turn = this._getUserVisibleTurnState(context);
     const where = formatSessionWhere(e);
     const rawContent = String(content ?? '').trim();
     if (!rawContent) return { success: false, error: 'content 不能为空' };
@@ -2569,19 +2572,19 @@ export default class ChatStream extends AIStream {
       return { success: false, error: '清理 Markdown 后无可发送正文' };
     }
 
-    if (this._hasSentReplyThisTurn && this._lastReplySummary) {
+    if (turn.hasSentReply && turn.lastReplySummary) {
       return {
         success: true,
-        raw: formatUserVisibleDuplicateAck(where, this._lastReplySummary, 'reply')
+        raw: formatUserVisibleDuplicateAck(where, turn.lastReplySummary, 'reply')
       };
     }
 
-    if (this._hasSentEmotionThisTurn && this._lastEmotionSummary) {
-      const emotionText = this._lastEmotionSummary.match(/附言「(.+)」/)?.[1] || '';
+    if (turn.hasSentEmotion && turn.lastEmotionSummary) {
+      const emotionText = turn.lastEmotionSummary.match(/附言「(.+)」/)?.[1] || '';
       if (emotionText && isOverlappingUserVisible(filteredContent, emotionText)) {
         return {
           success: true,
-          raw: formatUserVisibleDuplicateAck(where, this._lastEmotionSummary, 'reply')
+          raw: formatUserVisibleDuplicateAck(where, turn.lastEmotionSummary, 'reply')
         };
       }
     }
@@ -2601,8 +2604,8 @@ export default class ChatStream extends AIStream {
     if (totalSent < 1) {
       return { success: false, error: '未能发出任何可见消息，请检查 content 与文本协议' };
     }
-    this._hasSentReplyThisTurn = true;
-    this._lastReplySummary = allSentContent.join(' | ');
+    turn.hasSentReply = true;
+    turn.lastReplySummary = allSentContent.join(' | ');
     return {
       success: true,
       raw: formatDeliveredAck(where, allSentContent)
@@ -2636,44 +2639,38 @@ export default class ChatStream extends AIStream {
       debugDumpFullPrompt = !!messages.debugDumpFullPrompt;
     }
 
-    try {
-      if (e) this.recordMessage(e);
+    return runWithStreamRequestContext({ e, turnState: createUserVisibleTurnState() }, async () => {
+      try {
+        if (e) this.recordMessage(e);
 
-      if (!Array.isArray(messages)) {
-        messages = await this.buildChatContext(e, messages);
+        if (!Array.isArray(messages)) {
+          messages = await this.buildChatContext(e, messages);
+        }
+
+        messages = await this.mergeMessageHistory(messages, e);
+
+        const query = Array.isArray(messages) ? this.extractQueryFromMessages(messages) : messages;
+        messages = await this.buildEnhancedContext(e, query, messages);
+
+        if (Bot.StreamLoader) Bot.StreamLoader.currentEvent = e || null;
+
+        const callOpts = { ...config, debugDumpFullPrompt, _debugDumpEvent: e };
+        let llm = await this.callAI(messages, callOpts);
+        if (llm == null) return null;
+
+        let text = String(llm.text ?? '').trim();
+        if (text) text = this.stripMarkdownForOutgoing(text);
+
+        ({ llm, text } = await this._ensureUserVisibleReply(e, llm, text));
+
+        return text || '';
+      } catch (error) {
+        Bot.makeLog('error', `[ChatStream] execute 失败: ${error.message}`, 'ChatStream');
+        return null;
+      } finally {
+        if (Bot.StreamLoader?.currentEvent === e) Bot.StreamLoader.currentEvent = null;
       }
-
-      messages = await this.mergeMessageHistory(messages, e);
-
-      const query = Array.isArray(messages) ? this.extractQueryFromMessages(messages) : messages;
-      messages = await this.buildEnhancedContext(e, query, messages);
-
-      if (Bot.StreamLoader) Bot.StreamLoader.currentEvent = e || null;
-      this._hasSentEmotionThisTurn = false;
-      this._lastEmotionSummary = '';
-      this._hasSentReplyThisTurn = false;
-      this._lastReplySummary = '';
-
-      const callOpts = { ...config, debugDumpFullPrompt, _debugDumpEvent: e };
-      let llm = await this.callAI(messages, callOpts);
-      if (llm == null) return null;
-
-      let text = String(llm.text ?? '').trim();
-      if (text) text = this.stripMarkdownForOutgoing(text);
-
-      ({ llm, text } = await this._ensureUserVisibleReply(e, llm, text));
-
-      return text || '';
-    } catch (error) {
-      Bot.makeLog('error', `[ChatStream] execute 失败: ${error.message}`, 'ChatStream');
-      return null;
-    } finally {
-      this._hasSentEmotionThisTurn = false;
-      this._lastEmotionSummary = '';
-      this._hasSentReplyThisTurn = false;
-      this._lastReplySummary = '';
-      if (Bot.StreamLoader?.currentEvent === e) Bot.StreamLoader.currentEvent = null;
-    }
+    });
   }
 
   /**
