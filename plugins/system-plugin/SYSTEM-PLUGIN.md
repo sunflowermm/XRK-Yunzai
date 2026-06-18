@@ -108,7 +108,7 @@ plugins/system-plugin/
 
 | 工作流      | 说明与主要工具 |
 |-------------|----------------|
-| **chat**    | 智能聊天与群内互动。工具：`reply`、`at`（可选 text）、`emotion`（表情包，可选 text）、`poke`（群/私聊）、`emojiReaction`、`thumbUp`、`sign`、`mute`/`unmute`、`muteAll`/`unmuteAll`、`setCard`、`setGroupName`、`setAdmin`/`unsetAdmin`、`setTitle`、`kick`、`setEssence`/`removeEssence`、`announce`、`recall`、`getGroupInfoEx`、`getAtAllRemain`、`getBanList`、`setGroupTodo`、`getFriendList`、`getGroupMembers` 等。 |
+| **chat**    | 智能聊天与群内互动。工具：`reply`、`emotion`、`send_file`、`send_image`、`poke`、`relayPrivate`（私聊传话）、`relayPrivateImage`、`relayPrivateEmotion`、`emojiReaction`、`thumbUp`、`sign`、群管与查询类等。 |
 | **memory**  | 工作区 Markdown 记忆。工具：`append_memory`、`read_memory`、`search_memory` 等；存储于 `data/ai-workspace/{id}/memory/`。 |
 | **tools**   | 文件与执行。工具：`read`、`grep`、`write`、`run`。工作区默认 `~/Desktop`。 |
 | **database**| 知识库。工具：`save_knowledge`、`query_knowledge`、`list_knowledge`。存储目录 `~/.xrk/knowledge`。 |

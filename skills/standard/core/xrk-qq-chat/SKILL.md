@@ -14,7 +14,11 @@ description: QQ/群聊 Agent：NapCat 能力、回复、发文件、记忆与刷
 | reply | 文字消息：`send_msg`（`\|`、`[回复:ID]`、`[at:QQ]`） |
 | emotion | 内置表情包图（resources/aiimages） |
 | poke | 核心 `send_poke` |
+| relayPrivate | 私聊传话：`pickFriend` → `send_msg`（`user_id`） |
+| relayPrivateImage | 私聊发图：`pickFriend.sendMsg` + `segment.image` |
+| relayPrivateEmotion | 私聊发表情包：`pickFriend` + `resources/aiimages` |
 | send_file | 群组/私聊 `sendFile` + 工作区路径 |
+| getFriendList / getFriendInfo | 好友列表与资料（传话前确认 qq） |
 | saveMessageAsset | `get_msg` + 下载到工作区 `downloads/` |
 | readChatRecord | 内存/适配器聊天记录（**仅一层**） |
 | emojiReaction | 消息扩展 `set_msg_emoji_like` |
@@ -29,6 +33,13 @@ description: QQ/群聊 Agent：NapCat 能力、回复、发文件、记忆与刷
 | recall | `delete_msg` + `get_msg` |
 
 底层桥接：`OneBotv11` 适配器的 `e.group` / `e.bot.sendApi`。
+
+## 私聊传话（relayPrivate*）
+
+- **relayPrivate**：`qq` + `content`；群聊中发起时正文**不会**出现在当前群，仅工具回执可见。
+- **relayPrivateImage** / **relayPrivateEmotion**：向好友私聊发图或表情包；附言支持 `|` 分句，图仅随第一条。
+- 目标须为机器人好友；先用 **getFriendList** / **getFriendInfo** 确认 QQ。实现：`bot.pickFriend(qq).sendMsg(...)`。
+- 主人可传话给非好友列表 QQ（放宽校验）；普通用户仅好友。
 
 ## 聊天记录协议（一层限制）
 
