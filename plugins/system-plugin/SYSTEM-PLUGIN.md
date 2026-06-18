@@ -219,7 +219,7 @@ mergeStreams:
 1. **新增工作流**：在 `plugins/<某插件>/stream/` 下新增 `xxx.js`，导出继承 `AIStream` 的类，实现 `init()` 并在其中 `registerMCPTool()`。StreamLoader 会自动扫描并加载。  
 2. **合并到聊天**：在 `data/ai/config.yaml` 的 `mergeStreams` 中加上工作流名称即可（如 `desktop`、`memory`），前提是 AI 助手 init 时已调用 `mergeStreams`。  
 3. **适配器**：新端实现与 OneBotv11 类似的接口（事件上报、`sendMsg`、`sendApi` 等），并 `Bot.adapter.push(实例)`。  
-4. **表情包资源**：chat 工作流从 `resources/aiimages/{开心|惊讶|伤心|大笑|害怕|生气}/` 读取图片，可按需放置。  
+4. **表情包资源**：chat 工作流从 `resources/aiimages/{分类}/` 读取图片；运行 `node scripts/import-qq-emojis.mjs` 可从 NTQQ 缓存与 Downloads 两处导入（同 GIF 按文件名 hash 去重，后者覆盖前者）。分类与 NapCat 贴表情 ID 见 `lib/utils/emotion-categories.js`。
 5. **文档与仓库**：本文档仅描述 system-plugin 自带的能力与结构。框架底层文档见项目根 **`docs/`** 与 **`docs/overview/DEVELOPER_HUB.md`**（核心对象、插件/工作流基类、适配器、配置等）。
 
 ---

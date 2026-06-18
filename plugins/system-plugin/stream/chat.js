@@ -31,6 +31,14 @@ import {
   segmentsToDisplayText
 } from '../../../lib/utils/chat-reply-protocol.js';
 import {
+  EMOTION_IMAGE_EXTS,
+  EMOJI_REACTION_ALIASES,
+  EMOJI_REACTION_TYPES,
+  formatEmotionTypeList,
+  getEmojiReactionIds,
+  normalizeEmotionType
+} from '../../../lib/utils/emotion-categories.js';
+import {
   actionAck,
   createUserVisibleTurnState,
   describeEmotionSent,
@@ -43,18 +51,6 @@ import {
 } from '../../../lib/utils/chat-user-visible-ack.js';
 const EMOTIONS_DIR = resolveProjectPath(RESOURCES_AIIMAGES_DIR);
 const IMAGE_SEND_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
-
-// 表情回应映射
-const EMOJI_REACTIONS = {
-  '开心': ['4', '14', '21', '28', '76', '79', '99', '182', '201', '290'],
-  '惊讶': ['26', '32', '97', '180', '268', '289'],
-  '伤心': ['5', '9', '106', '111', '173', '174'],
-  '大笑': ['4', '12', '28', '101', '182', '281'],
-  '害怕': ['26', '27', '41', '96'],
-  '喜欢': ['42', '63', '85', '116', '122', '319'],
-  '爱心': ['66', '122', '319'],
-  '生气': ['8', '23', '39', '86', '179', '265']
-};
 
 function randomRange(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -135,9 +131,7 @@ export default class ChatStream extends AIStream {
       try {
         await BotUtil.mkdir(emotionDir);
         const files = FileUtils.existsSync(emotionDir) ? FileUtils.readDirSync(emotionDir) : [];
-        const imageFiles = files.filter(file => 
-          /\.(jpg|jpeg|png|gif)$/i.test(file)
-        );
+        const imageFiles = files.filter(file => EMOTION_IMAGE_EXTS.test(file));
         ChatStream.emotionImages[emotion] = imageFiles.map(file => 
           path.join(emotionDir, file)
         );
@@ -415,7 +409,7 @@ export default class ChatStream extends AIStream {
     });
 
     this.registerMCPTool('emotion', {
-      description: '发表情包图片（resources/aiimages 随机一张）。emotionType：开心、惊讶、伤心、大笑、害怕、生气。用户只要表情时不要填 text。回执会说明用户已看到的内容。',
+      description: `发表情包图片（resources/aiimages/{分类}/ 随机一张）。emotionType：${formatEmotionTypeList()}。用户只要表情时不要填 text。回执会说明用户已看到的内容。`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -534,12 +528,12 @@ export default class ChatStream extends AIStream {
     });
 
     this.registerMCPTool('emojiReaction', {
-      description: '对群消息表情回应。emojiType：开心、惊讶、伤心、大笑、害怕、喜欢、爱心、生气。msgId 不填则最近一条他人消息。仅群聊。',
+      description: `对群消息表情回应。emojiType：${formatEmotionTypeList(EMOJI_REACTION_TYPES)}。msgId 不填则最近一条他人消息。仅群聊。`,
       inputSchema: {
         type: 'object',
         properties: {
           msgId: { type: 'number', description: '可选，不填则最近一条' },
-          emojiType: { type: 'string', description: '必填', enum: ['开心', '惊讶', '伤心', '大笑', '害怕', '喜欢', '爱心', '生气'] }
+          emojiType: { type: 'string', description: '必填', enum: EMOJI_REACTION_TYPES }
         },
         required: ['emojiType']
       },
@@ -554,27 +548,10 @@ export default class ChatStream extends AIStream {
           return { success: false, error: '非群聊环境' };
         }
 
-        // 兼容英文枚举到内部中文映射
-        const typeMap = {
-          like: '喜欢',
-          love: '爱心',
-          laugh: '大笑',
-          wow: '惊讶',
-          sad: '伤心',
-          angry: '生气'
-        };
-        let emojiType = args.emojiType;
-        if (emojiType && typeMap[emojiType]) {
-          emojiType = typeMap[emojiType];
-        }
-
-        if (!EMOJI_REACTIONS[emojiType]) {
+        const emojiType = normalizeEmotionType(args.emojiType, EMOJI_REACTION_ALIASES);
+        const emojiIds = getEmojiReactionIds(emojiType);
+        if (!emojiIds) {
           return { success: false, error: '无效表情类型' };
-        }
-
-        const emojiIds = EMOJI_REACTIONS[emojiType];
-        if (!emojiIds || emojiIds.length === 0) {
-          return { success: false, error: '表情类型无可用表情ID' };
         }
 
         // 如果没有传 msgId，则尝试使用最近一条他人消息的 ID
@@ -2029,7 +2006,7 @@ export default class ChatStream extends AIStream {
       '',
       '## 对用户说话（assistant 正文群里不可见）',
       '- **reply**：文字。`|` 分句 · `[回复:消息ID]` · 群聊 `[at:数字QQ]`',
-      '- **emotion**：发表情包图（开心/惊讶/伤心/大笑/害怕/生气）；用户只要表情时不要填 text',
+      `- **emotion**：发表情包图（${formatEmotionTypeList()}）；用户只要表情时不要填 text`,
       '- 工具回执会说明「你已在群里发出什么」；用户已能看到后，不要重复 reply/emotion。',
       '- 禁止 `@QQ`/`@昵称`。只答 `[当前消息]`。',
       '',
