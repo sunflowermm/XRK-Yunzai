@@ -21,8 +21,8 @@ export default class ToolsStream extends AIStream {
   constructor() {
     super({
       name: 'tools',
-      description: '基础工具工作流（read/grep/write/delete_file/modify_file/list_files/run）',
-      version: '1.0.7',
+      description: '基础工具工作流（read/grep/search_replace/write/modify_file/list_files/run）',
+      version: '1.1.0',
       author: 'XRK',
       priority: 200,
       config: {
@@ -46,51 +46,70 @@ export default class ToolsStream extends AIStream {
     this.registerAllFunctions();
   }
 
+  _packReadSuccess(result, { truncatedByMax = false, maxChars } = {}) {
+    const fullLen = result.fullContent?.length ?? result.content?.length ?? 0;
+    const rangeNote = result.ranged
+      ? `行 ${result.startLine}-${result.endLine} / 共 ${result.totalLines} 行`
+      : `共 ${result.totalLines ?? '?'} 行`;
+    const previewLimit = Math.min(this.fileToolsCfg.readRawPreviewChars, maxChars);
+    let content = result.content;
+    let truncated = truncatedByMax;
+    if (typeof content === 'string' && content.length > maxChars) {
+      content = content.slice(0, maxChars);
+      truncated = true;
+    }
+    const preview =
+      typeof content === 'string' && content.length > previewLimit
+        ? `${content.slice(0, previewLimit)}\n…(预览截断；可缩小 startLine/endLine 或 grep 定位)`
+        : content;
+    const rawLines = [
+      `文件: ${result.path}`,
+      rangeNote,
+      `字符: ${fullLen}${truncated ? `（返回已截断至 ${maxChars}）` : ''}`,
+      '',
+      preview
+    ];
+    return {
+      success: true,
+      raw: rawLines.join('\n'),
+      data: {
+        filePath: result.path,
+        fileName: path.basename(result.path),
+        content,
+        startLine: result.startLine,
+        endLine: result.endLine,
+        totalLines: result.totalLines,
+        lineCount: result.lineCount,
+        ranged: !!result.ranged,
+        size: fullLen,
+        returnedChars: typeof content === 'string' ? content.length : 0,
+        truncated,
+        maxReadChars: maxChars
+      }
+    };
+  }
+
   registerAllFunctions() {
     this.registerMCPTool('read', {
-      description: '读取文件内容。支持相对路径和绝对路径，文件不存在时自动在工作区搜索。',
+      description:
+        '读取工作区文本文件。可选 startLine/endLine（1 起始，含首尾）只看部分行；返回带行号前缀，便于 search_replace。不传行号则读全文件（大文件会截断）。',
       inputSchema: {
         type: 'object',
-        properties: { filePath: { type: 'string', description: '文件路径（相对或绝对路径）' } },
+        properties: {
+          filePath: { type: 'string', description: '文件路径（相对工作区）' },
+          startLine: { type: 'integer', description: '起始行号（1 起始，可选）' },
+          endLine: { type: 'integer', description: '结束行号（含，可选）' },
+          showLineNumbers: { type: 'boolean', description: '是否带行号前缀', default: true }
+        },
         required: ['filePath']
       },
       handler: async (args = {}) => {
-        const { filePath } = args;
+        const { filePath, startLine, endLine, showLineNumbers } = args;
         if (!filePath) return { success: false, error: '文件路径不能为空' };
-        let result = await this.tools.readFile(filePath);
-        if (!result.success) result = await this.trySearchAndReadFile(filePath);
+        let result = await this.tools.readFile(filePath, { startLine, endLine, showLineNumbers });
+        if (!result.success) result = await this.trySearchAndReadFile(filePath, { startLine, endLine, showLineNumbers });
         if (result.success) {
-          const maxChars = this.fileToolsCfg.maxReadChars;
-          let content = result.content;
-          let truncated = false;
-          if (typeof content === 'string' && content.length > maxChars) {
-            content = content.slice(0, maxChars);
-            truncated = true;
-          }
-          const previewLimit = Math.min(this.fileToolsCfg.readRawPreviewChars, maxChars);
-          const preview =
-            typeof content === 'string' && content.length > previewLimit
-              ? `${content.slice(0, previewLimit)}\n…(预览截断，完整 ${content.length} 字符；可用 grep 查片段)`
-              : content;
-          const rawLines = [
-            `文件: ${result.path}`,
-            `大小: ${result.content.length} 字符${truncated ? `（已截断至 ${maxChars}）` : ''}`,
-            '',
-            preview
-          ];
-          return {
-            success: true,
-            raw: rawLines.join('\n'),
-            data: {
-              filePath: result.path,
-              fileName: path.basename(result.path),
-              content,
-              size: result.content.length,
-              returnedChars: typeof content === 'string' ? content.length : 0,
-              truncated,
-              maxReadChars: maxChars
-            }
-          };
+          return this._packReadSuccess(result, { maxChars: this.fileToolsCfg.maxReadChars });
         }
         return { success: false, error: result.error || `未找到文件: ${filePath}` };
       },
@@ -98,26 +117,38 @@ export default class ToolsStream extends AIStream {
     });
 
     this.registerMCPTool('grep', {
-      description: '在文件中搜索文本。支持指定文件或工作区所有文件，不区分大小写。',
+      description: '在工作区搜索文本（字面量，非正则元字符）。可指定 filePath；contextBefore/After 附带上下文行（0-5）。',
       inputSchema: {
         type: 'object',
         properties: {
           pattern: { type: 'string', description: '搜索关键词' },
-          filePath: { type: 'string', description: '文件路径（可选）' }
+          filePath: { type: 'string', description: '限定单个文件（可选）' },
+          contextBefore: { type: 'integer', description: '匹配行前上下文行数 0-5', default: 0 },
+          contextAfter: { type: 'integer', description: '匹配行后上下文行数 0-5', default: 0 }
         },
         required: ['pattern']
       },
       handler: async (args = {}) => {
-        const { pattern, filePath } = args;
+        const { pattern, filePath, contextBefore = 0, contextAfter = 0 } = args;
         if (!pattern) return { success: false, error: '搜索关键词不能为空' };
         const result = await this.tools.grep(pattern, filePath, {
           caseSensitive: false,
           lineNumbers: true,
-          maxResults: this.fileToolsCfg.grepMaxResults
+          maxResults: this.fileToolsCfg.grepMaxResults,
+          contextBefore,
+          contextAfter
         });
         if (result.success) {
+          const blocks = result.matches.map((m) => {
+            if (m.snippet) {
+              return `${m.file}:${m.line}\n${m.snippet}`;
+            }
+            return `${m.file}:${m.line}: ${m.content}`;
+          });
+          const head = `pattern="${pattern}"${filePath ? ` file=${filePath}` : ' scope=workspace'} 共 ${result.matches.length} 条`;
           return {
             success: true,
+            raw: blocks.length ? `${head}\n\n${blocks.join('\n\n')}` : `${head}\n（无匹配）`,
             data: {
               pattern,
               filePath: filePath || null,
@@ -131,8 +162,37 @@ export default class ToolsStream extends AIStream {
       enabled: true
     });
 
+    this.registerMCPTool('search_replace', {
+      description:
+        '按 oldText 精确替换为 newText（定向改代码，类似补丁）。oldText 须唯一；多处相同则加长上下文或 replaceAll=true。改前先 read 确认片段。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          filePath: { type: 'string', description: '文件路径' },
+          oldText: { type: 'string', description: '要被替换的原文（含足够上下文）' },
+          newText: { type: 'string', description: '替换后的文本（可为空字符串）' },
+          replaceAll: { type: 'boolean', description: '是否替换所有匹配', default: false }
+        },
+        required: ['filePath', 'oldText', 'newText']
+      },
+      handler: async (args = {}) => {
+        const { filePath, oldText, newText, replaceAll = false } = args;
+        if (!filePath) return { success: false, error: '文件路径不能为空' };
+        const result = await this.tools.searchReplace(filePath, oldText, newText, { replaceAll });
+        if (result.success) {
+          return {
+            success: true,
+            raw: `已替换 ${result.replacements} 处${result.replaceAll ? '（全部）' : ''}：${result.path}`,
+            data: result
+          };
+        }
+        return { success: false, error: result.error, data: result.occurrences ? { occurrences: result.occurrences } : undefined };
+      },
+      enabled: true
+    });
+
     this.registerMCPTool('write', {
-      description: '写入文件内容（完全覆盖）。文件不存在时自动创建。如需追加请使用 modify_file。',
+      description: '整文件写入（覆盖）。新建或重写用此工具；局部改动优先 search_replace。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -147,7 +207,7 @@ export default class ToolsStream extends AIStream {
         if (content === undefined) return { success: false, error: '文件内容不能为空' };
         const result = await this.tools.writeFile(filePath, content);
         if (result.success) {
-          return { success: true, data: { filePath: result.path, message: '文件写入成功' } };
+          return { success: true, raw: `已写入 ${result.path}`, data: { filePath: result.path, message: '文件写入成功' } };
         }
         return { success: false, error: result.error };
       },
@@ -166,7 +226,7 @@ export default class ToolsStream extends AIStream {
         if (!filePath) return { success: false, error: '文件路径不能为空' };
         const result = await this.tools.deleteFile(filePath);
         if (result.success) {
-          return { success: true, data: { filePath: result.path, message: '文件删除成功' } };
+          return { success: true, raw: `已删除 ${result.path}`, data: { filePath: result.path, message: '文件删除成功' } };
         }
         return { success: false, error: result.error };
       },
@@ -174,35 +234,37 @@ export default class ToolsStream extends AIStream {
     });
 
     this.registerMCPTool('modify_file', {
-      description: '修改文件内容。支持 replace（替换全部或指定行）、append、prepend。',
+      description: '追加或替换单行。mode=line 须 lineNumber；append/prepend 追加内容。整文件或片段改动请用 write / search_replace。',
       inputSchema: {
         type: 'object',
         properties: {
           filePath: { type: 'string', description: '文件路径' },
-          content: { type: 'string', description: '要添加或替换的内容' },
+          content: { type: 'string', description: '要写入的内容' },
           mode: {
             type: 'string',
-            enum: ['replace', 'append', 'prepend'],
-            default: 'replace'
+            enum: ['line', 'append', 'prepend'],
+            default: 'append'
           },
-          lineNumber: { type: 'integer', description: '行号（replace 模式，从 1 开始）' }
+          lineNumber: { type: 'integer', description: '行号（mode=line 时必填，从 1 开始）' }
         },
         required: ['filePath', 'content']
       },
       handler: async (args = {}) => {
-        const { filePath, content, mode = 'replace', lineNumber } = args;
+        const { filePath, content, mode = 'append', lineNumber } = args;
         if (!filePath || content === undefined) {
           return { success: false, error: '文件路径和内容不能为空' };
         }
         const result = await this.tools.modifyFile(filePath, content, { mode, lineNumber });
         if (result.success) {
+          const msg = mode === 'line'
+            ? `第 ${lineNumber} 行已替换`
+            : mode === 'append'
+              ? '已追加到文件末尾'
+              : '已插入到文件开头';
           return {
             success: true,
-            data: {
-              filePath: result.path,
-              mode,
-              message: `文件${mode === 'replace' ? '替换' : mode === 'append' ? '追加' : '插入'}成功`
-            }
+            raw: `${msg}：${result.path}`,
+            data: { filePath: result.path, mode, lineNumber, message: msg }
           };
         }
         return { success: false, error: result.error };
@@ -211,24 +273,27 @@ export default class ToolsStream extends AIStream {
     });
 
     this.registerMCPTool('list_files', {
-      description: '列出目录中的文件和子目录。',
+      description: '列出目录内容。maxDepth>1 时递归子目录，返回 relPath 相对工作区路径。',
       inputSchema: {
         type: 'object',
         properties: {
-          dirPath: { type: 'string', description: '目录路径（可选）' },
+          dirPath: { type: 'string', description: '目录路径（可选，默认工作区根）' },
           includeHidden: { type: 'boolean', default: false },
-          type: { type: 'string', enum: ['all', 'files', 'dirs'], default: 'all' }
+          type: { type: 'string', enum: ['all', 'files', 'dirs'], default: 'all' },
+          maxDepth: { type: 'integer', description: '递归深度，1=仅当前层', default: 1 }
         }
       },
       handler: async (args = {}) => {
-        const { dirPath = null, includeHidden = false, type = 'all' } = args;
-        const result = await this.tools.listDir(dirPath, { includeHidden, type });
+        const { dirPath = null, includeHidden = false, type = 'all', maxDepth = 1 } = args;
+        const result = await this.tools.listDir(dirPath, { includeHidden, type, maxDepth });
         if (result.success) {
-          const lines = result.items.map((item) => `- ${item.name} (${item.type || 'file'})`);
+          const lines = result.items.map((item) =>
+            `- ${item.relPath || item.name} (${item.type || 'file'}${item.size != null ? `, ${item.size}B` : ''})`
+          );
           return {
             success: true,
-            raw: `目录: ${result.path}\n共 ${result.items.length} 项:\n${lines.join('\n')}`,
-            data: { path: result.path, items: result.items, count: result.items.length }
+            raw: `目录: ${result.path}\n深度: ${result.maxDepth}\n共 ${result.items.length} 项:\n${lines.join('\n')}`,
+            data: { path: result.path, items: result.items, count: result.items.length, maxDepth: result.maxDepth }
           };
         }
         return { success: false, error: result.error };
@@ -289,7 +354,7 @@ export default class ToolsStream extends AIStream {
     });
   }
 
-  async trySearchAndReadFile(filePath) {
+  async trySearchAndReadFile(filePath, readOpts = {}) {
     const searchResults = await this.tools.searchFiles(path.basename(filePath), {
       maxDepth: 2,
       fileExtensions: null
@@ -297,7 +362,7 @@ export default class ToolsStream extends AIStream {
     if (searchResults.length === 0) {
       return { success: false, error: `未找到文件: ${filePath}` };
     }
-    return await this.tools.readFile(searchResults[0]);
+    return await this.tools.readFile(searchResults[0], readOpts);
   }
 
   async executeCommand(command) {
@@ -330,9 +395,10 @@ export default class ToolsStream extends AIStream {
 
   buildSystemPrompt() {
     return `【基础工具说明】
-MCP：read / grep / write / delete_file / modify_file / list_files / run
+MCP：read（可按行） / grep（可带上下文） / search_replace（定向补丁） / write / modify_file / list_files / run / delete_file
 当前工作区：${this.workspace}
-run 已在工作区根目录执行；命令内用相对路径（docs/、output/），勿 cd 到工作区、勿用 "~/…" 引号路径。
-read 受 maxReadChars 截断；run 受 aistream.tools.file 开关与超时约束。`;
+改代码推荐：grep 定位 → read(startLine,endLine) 看上下文 → search_replace(oldText,newText) 精确改；整文件用 write。
+modify_file 仅 append/prepend/单行 line；勿用已移除的 replace 整文件模式。
+list_files 可 maxDepth 递归；read 行号从 1 开始，返回带 N| 前缀。`;
   }
 }

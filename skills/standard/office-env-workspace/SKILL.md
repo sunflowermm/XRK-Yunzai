@@ -16,12 +16,14 @@ description: Agent 工作区文件操作：read/write/list_files/grep/create/del
 
 | 工具 | 用途 |
 |------|------|
-| `list_files` | 列目录（可递归） |
-| `read` | 读文本/代码（有大小上限） |
-| `write` | 新建或覆盖（自动建目录） |
-| `modify_file` | 局部替换 |
+| `list_files` | 列目录（`maxDepth` 可递归） |
+| `read` | 读文本；`startLine`/`endLine` 看指定行，返回带行号 |
+| `grep` | 搜关键字；`contextBefore`/`contextAfter` 带上下文 |
+| `search_replace` | 按 `oldText`→`newText` 定向改代码（须唯一或 `replaceAll`） |
+| `write` | 整文件新建或覆盖 |
+| `modify_file` | `append`/`prepend`/单行 `line` |
 | `delete_file` | 删除（需确认） |
-| `grep` | 按正则搜文件内容 |
+| `run` | 工作区内执行命令 |
 
 ## 习惯
 
