@@ -26,9 +26,11 @@ import { runWithStreamRequestContext, getStreamRequestContext } from '../../../l
 import {
   contentHasGroupAt,
   EMOTION_TYPES,
-  parseReplyContentSegments,
+  parseImageContentMark,
+  PROTOCOL_MARKER_RE,
   replyContentForbidden,
-  segmentsToDisplayText
+  resolveOutgoingMessage,
+  buildOutboundSegments
 } from '../../../lib/utils/chat-reply-protocol.js';
 import {
   EMOTION_IMAGE_EXTS,
@@ -386,7 +388,7 @@ export default class ChatStream extends AIStream {
     });
 
     this.registerMCPTool('reply', {
-      description: '发文字消息（用户可见）。content：| 分句；[回复:消息ID]；群聊 [at:数字QQ]。禁止 @QQ/@昵称。发表情包用 emotion。回执会说明是否已发出。',
+      description: '发文字消息（用户可见）。content：| 分句；[回复:消息ID]；群聊 [at:数字QQ]。禁止 @QQ/@昵称。发表情包用 emotion，发图用 send_image。回执会说明是否已发出。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -409,7 +411,7 @@ export default class ChatStream extends AIStream {
     });
 
     this.registerMCPTool('emotion', {
-      description: `发表情包图片（resources/aiimages/{分类}/ 随机一张）。emotionType：${formatEmotionTypeList()}。用户只要表情时不要填 text。回执会说明用户已看到的内容。`,
+      description: `发表情包图片（resources/aiimages/{分类}/ 随机一张）。emotionType：${formatEmotionTypeList()}。text 可选附言，支持 [回复:消息ID]。用户只要表情时不要填 text。`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -480,11 +482,12 @@ export default class ChatStream extends AIStream {
     });
 
     this.registerMCPTool('send_image', {
-      description: '向当前会话发送图片或表情包（segment.image）。filePath 为工作区内图片路径；GIF/PNG/JPG 等均走本工具，勿用 send_file。',
+      description: '向当前会话发送图片（segment.image）。filePath 为工作区内图片路径；可选 messageId 回复某条消息。GIF/PNG/JPG 等均走本工具，勿用 send_file。',
       inputSchema: {
         type: 'object',
         properties: {
-          filePath: { type: 'string', description: '工作区内图片路径' }
+          filePath: { type: 'string', description: '工作区内图片路径' },
+          messageId: { type: 'number', description: '可选，回复某条消息' }
         },
         required: ['filePath']
       },
@@ -514,7 +517,15 @@ export default class ChatStream extends AIStream {
           if (!e?.reply) {
             return { success: false, error: '当前环境无法发送消息' };
           }
-          await e.reply([segment.image(absPath)]);
+          const replyId = args.messageId != null ? String(args.messageId).trim() : '';
+          const payload = buildOutboundSegments(segment, {
+            replyId: replyId || null,
+            imagePaths: [absPath]
+          });
+          if (!payload.length) {
+            return { success: false, error: '无法组装发送内容' };
+          }
+          await e.reply(payload);
           const where = e.group_id ? `群 ${e.group_id}` : `用户 ${e.user_id}(私聊)`;
           const name = path.basename(absPath);
           this.recordAIResponse(e, `[图片:${name}]`);
@@ -1795,7 +1806,7 @@ export default class ChatStream extends AIStream {
     Bot.makeLog('debug', `[ChatStream] recordAIResponse group=${e?.group_id} textLen=${text.length} text=${text}`, 'ChatStream');
     
     // 提取图片内容标记（不会被用户看见，仅记录到历史）
-    const { imageContent, text: cleanText } = this.parseImageContentMark(text);
+    const { imageContent, text: cleanText } = parseImageContentMark(text);
     
     const msgData = {
       user_id: e.self_id,
@@ -2006,7 +2017,8 @@ export default class ChatStream extends AIStream {
       '',
       '## 对用户说话（assistant 正文群里不可见）',
       '- **reply**：文字。`|` 分句 · `[回复:消息ID]` · 群聊 `[at:数字QQ]`',
-      `- **emotion**：发表情包图（${formatEmotionTypeList()}）；用户只要表情时不要填 text`,
+      '- **emotion**：发表情包图（支持附言与 `[回复:消息ID]`）；用户只要表情时不要填 text',
+      '- **send_image**：工作区图片；可选 messageId 回复某条消息',
       '- 工具回执会说明「你已在群里发出什么」；用户已能看到后，不要重复 reply/emotion。',
       '- 禁止 `@QQ`/`@昵称`。只答 `[当前消息]`。',
       '',
@@ -2489,8 +2501,12 @@ export default class ChatStream extends AIStream {
   }
 
   static _prepareFallbackOutgoingText(text) {
+    const emotionRe = new RegExp(
+      `\\[(${EMOTION_TYPES.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\]`,
+      'g'
+    );
     return String(text ?? '')
-      .replace(/\[(开心|惊讶|伤心|大笑|害怕|生气)\]/g, '')
+      .replace(emotionRe, '')
       .replace(/\[at:\d{5,10}\]/gi, '')
       .replace(/\s+/g, ' ')
       .trim();
@@ -2526,16 +2542,24 @@ export default class ChatStream extends AIStream {
       if (forbidden) return { success: false, error: forbidden };
       const filtered = this.stripMarkdownForOutgoing(body);
       if (!filtered) return { success: false, error: '附言清理后为空' };
-      await e.reply([seg.image(image), filtered]);
-      this.recordAIResponse(e, filtered);
+      const { replyId, segments, displayText } = resolveOutgoingMessage(filtered);
+      const payload = buildOutboundSegments(seg, {
+        replyId,
+        imagePaths: [image],
+        segments
+      });
+      if (!payload.length) return { success: false, error: '无法组装发送内容' };
+      await e.reply(payload);
+      this.recordAIResponse(e, displayText);
       turn.hasSentEmotion = true;
-      turn.lastEmotionSummary = describeEmotionSent(emotionType, filtered);
+      turn.lastEmotionSummary = describeEmotionSent(emotionType, displayText);
       return {
         success: true,
-        raw: formatEmotionDeliveredAck(where, emotionType, filtered)
+        raw: formatEmotionDeliveredAck(where, emotionType, displayText)
       };
     }
-    await e.reply(seg.image(image));
+    const payload = buildOutboundSegments(seg, { imagePaths: [image] });
+    await e.reply(payload);
     this.recordAIResponse(e, '');
     turn.hasSentEmotion = true;
     turn.lastEmotionSummary = describeEmotionSent(emotionType, '');
@@ -2663,7 +2687,6 @@ export default class ChatStream extends AIStream {
       return { totalSent: 0, allSentContent: [] };
     }
 
-    // 分句：半角 | 与全角 ｜ 均作为分隔符，每条单独发送
     const messages = content.split(/[|｜]/).map(m => m.trim()).filter(Boolean);
     if (messages.length === 0) {
       return { totalSent: 0, allSentContent: [] };
@@ -2674,63 +2697,35 @@ export default class ChatStream extends AIStream {
     const allSentContent = [];
 
     for (let i = 0; i < messages.length; i++) {
-      let msg = messages[i];
+      const msg = messages[i];
       if (!msg) continue;
 
-      // 提取图片内容标记（不会被用户看见）
-      const { imageContent, text: afterImageMark } = this.parseImageContentMark(msg);
-      msg = afterImageMark;
+      const { imageContent, replyId, segments, displayText } = resolveOutgoingMessage(msg, {
+        fallbackReplyId: messageId
+      });
+      const payload = buildOutboundSegments(seg, { replyId, segments });
+      if (!payload.length) continue;
 
-      const { replyId, segments: parsedSegments } = parseReplyContentSegments(msg);
-      const segments = parsedSegments;
-      const finalReplyId = replyId || messageId;
+      await e.reply(payload);
 
-      const sentContent = segmentsToDisplayText(segments, msg);
-      if (finalReplyId) {
-        const replySegment = seg.reply(finalReplyId);
-        await e.reply(segments.length > 0 ? [replySegment, ...segments] : [replySegment, ' ']);
-      } else if (segments.length > 0) {
-        await e.reply(segments);
-      } else {
-        await e.reply(msg || ' ');
-      }
-
-      // 记录发送的内容（包含图片内容标记，用于历史记录）
+      const sentContent = displayText || msg;
       if (recordToHistory) {
-        const originalTextWithMark = imageContent 
-          ? `${sentContent || msg}[图片内容:${imageContent}]` 
-          : (sentContent || msg);
+        const originalTextWithMark = imageContent
+          ? `${sentContent}[图片内容:${imageContent}]`
+          : sentContent;
         this.recordAIResponse(e, originalTextWithMark);
       }
-      
-      // 计入回复记录（记录用户实际看到的内容，不含图片内容标记）
       if (updateReplyContents) {
-        allSentContent.push(sentContent || msg);
+        allSentContent.push(sentContent);
       }
       totalSent++;
 
-      // ⚠️ 重要：多条消息之间延迟，避免发送过快
       if (i < messages.length - 1) {
         await BotUtil.sleep(randomRange(800, 1500));
       }
     }
 
     return { totalSent, allSentContent };
-  }
-
-  parseImageContentMark(text) {
-    const imageContentRegex = /\[图片内容:([^\]]+)\]/g;
-    const matches = [];
-    let match;
-    while ((match = imageContentRegex.exec(text)) !== null) {
-      matches.push(match[1]);
-    }
-    if (matches.length === 0) return { imageContent: null, text };
-    const cleanText = text.replace(imageContentRegex, '').trim();
-    return {
-      imageContent: matches.join('；'), // 多个标记用分号连接
-      text: cleanText
-    };
   }
 
   /**
@@ -2776,8 +2771,7 @@ export default class ChatStream extends AIStream {
   /** 协议片段占位，避免被 Markdown 规则误伤（含表情、[CQ]、[回复]、[图片内容:]） */
   static _protectProtocolMarkers(text) {
     const tokens = [];
-    const re =
-      /(\[at:\d{5,10}\]|(?:\[图片内容:[^\]]+\])|(?:\[回复:(?:ID:)?\d+\])|(?:\[CQ:[^\]]+\]))/gi;
+    const re = new RegExp(PROTOCOL_MARKER_RE.source, PROTOCOL_MARKER_RE.flags);
     const masked = text.replace(re, (full) => {
       const i = tokens.length;
       tokens.push(full);
