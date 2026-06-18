@@ -24,13 +24,14 @@ import {
 import { summarizeToolForHistory } from '../../../lib/utils/mcp-server.js';
 import { runWithStreamRequestContext, getStreamRequestContext } from '../../../lib/aistream/stream-request-context.js';
 import {
+  buildOutboundSegments,
   contentHasGroupAt,
   EMOTION_TYPES,
   parseImageContentMark,
   PROTOCOL_MARKER_RE,
   replyContentForbidden,
   resolveOutgoingMessage,
-  buildOutboundSegments
+  splitProtocolParts
 } from '../../../lib/utils/chat-reply-protocol.js';
 import {
   EMOTION_IMAGE_EXTS,
@@ -411,7 +412,7 @@ export default class ChatStream extends AIStream {
     });
 
     this.registerMCPTool('emotion', {
-      description: `发表情包图片（resources/aiimages/{分类}/ 随机一张）。emotionType：${formatEmotionTypeList()}。text 可选附言，支持 [回复:消息ID]。用户只要表情时不要填 text。`,
+      description: `发表情包图片（resources/aiimages/{分类}/ 随机一张）。emotionType：${formatEmotionTypeList()}。text 可选附言，支持 [回复:消息ID] 与 | 分句（图与回复仅随第一条）。用户只要表情时不要填 text。`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -2016,8 +2017,8 @@ export default class ChatStream extends AIStream {
       persona + masterNote,
       '',
       '## 对用户说话（assistant 正文群里不可见）',
-      '- **reply**：文字。`|` 分句 · `[回复:消息ID]` · 群聊 `[at:数字QQ]`',
-      '- **emotion**：发表情包图（支持附言与 `[回复:消息ID]`）；用户只要表情时不要填 text',
+      '- **reply**：文字。`|` 分句 · `[回复:消息ID]` · 群聊 `[at:数字QQ]`（每条可带回复）',
+      '- **emotion**：发表情包；附言支持 `[回复:消息ID]` 与 `|` 分句，**图与回复仅第一条**',
       '- **send_image**：工作区图片；可选 messageId 回复某条消息',
       '- 工具回执会说明「你已在群里发出什么」；用户已能看到后，不要重复 reply/emotion。',
       '- 禁止 `@QQ`/`@昵称`。只答 `[当前消息]`。',
@@ -2542,15 +2543,14 @@ export default class ChatStream extends AIStream {
       if (forbidden) return { success: false, error: forbidden };
       const filtered = this.stripMarkdownForOutgoing(body);
       if (!filtered) return { success: false, error: '附言清理后为空' };
-      const { replyId, segments, displayText } = resolveOutgoingMessage(filtered);
-      const payload = buildOutboundSegments(seg, {
-        replyId,
+      const { totalSent, allSentContent } = await this._sendOutboundParts(e, {
+        content: filtered,
         imagePaths: [image],
-        segments
+        recordToHistory: true,
+        replyFallbackOnAllParts: false
       });
-      if (!payload.length) return { success: false, error: '无法组装发送内容' };
-      await e.reply(payload);
-      this.recordAIResponse(e, displayText);
+      if (totalSent < 1) return { success: false, error: '无法组装发送内容' };
+      const displayText = allSentContent.join(' | ');
       turn.hasSentEmotion = true;
       turn.lastEmotionSummary = describeEmotionSent(emotionType, displayText);
       return {
@@ -2679,53 +2679,72 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 文本协议：分句（|）、[回复:ID]、[at:QQ]、[图片内容:]
+   * 统一对外发送：| 分句、[回复:ID]、[at:QQ]、可选首条附图。
+   * @param {boolean} [opts.replyFallbackOnAllParts=true] reply 工具 messageId 是否作用于每条；emotion 为 false（仅首条可带回复/图）
    */
-  async _processAndSendTextProtocol(e, content, options = {}) {
-    const { messageId, recordToHistory = true, updateReplyContents = true } = options;
-    if (!e?.reply || !content?.trim()) {
+  async _sendOutboundParts(e, {
+    content,
+    messageId,
+    imagePaths = [],
+    recordToHistory = true,
+    updateReplyContents = true,
+    replyFallbackOnAllParts = true
+  } = {}) {
+    if (!e?.reply || !String(content ?? '').trim()) {
       return { totalSent: 0, allSentContent: [] };
     }
 
-    const messages = content.split(/[|｜]/).map(m => m.trim()).filter(Boolean);
-    if (messages.length === 0) {
-      return { totalSent: 0, allSentContent: [] };
-    }
+    const parts = splitProtocolParts(content);
+    if (!parts.length) return { totalSent: 0, allSentContent: [] };
 
     const seg = segment;
     let totalSent = 0;
     const allSentContent = [];
 
-    for (let i = 0; i < messages.length; i++) {
-      const msg = messages[i];
-      if (!msg) continue;
-
-      const { imageContent, replyId, segments, displayText } = resolveOutgoingMessage(msg, {
-        fallbackReplyId: messageId
+    for (let i = 0; i < parts.length; i++) {
+      const useFallback = replyFallbackOnAllParts || i === 0;
+      const { imageContent, replyId, segments, displayText } = resolveOutgoingMessage(parts[i], {
+        fallbackReplyId: useFallback ? messageId : null
       });
-      const payload = buildOutboundSegments(seg, { replyId, segments });
+      const payload = buildOutboundSegments(seg, {
+        replyId,
+        imagePaths: i === 0 ? imagePaths : [],
+        segments
+      });
       if (!payload.length) continue;
 
       await e.reply(payload);
 
-      const sentContent = displayText || msg;
+      const sentContent = displayText || parts[i];
       if (recordToHistory) {
         const originalTextWithMark = imageContent
           ? `${sentContent}[图片内容:${imageContent}]`
           : sentContent;
         this.recordAIResponse(e, originalTextWithMark);
       }
-      if (updateReplyContents) {
-        allSentContent.push(sentContent);
-      }
+      if (updateReplyContents) allSentContent.push(sentContent);
       totalSent++;
 
-      if (i < messages.length - 1) {
+      if (i < parts.length - 1) {
         await BotUtil.sleep(randomRange(800, 1500));
       }
     }
 
     return { totalSent, allSentContent };
+  }
+
+  /**
+   * 文本协议：分句（|）、[回复:ID]、[at:QQ]、[图片内容:]
+   */
+  async _processAndSendTextProtocol(e, content, options = {}) {
+    const { messageId, recordToHistory = true, updateReplyContents = true } = options;
+    return this._sendOutboundParts(e, {
+      content,
+      messageId,
+      recordToHistory,
+      updateReplyContents,
+      replyFallbackOnAllParts: true
+    });
   }
 
   /**
