@@ -82,7 +82,7 @@ export default class ChatStream extends AIStream {
       return `未向${where}发送可见正文。\n${ChatStream.TOOL_DELIVERED_FOOTER}`;
     }
     const body = items.map((c, i) => `${i + 1}. ${c}`).join('\n');
-    return `你已在${where}发送以下内容（共${items.length}条）：\n${body}\n${ChatStream.TOOL_DELIVERED_FOOTER}`;
+    return `已向${where}送达 ${items.length} 条可见消息：\n${body}\n对用户可见回复已完成，若无其他工具任务请结束，勿重复调用 reply。\n${ChatStream.TOOL_DELIVERED_FOOTER}`;
   }
 
   static actionAck(detail) {
