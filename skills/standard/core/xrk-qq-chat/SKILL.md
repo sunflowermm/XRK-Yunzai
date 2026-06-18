@@ -16,7 +16,13 @@ description: QQ/群聊 Agent：NapCat 能力、回复、发文件、记忆与刷
 | poke | 核心 `send_poke` |
 | relayPrivate | 私聊传话：`pickFriend` → `send_msg`（`user_id`） |
 | relayPrivateImage | 私聊发图：`pickFriend.sendMsg` + `segment.image` |
+| relayPrivateFile | 私聊发文件：`pickFriend.sendFile` + 工作区路径 |
 | relayPrivateEmotion | 私聊发表情包：`pickFriend` + `resources/aiimages` |
+| getFriendRequests | 待处理好友申请（`request_list` + `get_doubt_friends_add_request`） |
+| handleFriendRequest | 同意/拒绝好友申请：`set_friend_add_request`（须主人） |
+| handleDoubtFriendRequest | 同意可疑好友申请：`set_doubt_friends_add_request`（须主人） |
+| setFriendRemark | 设置好友备注：`set_friend_remark`（须主人） |
+| deleteFriend | 删除好友：`delete_friend`（须主人） |
 | send_file | 群组/私聊 `sendFile` + 工作区路径 |
 | getFriendList / getFriendInfo | 好友列表与资料（传话前确认 qq） |
 | saveMessageAsset | `get_msg` + 下载到工作区 `downloads/` |
@@ -37,9 +43,15 @@ description: QQ/群聊 Agent：NapCat 能力、回复、发文件、记忆与刷
 ## 私聊传话（relayPrivate*）
 
 - **relayPrivate**：`qq` + `content`；群聊中发起时正文**不会**出现在当前群，仅工具回执可见。
-- **relayPrivateImage** / **relayPrivateEmotion**：向好友私聊发图或表情包；附言支持 `|` 分句，图仅随第一条。
-- 目标须为机器人好友；先用 **getFriendList** / **getFriendInfo** 确认 QQ。实现：`bot.pickFriend(qq).sendMsg(...)`。
-- 主人可传话给非好友列表 QQ（放宽校验）；普通用户仅好友。
+- **relayPrivateImage** / **relayPrivateEmotion** / **relayPrivateFile**：向好友私聊发图、表情包或文件；附言支持 `|` 分句（图/文件与文字分条时图仅随首条）。
+- 目标须为机器人好友；先用 **getFriendList** 确认 QQ。非好友时 relay 会失败，**禁止 reply 声称已私聊发出**。
+
+## 加好友（限制说明）
+
+- **OneBot/NapCat 无「机器人主动加好友」API**；只能处理别人发来的申请。
+- 用户需先向机器人号发起好友申请；`plugins/system-plugin/plugin/friend.js` 在 `autoFriend=1` 时自动同意。
+- 主人手动处理：**getFriendRequests** → **handleFriendRequest**（`flag` + `approve`）；可疑申请用 **handleDoubtFriendRequest**。
+- 备注/删好友：**setFriendRemark**、**deleteFriend**（均须主人）。
 
 ## 聊天记录协议（一层限制）
 

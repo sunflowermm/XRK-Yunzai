@@ -77,7 +77,7 @@ export default class ChatStream extends AIStream {
   /** 已通过 reply/recordAIResponse 写入历史的对外工具，不再重复记工具摘要 */
   static TOOL_HISTORY_SKIP = new Set([
     'reply', 'emotion', 'send_file', 'send_image', 'poke',
-    'relayPrivate', 'relayPrivateImage', 'relayPrivateEmotion',
+    'relayPrivate', 'relayPrivateImage', 'relayPrivateEmotion', 'relayPrivateFile',
     'thumbUp', 'sign', 'emojiReaction', 'recall', 'forgeForward'
   ]);
 
@@ -163,6 +163,72 @@ export default class ChatStream extends AIStream {
     return null;
   }
 
+  /** 好友管理类写操作：仅主人 */
+  _requireMaster(context) {
+    if (context.e?.isMaster !== true) {
+      return { success: false, error: '需要主人权限' };
+    }
+    return null;
+  }
+
+  /** 从 bot.request_list 提取待处理好友申请 */
+  _collectPendingFriendRequests(bot) {
+    const list = typeof bot?.getSystemMsg === 'function'
+      ? bot.getSystemMsg()
+      : bot?.request_list;
+    if (!Array.isArray(list)) return [];
+
+    return list
+      .filter((item) => item?.request_type === 'friend')
+      .map((item) => ({
+        qq: String(item.user_id ?? ''),
+        comment: String(item.comment ?? '').trim(),
+        flag: String(item.flag ?? '').trim(),
+        time: item.time ?? null,
+        source: 'request_event'
+      }))
+      .filter((item) => item.qq && item.flag);
+  }
+
+  /** 按 flag 或 qq 解析待处理好友申请 */
+  _resolveFriendRequest(bot, { flag, qq } = {}) {
+    const pending = this._collectPendingFriendRequests(bot);
+    const flagStr = String(flag ?? '').trim();
+    if (flagStr) {
+      const hit = pending.find((item) => item.flag === flagStr);
+      if (hit) return hit;
+      return { flag: flagStr, qq: String(qq ?? '').trim() || null, source: 'manual_flag' };
+    }
+
+    const targetQq = this._normalizeTargetQq(qq);
+    if (!targetQq) return null;
+    const matches = pending.filter((item) => item.qq === targetQq);
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) {
+      return { error: `QQ ${targetQq} 有多条待处理申请，请指定 flag` };
+    }
+    return null;
+  }
+
+  async _fetchDoubtFriendRequests(bot, count = 20) {
+    if (!bot?.sendApi) return [];
+    try {
+      const result = await bot.sendApi('get_doubt_friends_add_request', { count });
+      const rows = Array.isArray(result?.data) ? result.data : [];
+      return rows.map((item) => ({
+        qq: String(item.user_id ?? ''),
+        nickname: String(item.nickname ?? '').trim(),
+        comment: String(item.reason ?? item.comment ?? '').trim(),
+        flag: String(item.flag ?? '').trim(),
+        age: item.age ?? null,
+        sex: item.sex ?? null,
+        source: 'doubt'
+      })).filter((item) => item.qq && item.flag);
+    } catch {
+      return [];
+    }
+  }
+
   /** 校验并规范化目标 QQ（5–10 位） */
   _normalizeTargetQq(raw) {
     const targetQq = String(raw ?? '').trim();
@@ -173,30 +239,155 @@ export default class ChatStream extends AIStream {
   }
 
   /**
-   * 通过 bot.pickFriend 获取私聊发送面；须为好友（主人可放宽）。
-   * @returns {{ friend, targetQq, displayName } | { error: string }}
+   * 通过 bot.pickFriend 获取私聊发送面；须为好友（刷新好友列表后校验，无主人放宽）。
+   * @returns {Promise<{ friend, targetQq, displayName } | { error: string }>}
    */
-  _pickFriendSender(e, qq) {
+  async _pickFriendSender(e, qq) {
     const targetQq = this._normalizeTargetQq(qq);
     if (!targetQq) return { error: 'qq 须为 5-10 位数字' };
 
     const bot = e?.bot;
     if (!bot?.pickFriend) return { error: '当前环境不支持私聊传话' };
 
-    const friend = bot.pickFriend(targetQq);
-    if (!friend?.sendMsg) return { error: '无法获取好友私聊发送能力' };
+    if (typeof bot.getFriendMap === 'function') {
+      try {
+        await bot.getFriendMap();
+      } catch (err) {
+        Bot.makeLog('warn', `[ChatStream] 刷新好友列表失败: ${err.message}`, 'ChatStream');
+      }
+    }
 
     const inFriendList =
       bot.fl?.has?.(targetQq) ||
       bot.fl?.has?.(parseInt(targetQq, 10)) ||
-      bot.fl?.get?.(targetQq) != null;
-    if (!inFriendList && e?.isMaster !== true) {
-      return { error: `QQ ${targetQq} 不在好友列表，无法私聊传话（可先 getFriendList 确认）` };
+      bot.fl?.get?.(targetQq) != null ||
+      bot.fl?.get?.(parseInt(targetQq, 10)) != null;
+    if (!inFriendList) {
+      return {
+        error: `QQ ${targetQq} 不在机器人好友列表，无法私聊传话。请让对方先添加机器人号为好友，或用 getFriendList 确认、getFriendRequests 处理申请。`
+      };
     }
+
+    const friend = bot.pickFriend(targetQq);
+    if (!friend?.sendMsg) return { error: '无法获取好友私聊发送能力' };
 
     const info = bot.fl?.get?.(targetQq) || bot.fl?.get?.(parseInt(targetQq, 10)) || {};
     const displayName = info.remark || info.nickname || targetQq;
     return { friend, targetQq, displayName };
+  }
+
+  _formatPrivateSendError(err, targetQq) {
+    let msg = String(err?.message || err || '').trim();
+    const errMsgMatch = msg.match(/"errMsg"\s*:\s*"([^"]+)"/);
+    if (errMsgMatch?.[1]) msg = errMsgMatch[1];
+    if (/添加对方为好友|不是好友|not friend/i.test(msg)) {
+      return `QQ ${targetQq} 不是机器人好友，私聊未发出。请让对方先添加机器人号为好友。`;
+    }
+    return msg || '私聊发送失败';
+  }
+
+  _relayPrivateFail(targetQq, message) {
+    const detail = this._formatPrivateSendError(message, targetQq);
+    const normalized = detail.startsWith('QQ ') ? detail : `私聊未发出：${detail}`;
+    return {
+      success: false,
+      error: normalized,
+      raw: `${normalized}。禁止 reply 声称已发送；请向当前会话如实说明。`
+    };
+  }
+
+  async _wrapRelayPrivateHandler(targetQq, fn, delay = 300) {
+    try {
+      const result = await fn();
+      if (result?.success === false) {
+        const errText = result.error || result.raw || '私聊发送失败';
+        return this._relayPrivateFail(targetQq, errText);
+      }
+      if (delay > 0) await BotUtil.sleep(delay);
+      return result;
+    } catch (err) {
+      return this._relayPrivateFail(targetQq, err);
+    }
+  }
+
+  /** 解析并校验工作区内文件；requireImage / rejectImage 二选一约束文件类型 */
+  _resolveWorkspaceFile(context, filePath, { requireImage = false, rejectImage = false } = {}) {
+    const rel = String(filePath ?? '').trim();
+    if (!rel) return { error: 'filePath 不能为空' };
+
+    const workspace = resolveWorkspaceAbsFromContext(context);
+    const baseTools = new BaseTools(workspace);
+    let absPath;
+    try {
+      absPath = baseTools.resolvePathInWorkspace(rel);
+    } catch (err) {
+      return { error: err.message || '路径无效' };
+    }
+    if (!FileUtils.existsSync(absPath)) {
+      return { error: `文件不存在: ${rel}` };
+    }
+    const st = FileUtils.statSync(absPath);
+    if (!st?.isFile()) {
+      return { error: '路径不是文件' };
+    }
+
+    const isImage = ChatStream._isImageLikePath(absPath);
+    if (requireImage && !isImage) {
+      return { error: '非图片文件请用 send_file 或 relayPrivateFile' };
+    }
+    if (rejectImage && isImage) {
+      return { error: '图片请用 send_image 或 relayPrivateImage' };
+    }
+
+    return { absPath, rel, displayName: path.basename(absPath), isImage };
+  }
+
+  _relayFromWhere(e) {
+    return e?.isGroup && e?.group_id ? `群 ${e.group_id}` : '当前私聊';
+  }
+
+  _relayPrivateAck(e, picked, detail) {
+    return actionAck(`你已从${this._relayFromWhere(e)}向好友 ${picked.displayName}(${picked.targetQq}) ${detail}`);
+  }
+
+  /** 私聊发图：可选附言（| 分句，图仅首条） */
+  async _relayPrivateImageSend(friend, absPath, text = '') {
+    const caption = String(text ?? '').trim();
+    if (!caption) {
+      await friend.sendMsg([segment.image(absPath)]);
+      return { totalSent: 1 };
+    }
+    const filtered = this.stripMarkdownForOutgoing(caption);
+    const forbidden = filtered ? replyContentForbidden(filtered) : null;
+    if (forbidden) return { error: forbidden };
+    if (!filtered) return { error: '附言清理后为空' };
+    const result = await this._relayPrivateOutbound(friend, {
+      content: filtered,
+      imagePaths: [absPath],
+      replyFallbackOnAllParts: false
+    });
+    if (result.totalSent < 1) return { error: '未能发出私聊图片' };
+    return result;
+  }
+
+  /** 私聊发非图片文件；可选附言（先文字后文件） */
+  async _relayPrivateFileSend(friend, absPath, displayName, text = '') {
+    const caption = String(text ?? '').trim();
+    if (caption) {
+      const filtered = this.stripMarkdownForOutgoing(caption);
+      const forbidden = filtered ? replyContentForbidden(filtered) : null;
+      if (forbidden) return { error: forbidden };
+      if (filtered) {
+        const { totalSent } = await this._relayPrivateOutbound(friend, {
+          content: filtered,
+          replyFallbackOnAllParts: true
+        });
+        if (totalSent < 1) return { error: '未能发出私聊附言' };
+      }
+    }
+    if (!friend?.sendFile) return { error: '无法私聊发送文件' };
+    await friend.sendFile(absPath, displayName);
+    return { success: true };
   }
 
   async _fetchMessageById(e, msgId) {
@@ -479,34 +670,17 @@ export default class ChatStream extends AIStream {
       },
       handler: async (args = {}, context = {}) => {
         const e = context.e;
-        const filePath = String(args.filePath ?? '').trim();
-        if (!filePath) return { success: false, error: 'filePath 不能为空' };
-        const workspace = resolveWorkspaceAbsFromContext(context);
-        const baseTools = new BaseTools(workspace);
+        const resolved = this._resolveWorkspaceFile(context, args.filePath, { rejectImage: true });
+        if (resolved.error) return { success: false, error: resolved.error };
+
         return this._wrapHandler(async () => {
-          let absPath;
-          try {
-            absPath = baseTools.resolvePathInWorkspace(filePath);
-          } catch (err) {
-            return { success: false, error: err.message || '路径无效' };
-          }
-          if (!FileUtils.existsSync(absPath)) {
-            return { success: false, error: `文件不存在: ${filePath}` };
-          }
-          const st = FileUtils.statSync(absPath);
-          if (!st?.isFile()) {
-            return { success: false, error: '路径不是文件' };
-          }
-          if (ChatStream._isImageLikePath(absPath)) {
-            return { success: false, error: '图片/表情包请用 send_image（segment 发图），勿用 send_file' };
-          }
-          const displayName = String(args.name ?? path.basename(absPath)).trim() || path.basename(absPath);
+          const displayName = String(args.name ?? resolved.displayName).trim() || resolved.displayName;
           const sender = e?.group_id ? e.group : e?.friend;
           if (!sender?.sendFile) {
             return { success: false, error: '当前环境不支持发送文件' };
           }
-          await sender.sendFile(absPath, displayName);
-          const where = e.group_id ? `群 ${e.group_id}` : `用户 ${e.user_id}(私聊)`;
+          await sender.sendFile(resolved.absPath, displayName);
+          const where = formatSessionWhere(e);
           return {
             success: true,
             raw: actionAck(`你已在${where}发送文件「${displayName}」`)
@@ -528,45 +702,27 @@ export default class ChatStream extends AIStream {
       },
       handler: async (args = {}, context = {}) => {
         const e = context.e;
-        const filePath = String(args.filePath ?? '').trim();
-        if (!filePath) return { success: false, error: 'filePath 不能为空' };
-        const workspace = resolveWorkspaceAbsFromContext(context);
-        const baseTools = new BaseTools(workspace);
+        const resolved = this._resolveWorkspaceFile(context, args.filePath, { requireImage: true });
+        if (resolved.error) return { success: false, error: resolved.error };
+        if (!e?.reply) {
+          return { success: false, error: '当前环境无法发送消息' };
+        }
+
         return this._wrapHandler(async () => {
-          let absPath;
-          try {
-            absPath = baseTools.resolvePathInWorkspace(filePath);
-          } catch (err) {
-            return { success: false, error: err.message || '路径无效' };
-          }
-          if (!FileUtils.existsSync(absPath)) {
-            return { success: false, error: `文件不存在: ${filePath}` };
-          }
-          const st = FileUtils.statSync(absPath);
-          if (!st?.isFile()) {
-            return { success: false, error: '路径不是文件' };
-          }
-          if (!ChatStream._isImageLikePath(absPath)) {
-            return { success: false, error: '非图片文件请用 send_file' };
-          }
-          if (!e?.reply) {
-            return { success: false, error: '当前环境无法发送消息' };
-          }
           const replyId = args.messageId != null ? String(args.messageId).trim() : '';
           const payload = buildOutboundSegments(segment, {
             replyId: replyId || null,
-            imagePaths: [absPath]
+            imagePaths: [resolved.absPath]
           });
           if (!payload.length) {
             return { success: false, error: '无法组装发送内容' };
           }
           await e.reply(payload);
-          const where = e.group_id ? `群 ${e.group_id}` : `用户 ${e.user_id}(私聊)`;
-          const name = path.basename(absPath);
-          this.recordAIResponse(e, `[图片:${name}]`);
+          const where = formatSessionWhere(e);
+          this.recordAIResponse(e, `[图片:${resolved.displayName}]`);
           return {
             success: true,
-            raw: actionAck(`你已在${where}发送图片「${name}」`)
+            raw: actionAck(`你已在${where}发送图片「${resolved.displayName}」`)
           };
         });
       },
@@ -585,25 +741,24 @@ export default class ChatStream extends AIStream {
       },
       handler: async (args = {}, context = {}) => {
         const e = context.e;
-        const picked = this._pickFriendSender(e, args.qq);
-        if (picked.error) return { success: false, error: picked.error };
+        const picked = await this._pickFriendSender(e, args.qq);
+        if (picked.error) return this._relayPrivateFail(String(args.qq ?? ''), picked.error);
         const rawContent = String(args.content ?? '').trim();
         if (!rawContent) return { success: false, error: 'content 不能为空' };
         const filtered = this.stripMarkdownForOutgoing(rawContent);
         if (!filtered) return { success: false, error: '清理 Markdown 后无可发送正文' };
         const forbidden = replyContentForbidden(filtered);
         if (forbidden) return { success: false, error: forbidden };
-        return this._wrapHandler(async () => {
+        return this._wrapRelayPrivateHandler(picked.targetQq, async () => {
           const { totalSent, allSentContent } = await this._relayPrivateOutbound(picked.friend, {
             content: filtered,
             replyFallbackOnAllParts: true
           });
           if (totalSent < 1) return { success: false, error: '未能向好友发出任何私聊消息' };
-          const fromWhere = e.isGroup && e.group_id ? `群 ${e.group_id}` : '当前私聊';
           const body = allSentContent.join(' | ');
           return {
             success: true,
-            raw: actionAck(`你已从${fromWhere}向好友 ${picked.displayName}(${picked.targetQq}) 私聊发出 ${totalSent} 条：${body}`)
+            raw: this._relayPrivateAck(e, picked, `私聊发出 ${totalSent} 条：${body}`)
           };
         });
       },
@@ -623,44 +778,60 @@ export default class ChatStream extends AIStream {
       },
       handler: async (args = {}, context = {}) => {
         const e = context.e;
-        const picked = this._pickFriendSender(e, args.qq);
-        if (picked.error) return { success: false, error: picked.error };
-        const filePath = String(args.filePath ?? '').trim();
-        if (!filePath) return { success: false, error: 'filePath 不能为空' };
-        const workspace = resolveWorkspaceAbsFromContext(context);
-        const baseTools = new BaseTools(workspace);
-        return this._wrapHandler(async () => {
-          let absPath;
-          try {
-            absPath = baseTools.resolvePathInWorkspace(filePath);
-          } catch (err) {
-            return { success: false, error: err.message || '路径无效' };
-          }
-          if (!FileUtils.existsSync(absPath)) {
-            return { success: false, error: `文件不存在: ${filePath}` };
-          }
-          if (!ChatStream._isImageLikePath(absPath)) {
-            return { success: false, error: '非图片文件，请用 send_file 发给当前会话' };
-          }
-          const caption = String(args.text ?? '').trim();
-          if (caption) {
-            const filtered = this.stripMarkdownForOutgoing(caption);
-            const forbidden = filtered ? replyContentForbidden(filtered) : null;
-            if (forbidden) return { success: false, error: forbidden };
-            const { totalSent } = await this._relayPrivateOutbound(picked.friend, {
-              content: filtered,
-              imagePaths: [absPath],
-              replyFallbackOnAllParts: false
-            });
-            if (totalSent < 1) return { success: false, error: '未能发出私聊图片' };
-          } else {
-            await picked.friend.sendMsg([segment.image(absPath)]);
-          }
-          const name = path.basename(absPath);
-          const fromWhere = e.isGroup && e.group_id ? `群 ${e.group_id}` : '当前私聊';
+        const picked = await this._pickFriendSender(e, args.qq);
+        if (picked.error) return this._relayPrivateFail(String(args.qq ?? ''), picked.error);
+
+        const resolved = this._resolveWorkspaceFile(context, args.filePath, { requireImage: true });
+        if (resolved.error) return { success: false, error: resolved.error };
+
+        return this._wrapRelayPrivateHandler(picked.targetQq, async () => {
+          const sendResult = await this._relayPrivateImageSend(
+            picked.friend,
+            resolved.absPath,
+            args.text
+          );
+          if (sendResult.error) return { success: false, error: sendResult.error };
           return {
             success: true,
-            raw: actionAck(`你已从${fromWhere}向好友 ${picked.displayName}(${picked.targetQq}) 私聊发送图片「${name}」`)
+            raw: this._relayPrivateAck(e, picked, `私聊发送图片「${resolved.displayName}」`)
+          };
+        });
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('relayPrivateFile', {
+      description: '向好友私聊发送工作区非图片文件（pickFriend.sendFile）。qq、filePath 必填；name 可选显示名；text 可选附言（先文字后文件）。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          qq: { type: 'number', description: '目标好友 QQ' },
+          filePath: { type: 'string', description: '工作区内文件路径' },
+          name: { type: 'string', description: '可选，客户端显示的文件名' },
+          text: { type: 'string', description: '可选附言，支持 | 分句' }
+        },
+        required: ['qq', 'filePath']
+      },
+      handler: async (args = {}, context = {}) => {
+        const e = context.e;
+        const picked = await this._pickFriendSender(e, args.qq);
+        if (picked.error) return this._relayPrivateFail(String(args.qq ?? ''), picked.error);
+
+        const resolved = this._resolveWorkspaceFile(context, args.filePath, { rejectImage: true });
+        if (resolved.error) return { success: false, error: resolved.error };
+
+        return this._wrapRelayPrivateHandler(picked.targetQq, async () => {
+          const displayName = String(args.name ?? resolved.displayName).trim() || resolved.displayName;
+          const sendResult = await this._relayPrivateFileSend(
+            picked.friend,
+            resolved.absPath,
+            displayName,
+            args.text
+          );
+          if (sendResult.error) return { success: false, error: sendResult.error };
+          return {
+            success: true,
+            raw: this._relayPrivateAck(e, picked, `私聊发送文件「${displayName}」`)
           };
         });
       },
@@ -680,8 +851,8 @@ export default class ChatStream extends AIStream {
       },
       handler: async (args = {}, context = {}) => {
         const e = context.e;
-        const picked = this._pickFriendSender(e, args.qq);
-        if (picked.error) return { success: false, error: picked.error };
+        const picked = await this._pickFriendSender(e, args.qq);
+        if (picked.error) return this._relayPrivateFail(String(args.qq ?? ''), picked.error);
         const t = String(args.emotionType ?? '').trim();
         if (!EMOTION_TYPES.includes(t)) return { success: false, error: '无效表情类型' };
         const image = this.getRandomEmotionImage(t);
@@ -691,31 +862,16 @@ export default class ChatStream extends AIStream {
             error: `表情包(${t})暂无图片，请检查 resources/aiimages/${t}/`
           };
         }
-        return this._wrapHandler(async () => {
-          const body = String(args.text ?? '').trim();
-          let displayText = '';
-          if (body) {
-            const filtered = this.stripMarkdownForOutgoing(body);
-            if (!filtered) return { success: false, error: '附言清理后为空' };
-            const forbidden = replyContentForbidden(filtered);
-            if (forbidden) return { success: false, error: forbidden };
-            const { totalSent, allSentContent } = await this._relayPrivateOutbound(picked.friend, {
-              content: filtered,
-              imagePaths: [image],
-              replyFallbackOnAllParts: false
-            });
-            if (totalSent < 1) return { success: false, error: '未能发出私聊表情包' };
-            displayText = allSentContent.join(' | ');
-          } else {
-            await picked.friend.sendMsg([segment.image(image)]);
-          }
-          const fromWhere = e.isGroup && e.group_id ? `群 ${e.group_id}` : '当前私聊';
+        return this._wrapRelayPrivateHandler(picked.targetQq, async () => {
+          const sendResult = await this._relayPrivateImageSend(picked.friend, image, args.text);
+          if (sendResult.error) return { success: false, error: sendResult.error };
+          const displayText = sendResult.allSentContent?.join(' | ') || '';
           const summary = displayText
             ? `表情包(${t}) 与附言「${displayText}」`
             : `表情包(${t})`;
           return {
             success: true,
-            raw: actionAck(`你已从${fromWhere}向好友 ${picked.displayName}(${picked.targetQq}) 私聊发出${summary}`)
+            raw: this._relayPrivateAck(e, picked, `私聊发出${summary}`)
           };
         });
       },
@@ -1640,6 +1796,192 @@ export default class ChatStream extends AIStream {
       enabled: true
     });
 
+    this.registerMCPTool('getFriendRequests', {
+      description: '获取待处理好友申请（内存 request 事件 + NapCat 可疑好友申请）。机器人不能主动加别人，只能处理别人发来的申请。返回每条 qq、comment、flag。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          includeDoubt: { type: 'boolean', description: '是否包含可疑好友申请，默认 true' },
+          doubtCount: { type: 'number', description: '可疑申请条数上限，默认 20' }
+        },
+        required: []
+      },
+      handler: async (args = {}, context = {}) => {
+        const e = context.e;
+        const bot = e?.bot;
+        if (!bot) return { success: false, error: 'bot 不可用' };
+
+        const pending = this._collectPendingFriendRequests(bot);
+        const includeDoubt = args.includeDoubt !== false;
+        const doubtful = includeDoubt
+          ? await this._fetchDoubtFriendRequests(bot, Math.min(Math.max(Number(args.doubtCount) || 20, 1), 50))
+          : [];
+
+        const data = { pending, doubtful, note: '机器人无法主动发起加好友，只能同意/拒绝收到的申请；处理用 handleFriendRequest（flag 必填）' };
+        const raw = this._queryToolRaw(
+          `待处理好友申请（事件 ${pending.length} 条${includeDoubt ? `，可疑 ${doubtful.length} 条` : ''}）`,
+          data
+        );
+        return { success: true, data, raw };
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('handleFriendRequest', {
+      description: '同意或拒绝好友申请（set_friend_add_request）。须主人。flag 必填；也可只给 qq 且在仅一条待处理申请时自动匹配。approve 默认 true；remark 仅同意时有效。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          flag: { type: 'string', description: '申请 flag（getFriendRequests 返回）' },
+          qq: { type: 'number', description: '申请人 QQ（无 flag 时用于匹配唯一待处理申请）' },
+          approve: { type: 'boolean', description: 'true 同意，false 拒绝，默认 true' },
+          remark: { type: 'string', description: '同意后的好友备注' }
+        },
+        required: []
+      },
+      handler: async (args = {}, context = {}) => {
+        const masterCheck = this._requireMaster(context);
+        if (masterCheck) return masterCheck;
+
+        const e = context.e;
+        const bot = e?.bot;
+        if (!bot?.setFriendAddRequest && !bot?.sendApi) {
+          return { success: false, error: '当前适配器不支持处理好友申请' };
+        }
+
+        const resolved = this._resolveFriendRequest(bot, args);
+        if (!resolved) {
+          return { success: false, error: '未找到待处理好友申请，请先 getFriendRequests 获取 flag' };
+        }
+        if (resolved.error) return { success: false, error: resolved.error };
+        if (!resolved.flag) return { success: false, error: '缺少有效 flag' };
+
+        const approve = args.approve !== false;
+        const remark = approve ? String(args.remark ?? '').trim() : '';
+
+        return this._wrapHandler(async () => {
+          if (bot.setFriendAddRequest) {
+            await bot.setFriendAddRequest(resolved.flag, approve, remark);
+          } else {
+            await bot.sendApi('set_friend_add_request', {
+              flag: resolved.flag,
+              approve,
+              remark
+            });
+          }
+
+          if (Array.isArray(bot.request_list)) {
+            bot.request_list = bot.request_list.filter(
+              (item) => !(item?.request_type === 'friend' && String(item.flag) === resolved.flag)
+            );
+          }
+
+          const who = resolved.qq || '对方';
+          const action = approve ? `已同意 ${who} 的好友申请` : `已拒绝 ${who} 的好友申请`;
+          const remarkNote = approve && remark ? `，备注「${remark}」` : '';
+          return { success: true, raw: actionAck(`你${action}${remarkNote}。`) };
+        });
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('handleDoubtFriendRequest', {
+      description: '同意可疑好友申请（set_doubt_friends_add_request）。须主人。flag 必填，来自 getFriendRequests 的 doubtful 列表。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          flag: { type: 'string', description: '可疑申请 flag' }
+        },
+        required: ['flag']
+      },
+      handler: async (args = {}, context = {}) => {
+        const masterCheck = this._requireMaster(context);
+        if (masterCheck) return masterCheck;
+
+        const e = context.e;
+        const bot = e?.bot;
+        if (!bot?.sendApi) return { success: false, error: '当前适配器不支持处理可疑好友申请' };
+
+        const flag = String(args.flag ?? '').trim();
+        if (!flag) return { success: false, error: 'flag 不能为空' };
+
+        return this._wrapHandler(async () => {
+          await bot.sendApi('set_doubt_friends_add_request', { flag });
+          return { success: true, raw: actionAck(`你已同意可疑好友申请（flag=${flag}）。`) };
+        });
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('setFriendRemark', {
+      description: '设置好友备注（set_friend_remark）。须主人。qq、remark 必填。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          qq: { type: 'number' },
+          remark: { type: 'string' }
+        },
+        required: ['qq', 'remark']
+      },
+      handler: async (args = {}, context = {}) => {
+        const masterCheck = this._requireMaster(context);
+        if (masterCheck) return masterCheck;
+
+        const e = context.e;
+        const bot = e?.bot;
+        const targetQq = this._normalizeTargetQq(args.qq);
+        if (!targetQq) return { success: false, error: 'qq 须为 5-10 位数字' };
+
+        const remark = String(args.remark ?? '').trim();
+        if (!remark) return { success: false, error: 'remark 不能为空' };
+
+        return this._wrapHandler(async () => {
+          if (bot?.setFriendRemark) {
+            await bot.setFriendRemark(targetQq, remark);
+          } else if (bot?.sendApi) {
+            await bot.sendApi('set_friend_remark', { user_id: targetQq, remark });
+          } else {
+            return { success: false, error: '当前适配器不支持设置好友备注' };
+          }
+          return { success: true, raw: actionAck(`你已将好友 ${targetQq} 的备注设为「${remark}」。`) };
+        });
+      },
+      enabled: true
+    });
+
+    this.registerMCPTool('deleteFriend', {
+      description: '删除好友（delete_friend）。须主人。qq 必填。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          qq: { type: 'number' }
+        },
+        required: ['qq']
+      },
+      handler: async (args = {}, context = {}) => {
+        const masterCheck = this._requireMaster(context);
+        if (masterCheck) return masterCheck;
+
+        const e = context.e;
+        const bot = e?.bot;
+        const targetQq = this._normalizeTargetQq(args.qq);
+        if (!targetQq) return { success: false, error: 'qq 须为 5-10 位数字' };
+
+        return this._wrapHandler(async () => {
+          const friend = bot?.pickFriend?.(targetQq);
+          if (friend?.delete) {
+            await friend.delete();
+          } else if (bot?.sendApi) {
+            await bot.sendApi('delete_friend', { user_id: targetQq });
+          } else {
+            return { success: false, error: '当前适配器不支持删除好友' };
+          }
+          return { success: true, raw: actionAck(`你已删除好友 ${targetQq}。`) };
+        });
+      },
+      enabled: true
+    });
+
     this.registerMCPTool('readChatRecord', {
       description: '读取群聊记录（结构化 JSON）。合并转发仅一层摘要，内层不可展开（框架协议限制）。messageId 可选查单条；limit 默认 30。',
       inputSchema: {
@@ -1736,7 +2078,7 @@ export default class ChatStream extends AIStream {
           const hint =
             asset.type === 'image' || asset.type === 'mface'
               ? `已保存到 ${relPath}。发图用 send_image；内置表情包用 emotion。`
-              : `已保存到 ${relPath}。发非图片文件用 send_file。`;
+              : `已保存到 ${relPath}。当前会话发文件用 send_file；私聊传文件用 relayPrivateFile。`;
           return { success: true, data, raw: hint };
         } catch (err) {
           return { success: false, error: err.message };
@@ -2206,9 +2548,10 @@ export default class ChatStream extends AIStream {
       '## 对用户说话（assistant 正文群里不可见）',
       '- **reply**：当前会话文字。`|` 分句 · `[回复:消息ID]` · 群聊 `[at:数字QQ]`',
       '- **emotion** / **send_image**：当前会话发表情包或图片',
-      '- **relayPrivate**：向好友私聊传话（`qq`+`content`，群聊也可发起，正文不进当前群）',
-      '- **relayPrivateImage** / **relayPrivateEmotion**：私聊发图或表情包给好友',
+      '- **relayPrivate** / **relayPrivateImage** / **relayPrivateFile** / **relayPrivateEmotion**：私聊传话；目标须为机器人好友（可先 getFriendList）；须等 relay 成功后再 reply，失败时勿声称已发出',
       '- 查好友用 **getFriendList** / **getFriendInfo**；私聊传话目标须为好友',
+      '- **加好友**：机器人不能主动加别人；用户加机器人后，主人可用 **getFriendRequests** + **handleFriendRequest** 同意/拒绝',
+      '- 配置 `autoFriend=1` 时会自动同意好友申请；可疑申请用 **handleDoubtFriendRequest**',
       '- 工具回执会说明已发出内容；用户已能看到后不要重复发送。',
       '- 禁止 `@QQ`/`@昵称`。只答 `[当前消息]`。',
       '',
