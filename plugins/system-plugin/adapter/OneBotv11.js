@@ -1,10 +1,13 @@
 import path from "node:path"
 import { ulid } from "ulid"
 
-/** 出站 file：优先 HTTP url / 本地 path，避免 NapCat 仅给文件名时读不到 */
+/** 出站 file：优先 HTTP url / 本地 path；Buffer 原样保留（勿 String()，与 TRSS makeMsg 一致） */
 function pickOutboundFileRef(data) {
   if (!data || typeof data !== "object") return data
-  const file = String(data.file ?? "").trim()
+  const rawFile = data.file
+  if (Buffer.isBuffer(rawFile) || rawFile instanceof Uint8Array) return rawFile
+  const file = typeof rawFile === "string" ? rawFile.trim() : String(rawFile ?? "").trim()
+  if (file.startsWith("base64://")) return file
   const url = String(data.url ?? "").trim()
   const p = String(data.path ?? "").trim()
   if (/^https?:\/\//i.test(file)) return file
@@ -125,14 +128,18 @@ Bot.adapter.push(
 
     /**
      * 转换文件为 base64、本地路径或 HTTP（与 TRSS OneBotv11 一致，交给协议端处理）
+     * 大图优先落盘为绝对路径，减轻 NapCat rich media 超时 / transfer failed
      */
     async makeFile(file, opts = {}) {
       file = await Bot.Buffer(file, {
         http: true,
-        size: 10485760,
+        size: 1048576,
         ...opts,
       })
       if (Buffer.isBuffer(file)) return `base64://${file.toString("base64")}`
+      if (typeof file === "string" && file.startsWith("file://")) {
+        return file.replace(/^file:\/\//, "")
+      }
       return file
     }
 
