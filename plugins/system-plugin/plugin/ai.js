@@ -197,7 +197,6 @@ export class XRKAIAssistant extends plugin {
       let trigger = true;
       if (!debugDumpFullPrompt) {
         trigger = await this.shouldTriggerAI(e);
-        Bot.makeLog('debug', `[XRK-AI] handleMessage 触发检查 group=${e.group_id} user=${e.user_id} atBot=${e.atBot} trigger=${trigger}`, 'XRK-AI');
       }
       if (!trigger) return false;
 
@@ -261,7 +260,6 @@ export class XRKAIAssistant extends plugin {
       return false;
     }
     if (!this.isInAiWhitelist(e)) {
-      Bot.makeLog('debug', `[XRK-AI] shouldTrigger 不在白名单 group=${e.group_id}`, 'XRK-AI');
       return false;
     }
 
