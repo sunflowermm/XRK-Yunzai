@@ -7,6 +7,8 @@ import {
   isHttpRef,
   readImageBuffer,
   persistEntryMedia,
+  inlineBinaryFromRef,
+  isEntryMediaRelPath,
 } from "../../lib/utils/entry-media.js"
 
 const ENTRY_MEDIA_TYPES = new Set(['image', 'video', 'record'])
@@ -1116,24 +1118,37 @@ export class add extends plugin {
         delete item.url
         delete item.fid
       } else if (mode === 'send' && ENTRY_MEDIA_TYPES.has(item.type)) {
-        const localPath = await this.resolveEntryMediaPath(item)
-        if (!localPath) continue
-        item.file = localPath
-        delete item.url
-        delete item.fid
+        const inline = inlineBinaryFromRef(item.file)
+        if (inline) {
+          item.file = `base64://${inline.toString('base64')}`
+          delete item.url
+          delete item.fid
+        } else {
+          const localPath = await this.resolveEntryMediaPath(item)
+          if (!localPath) continue
+          item.file = localPath
+          delete item.url
+          delete item.fid
+        }
       }
       out.push(item)
     }
     return out
   }
 
-  /** 解析词条本地媒体路径（仅相对/绝对本地路径，不含 HTTP） */
+  /** 解析词条本地媒体路径（仅相对/绝对本地路径，不含 HTTP / 内联二进制） */
   async resolveEntryMediaPath(item) {
     const ref = String(item?.file ?? '').trim()
-    if (!ref || isHttpRef(ref)) return null
-    const localPath = path.join(this.messageJsonDir, ref)
-    if (await Bot.fsStat(localPath)) return localPath
-    if (!ref.includes('/')) return ref
+    if (!ref || isHttpRef(ref) || ref.startsWith('base64://') || inlineBinaryFromRef(ref)) return null
+    if (isEntryMediaRelPath(ref)) {
+      const localPath = path.join(this.messageJsonDir, ref)
+      if (await Bot.fsStat(localPath)) return localPath
+    }
+    if (FileUtils.isPathLike(ref)) {
+      if (await Bot.fsStat(ref)) return ref
+      const nested = path.join(this.messageJsonDir, ref)
+      if (await Bot.fsStat(nested)) return nested
+    }
     return null
   }
 
