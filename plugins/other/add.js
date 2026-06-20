@@ -5,10 +5,9 @@ import crypto from "crypto"
 import { FileUtils } from "../../lib/utils/file-utils.js"
 import {
   isHttpRef,
-  isEntryMediaRelPath,
   readImageBuffer,
   persistEntryMedia,
-} from "../../lib/utils/outbound-media.js"
+} from "../../lib/utils/entry-media.js"
 
 const ENTRY_MEDIA_TYPES = new Set(['image', 'video', 'record'])
 import {

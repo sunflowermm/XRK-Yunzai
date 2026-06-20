@@ -2,7 +2,7 @@ import path from 'path';
 import AIStream from '../../../lib/aistream/aistream.js';
 import BotUtil from '../../../lib/util.js';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
-import { materializeMediaRefToPath } from '../../../lib/utils/outbound-media.js';
+import { readImageBuffer } from '../../../lib/utils/entry-media.js';
 import { BaseTools } from '../../../lib/utils/base-tools.js';
 import StreamLoader from '../../../lib/aistream/loader.js';
 import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
@@ -521,7 +521,8 @@ export default class ChatStream extends AIStream {
     }
 
     if ((asset.type === 'image' || asset.type === 'mface') && (asset.file || asset.url)) {
-      if (await materializeMediaRefToPath({ file: asset.file, url: asset.url }, absPath, sendApi)) {
+      const buf = await readImageBuffer({ file: asset.file, url: asset.url }, sendApi, { persist: true });
+      if (buf?.length && await FileUtils.writeFileBuffer(absPath, buf)) {
         return absPath;
       }
     }

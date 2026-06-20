@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FileUtils } from '../lib/utils/file-utils.js';
-import { isHttpRef } from '../lib/utils/outbound-media.js';
+import { isHttpRef } from '../lib/utils/entry-media.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MSG_DIR = path.join(__dirname, '..', 'data/messageJson');
