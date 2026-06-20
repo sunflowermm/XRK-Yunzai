@@ -139,8 +139,13 @@ Bot.adapter.push(
       const msgs = []
       const forward = []
       for (let i of msg) {
-        if (typeof i !== "object") i = { type: "text", data: { text: i } }
-        else if (!i.data) i = { type: i.type, data: { ...i, type: undefined } }
+        if (Buffer.isBuffer(i) || i instanceof Uint8Array) {
+          i = { type: "image", data: { file: i } }
+        } else if (typeof i !== "object") i = { type: "text", data: { text: i } }
+        else if (!i.data) {
+          const coerced = tryCoerceBareBytesSegment({ data: i })
+          i = coerced || { type: i.type, data: { ...i, type: undefined } }
+        }
         else {
           const coerced = tryCoerceBareBytesSegment(i)
           if (coerced) i = coerced
