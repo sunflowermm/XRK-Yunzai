@@ -1,20 +1,22 @@
 import path from "node:path"
 import { ulid } from "ulid"
 
-/** 出站 file：优先 HTTP url / 本地 path；Buffer 原样保留（勿 String()，与 TRSS makeMsg 一致） */
+/** NapCat 出站：url/path 优先；Buffer 勿 String()（TRSS 直传 makeFile） */
 function pickOutboundFileRef(data) {
-  if (!data || typeof data !== "object") return data
-  const rawFile = data.file
-  if (Buffer.isBuffer(rawFile) || rawFile instanceof Uint8Array) return rawFile
-  const file = typeof rawFile === "string" ? rawFile.trim() : String(rawFile ?? "").trim()
+  if (!data || typeof data !== "object") return data?.file
+  const raw = data.file
+  if (Buffer.isBuffer(raw) || raw instanceof Uint8Array) return raw
+  const file = typeof raw === "string" ? raw.trim() : ""
   if (file.startsWith("base64://")) return file
   const url = String(data.url ?? "").trim()
   const p = String(data.path ?? "").trim()
   if (/^https?:\/\//i.test(file)) return file
   if (/^https?:\/\//i.test(url)) return url
   if (p) return p
-  return file || url || p
+  return file || url || p || undefined
 }
+
+const RICH_MEDIA = new Set(["image", "video", "record"])
 
 /** gml 成员 Map：统一以 string QQ 为键，读取时兼容历史 number 键 */
 function gmlMemberGet(map, userId) {
@@ -38,41 +40,6 @@ function gmlMemberDelete(map, userId) {
   map.delete(String(userId))
   const n = Number(userId)
   if (Number.isFinite(n)) map.delete(n)
-}
-
-/** 兼容把“裸字节数组”当消息段传入的历史插件：推断为 image.file(base64://...) */
-function tryCoerceBareBytesSegment(seg) {
-  if (!seg || typeof seg !== "object") return null
-  if (seg.type) return null
-  const data = seg.data
-  if (!data) return null
-
-  let buf = null
-  if (Buffer.isBuffer(data)) {
-    buf = data
-  } else if (data instanceof Uint8Array) {
-    buf = Buffer.from(data)
-  } else if (typeof data === "object") {
-    // 形如 {0:255,1:216,...}（JSON 化的 Buffer）
-    const keys = Object.keys(data)
-    if (keys.length > 0 && keys.length <= 10_000_000 && keys.every(k => /^\d+$/.test(k))) {
-      const maxKey = Math.max(...keys.map(k => Number(k)))
-      if (maxKey + 1 === keys.length) {
-        const arr = new Uint8Array(keys.length)
-        for (let i = 0; i < keys.length; i++) {
-          const v = data[i]
-          if (typeof v !== "number") return null
-          arr[i] = v & 0xff
-        }
-        buf = Buffer.from(arr)
-      }
-    }
-  }
-
-  if (!buf?.length) return null
-
-  // 只做最小兜底：交给 OneBot 的 image 段处理
-  return { type: "image", data: { file: `base64://${buf.toString("base64")}` } }
 }
 
 Bot.adapter.push(
@@ -126,26 +93,17 @@ Bot.adapter.push(
         })
     }
 
-    /**
-     * 转换文件为 base64、本地路径或 HTTP（与 TRSS OneBotv11 一致，交给协议端处理）
-     * 大图优先落盘为绝对路径，减轻 NapCat rich media 超时 / transfer failed
-     */
     async makeFile(file, opts = {}) {
       file = await Bot.Buffer(file, {
         http: true,
-        size: 1048576,
+        size: opts.preferPath ? 1 : 1048576,
         ...opts,
       })
       if (Buffer.isBuffer(file)) return `base64://${file.toString("base64")}`
-      if (typeof file === "string" && file.startsWith("file://")) {
-        return file.replace(/^file:\/\//, "")
-      }
+      if (typeof file === "string" && file.startsWith("file://")) return file.slice(7)
       return file
     }
 
-    /**
-     * 处理消息格式
-     */
     async makeMsg(msg) {
       if (!Array.isArray(msg)) msg = [msg]
       const msgs = []
@@ -153,14 +111,10 @@ Bot.adapter.push(
       for (let i of msg) {
         if (Buffer.isBuffer(i) || i instanceof Uint8Array) {
           i = { type: "image", data: { file: i } }
-        } else if (typeof i !== "object") i = { type: "text", data: { text: i } }
-        else if (!i.data) {
-          const coerced = tryCoerceBareBytesSegment({ data: i })
-          i = coerced || { type: i.type, data: { ...i, type: undefined } }
-        }
-        else {
-          const coerced = tryCoerceBareBytesSegment(i)
-          if (coerced) i = coerced
+        } else if (typeof i !== "object") {
+          i = { type: "text", data: { text: i } }
+        } else if (!i.data) {
+          i = { type: i.type, data: { ...i, type: undefined } }
         }
 
         switch (i.type) {
@@ -188,7 +142,9 @@ Bot.adapter.push(
         }
 
         const fileRef = pickOutboundFileRef(i.data)
-        if (fileRef) i.data.file = await this.makeFile(fileRef)
+        if (fileRef != null && fileRef !== "") {
+          i.data.file = await this.makeFile(fileRef, RICH_MEDIA.has(i.type) ? { preferPath: true } : {})
+        }
         msgs.push(i)
       }
       return [msgs, forward]
