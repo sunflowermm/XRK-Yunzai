@@ -2,6 +2,11 @@
 headless: new
 restartNum: 100
 puppeteerTimeout: 120000
+healthCheckInterval: 120000
+# 长时间无截图则重启 Chromium，避免隔夜连接僵死（0 关闭）
+idleRestartMs: 14400000
+maxRetries: 3
+retryDelay: 2000
 memoryThreshold: 1024
 maxConcurrent: 3
 waitUntil: domcontentloaded

@@ -31,6 +31,11 @@ export default class PuppeteerRenderer extends Renderer {
     this.puppeteerTimeout = config.puppeteerTimeout ?? rendererCfg.puppeteerTimeout ?? 120000;
     this.memoryThreshold = config.memoryThreshold ?? rendererCfg.memoryThreshold ?? 1024;
     this.maxConcurrent = config.maxConcurrent ?? rendererCfg.maxConcurrent ?? 3;
+    this.healthCheckInterval = config.healthCheckInterval ?? rendererCfg.healthCheckInterval ?? 120000;
+    this.idleRestartMs = config.idleRestartMs ?? rendererCfg.idleRestartMs ?? 14400000;
+    this.maxRetries = config.maxRetries ?? rendererCfg.maxRetries ?? 3;
+    this.retryDelay = config.retryDelay ?? rendererCfg.retryDelay ?? 2000;
+    this.lastActivityAt = Date.now();
     this._fileCache = new Map();
 
     this.config = {
@@ -333,8 +338,39 @@ export default class PuppeteerRenderer extends Renderer {
     return "000000000000";
   }
 
+  async connectToExisting(browserWSEndpoint, retries = 0) {
+    try {
+      const browser = await puppeteer.connect({
+        browserWSEndpoint,
+        defaultViewport: null,
+      });
+      const page = await browser.newPage();
+      await page.goto("about:blank", { timeout: 5000 });
+      await page.close();
+      return browser;
+    } catch (e) {
+      if (retries < this.maxRetries - 1) {
+        await new Promise(r => setTimeout(r, this.retryDelay * Math.pow(2, retries)));
+        return this.connectToExisting(browserWSEndpoint, retries + 1);
+      }
+      BotUtil.makeLog("warn", `Failed to connect to existing Chromium: ${e.message}`, "PuppeteerRenderer");
+      if (this.browserMacKey) await redis.del(this.browserMacKey).catch(() => {});
+      return null;
+    }
+  }
+
   async browserInit() {
-    if (this.browser) return this.browser;
+    if (this.browser) {
+      try {
+        if (!this.browser.isConnected()) throw new Error("disconnected");
+        await this.browser.version();
+        return this.browser;
+      } catch (e) {
+        BotUtil.makeLog("warn", `Existing browser invalid: ${e.message}`, "PuppeteerRenderer");
+        this.browser = null;
+        if (this.browserMacKey) await redis.del(this.browserMacKey).catch(() => {});
+      }
+    }
     if (this.lock) {
       const deadline = Date.now() + (this.config.browserInitWaitMax ?? 60000);
       while (this.lock && !this.browser && Date.now() < deadline) await new Promise(r => setTimeout(r, 200));
@@ -365,25 +401,8 @@ export default class PuppeteerRenderer extends Renderer {
       }
 
       if (browserWSEndpoint) {
-        try {
-          BotUtil.makeLog("info", `Connecting to existing Chromium instance: ${browserWSEndpoint}`, "PuppeteerRenderer");
-          this.browser = await puppeteer.connect({
-            browserWSEndpoint,
-            defaultViewport: null,
-          });
-
-          const pages = await this.browser.pages().catch(() => null);
-          if (!pages || !Array.isArray(pages)) {
-            await this.browser.close().catch(() => {});
-            this.browser = null;
-            if (this.browserMacKey) await redis.del(this.browserMacKey).catch(() => {});
-          }
-        } catch (e) {
-          BotUtil.makeLog("warn", `Failed to connect to existing Chromium: ${e.message}`, "PuppeteerRenderer");
-          if (this.browserMacKey) {
-            await redis.del(this.browserMacKey).catch(() => {});
-          }
-        }
+        BotUtil.makeLog("info", `Connecting to existing Chromium instance: ${browserWSEndpoint}`, "PuppeteerRenderer");
+        this.browser = await this.connectToExisting(browserWSEndpoint);
       }
 
       if (!this.browser) {
@@ -435,17 +454,24 @@ export default class PuppeteerRenderer extends Renderer {
 
   startHealthCheck() {
     if (this.healthCheckTimer) return;
-    
+
     this.healthCheckTimer = setInterval(async () => {
       if (!this.browser || this.shoting.length > 0 || this.shotingUser.length > 0) return;
-      
+
+      if (this.idleRestartMs > 0 && Date.now() - this.lastActivityAt > this.idleRestartMs) {
+        BotUtil.makeLog("info", "Chromium idle timeout, restarting...", "PuppeteerRenderer");
+        await this.restart(true);
+        return;
+      }
+
       try {
-        await this.browser.pages();
+        if (!this.browser.isConnected()) throw new Error("disconnected");
+        await this.browser.version();
       } catch (e) {
         BotUtil.makeLog("warn", `Health check failed: ${e.message}, restarting...`, "PuppeteerRenderer");
         await this.restart(true);
       }
-    }, 120000);
+    }, this.healthCheckInterval);
   }
 
   async screenshot(name, data = {}) {
@@ -467,6 +493,15 @@ export default class PuppeteerRenderer extends Renderer {
       if (isUserTriggered) this.shotingUser = this.shotingUser.filter(i => i !== name);
       else this.shoting = this.shoting.filter(i => i !== name);
       return false;
+    }
+
+    if (this.idleRestartMs > 0 && Date.now() - this.lastActivityAt > this.idleRestartMs) {
+      await this.restart(true);
+      if (!await this.browserInit()) {
+        if (isUserTriggered) this.shotingUser = this.shotingUser.filter(i => i !== name);
+        else this.shoting = this.shoting.filter(i => i !== name);
+        return false;
+      }
     }
 
     const wantTpl = Boolean(d.tplFile);
@@ -534,8 +569,12 @@ export default class PuppeteerRenderer extends Renderer {
 
       ret = await this.captureScreenshot(page, d, name, start, useUrl, pageHeight);
       this.renderNum += ret.length;
+      if (ret.length > 0) this.lastActivityAt = Date.now();
     } catch (error) {
       BotUtil.makeLog("error", `[${name}] Screenshot failed: ${error.message}`, "PuppeteerRenderer");
+      if (/timeout|timed out|disconnected|Target closed/i.test(error.message)) {
+        setTimeout(() => this.restart(true), 500);
+      }
       ret = [];
     } finally {
       if (page) {
@@ -583,6 +622,7 @@ export default class PuppeteerRenderer extends Renderer {
       }
 
       this.renderNum = 0;
+      this.lastActivityAt = Date.now();
 
       if (this.healthCheckTimer) {
         clearInterval(this.healthCheckTimer);
