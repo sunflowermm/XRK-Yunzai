@@ -13,6 +13,35 @@ const mediaDir = resolveProjectPath(WWW_MEDIA_DIR);
 const TEMP_MAX_AGE_MS = 3600000;  // 1 小时
 const TEMP_CLEANUP_INTERVAL_MS = 3600000;
 
+/** 将消息段 / 转发节点内容格式化为可读文本（避免控制台出现 [object Object]） */
+function formatMessageContent(message) {
+  if (message == null) return '';
+  if (typeof message === 'string') return message;
+  if (Array.isArray(message)) {
+    return message.map(formatMessageContent).filter(Boolean).join('');
+  }
+  if (typeof message !== 'object') return String(message);
+  if (message.type === 'text') return message.text ?? '';
+  if (message.type === 'image') return `[图片:${message.file || message.url || '未命名'}]`;
+  if (message.type === 'video') return `[视频:${message.file || message.url || '未命名'}]`;
+  if (message.type === 'record') return `[语音:${message.file || message.url || '未命名'}]`;
+  if (message.type === 'at') return `[@${message.qq ?? message.id ?? ''}]`;
+  if (message.message !== undefined) return formatMessageContent(message.message);
+  if (message.type) return `[${message.type}]`;
+  try {
+    return JSON.stringify(message);
+  } catch {
+    return String(message);
+  }
+}
+
+function formatForwardPreview(item) {
+  if (item?.preview) return item.preview;
+  const nodes = item?.messages || item?.data;
+  if (!Array.isArray(nodes)) return '[转发消息]';
+  return nodes.map(n => formatMessageContent(n.message ?? n)).filter(Boolean).join('\n\n---\n\n');
+}
+
 /** 清理 www/stdin、www/media 下超过时效的临时文件，返回删除数量 */
 async function runTempCleanup() {
   let cleaned = 0;
@@ -333,9 +362,18 @@ export class StdinHandler {
           case 'forward':
             processed.push(item);
             break;
+          case 'node':
+            processed.push({
+              type: 'forward',
+              messages: item.data,
+              preview: formatForwardPreview({ data: item.data })
+            });
+            break;
           default:
             processed.push(item);
         }
+      } else if (typeof item === 'object' && item !== null && item.message !== undefined) {
+        processed.push({ type: 'text', text: formatMessageContent(item.message) });
       } else {
         processed.push({ type: "text", text: String(item) });
       }
@@ -484,8 +522,8 @@ export class StdinHandler {
     }
 
     if (result.content.length === 1 && result.content[0].type === 'forward') {
-      const forward = result.content[0].messages || result.content[0];
-      return `转发消息: ${JSON.stringify(forward, null, 2)}`;
+      const preview = formatForwardPreview(result.content[0]);
+      return preview || '转发消息';
     }
 
     const parts = [];
@@ -614,7 +652,10 @@ export class StdinHandler {
           processedItems.push(item);
         } else if (item.type === 'forward') {
           processedItems.push(item);
-          textLogs.push(`[转发消息]`);
+          textLogs.push(formatForwardPreview(item));
+        } else if (item.type === 'node' && Array.isArray(item.data)) {
+          processedItems.push(item);
+          textLogs.push(formatForwardPreview({ data: item.data }));
         } else {
           const typeMap = {
             'at': `[@${item.qq || item.id}]`,
@@ -627,6 +668,10 @@ export class StdinHandler {
           textLogs.push(typeMap[item.type] || `[${item.type}]`);
           processedItems.push(item);
         }
+      } else if (item && typeof item === 'object' && item.message !== undefined) {
+        const text = formatMessageContent(item.message);
+        textLogs.push(text);
+        processedItems.push({ type: 'text', text });
       } else {
         const text = String(item);
         textLogs.push(text);
@@ -661,11 +706,12 @@ export class StdinHandler {
       return [];
     }
 
+    const preview = forwardMsg.map(n => formatMessageContent(n.message)).filter(Boolean).join('\n\n---\n\n');
     logger.subtitle("收到转发消息");
     logger.line('-', 40, 'cyan');
-    Bot.makeLog('mark', `转发消息内容: ${JSON.stringify(forwardMsg, null, 2)}`, 'StdinAdapter');
+    Bot.makeLog('mark', preview || '（空转发）', 'StdinAdapter');
     logger.line('-', 40, 'cyan');
-    return forwardMsg;
+    return [{ type: 'forward', messages: forwardMsg, preview }];
   }
 
   cleanupTempFiles() {
