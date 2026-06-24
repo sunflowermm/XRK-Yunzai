@@ -521,7 +521,7 @@ export default class ChatStream extends AIStream {
     }
 
     if ((asset.type === 'image' || asset.type === 'mface') && (asset.file || asset.url)) {
-      const buf = await readImageBuffer({ file: asset.file, url: asset.url }, sendApi, { persist: true });
+      const buf = await readImageBuffer({ file: asset.file, url: asset.url }, sendApi);
       if (buf?.length && await FileUtils.writeFileBuffer(absPath, buf)) {
         return absPath;
       }

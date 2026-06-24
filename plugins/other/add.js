@@ -343,7 +343,6 @@ export class add extends plugin {
       const buffer = await readImageBuffer(
         typeof imgUrl === 'object' && imgUrl !== null ? imgUrl : { url: imgUrl },
         this._bindSendApi(),
-        { persist: true },
       )
       if (!buffer?.length) return { success: false, error: '下载图片失败' }
 
@@ -801,7 +800,7 @@ export class add extends plugin {
   async getImageHash(imgUrl) {
     try {
       const refs = typeof imgUrl === 'object' && imgUrl !== null ? imgUrl : { url: imgUrl }
-      const buffer = await readImageBuffer(refs, this._bindSendApi(), { persist: true })
+      const buffer = await readImageBuffer(refs, this._bindSendApi())
       if (!buffer?.length) return null
       return crypto.createHash('md5').update(buffer).digest('hex')
     } catch (err) {
