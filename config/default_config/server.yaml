@@ -264,6 +264,10 @@ auth:
     file: "config/server_config/api_key.json"
     # length: 密钥长度（字符数）
     length: 64
+  # onebot: NapCat 反向 WS（/OneBotv11）专项配置
+  onebot:
+    # requireLoopbackAuth: true 时即使来自 127.* 也要求 Bearer/access_token（与 api_key.json 一致）
+    requireLoopbackAuth: true
   # uiCookie: 同源前端免认证（与 XRK-AGT 对齐）
   uiCookie:
     # enabled: 是否启用同源 Cookie 放行
