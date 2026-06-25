@@ -218,6 +218,7 @@ export default class PuppeteerRenderer extends Renderer {
       type: imgType === "png" ? "png" : "jpeg",
       omitBackground: d.omitBackground ?? false,
       quality: d.quality ?? 85,
+      timeout: Number.isFinite(d.screenshotTimeout) ? d.screenshotTimeout : this.puppeteerTimeout,
     };
     if (opts.type === "png") delete opts.quality;
     if (d.path) opts.path = d.path;
