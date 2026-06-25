@@ -2340,6 +2340,7 @@ Bot.adapter.push(
         this.defineEventProperty(data, "member", () => this.pickMember(data, data.group_id, data.user_id))
       }
 
+      if (!data.sender) data.sender = {}
       const memberMap = data.bot.gml.get(data.group_id)
       const memberInfo = gmlMemberGet(memberMap, data.user_id)
       const friendInfo = data.bot.fl.get(data.user_id)
@@ -2846,7 +2847,9 @@ Bot.adapter.push(
       data.bot.request_list.push(data)
       data.tasker = 'onebot'
       data.isOneBot = true
-      
+      data.sender ??= {}
+      this.attachRelationAccessors(data)
+
       const onebotRequestEvent = `onebot.${data.post_type}`
       Bot.em(onebotRequestEvent, data)
       Bot.em(`${data.post_type}.${data.request_type}.${data.sub_type}`, data)

@@ -5,26 +5,13 @@ export class quit extends plugin {
     super({
       name: 'notice',
       dsc: '自动退群',
-      event: ['notice.group.increase', 'request.group.invite']
+      event: 'notice.group.increase'
     })
   }
 
   async accept () {
     const other = cfg.other
     if (other.autoQuit <= 0) return
-
-    /** 请求阶段直接拒绝拉群邀请，避免遗漏入群事件 */
-    if (this.e.post_type === 'request') {
-      if (this.e.sub_type !== 'invite') return
-      const inviter = Number(this.e.user_id)
-      if (cfg.masterQQ.some(qq => Number(qq) === inviter)) {
-        Bot.makeLog('mark', `[主人邀请] ${this.e.group_id}`, 'Quit')
-        return
-      }
-      await this.e.bot.setGroupAddRequest(this.e.flag, false, '禁止拉群')
-      Bot.makeLog('mark', `[自动拒绝拉群邀请] ${this.e.group_id}`, 'Quit')
-      return
-    }
 
     /** 仅处理机器人自身入群的通知 */
     if (this.e.user_id != this.e.bot.uin) return

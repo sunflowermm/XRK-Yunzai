@@ -9,15 +9,38 @@ export class invite extends plugin {
     })
   }
 
+  isMaster (userId) {
+    const masters = cfg.masterQQ
+    if (!masters?.length) return false
+    const id = Number(userId)
+    return masters.some(qq => Number(qq) === id)
+  }
+
+  groupLabel () {
+    return this.e.group_name || this.e.group_id
+  }
+
   async accept () {
-    if (!cfg.masterQQ || !cfg.masterQQ.includes(Number(this.e.user_id))) {
-      Bot.makeLog('mark', `[邀请加群]：${this.e.group_name}：${this.e.group_id}`, 'Invite')
+    const inviter = Number(this.e.user_id)
+    const label = this.groupLabel()
+
+    if (this.isMaster(inviter)) {
+      Bot.makeLog('mark', `[主人邀请加群]：${label}：${this.e.group_id}`, 'Invite')
+      await this.e.approve(true)
+      try {
+        await this.e.bot.pickFriend(inviter).sendMsg(`已同意加群：${label}`)
+      } catch (err) {
+        Bot.makeLog('error', err, 'Invite')
+      }
       return
     }
-    Bot.makeLog('mark', `[主人邀请加群]：${this.e.group_name}：${this.e.group_id}`, 'Invite')
-    this.e.approve(true)
-    this.e.bot.sendPrivateMsg(this.e.user_id, `已同意加群：${this.e.group_name}`).catch((err) => {
-      Bot.makeLog('error', err, 'Invite')
-    })
+
+    Bot.makeLog('mark', `[邀请加群]：${label}：${this.e.group_id}`, 'Invite')
+
+    const autoQuit = cfg.other?.autoQuit ?? 0
+    if (autoQuit <= 0) return
+
+    await this.e.approve(false, '禁止拉群')
+    Bot.makeLog('mark', `[自动拒绝拉群邀请] ${this.e.group_id}`, 'Invite')
   }
 }
