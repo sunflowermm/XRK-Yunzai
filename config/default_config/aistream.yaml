@@ -9,7 +9,8 @@ global:
   maxConcurrent: 5
 
 cache:
-  enabled: true
+  # Agent/聊天工作流默认不缓存整轮结果；仅无工具、显式 config.cache: true 的只读流可 opt-in
+  enabled: false
   ttl: 300
   maxSize: 100
 
@@ -31,6 +32,13 @@ llm:
       - timeout
       - network
       - "5xx"
+  # Provider 提示缓存：提高前缀命中率、降低 input token 费用（OpenAI / Anthropic / DeepSeek 等）
+  promptCache:
+    enabled: true
+    keyPrefix: xrk
+    retention: in-memory
+    anthropicCache: true
+    scopeInKey: true
 
 mcp:
   enabled: true

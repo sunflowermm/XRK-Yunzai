@@ -4,7 +4,6 @@ import BotUtil from '../../../lib/util.js';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
 import { readImageBuffer } from '../../../lib/utils/entry-media.js';
 import { BaseTools } from '../../../lib/utils/base-tools.js';
-import StreamLoader from '../../../lib/aistream/loader.js';
 import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
 import { prepareOpenAIChatVisionMessages } from '../../../lib/utils/llm/image-utils.js';
 import {
@@ -23,6 +22,10 @@ import {
 } from '../../../lib/utils/llm/llm-nonstream-reply.js';
 import { summarizeToolForHistory } from '../../../lib/utils/mcp-server.js';
 import { runWithStreamRequestContext, getStreamRequestContext } from '../../../lib/aistream/stream-request-context.js';
+import { bumpAgentSessionForEvent } from '../../../lib/aistream/agent-session.js';
+import { assembleChatLlmMessages } from '../../../lib/aistream/chat-pipeline.js';
+import { applyPromptCachePolicy } from '../../../lib/utils/llm/prompt-cache-policy.js';
+import { MemorySystem } from '../../../lib/aistream/memory.js';
 import {
   buildOutboundSegments,
   contentHasGroupAt,
@@ -90,6 +93,7 @@ export default class ChatStream extends AIStream {
       priority: 10,
       config: {
         enabled: true,
+        cache: false,
         temperature: 0.8,
         maxTokens: 8000,
         topP: 0.9,
@@ -2308,7 +2312,7 @@ export default class ChatStream extends AIStream {
       };
 
       if (groupId && e.isGroup !== false) {
-        ChatStream._pushGroupHistoryEntry(groupId, msgData);
+        ChatStream._pushGroupHistoryEntry(groupId, msgData, { e });
       }
 
       Bot.makeLog('debug', `[ChatStream] recordMessage group=${groupId} userId=${userId} msgLen=${(message || '').length} messageId=${messageId}`, 'ChatStream');
@@ -2347,7 +2351,7 @@ export default class ChatStream extends AIStream {
       imageContentMark: imageContent || undefined // 图片内容标记（如果存在）
     };
     if (e?.isGroup && e.group_id) {
-      ChatStream._pushGroupHistoryEntry(e.group_id, msgData, { local: true });
+      ChatStream._pushGroupHistoryEntry(e.group_id, msgData, { local: true, e });
     }
     if (imageContent) {
       Bot.makeLog('debug', `[ChatStream] recordAIResponse 提取图片内容标记: ${imageContent}`, 'ChatStream');
@@ -2419,10 +2423,11 @@ export default class ChatStream extends AIStream {
     );
   }
 
-  static _pushGroupHistoryEntry(groupId, msgData, { local = false } = {}) {
+  static _pushGroupHistoryEntry(groupId, msgData, { local = false, e = null } = {}) {
     if (!groupId || !msgData) return;
     const entry = ChatStream._prepareHistoryEntry(groupId, msgData, { local });
     ChatStream._mergeAndStoreGroupHistory(groupId, [entry]);
+    if (e) bumpAgentSessionForEvent(e);
   }
 
   /**
@@ -2446,7 +2451,7 @@ export default class ChatStream extends AIStream {
         isTool: true,
         toolName: String(toolName || '')
       };
-      ChatStream._pushGroupHistoryEntry(e.group_id, msgData, { local: true });
+      ChatStream._pushGroupHistoryEntry(e.group_id, msgData, { local: true, e });
       Bot.makeLog(
         'debug',
         `[ChatStream] recordToolCallResult tool=${toolName} group=${e.group_id} summaryLen=${summary.length}`,
@@ -2531,20 +2536,11 @@ export default class ChatStream extends AIStream {
     const persona =
       question?.persona ||
       '你是群里一起聊天的伙伴：像真人一样接话——听得懂玩笑和气氛，该正经说清、该闲聊就短打，别像客服稿或说明书。';
-    const botRole = question?.botRole || this.getBotRole(e);
-    const dateStr = question?.dateStr || new Date().toLocaleString('zh-CN');
     const botName = e.bot?.nickname || e.bot?.info?.nickname || e.bot?.name || 'Bot';
-    const isMaster = e.isMaster === true;
-    const masterNote = isMaster ? '\n主人指令优先、少反驳。' : '';
-
-    const sessionLine = e.isGroup && e.group_id
-      ? `${botName}｜QQ ${e.self_id}｜群 ${e.group_id}｜${botRole}｜${dateStr}`
-      : `${botName}｜QQ ${e.self_id}｜私聊 ${e.user_id}｜${dateStr}`;
 
     const lines = [
       `# ${botName}`,
-      sessionLine,
-      persona + masterNote,
+      persona,
       '',
       '## 对用户说话（assistant 正文群里不可见）',
       '- **reply**：当前会话文字。`|` 分句 · `[回复:消息ID]` · 群聊 `[at:数字QQ]`',
@@ -2673,27 +2669,35 @@ export default class ChatStream extends AIStream {
     return '';
   }
 
+  /** 动态上下文：时间/主人权限等，勿写入 system（避免破坏 Provider 前缀缓存） */
+  _buildVolatileTurnContext(e, question) {
+    const dateStr = question?.dateStr || new Date().toLocaleString('zh-CN');
+    const botName = e?.bot?.nickname || e?.bot?.info?.nickname || e?.bot?.name || 'Bot';
+    const botRole = question?.botRole || this.getBotRole(e);
+    const sessionLine = e?.isGroup && e?.group_id
+      ? `${botName}｜QQ ${e.self_id}｜群 ${e.group_id}｜${botRole}`
+      : `${botName}｜QQ ${e.self_id}｜私聊 ${e.user_id}`;
+    const isMaster = e?.isMaster === true;
+    const parts = [`会话：${sessionLine}`, `当前时间：${dateStr}`];
+    if (isMaster) parts.push('当前发言者为主人，指令优先、少反驳。');
+    return `【本轮上下文】\n${parts.join('\n')}`;
+  }
+
   /**
-   * 构建增强上下文：在基础 messages 上追加 Redis 会话记忆摘要（若有）
+   * 构建增强上下文：Redis 记忆与动态轮次信息以独立 user 消息注入（static system 前缀可缓存）
    */
-  async buildEnhancedContext(e, query, messages) {
-    const baseMessages = typeof super.buildEnhancedContext === 'function'
-      ? await super.buildEnhancedContext(e, query, messages)
-      : messages;
+  async buildEnhancedContext(e, question, messages) {
+    const enhanced = [...messages];
+    let insertAt = 1;
+
+    const volatile = this._buildVolatileTurnContext(e, question);
+    if (volatile) {
+      enhanced.splice(insertAt++, 0, { role: 'user', content: volatile });
+    }
 
     const memText = await this._buildMemoryContext(e);
-    if (!memText) return baseMessages;
-
-    const enhanced = [...baseMessages];
-    const head = enhanced[0];
-    if (head?.role === 'system') {
-      const cur = head.content;
-      const merged = typeof cur === 'string'
-        ? `${cur}\n\n${memText}`
-        : `${typeof cur === 'object' && cur != null ? JSON.stringify(cur) : String(cur)}\n\n${memText}`;
-      enhanced[0] = { ...head, content: merged };
-    } else {
-      enhanced.unshift({ role: 'system', content: memText });
+    if (memText) {
+      enhanced.splice(insertAt, 0, { role: 'user', content: memText });
     }
 
     return enhanced;
@@ -2769,6 +2773,7 @@ export default class ChatStream extends AIStream {
 
       if (newMessages.length > 0) {
         ChatStream._mergeAndStoreGroupHistory(groupId, newMessages);
+        bumpAgentSessionForEvent(e);
       }
     } catch (error) {
       Bot.makeLog(
@@ -3171,42 +3176,47 @@ export default class ChatStream extends AIStream {
     return { llm, text };
   }
 
-  async execute(e, messages, config) {
+  async execute(e, question, config) {
     let debugDumpFullPrompt = false;
-    if (!Array.isArray(messages) && messages && typeof messages === 'object') {
-      debugDumpFullPrompt = !!messages.debugDumpFullPrompt;
+    if (!Array.isArray(question) && question && typeof question === 'object') {
+      debugDumpFullPrompt = !!question.debugDumpFullPrompt;
+    }
+
+    const runTurn = async () => {
+      if (e) this.recordMessage(e);
+
+      const questionObj = !Array.isArray(question) && question && typeof question === 'object'
+        ? question
+        : null;
+
+      const messages = await assembleChatLlmMessages(this, e, questionObj ?? question);
+      const callOpts = { ...config, debugDumpFullPrompt, _debugDumpEvent: e };
+      let llm = await this.callAI(messages, callOpts);
+      if (llm == null) return null;
+
+      let text = String(llm.text ?? '').trim();
+      if (text) text = this.stripMarkdownForOutgoing(text);
+
+      ({ llm, text } = await this._ensureUserVisibleReply(e, llm, text));
+      return text || '';
+    };
+
+    const existing = getStreamRequestContext();
+    if (existing?.turnState) {
+      try {
+        return await runTurn();
+      } catch (error) {
+        Bot.makeLog('error', `[ChatStream] execute 失败: ${error.message}`, 'ChatStream');
+        return null;
+      }
     }
 
     return runWithStreamRequestContext({ e, turnState: createUserVisibleTurnState() }, async () => {
       try {
-        if (e) this.recordMessage(e);
-
-        if (!Array.isArray(messages)) {
-          messages = await this.buildChatContext(e, messages);
-        }
-
-        messages = await this.mergeMessageHistory(messages, e);
-
-        const query = Array.isArray(messages) ? this.extractQueryFromMessages(messages) : messages;
-        messages = await this.buildEnhancedContext(e, query, messages);
-
-        if (Bot.StreamLoader) Bot.StreamLoader.currentEvent = e || null;
-
-        const callOpts = { ...config, debugDumpFullPrompt, _debugDumpEvent: e };
-        let llm = await this.callAI(messages, callOpts);
-        if (llm == null) return null;
-
-        let text = String(llm.text ?? '').trim();
-        if (text) text = this.stripMarkdownForOutgoing(text);
-
-        ({ llm, text } = await this._ensureUserVisibleReply(e, llm, text));
-
-        return text || '';
+        return await runTurn();
       } catch (error) {
         Bot.makeLog('error', `[ChatStream] execute 失败: ${error.message}`, 'ChatStream');
         return null;
-      } finally {
-        if (Bot.StreamLoader?.currentEvent === e) Bot.StreamLoader.currentEvent = null;
       }
     });
   }
@@ -3507,7 +3517,7 @@ export default class ChatStream extends AIStream {
   static async dumpLlmRequestSnapshot(stream, e, messagesAssembled, apiConfigRest) {
     const result = { success: false };
     try {
-      const resolved = stream.resolveLLMConfig(apiConfigRest || {});
+      const resolved = applyPromptCachePolicy(stream.resolveLLMConfig(apiConfigRest || {}), { stream, e });
       const client = LLMFactory.createClient(resolved);
       const overrides = { ...resolved, stream: false, streams: stream._getToolStreamNames() };
       const timeoutMs = client.timeout ?? client._timeout ?? 360000;
@@ -3564,27 +3574,42 @@ export default class ChatStream extends AIStream {
 
   /**
    * 清除指定群组/用户的完整对话记录
-   * @param {string|number} groupId - 群组ID或用户ID
+   * @param {string|number} scopeId - 群组 ID 或用户 ID
+   * @param {{ e?: object, isGroup?: boolean }} [options]
    * @returns {Promise<Object>} 清除结果
    */
-  static async clearConversation(groupId) {
-    const gid = String(groupId);
+  static async clearConversation(scopeId, { e = null, isGroup } = {}) {
+    const gid = String(scopeId);
+    const groupChat = isGroup ?? (e?.isGroup !== false && !!e?.group_id);
     const result = {
       success: true,
       cleared: {
-        history: false
+        history: false,
+        memory: false
       }
     };
 
     try {
-      // 清除聊天记录
       if (ChatStream.messageHistory.has(gid)) {
         ChatStream._dropGroupHistoryState(gid);
         result.cleared.history = true;
-        Bot.makeLog('debug', `[ChatStream] clearConversation 清除聊天记录 group=${gid}`, 'ChatStream');
+        Bot.makeLog('debug', `[ChatStream] clearConversation 清除聊天记录 scope=${gid}`, 'ChatStream');
       }
 
-      Bot.makeLog('debug', `[ChatStream] clearConversation 完成 group=${gid} cleared=${JSON.stringify(result.cleared)}`, 'ChatStream');
+      const mem = new MemorySystem({ baseKey: 'ai:memory:chat' });
+      if (mem.isEnabled()) {
+        if (groupChat) {
+          result.cleared.memory = await mem.forget(`group:${gid}`, 'group');
+        } else {
+          result.cleared.memory = await mem.forget(gid, 'private');
+        }
+      }
+
+      if (e) {
+        bumpAgentSessionForEvent(e);
+      }
+
+      Bot.makeLog('debug', `[ChatStream] clearConversation 完成 scope=${gid} cleared=${JSON.stringify(result.cleared)}`, 'ChatStream');
     } catch (error) {
       result.success = false;
       Bot.makeLog('error', `[ChatStream] clearConversation 失败: ${error.message}`, 'ChatStream');

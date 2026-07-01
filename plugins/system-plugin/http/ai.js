@@ -11,6 +11,8 @@ import {
   applyRequestWorkspaceToStreams
 } from '../lib/ai-workspace-runtime.js';
 import { runWithAiConsoleContext } from '../lib/ai-workspace-context.js';
+import { pickPromptCacheOverrides } from '../../../lib/utils/llm/prompt-cache-policy.js';
+import { assembleChatLlmMessages } from '../../../lib/aistream/chat-pipeline.js';
 
 /**
  * POST /api/v3/chat/completions
@@ -167,7 +169,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
   }
 
   const base = LLMFactory.getProviderConfig(provider);
-  const llmConfig = { provider, ...base };
+  const llmConfig = { provider, ...base, promptCache: aistreamCfgForRequest.llm?.promptCache };
   Bot.makeLog('debug', `[AI] 运营商=${provider}, stream=${streamFlag}, messages=${messages?.length ?? 0}`, 'HTTP');
 
   if (streamFlag && base.enableStream === false) {
@@ -218,6 +220,10 @@ async function handleChatCompletionsV3(req, res, Bot) {
     overrides.streams = expandChatToolStreamWhitelist(workflowStreams);
   }
   overrides.mcpToolMode = workflowStreams?.length ? 'execute' : 'passthrough';
+  Object.assign(
+    overrides,
+    pickPromptCacheOverrides(llmConfig, { stream: { name: workflowStreams?.[0] || 'http-v3' } })
+  );
 
   const fileWorkspaceAbs = workspaceCtx.fileRootAbs || workspaceCtx.agentRootAbs;
   const restoreStreamWorkspace = applyRequestWorkspaceToStreams(Bot?.StreamLoader, fileWorkspaceAbs);
@@ -459,7 +465,7 @@ async function handleAiStream(req, res, Bot) {
   if (res.flushHeaders) res.flushHeaders();
 
   try {
-    const messages = await stream.buildChatContext(null, { text: prompt || '你好', persona });
+    const messages = await assembleChatLlmMessages(stream, null, { text: prompt || '你好', persona });
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       res.write('data: ' + JSON.stringify({ error: '消息构建失败' }) + '\n\n');
       res.write('data: [DONE]\n\n');

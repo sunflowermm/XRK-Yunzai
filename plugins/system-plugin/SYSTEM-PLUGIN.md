@@ -122,7 +122,7 @@ plugins/system-plugin/
 
 - **ai.js（XRK-AI 助手）**  
   - 监听 `message`，根据 `data/ai/config.yaml` 判断是否触发（白名单群/用户、@ 或前缀、冷却与概率）。  
-  - 触发后取 `chat` 或合并流 `chat-merged`，调用 `stream.process(e, { content, persona, ... })`。  
+  - 触发后取 `chat` 或合并流 `chat-merged`，经 `StreamLoader.executeStream` 执行（并发限制 + 统一 ALS）。  
   - 若配置了 `mergeStreams`，会在 `init` 时调用 `StreamLoader.mergeStreams({ name: 'chat-merged', main: 'chat', secondary: mergeStreams, prefixSecondary: true })`。
 
 - **recallReply.js**：回复撤回（如 `#撤回`），仅主人。  

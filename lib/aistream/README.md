@@ -6,7 +6,9 @@
 |------|------|
 | **loader.js** | `StreamLoader`：加载 `plugins/<插件>/stream/`；MCP（`mcpServer`、内置 `mcpServers`、远程 `aistream.mcp.remote.mcpServers` JSON 块） |
 | **aistream.js** | `AIStream`：工作流基类；`resolveLLMConfig` 合并单次调用、工作流 `this.config`、`LLMFactory.getProviderConfig`、`getAistreamConfigOptional().llm` |
-| **stream-cache.js** | 工作流结果 LRU 缓存（读 `getAistreamConfigOptional().cache`） |
+| **chat-pipeline.js** | Chat LLM 消息组装（history/memory/静态 system 分层） |
+| **stream-cache.js** | 工作流结果 LRU（opt-in；键含 session revision） |
+| **agent-session.js** | 会话 revision / 有副作用流判定 |
 | **memory.js** / **workflow-manager.js** | 记忆与调度，见 [docs/reference/WORKFLOWS.md](../../docs/reference/WORKFLOWS.md) |
 
 ## 配置读取

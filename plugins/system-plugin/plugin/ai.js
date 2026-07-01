@@ -167,11 +167,12 @@ export class XRKAIAssistant extends plugin {
         Bot.makeLog('info', `[XRK-AI] 检测到清除对话指令 group=${groupId} user=${e.user_id}`, 'XRK-AI');
         
         try {
-          const result = await ChatStream.clearConversation(groupId);
+          const result = await ChatStream.clearConversation(e.group_id || e.user_id, { e });
 
           if (result.success) {
             const clearedItems = [];
             if (result.cleared.history) clearedItems.push('聊天记录');
+            if (result.cleared.memory) clearedItems.push('Redis 记忆');
 
             await e.reply(`✅ 对话已重置！已清除：${clearedItems.join('、') || '无'}`);
             Bot.makeLog('info', `[XRK-AI] 清除对话成功 group=${groupId} cleared=${JSON.stringify(result.cleared)}`, 'XRK-AI');
@@ -212,7 +213,7 @@ export class XRKAIAssistant extends plugin {
       // 调试导出：勿走「随机撸猫」群合并分支，便于对照真实 messages
       const isGlobalTrigger = isRandom && !debugDumpFullPrompt;
       Bot.makeLog('debug', `[XRK-AI] 消息内容 isRandom=${isRandom} isGlobalTrigger=${isGlobalTrigger} len=${text?.length ?? 0} debugDump=${!!debugDumpFullPrompt}`, 'XRK-AI');
-      // 仅调试口令、剥离后无正文时也必须走 stream（否则会跳过 execute 里的 dumpFullLlmContextToData）
+      // 仅调试口令、剥离后无正文时也必须走 stream（否则会跳过 execute 里的 dumpLlmRequestSnapshot）
       if (!debugDumpFullPrompt && !isGlobalTrigger && !text) {
         const img = stream.getRandomEmotionImage?.('惊讶');
         if (img) await e.reply(segment.image(img));
@@ -221,8 +222,9 @@ export class XRKAIAssistant extends plugin {
         return true;
       }
 
-      Bot.makeLog('debug', `[XRK-AI] 调用 stream.process personaLen=${(this.config.persona ?? '').length}`, 'XRK-AI');
-      await stream.process(
+      Bot.makeLog('debug', `[XRK-AI] 调用 executeStream name=${stream?.name}`, 'XRK-AI');
+      await Bot.StreamLoader.executeStream(
+        stream,
         e,
         {
           content: text,
@@ -233,7 +235,7 @@ export class XRKAIAssistant extends plugin {
         },
         {}
       );
-      Bot.makeLog('debug', `[XRK-AI] stream.process 完成`, 'XRK-AI');
+      Bot.makeLog('debug', `[XRK-AI] executeStream 完成`, 'XRK-AI');
       return true;
     } catch (err) {
       Bot.makeLog('error', `[XRK-AI] handleMessage: ${err.message}`, 'XRK-AI');
