@@ -1,36 +1,21 @@
 export class newcomer extends plugin {
   constructor () {
     super({
-		/** 插件名字 */
       name: '欢迎新人',
-	  /** 插件描述 */
       dsc: '新人入群欢迎',
-      /** https://oicqjs.github.io/oicq/#events */
-	  /** 插件触发事件 */
       event: 'notice.group.increase',
       priority: 5000
     })
   }
 
-  /** 接受到消息都会执行一次 */
   async accept () {
-    /** 定义入群欢迎内容 */
-    let msg = '欢迎新人！'
-    /** 冷却cd 30s */
-    let cd = 30
+    const e = this.e
+    if (e.user_id === e.self_id || e.user_id === e.bot?.uin) return
 
-    if (this.e.user_id == this.e.bot.uin) return
-
-    /** cd */
-    let key = `Yz:newcomers:${this.e.group_id}`
-    if (await redis.get(key)) return
-    redis.set(key, '1', { EX: cd })
-
-    /** 回复 */
     await this.reply([
-      segment.at(this.e.user_id),
-      // segment.image(),
-      msg
+      segment.at(e.user_id),
+      ' ',
+      '欢迎新人！'
     ])
   }
 }
@@ -43,24 +28,21 @@ export class outNotice extends plugin {
       event: 'notice.group.decrease'
     })
 
-    /** 退群提示词 */
     this.tips = '退群了'
   }
 
   async accept () {
-    if (this.e.user_id == this.e.bot.uin) return
+    const e = this.e
+    if (e.user_id === e.self_id || e.user_id === e.bot?.uin) return
 
-    let name, msg
-    if (this.e.member) {
-      name = this.e.member.card || this.e.member.nickname
-    }
-
-    if (name) {
-      msg = `${name}(${this.e.user_id}) ${this.tips}`
+    let msg
+    if (e.member) {
+      const name = e.member.card || e.member.nickname
+      msg = name ? `${name}(${e.user_id}) ${this.tips}` : `${e.user_id} ${this.tips}`
     } else {
-      msg = `${this.e.user_id} ${this.tips}`
+      msg = `${e.user_id} ${this.tips}`
     }
-    Bot.makeLog('mark', `[退出通知]${this.e.logText} ${msg}`, 'GroupNotice')
+    Bot.makeLog('mark', `[退出通知]${e.logText} ${msg}`, 'GroupNotice')
     await this.reply(msg)
   }
 }
