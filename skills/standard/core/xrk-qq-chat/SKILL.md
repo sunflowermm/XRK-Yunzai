@@ -33,7 +33,7 @@ description: QQ/群聊 Agent：NapCat 能力、回复、发文件、记忆与刷
 | setEssence / removeEssence | `set_essence_msg` / `delete_essence_msg` |
 | setGroupTodo | `set_group_todo` |
 | completeGroupTodo / cancelGroupTodo | `complete_group_todo` / `cancel_group_todo` |
-| mute / kick / setAdmin … | 群组接口（**需群主/管理员**） |
+| mute / kick / setAdmin / setGroupName / **setGroupAvatar** … | 群组接口（**需群主/管理员**；头像为工作区图片路径 → `set_group_portrait`） |
 | getGroupInfo / getMemberInfo | 群组接口 |
 | thumbUp | 用户接口 `send_like` |
 | recall | `delete_msg` + `get_msg` |

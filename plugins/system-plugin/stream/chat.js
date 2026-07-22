@@ -1124,6 +1124,52 @@ export default class ChatStream extends AIStream {
       enabled: true
     });
 
+    this.registerMCPTool('setGroupAvatar', {
+      description:
+        '将工作区内图片设为当前群头像。filePath 为工作区相对路径（如 downloads/xxx.png）。仅群聊；发言者须群主/管理员或主人；机器人须有群管权限。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          filePath: {
+            type: 'string',
+            description: '工作区内图片路径（PNG/JPG/GIF/WEBP/BMP 等）',
+          },
+        },
+        required: ['filePath'],
+      },
+      handler: async (args = {}, context = {}) => {
+        const adminCheck = this._requireGroupAdmin(context);
+        if (adminCheck) return adminCheck;
+
+        const e = context.e;
+        const speakerOk =
+          e.isMaster === true ||
+          e.sender?.role === 'owner' ||
+          e.sender?.role === 'admin' ||
+          e.member?.is_owner === true ||
+          e.member?.is_admin === true;
+        if (!speakerOk) {
+          return { success: false, error: '需要群主、管理员或主人才能设置群头像' };
+        }
+        if (typeof e.group?.setAvatar !== 'function') {
+          return { success: false, error: '当前环境不支持设置群头像' };
+        }
+
+        const resolved = this._resolveWorkspaceFile(context, args.filePath, { requireImage: true });
+        if (resolved.error) return { success: false, error: resolved.error };
+
+        return this._wrapHandler(async () => {
+          await e.group.setAvatar(resolved.absPath);
+          const gid = e.group_id;
+          return {
+            success: true,
+            raw: actionAck(`你已将工作区图片「${resolved.displayName}」设为群 ${gid} 的头像。`),
+          };
+        });
+      },
+      enabled: true,
+    });
+
     this.registerMCPTool('setAdmin', {
       description: '设置管理员。qq 必填。需管理/群主。仅群聊。',
       inputSchema: {
@@ -2545,6 +2591,7 @@ export default class ChatStream extends AIStream {
       '## 对用户说话（assistant 正文群里不可见）',
       '- **reply**：当前会话文字。`|` 分句 · `[回复:消息ID]` · 群聊 `[at:数字QQ]`',
       '- **emotion** / **send_image**：当前会话发表情包或图片',
+      '- **setGroupAvatar**：工作区内图片路径设为当前群头像（可先 saveMessageAsset）',
       '- **relayPrivate** / **relayPrivateImage** / **relayPrivateFile** / **relayPrivateEmotion**：私聊传话；目标须为机器人好友（可先 getFriendList）；须等 relay 成功后再 reply，失败时勿声称已发出',
       '- 查好友用 **getFriendList** / **getFriendInfo**；私聊传话目标须为好友',
       '- **加好友**：机器人不能主动加别人；用户加机器人后，主人可用 **getFriendRequests** + **handleFriendRequest** 同意/拒绝',
