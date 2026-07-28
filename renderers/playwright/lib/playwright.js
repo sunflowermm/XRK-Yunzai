@@ -303,206 +303,237 @@ export default class PlaywrightRenderer extends Renderer {
   async screenshot(name, data = {}) {
     const d = this.normalizeScreenshotData(data);
     const isUserTriggered = data.priority === true || data.userTriggered === true;
+    const slotId = `${name}#${Date.now().toString(36)}#${Math.random().toString(36).slice(2, 8)}`;
+    const queueWaitMs = Number.isFinite(d.queueWaitTimeout)
+      ? d.queueWaitTimeout
+      : (this.playwrightTimeout || 120000);
+    const releaseSlot = () => {
+      if (isUserTriggered) {
+        const i = this.shotingUser.indexOf(slotId);
+        if (i >= 0) this.shotingUser.splice(i, 1);
+      } else {
+        const i = this.shoting.indexOf(slotId);
+        if (i >= 0) this.shoting.splice(i, 1);
+      }
+    };
+
+    const waitStart = Date.now();
     if (isUserTriggered) {
       while (this.shotingUser.length >= 1) {
-        await new Promise(r => setTimeout(r, 100));
+        if (Date.now() - waitStart > queueWaitMs) {
+          BotUtil.makeLog(
+            "error",
+            `[${name}] 渲染队列等待超时 (${queueWaitMs}ms)，userSlots=${this.shotingUser.length}`,
+            "PlaywrightRenderer"
+          );
+          return false;
+        }
+        await new Promise((r) => setTimeout(r, 100));
       }
-      this.shotingUser.push(name);
+      this.shotingUser.push(slotId);
     } else {
       while (this.shoting.length + this.shotingUser.length >= this.maxConcurrent) {
-        await new Promise(r => setTimeout(r, 100));
+        if (Date.now() - waitStart > queueWaitMs) {
+          BotUtil.makeLog(
+            "error",
+            `[${name}] 渲染队列等待超时 (${queueWaitMs}ms)，slots=${this.shoting.length}+${this.shotingUser.length}`,
+            "PlaywrightRenderer"
+          );
+          return false;
+        }
+        await new Promise((r) => setTimeout(r, 100));
       }
-      this.shoting.push(name);
+      this.shoting.push(slotId);
     }
-
-    if (!await this.browserInit()) {
-      if (isUserTriggered) this.shotingUser = this.shotingUser.filter(i => i !== name);
-      else this.shoting = this.shoting.filter(i => i !== name);
-      return false;
-    }
-
-    const wantTpl = Boolean(d.tplFile);
-    const useUrl = !wantTpl && d.url && /^https?:\/\//i.test(String(d.url));
-    const pageHeight = d.multiPageHeight ?? 4000;
-    let savePath = null;
-    let directFilePath = null;
-    if (!useUrl) {
-      const tpl = d.tplFile;
-      if (typeof tpl === "string" && path.isAbsolute(tpl) && FileUtils.existsSync(tpl)) {
-        directFilePath = path.resolve(tpl);
-      } else {
-        savePath = this.dealTpl(name, d);
-        if (!savePath) return false;
-      }
-    }
-    const filePath = useUrl ? null : (directFilePath || path.join(resolveProjectPath(), String(savePath).replace(/^\.\/?/, "")));
-    if (!useUrl && (typeof filePath !== "string" || !FileUtils.existsSync(filePath))) {
-      BotUtil.makeLog("error", `HTML file does not exist: ${filePath}`, "PlaywrightRenderer");
-      return false;
-    }
-
-    let ret = [];
-    let context = null;
-    let page = null;
-    const start = Date.now();
 
     try {
-      const contextOptions = {
-        ...this.contextOptions,
-        viewport: { width: d.width, height: d.height },
-        deviceScaleFactor: d.deviceScaleFactor ?? this.contextOptions.deviceScaleFactor,
-        ignoreHTTPSErrors: d.ignoreHTTPSErrors ?? this.contextOptions.ignoreHTTPSErrors,
-      };
-      context = await this.browser.newContext(contextOptions);
-      page = await context.newPage();
+      if (!await this.browserInit()) return false;
 
-      const blockTypes = this.getBlockResourceTypes(d);
-      const rewriteRules = this.getResourceRewriteRules(d);
-      if (blockTypes.length > 0 || rewriteRules.length > 0) {
-        await page.route("**/*", async (route) => {
-          const reqUrl = route.request().url();
-          for (const rule of rewriteRules) {
-            if (!this.matchRewrite(rule, reqUrl)) continue;
-            try {
-              if (rule.toUrl) return await route.continue({ url: rule.toUrl });
-              if (rule.toFile) {
-                const buf = this.readCacheFile(rule.toFile);
-                if (buf) {
-                  return await route.fulfill({
-                    status: 200,
-                    contentType: rule.contentType || this.guessContentType(rule.toFile),
-                    body: buf,
-                  });
+      const wantTpl = Boolean(d.tplFile);
+      const useUrl = !wantTpl && d.url && /^https?:\/\//i.test(String(d.url));
+      const pageHeight = d.multiPageHeight ?? 4000;
+      let savePath = null;
+      let directFilePath = null;
+      if (!useUrl) {
+        const tpl = d.tplFile;
+        if (typeof tpl === "string" && path.isAbsolute(tpl) && FileUtils.existsSync(tpl)) {
+          directFilePath = path.resolve(tpl);
+        } else {
+          savePath = this.dealTpl(name, d);
+          if (!savePath) return false;
+        }
+      }
+      const filePath = useUrl ? null : (directFilePath || path.join(resolveProjectPath(), String(savePath).replace(/^\.\/?/, "")));
+      if (!useUrl && (typeof filePath !== "string" || !FileUtils.existsSync(filePath))) {
+        BotUtil.makeLog("error", `HTML file does not exist: ${filePath}`, "PlaywrightRenderer");
+        return false;
+      }
+
+      let ret = [];
+      let context = null;
+      let page = null;
+      const start = Date.now();
+
+      try {
+        const contextOptions = {
+          ...this.contextOptions,
+          viewport: { width: d.width, height: d.height },
+          deviceScaleFactor: d.deviceScaleFactor ?? this.contextOptions.deviceScaleFactor,
+          ignoreHTTPSErrors: d.ignoreHTTPSErrors ?? this.contextOptions.ignoreHTTPSErrors,
+        };
+        context = await this.browser.newContext(contextOptions);
+        page = await context.newPage();
+
+        const blockTypes = this.getBlockResourceTypes(d);
+        const rewriteRules = this.getResourceRewriteRules(d);
+        if (blockTypes.length > 0 || rewriteRules.length > 0) {
+          await page.route("**/*", async (route) => {
+            const reqUrl = route.request().url();
+            for (const rule of rewriteRules) {
+              if (!this.matchRewrite(rule, reqUrl)) continue;
+              try {
+                if (rule.toUrl) return await route.continue({ url: rule.toUrl });
+                if (rule.toFile) {
+                  const buf = this.readCacheFile(rule.toFile);
+                  if (buf) {
+                    return await route.fulfill({
+                      status: 200,
+                      contentType: rule.contentType || this.guessContentType(rule.toFile),
+                      body: buf,
+                    });
+                  }
                 }
+              } catch (e) {
+                BotUtil.makeLog("debug", `[${name}] rewrite failed: ${e?.message || e}`, "PlaywrightRenderer");
               }
-            } catch (e) {
-              BotUtil.makeLog("debug", `[${name}] rewrite failed: ${e?.message || e}`, "PlaywrightRenderer");
             }
+            const resourceType = route.request().resourceType();
+            if (blockTypes.includes(resourceType)) return route.abort();
+            return route.continue();
+          });
+        }
+
+        const pageGotoParams = Object.assign(
+          { timeout: this.playwrightTimeout, waitUntil: d.waitUntil || "domcontentloaded" },
+          d.pageGotoParams || {}
+        );
+
+        await page.goto(useUrl ? d.url : toFileUrl(filePath), pageGotoParams);
+
+        if (d.waitImages !== false) {
+          const imageWait = Number.isFinite(d.imageWaitTimeout) ? d.imageWaitTimeout : 800;
+          if (imageWait > 0) {
+            await page.evaluate((ms) => new Promise(resolve => {
+              const timeout = setTimeout(resolve, ms);
+              const images = Array.from(document.querySelectorAll("img"));
+              if (images.length === 0) { clearTimeout(timeout); return resolve(); }
+              let loaded = 0;
+              const done = () => { loaded++; if (loaded === images.length) { clearTimeout(timeout); resolve(); } };
+              images.forEach(img => img.complete ? done() : (img.onload = img.onerror = done));
+            }), imageWait);
           }
-          const resourceType = route.request().resourceType();
-          if (blockTypes.includes(resourceType)) return route.abort();
-          return route.continue();
-        });
-      }
-
-      const pageGotoParams = Object.assign(
-        { timeout: this.playwrightTimeout, waitUntil: d.waitUntil || "domcontentloaded" },
-        d.pageGotoParams || {}
-      );
-
-      await page.goto(useUrl ? d.url : toFileUrl(filePath), pageGotoParams);
-
-      if (d.waitImages !== false) {
-        const imageWait = Number.isFinite(d.imageWaitTimeout) ? d.imageWaitTimeout : 800;
-        if (imageWait > 0) {
-          await page.evaluate((ms) => new Promise(resolve => {
-            const timeout = setTimeout(resolve, ms);
-            const images = Array.from(document.querySelectorAll("img"));
-            if (images.length === 0) { clearTimeout(timeout); return resolve(); }
-            let loaded = 0;
-            const done = () => { loaded++; if (loaded === images.length) { clearTimeout(timeout); resolve(); } };
-            images.forEach(img => img.complete ? done() : (img.onload = img.onerror = done));
-          }), imageWait);
         }
-      }
 
-      if (d.waitFonts !== false) {
-        const fontWait = Number.isFinite(d.fontWaitTimeout) ? d.fontWaitTimeout : 800;
-        if (fontWait > 0) {
-          await page.evaluate((ms) => new Promise((resolve) => {
-            if (!document.fonts || !document.fonts.ready) return resolve();
-            const timeout = setTimeout(resolve, ms);
-            document.fonts.ready
-              .then(() => { clearTimeout(timeout); resolve(); })
-              .catch(() => { clearTimeout(timeout); resolve(); });
-          }), fontWait);
+        if (d.waitFonts !== false) {
+          const fontWait = Number.isFinite(d.fontWaitTimeout) ? d.fontWaitTimeout : 800;
+          if (fontWait > 0) {
+            await page.evaluate((ms) => new Promise((resolve) => {
+              if (!document.fonts || !document.fonts.ready) return resolve();
+              const timeout = setTimeout(resolve, ms);
+              document.fonts.ready
+                .then(() => { clearTimeout(timeout); resolve(); })
+                .catch(() => { clearTimeout(timeout); resolve(); });
+            }), fontWait);
+          }
         }
-      }
 
-      const fullPage = d.fullPage === true || (useUrl && d.fullPage !== false);
-      const imgType = String(d.imgType ?? "jpeg").toLowerCase();
-      const screenshotOpts = {
-        type: imgType === "png" ? "png" : "jpeg",
-        omitBackground: d.omitBackground ?? false,
-        quality: d.quality ?? 85,
-      };
-      if (screenshotOpts.type === "png") delete screenshotOpts.quality;
-      if (d.path) screenshotOpts.path = d.path;
+        const fullPage = d.fullPage === true || (useUrl && d.fullPage !== false);
+        const imgType = String(d.imgType ?? "jpeg").toLowerCase();
+        const screenshotOpts = {
+          type: imgType === "png" ? "png" : "jpeg",
+          omitBackground: d.omitBackground ?? false,
+          quality: d.quality ?? 85,
+        };
+        if (screenshotOpts.type === "png") delete screenshotOpts.quality;
+        if (d.path) screenshotOpts.path = d.path;
 
-      const defaultDelay = useUrl ? (d.delayBeforeScreenshotUrl ?? 1500) : (d.delayBeforeScreenshotFile ?? 0);
-      const delayMs = fullPage ? (d.delayBeforeScreenshot ?? defaultDelay) : 0;
-      if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
+        const defaultDelay = useUrl ? (d.delayBeforeScreenshotUrl ?? 1500) : (d.delayBeforeScreenshotFile ?? 0);
+        const delayMs = fullPage ? (d.delayBeforeScreenshot ?? defaultDelay) : 0;
+        if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
 
-      if (fullPage) {
-        let buf = toBuffer(await page.screenshot({ ...screenshotOpts, fullPage: true }));
-        const cropTop = d.cropTopPercent;
-        const cropBottom = d.cropBottomPercent;
-        if (buf && ((typeof cropTop === "number" && cropTop > 0 && cropTop < 1) || (typeof cropBottom === "number" && cropBottom > 0 && cropBottom < 1))) {
-          const cropped = await cropTopAndBottom(buf, cropTop || 0, cropBottom || 0);
-          if (cropped) buf = cropped;
-        }
-        if (buf) ret.push(buf);
-        this.renderNum++;
-        if (ret[0]) BotUtil.makeLog("info", `[${name}][${this.renderNum}] fullPage ${(ret[0].length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PlaywrightRenderer");
-      } else if (d.clip && typeof d.clip === "object" && ["x", "y", "width", "height"].every(k => Number.isFinite(d.clip[k]))) {
-        const buf = toBuffer(await page.screenshot({ ...screenshotOpts, clip: d.clip }));
-        if (buf) ret.push(buf);
-        this.renderNum++;
-        if (ret.length) BotUtil.makeLog("info", `[${name}][${this.renderNum}] clip ${Date.now() - start}ms`, "PlaywrightRenderer");
-      } else {
-        const body = (await page.locator("#container").first()) || (await page.locator("body"));
-        const boundingBox = await body.boundingBox();
-        if (!boundingBox) {
-          const buf = toBuffer(await page.screenshot({ ...screenshotOpts, fullPage: false }));
+        if (fullPage) {
+          let buf = toBuffer(await page.screenshot({ ...screenshotOpts, fullPage: true }));
+          const cropTop = d.cropTopPercent;
+          const cropBottom = d.cropBottomPercent;
+          if (buf && ((typeof cropTop === "number" && cropTop > 0 && cropTop < 1) || (typeof cropBottom === "number" && cropBottom > 0 && cropBottom < 1))) {
+            const cropped = await cropTopAndBottom(buf, cropTop || 0, cropBottom || 0);
+            if (cropped) buf = cropped;
+          }
           if (buf) ret.push(buf);
           this.renderNum++;
-        } else {
-          let num = d.multiPage ? Math.ceil(boundingBox.height / pageHeight) || 1 : 1;
-          if (d.multiPage) screenshotOpts.type = "jpeg";
-        if (num === 1) {
-          const buf = toBuffer(await body.screenshot(screenshotOpts));
+          if (ret[0]) BotUtil.makeLog("info", `[${name}][${this.renderNum}] fullPage ${(ret[0].length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PlaywrightRenderer");
+        } else if (d.clip && typeof d.clip === "object" && ["x", "y", "width", "height"].every(k => Number.isFinite(d.clip[k]))) {
+          const buf = toBuffer(await page.screenshot({ ...screenshotOpts, clip: d.clip }));
           if (buf) ret.push(buf);
           this.renderNum++;
-          if (ret[0]) BotUtil.makeLog("info", `[${name}][${this.renderNum}] ${(ret[0].length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PlaywrightRenderer");
+          if (ret.length) BotUtil.makeLog("info", `[${name}][${this.renderNum}] clip ${Date.now() - start}ms`, "PlaywrightRenderer");
         } else {
-          await page.setViewportSize({ width: Math.ceil(boundingBox.width), height: Math.min(pageHeight + 100, 2000) });
-          for (let i = 1; i <= num; i++) {
-            if (i === num && num > 1) await page.setViewportSize({ width: Math.ceil(boundingBox.width), height: Math.min(parseInt(boundingBox.height) - pageHeight * (num - 1), 2000) || 100 });
-            if (i !== 1) {
-              await page.evaluate((y) => window.scrollTo(0, y), pageHeight * (i - 1));
-              await new Promise(r => setTimeout(r, 100));
-            }
-            const clip = (i === num && num > 1) ? { x: boundingBox.x, y: 0, width: boundingBox.width, height: Math.min(boundingBox.height - pageHeight * (i - 1), pageHeight) } : null;
-            const buf = toBuffer(clip ? await page.screenshot({ ...screenshotOpts, clip }) : await body.screenshot(screenshotOpts));
+          const body = (await page.locator("#container").first()) || (await page.locator("body"));
+          const boundingBox = await body.boundingBox();
+          if (!boundingBox) {
+            const buf = toBuffer(await page.screenshot({ ...screenshotOpts, fullPage: false }));
             if (buf) ret.push(buf);
             this.renderNum++;
-            if (i < num && num > 2) await new Promise(r => setTimeout(r, 100));
+          } else {
+            let num = d.multiPage ? Math.ceil(boundingBox.height / pageHeight) || 1 : 1;
+            if (d.multiPage) screenshotOpts.type = "jpeg";
+          if (num === 1) {
+            const buf = toBuffer(await body.screenshot(screenshotOpts));
+            if (buf) ret.push(buf);
+            this.renderNum++;
+            if (ret[0]) BotUtil.makeLog("info", `[${name}][${this.renderNum}] ${(ret[0].length / 1024).toFixed(2)}KB ${Date.now() - start}ms`, "PlaywrightRenderer");
+          } else {
+            await page.setViewportSize({ width: Math.ceil(boundingBox.width), height: Math.min(pageHeight + 100, 2000) });
+            for (let i = 1; i <= num; i++) {
+              if (i === num && num > 1) await page.setViewportSize({ width: Math.ceil(boundingBox.width), height: Math.min(parseInt(boundingBox.height) - pageHeight * (num - 1), 2000) || 100 });
+              if (i !== 1) {
+                await page.evaluate((y) => window.scrollTo(0, y), pageHeight * (i - 1));
+                await new Promise(r => setTimeout(r, 100));
+              }
+              const clip = (i === num && num > 1) ? { x: boundingBox.x, y: 0, width: boundingBox.width, height: Math.min(boundingBox.height - pageHeight * (i - 1), pageHeight) } : null;
+              const buf = toBuffer(clip ? await page.screenshot({ ...screenshotOpts, clip }) : await body.screenshot(screenshotOpts));
+              if (buf) ret.push(buf);
+              this.renderNum++;
+              if (i < num && num > 2) await new Promise(r => setTimeout(r, 100));
+            }
+            BotUtil.makeLog("info", `[${name}] multiPage ${num} ${Date.now() - start}ms`, "PlaywrightRenderer");
           }
-          BotUtil.makeLog("info", `[${name}] multiPage ${num} ${Date.now() - start}ms`, "PlaywrightRenderer");
+          }
         }
-        }
+      } catch (error) {
+        BotUtil.makeLog("error", `[${name}] Screenshot failed: ${error.message}`, "PlaywrightRenderer");
+        ret = [];
+      } finally {
+        if (page) await page.close({ runBeforeUnload: false }).catch(() => {});
+        if (context) await context.close().catch(() => {});
       }
-    } catch (error) {
-      BotUtil.makeLog("error", `[${name}] Screenshot failed: ${error.message}`, "PlaywrightRenderer");
-      ret = [];
+
+      releaseSlot();
+
+      if (this.renderNum % this.restartNum === 0 && this.renderNum > 0 && this.shoting.length === 0 && this.shotingUser.length === 0) {
+        BotUtil.makeLog("info", `Completed ${this.renderNum} screenshots, restarting browser...`, "PlaywrightRenderer");
+        setTimeout(() => this.restart(), 2000);
+      }
+
+      if (ret.length === 0 || !ret[0]) {
+        BotUtil.makeLog("error", `[${name}] Screenshot result is empty`, "PlaywrightRenderer");
+        return false;
+      }
+
+      return data.multiPage ? ret : ret[0];
     } finally {
-      if (page) await page.close({ runBeforeUnload: false }).catch(() => {});
-      if (context) await context.close().catch(() => {});
-      if (isUserTriggered) this.shotingUser = this.shotingUser.filter(i => i !== name);
-      else this.shoting = this.shoting.filter(i => i !== name);
+      releaseSlot();
     }
-
-    if (this.renderNum % this.restartNum === 0 && this.renderNum > 0 && this.shoting.length === 0 && this.shotingUser.length === 0) {
-      BotUtil.makeLog("info", `Completed ${this.renderNum} screenshots, restarting browser...`, "PlaywrightRenderer");
-      setTimeout(() => this.restart(), 2000);
-    }
-
-    if (ret.length === 0 || !ret[0]) {
-      BotUtil.makeLog("error", `[${name}] Screenshot result is empty`, "PlaywrightRenderer");
-      return false;
-    }
-
-    return data.multiPage ? ret : ret[0];
   }
 
   async restart(force = false) {

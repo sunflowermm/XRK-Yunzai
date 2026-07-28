@@ -478,125 +478,153 @@ export default class PuppeteerRenderer extends Renderer {
   async screenshot(name, data = {}) {
     const d = this.normalizeScreenshotData(data);
     const isUserTriggered = data.priority === true || data.userTriggered === true;
+    // 唯一槽位 id：同 name 并发结束时勿误清其它任务；模板失败提前 return 也必须释放
+    const slotId = `${name}#${Date.now().toString(36)}#${Math.random().toString(36).slice(2, 8)}`;
+    const queueWaitMs = Number.isFinite(d.queueWaitTimeout)
+      ? d.queueWaitTimeout
+      : (this.puppeteerTimeout || 120000);
+    const releaseSlot = () => {
+      if (isUserTriggered) {
+        const i = this.shotingUser.indexOf(slotId);
+        if (i >= 0) this.shotingUser.splice(i, 1);
+      } else {
+        const i = this.shoting.indexOf(slotId);
+        if (i >= 0) this.shoting.splice(i, 1);
+      }
+    };
+
+    const waitStart = Date.now();
     if (isUserTriggered) {
       while (this.shotingUser.length >= 1) {
-        await new Promise(r => setTimeout(r, 100));
+        if (Date.now() - waitStart > queueWaitMs) {
+          BotUtil.makeLog(
+            "error",
+            `[${name}] 渲染队列等待超时 (${queueWaitMs}ms)，userSlots=${this.shotingUser.length}`,
+            "PuppeteerRenderer"
+          );
+          return false;
+        }
+        await new Promise((r) => setTimeout(r, 100));
       }
-      this.shotingUser.push(name);
+      this.shotingUser.push(slotId);
     } else {
       while (this.shoting.length + this.shotingUser.length >= this.maxConcurrent) {
-        await new Promise(r => setTimeout(r, 100));
+        if (Date.now() - waitStart > queueWaitMs) {
+          BotUtil.makeLog(
+            "error",
+            `[${name}] 渲染队列等待超时 (${queueWaitMs}ms)，slots=${this.shoting.length}+${this.shotingUser.length}`,
+            "PuppeteerRenderer"
+          );
+          return false;
+        }
+        await new Promise((r) => setTimeout(r, 100));
       }
-      this.shoting.push(name);
+      this.shoting.push(slotId);
     }
-
-    if (!await this.browserInit()) {
-      if (isUserTriggered) this.shotingUser = this.shotingUser.filter(i => i !== name);
-      else this.shoting = this.shoting.filter(i => i !== name);
-      return false;
-    }
-
-    if (this.idleRestartMs > 0 && Date.now() - this.lastActivityAt > this.idleRestartMs) {
-      await this.restart(true);
-      if (!await this.browserInit()) {
-        if (isUserTriggered) this.shotingUser = this.shotingUser.filter(i => i !== name);
-        else this.shoting = this.shoting.filter(i => i !== name);
-        return false;
-      }
-    }
-
-    const wantTpl = Boolean(d.tplFile);
-    const useUrl = !wantTpl && d.url && /^https?:\/\//i.test(String(d.url));
-    const pageHeight = d.multiPageHeight ?? 4000;
-    let savePath = null;
-    let directFilePath = null;
-    if (!useUrl) {
-      const tpl = d.tplFile;
-      if (typeof tpl === "string" && path.isAbsolute(tpl) && FileUtils.existsSync(tpl)) {
-        directFilePath = path.resolve(tpl);
-      } else {
-        savePath = this.dealTpl(name, d);
-        if (!savePath) return false;
-      }
-    }
-    const filePath = useUrl ? null : (directFilePath || path.join(resolveProjectPath(), String(savePath).replace(/^\.\/?/, "")));
-    if (!useUrl && (typeof filePath !== "string" || !FileUtils.existsSync(filePath))) {
-      BotUtil.makeLog("error", `HTML file does not exist: ${filePath}`, "PuppeteerRenderer");
-      return false;
-    }
-
-    let ret = [];
-    let page = null;
-    const start = Date.now();
 
     try {
-      page = await this.browser.newPage();
-      await this.setupRequestRoute(page, d, name);
+      if (!await this.browserInit()) return false;
 
-      await page.setViewport({
-        width: d.width,
-        height: d.height,
-        deviceScaleFactor: d.deviceScaleFactor,
-      });
-
-      const pageGotoParams = Object.assign(
-        { timeout: this.puppeteerTimeout, waitUntil: d.waitUntil || "domcontentloaded" },
-        d.pageGotoParams || {}
-      );
-      await page.goto(useUrl ? d.url : toFileUrl(filePath), pageGotoParams);
-
-      if (typeof d.pageStyle === "string" && d.pageStyle.trim()) {
-        await page.addStyleTag({ content: d.pageStyle }).catch(() => {});
+      if (this.idleRestartMs > 0 && Date.now() - this.lastActivityAt > this.idleRestartMs) {
+        await this.restart(true);
+        if (!await this.browserInit()) return false;
       }
 
-      const timeout = this.selectorTimeout(d);
-      await this.waitForExprs(page, d.waitForFunctionList, timeout);
-      if (typeof d.pageEvaluate === "string" && d.pageEvaluate.trim()) {
-        try {
-          await page.evaluate(d.pageEvaluate);
-        } catch (e) {
-          BotUtil.makeLog("debug", `[${name}] pageEvaluate: ${e?.message || e}`, "PuppeteerRenderer");
+      const wantTpl = Boolean(d.tplFile);
+      const useUrl = !wantTpl && d.url && /^https?:\/\//i.test(String(d.url));
+      const pageHeight = d.multiPageHeight ?? 4000;
+      let savePath = null;
+      let directFilePath = null;
+      if (!useUrl) {
+        const tpl = d.tplFile;
+        if (typeof tpl === "string" && path.isAbsolute(tpl) && FileUtils.existsSync(tpl)) {
+          directFilePath = path.resolve(tpl);
+        } else {
+          savePath = this.dealTpl(name, d);
+          if (!savePath) return false;
         }
       }
-      await this.waitForExprs(page, d.waitForFunctionAfterList, timeout);
-      await this.waitForSels(page, d.waitForSelectorList, timeout);
-
-      if (d.waitImages !== false) {
-        await this.waitImagesLoaded(page, Number.isFinite(d.imageWaitTimeout) ? d.imageWaitTimeout : 800);
-      }
-      if (d.waitFonts !== false) {
-        await this.waitFontsReady(page, Number.isFinite(d.fontWaitTimeout) ? d.fontWaitTimeout : 800);
+      const filePath = useUrl ? null : (directFilePath || path.join(resolveProjectPath(), String(savePath).replace(/^\.\/?/, "")));
+      if (!useUrl && (typeof filePath !== "string" || !FileUtils.existsSync(filePath))) {
+        BotUtil.makeLog("error", `HTML file does not exist: ${filePath}`, "PuppeteerRenderer");
+        return false;
       }
 
-      ret = await this.captureScreenshot(page, d, name, start, useUrl, pageHeight);
-      this.renderNum += ret.length;
-      if (ret.length > 0) this.lastActivityAt = Date.now();
-    } catch (error) {
-      BotUtil.makeLog("error", `[${name}] Screenshot failed: ${error.message}`, "PuppeteerRenderer");
-      if (/timeout|timed out|disconnected|Target closed/i.test(error.message)) {
-        setTimeout(() => this.restart(true), 500);
+      let ret = [];
+      let page = null;
+      const start = Date.now();
+
+      try {
+        page = await this.browser.newPage();
+        await this.setupRequestRoute(page, d, name);
+
+        await page.setViewport({
+          width: d.width,
+          height: d.height,
+          deviceScaleFactor: d.deviceScaleFactor,
+        });
+
+        const pageGotoParams = Object.assign(
+          { timeout: this.puppeteerTimeout, waitUntil: d.waitUntil || "domcontentloaded" },
+          d.pageGotoParams || {}
+        );
+        await page.goto(useUrl ? d.url : toFileUrl(filePath), pageGotoParams);
+
+        if (typeof d.pageStyle === "string" && d.pageStyle.trim()) {
+          await page.addStyleTag({ content: d.pageStyle }).catch(() => {});
+        }
+
+        const timeout = this.selectorTimeout(d);
+        await this.waitForExprs(page, d.waitForFunctionList, timeout);
+        if (typeof d.pageEvaluate === "string" && d.pageEvaluate.trim()) {
+          try {
+            await page.evaluate(d.pageEvaluate);
+          } catch (e) {
+            BotUtil.makeLog("debug", `[${name}] pageEvaluate: ${e?.message || e}`, "PuppeteerRenderer");
+          }
+        }
+        await this.waitForExprs(page, d.waitForFunctionAfterList, timeout);
+        await this.waitForSels(page, d.waitForSelectorList, timeout);
+
+        if (d.waitImages !== false) {
+          await this.waitImagesLoaded(page, Number.isFinite(d.imageWaitTimeout) ? d.imageWaitTimeout : 800);
+        }
+        if (d.waitFonts !== false) {
+          await this.waitFontsReady(page, Number.isFinite(d.fontWaitTimeout) ? d.fontWaitTimeout : 800);
+        }
+
+        ret = await this.captureScreenshot(page, d, name, start, useUrl, pageHeight);
+        this.renderNum += ret.length;
+        if (ret.length > 0) this.lastActivityAt = Date.now();
+      } catch (error) {
+        BotUtil.makeLog("error", `[${name}] Screenshot failed: ${error.message}`, "PuppeteerRenderer");
+        if (/timeout|timed out|disconnected|Target closed/i.test(error.message)) {
+          setTimeout(() => this.restart(true), 500);
+        }
+        ret = [];
+      } finally {
+        if (page) {
+          page.removeAllListeners("request");
+          await page.close().catch(() => {});
+        }
       }
-      ret = [];
+
+      releaseSlot();
+
+      if (this.renderNum % this.restartNum === 0 && this.renderNum > 0 && this.shoting.length === 0 && this.shotingUser.length === 0) {
+        BotUtil.makeLog("info", `Completed ${this.renderNum} screenshots, restarting browser...`, "PuppeteerRenderer");
+        setTimeout(() => this.restart(), 2000);
+      }
+
+      if (ret.length === 0 || !ret[0]) {
+        BotUtil.makeLog("error", `[${name}] Screenshot result is empty`, "PuppeteerRenderer");
+        return false;
+      }
+
+      return data.multiPage ? ret : ret[0];
     } finally {
-      if (page) {
-        page.removeAllListeners("request");
-        await page.close().catch(() => {});
-      }
-      if (isUserTriggered) this.shotingUser = this.shotingUser.filter(i => i !== name);
-      else this.shoting = this.shoting.filter(i => i !== name);
+      releaseSlot();
     }
-
-    if (this.renderNum % this.restartNum === 0 && this.renderNum > 0 && this.shoting.length === 0 && this.shotingUser.length === 0) {
-      BotUtil.makeLog("info", `Completed ${this.renderNum} screenshots, restarting browser...`, "PuppeteerRenderer");
-      setTimeout(() => this.restart(), 2000);
-    }
-
-    if (ret.length === 0 || !ret[0]) {
-      BotUtil.makeLog("error", `[${name}] Screenshot result is empty`, "PuppeteerRenderer");
-      return false;
-    }
-
-    return data.multiPage ? ret : ret[0];
   }
 
   async restart(force = false) {
