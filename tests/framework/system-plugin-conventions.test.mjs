@@ -73,6 +73,32 @@ describe('system-plugin 底层约定', () => {
     }
   });
 
+  it('www/xrk 无空 catch（排除 vendor lib/）', () => {
+    const emptyCatch =
+      /catch\s*\(\s*\)\s*\{\s*\}|catch\s*\{\s*\}|catch\s*\(\s*_\w*\s*\)\s*\{\s*\}|catch\s*\(\s*\w+\s*\)\s*\{\s*\}|\.catch\(\s*\(\s*\)\s*=>\s*\{\s*\}\)/;
+    const wwwRoot = path.join(SYSTEM_PLUGIN_DIR, 'www', 'xrk');
+    const files = [];
+    const walk = (dir) => {
+      if (!fs.existsSync(dir)) return;
+      for (const name of fs.readdirSync(dir)) {
+        const full = path.join(dir, name);
+        const st = fs.statSync(full);
+        if (st.isDirectory()) {
+          if (name === 'lib') continue;
+          walk(full);
+        } else if (name.endsWith('.js')) {
+          files.push(full);
+        }
+      }
+    };
+    walk(wwwRoot);
+    assert.ok(files.length > 0, 'www/xrk 应有业务 JS');
+    for (const file of files) {
+      const text = fs.readFileSync(file, 'utf8');
+      assert.ok(!emptyCatch.test(text), `${path.relative(root, file)} 禁止空 catch`);
+    }
+  });
+
   it('stream 工作流不在 constructor 内 new Map/{}', () => {
     const streamDir = path.join(SYSTEM_PLUGIN_DIR, 'stream');
     const bad = /constructor\s*\([^)]*\)\s*\{[\s\S]*?this\.\w+\s*=\s*(new Map\(\)|\{\})/;

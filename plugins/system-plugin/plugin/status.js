@@ -1,10 +1,7 @@
 import os from 'os'
 import moment from 'moment'
 import * as si from 'systeminformation'
-import { createRequire } from "module"
 import { formatBytes, formatDuration } from '../../../lib/utils/byte-size.js'
-
-const require = createRequire(import.meta.url)
 
 export class stattools extends plugin {
   constructor() {

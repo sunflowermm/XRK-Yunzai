@@ -47,8 +47,11 @@ plugins/system-plugin/
 │   ├── 进群退群通知.js
 │   ├── 伪造消息.js
 │   ├── 主动复读.js
-│   ├── 模拟定时输入.js
 │   └── 葵崽插件.js
+├── lib/                # 插件内辅助（非消息插件入口）
+│   ├── ai-workspace-runtime.js
+│   ├── ai-workspace-context.js
+│   └── message-fabricator.js
 ├── http/               # HTTP 服务与 API
 │   ├── core.js        # 核心接口（系统信息等）
 │   ├── plugin.js      # 插件列表/统计
@@ -69,20 +72,15 @@ plugins/system-plugin/
 ├── commonconfig/       # 通用配置（ConfigManager 加载，供 API/前端编辑）
 │   ├── system.js       # 系统配置（bot/other/server/device 等子配置）
 │   ├── ai_config.js    # AI 助手配置（data/ai/config.yaml），键名 system-plugin_ai_config
-│   ├── openai_llm.js
-│   ├── openai_compat_llm.js
-│   ├── anthropic_llm.js
-│   ├── azure_openai_llm.js
-│   ├── volcengine_llm.js
-│   ├── xiaomimimo_llm.js
-│   ├── gptgod_llm.js
-│   ├── gemini_llm.js
-│   └── tools.js
+│   ├── tools.js
+│   └── *_llm.js / *_compat_llm.js  # LLM Provider（由 create-llm-factory-config 生成）
 ├── www/                # 前端静态与页面
 │   └── xrk/
 ├── SYSTEM-PLUGIN.md    # 本文档
 └── .gitignore
 ```
+
+LLM 配置文件由 `create-llm-factory-config` 生成（含 openai / anthropic / gemini / deepseek / ollama / cherryin / newapi 等及 `*_compat_llm`），勿手写逐一枚举。
 
 ---
 

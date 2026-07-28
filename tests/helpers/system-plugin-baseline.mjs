@@ -11,7 +11,7 @@ export const SYSTEM_PLUGIN_DIR = path.join(root, 'plugins', 'system-plugin');
 export const SYSTEM_PLUGIN_BASELINE = Object.freeze({
   http: 10,
   stream: 7,
-  plugin: 12,
+  plugin: 11,
   events: 5,
   adapter: 5,
 });

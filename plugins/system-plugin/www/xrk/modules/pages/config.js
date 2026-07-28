@@ -57,7 +57,7 @@ export function renderConfigPage(app) {
       if (lastName) {
         app._configState.pendingSelect = { name: lastName, child: lastChild || null };
       }
-    } catch {}
+    } catch (err) { console.debug('[XRK]', err); }
   } else if (app._configState.listScrollTop == null) {
     app._configState.listScrollTop = app.readStoredConfigListScroll?.() ?? null;
   }

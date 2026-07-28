@@ -108,12 +108,12 @@ export function bindViewportHeightVar(varName = '--vh') {
   // 先立即设置一次，减少首屏跳动
   try {
     apply();
-  } catch {}
+  } catch (err) { console.debug('[XRK]', err); }
 
   // visualViewport resize 在软键盘弹出时更敏感
   try {
     window.visualViewport?.addEventListener?.('resize', apply);
-  } catch {}
+  } catch (err) { console.debug('[XRK]', err); }
 
   window.addEventListener('resize', apply, { passive: true });
 }

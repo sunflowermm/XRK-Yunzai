@@ -45,7 +45,7 @@ pnpm lint && pnpm test && node scripts/validate-skills.mjs
 |----|---------|------------|
 | 基础设施 | `src/infrastructure/` | `lib/` |
 | 业务 | `core/<Core>/` | `plugins/<名>/` |
-| 文件工具 | BotUtil + FileLoader | **FileUtils**（业务必用） |
+| 文件工具 | BotUtil FS 薄封装 | **FileUtils**（业务必用） |
 | 事件监听 | EventListenerBase + init() | EventListener + deal() |
 | 工厂 | LLM + 历史 ASR/TTS | **仅 LLM** |
 | Node | ≥26 专项 API | ≥24 |

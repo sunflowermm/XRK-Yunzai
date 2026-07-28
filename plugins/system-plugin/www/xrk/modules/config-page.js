@@ -98,7 +98,7 @@ export const configPageMethods = {
     const next = !this.isConfigDense();
     try {
       localStorage.setItem('configEditorDense', next ? '1' : '0');
-    } catch {}
+    } catch (err) { console.debug('[XRK]', err); }
     document.querySelector('.config-page')?.classList.toggle('config-page-dense', next);
     const btn = document.getElementById('configDensityToggle');
     if (btn) btn.textContent = next ? '舒适布局' : '紧凑布局';
@@ -213,7 +213,7 @@ export const configPageMethods = {
     const write = () => {
       try {
         localStorage.setItem('lastConfigListScrollTop', String(Math.round(n)));
-      } catch {}
+      } catch (err) { console.debug('[XRK]', err); }
     };
 
     if (flush) {
@@ -312,7 +312,7 @@ export const configPageMethods = {
     try {
       localStorage.setItem('lastConfigName', name);
       localStorage.setItem('lastConfigChild', child || '');
-    } catch {}
+    } catch (err) { console.debug('[XRK]', err); }
     if (!this._configState) {
       void this.navigateTo('config');
       return;
@@ -502,7 +502,7 @@ export const configPageMethods = {
     try {
       localStorage.setItem('lastConfigName', name);
       localStorage.setItem('lastConfigChild', child || '');
-    } catch {}
+    } catch (err) { console.debug('[XRK]', err); }
     this._configState.jsonText = '';
     this._configState.jsonDirty = false;
 
@@ -2029,7 +2029,7 @@ export const configPageMethods = {
     }
     try {
       if (key) localStorage.setItem(key, m);
-    } catch {}
+    } catch (err) { console.debug('[XRK]', err); }
   },
 
   formatKeyValueLines(obj = {}) {

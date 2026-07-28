@@ -33,7 +33,7 @@ export function setActiveApiSidebarItem(apiId) {
   item.setAttribute('aria-current', 'true');
   try {
     item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  } catch {}
+  } catch (err) { console.debug('[XRK]', err); }
   return true;
 }
 
@@ -147,7 +147,7 @@ export function selectAPI(app, apiId, options = {}) {
   // 记住最近选中的 API，刷新后恢复
   try {
     localStorage.setItem('lastApiId', apiId);
-  } catch {}
+  } catch (err) { console.debug('[XRK]', err); }
   setActiveApiSidebarItem(apiId);
   app._lastJsonPreview = null;
   // 切换 API 时强制清空旧 CodeMirror 引用，避免 setValue 写入已被 innerHTML 替换的旧 textarea
@@ -298,7 +298,7 @@ function selectCustomAPI(app, { closeSidebar }) {
   app.jsonEditor = null;
   try {
     localStorage.setItem('lastApiId', 'custom');
-  } catch {}
+  } catch (err) { console.debug('[XRK]', err); }
   setActiveApiSidebarItem('custom');
 
   welcome.style.display = 'none';
@@ -404,7 +404,7 @@ function selectCustomAPI(app, { closeSidebar }) {
     customMethodEl.addEventListener('change', () => {
       try {
         localStorage.setItem('customApiMethod', customMethodEl.value);
-      } catch {}
+      } catch (err) { console.debug('[XRK]', err); }
     });
   }
   let customSaveTimer = null;
@@ -415,7 +415,7 @@ function selectCustomAPI(app, { closeSidebar }) {
       customSaveTimer = setTimeout(() => {
         try {
           localStorage.setItem(key, el.value);
-        } catch {}
+        } catch (err) { console.debug('[XRK]', err); }
       }, delay);
     });
   };
@@ -639,7 +639,7 @@ export async function initJSONEditor(app) {
   if (app.jsonEditor && typeof app.jsonEditor.toTextArea === 'function') {
     try {
       app.jsonEditor.toTextArea();
-    } catch {}
+    } catch (err) { console.debug('[XRK]', err); }
   }
 
   const theme = app.theme === 'dark' ? 'monokai' : 'default';
@@ -1004,7 +1004,7 @@ export function renderResponse(app, status, data, time, requestInfo = {}) {
     if (!isMobile) {
       section.scrollIntoView({ behavior: 'smooth' });
     }
-  } catch {}
+  } catch (err) { console.debug('[XRK]', err); }
 }
 
 export function syntaxHighlight(json) {

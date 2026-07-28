@@ -56,7 +56,7 @@ description: 开发或审计 XRK-Yunzai 底层基类、加载器、工厂与工�
 ## 工具入口
 
 ```javascript
-import { FileUtils, ObjectUtils, FileLoader, PluginDirScanner, HotReloadBase, tryParseJson } from '../../lib/utils/index.js';
+import { FileUtils, ObjectUtils, PluginDirScanner, HotReloadBase, tryParseJson } from '../../lib/utils/index.js';
 import { getServerConfigPath } from '../../lib/config/config-constants.js';
 import BotUtil from '../../lib/util.js';
 ```

@@ -175,7 +175,7 @@ class App {
     });
     this._statusUpdateTimer = setInterval(() => {
       if (this.currentPage === 'home' && !document.hidden && !this._statusLoading) {
-        this.loadSystemStatus().catch(() => {});
+        this.loadSystemStatus().catch((err) => { console.debug('[XRK]', err); });
       }
     }, 60000);
 
@@ -445,7 +445,7 @@ class App {
     this.showToast('API Key 已保存', 'success');
     this.checkConnection();
     if (this.currentPage === 'chat') {
-      this.loadLlmOptions(true).catch(() => {});
+      this.loadLlmOptions(true).catch((err) => { console.debug('[XRK]', err); });
       if (this._needsDeviceWs()) {
         this._releaseDeviceWs();
         this.ensureDeviceWs();
@@ -523,10 +523,10 @@ class App {
     this.currentPage = normalizedPage;
     try {
       document.body.dataset.page = normalizedPage;
-    } catch {}
+    } catch (err) { console.debug('[XRK]', err); }
     try {
       localStorage.setItem('lastPage', normalizedPage);
-    } catch {}
+    } catch (err) { console.debug('[XRK]', err); }
 
     const navItems = $$('.nav-item');
     navItems.forEach(item => {
@@ -780,7 +780,7 @@ class App {
     try {
       const sorted = [...history].sort((a, b) => (a.ts || 0) - (b.ts || 0));
       sorted.forEach(m => {
-        try { this._renderHistoryMessage(m); } catch (e) {}
+        try { this._renderHistoryMessage(m); } catch (e) { console.debug('[XRK]', e); }
       });
     } finally {
       this._isRestoringHistory = false;
@@ -1416,7 +1416,7 @@ class App {
                   if (btn.action === 'copy' && btn.data) {
                     navigator.clipboard.writeText(btn.data).then(() => {
                       this.showToast('已复制到剪贴板', 'success');
-                    }).catch(() => {});
+                    }).catch((err) => { console.debug('[XRK]', err); });
                   }
                 }
               });
@@ -1881,7 +1881,7 @@ class App {
                 const audioEl = item.node?.querySelector('audio.chat-audio, audio');
                 if (audioEl) audioEl.src = u;
               }
-            } catch {}
+            } catch (err) { console.debug('[XRK]', err); }
             
             if (item.displayUrl && String(item.displayUrl).startsWith('blob:')) {
               this._safeRevokeObjectURL(item.displayUrl);
@@ -2212,7 +2212,7 @@ class App {
       try {
         const j = raw ? JSON.parse(raw) : null;
         msg = j?.message || j?.error || msg;
-      } catch {}
+      } catch (err) { console.debug('[XRK]', err); }
       throw new Error(msg);
     }
 
@@ -2372,7 +2372,7 @@ class App {
     if (this._activeEventSource) {
       try {
         this._activeEventSource.close();
-      } catch {}
+      } catch (err) { console.debug('[XRK]', err); }
       this._activeEventSource = null;
     }
     this.clearChatStreamState();
@@ -2523,7 +2523,7 @@ class App {
       ws.onerror = null;
       ws.onmessage = null;
       ws.close(1000, 'released');
-    } catch {}
+    } catch (err) { console.debug('[XRK]', err); }
   }
 
   async ensureDeviceWs() {
@@ -2537,7 +2537,7 @@ class App {
     // 清理旧的连接和定时器
     try {
       this._deviceWs?.close();
-    } catch {}
+    } catch (err) { console.debug('[XRK]', err); }
     this._deviceWs = null;
     this._clearWsTimers();
     

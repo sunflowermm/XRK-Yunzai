@@ -79,7 +79,7 @@ export async function renderChatPage(app) {
       const placeholder = document.getElementById('aiSettingsPlaceholder');
       placeholder.outerHTML = aiSettings;
       applyAIMobileSettingsState(true);
-    } catch {}
+    } catch (err) { console.debug('[XRK]', err); }
   }
 
   app.initChatControls();
@@ -102,7 +102,7 @@ export function unbindChatEvents(app) {
       handlers.forEach(({ event, handler }) => {
         try {
           element.removeEventListener(event, handler);
-        } catch {}
+        } catch (err) { console.debug('[XRK]', err); }
       });
     }
   }
@@ -180,7 +180,7 @@ export function bindChatEvents(app) {
       try {
         localStorage.setItem('lastConfigName', pendingSelect.name);
         localStorage.setItem('lastConfigChild', pendingSelect.child);
-      } catch {}
+      } catch (err) { console.debug('[XRK]', err); }
       app.navigateTo('config');
     });
   }

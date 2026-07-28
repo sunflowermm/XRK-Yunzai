@@ -1,5 +1,5 @@
-import fs from 'node:fs';
 import path from 'node:path';
+import { FileUtils } from '../../../lib/utils/file-utils.js';
 import { isPathInside, realpathSyncOrResolve } from '../../../lib/utils/path-guards.js';
 import { expandHomePath } from '../../../lib/utils/workspace-run-command.js';
 import { readTextFileUnderWorkspaceRoot } from '../../../lib/utils/safe-workspace-read.js';
@@ -40,7 +40,7 @@ export function listAgentWorkspaceIds() {
   ensureAgentWorkspaceSync(DEFAULT_WORKSPACE_ID);
   const root = getAgentWorkspacesRoot();
   try {
-    const entries = fs.readdirSync(root, { withFileTypes: true });
+    const entries = FileUtils.readDirSync(root, { withFileTypes: true });
     const ids = entries
       .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
       .map((e) => e.name)
@@ -50,7 +50,8 @@ export function listAgentWorkspaceIds() {
         return a.localeCompare(b, 'zh-CN');
       });
     return ids.length ? ids : [DEFAULT_WORKSPACE_ID];
-  } catch {
+  } catch (err) {
+    Bot.makeLog?.('debug', `listAgentWorkspaceIds: ${err?.message || err}`, 'AIWorkspace');
     return [DEFAULT_WORKSPACE_ID];
   }
 }
@@ -102,7 +103,7 @@ export function resolvePresetOrThrow(presetId) {
   const id = normalizePresetId(presetId);
   if (id === 'project') return { ...BUILTIN_PROJECT };
   const abs = getAgentWorkspaceAbs(id);
-  if (!fs.existsSync(abs)) {
+  if (!FileUtils.existsSync(abs)) {
     throw new Error(`无效工作区: ${id}`);
   }
   return resolveWorkspacePreset(id);
@@ -236,7 +237,7 @@ export function listWorkspaceFiles(fileRootAbs, dirRel = '') {
   const dirAbs = resolveDirUnderRoot(fileRootAbs, dirRel);
   let entries;
   try {
-    entries = fs.readdirSync(dirAbs, { withFileTypes: true });
+    entries = FileUtils.readDirSync(dirAbs, { withFileTypes: true });
   } catch (err) {
     throw new Error(err?.message || '无法读取目录');
   }
@@ -250,10 +251,7 @@ export function listWorkspaceFiles(fileRootAbs, dirRel = '') {
         return { name: e.name, path: relPath, type: 'dir' };
       }
       if (e.isFile()) {
-        let size = 0;
-        try {
-          size = fs.statSync(path.join(dirAbs, e.name)).size;
-        } catch {}
+        const size = FileUtils.statSync(path.join(dirAbs, e.name))?.size ?? 0;
         return { name: e.name, path: relPath, type: 'file', size };
       }
       return null;
@@ -295,15 +293,15 @@ export function writeWorkspaceAgents(agentRootAbs, content = '') {
   if (!isPathInside(rootReal, realpathSyncOrResolve(dir))) {
     throw new Error('无法写入工作区外路径');
   }
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(abs, String(content ?? ''), 'utf8');
+  FileUtils.ensureDirSync(dir);
+  FileUtils.writeFileSync(abs, String(content ?? ''), 'utf8');
   return { path: rel };
 }
 
 export function openWorkspaceFileDownload(fileRootAbs, relPath) {
   const fileReal = resolveFileUnderRoot(fileRootAbs, relPath);
-  const st = fs.statSync(fileReal);
-  if (!st.isFile()) throw new Error('不是文件');
+  const st = FileUtils.statSync(fileReal);
+  if (!st?.isFile()) throw new Error('不是文件');
   return { abs: fileReal, name: path.basename(fileReal) };
 }
 
