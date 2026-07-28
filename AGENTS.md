@@ -4,6 +4,8 @@
 
 XRK-Yunzai 是基于 Node.js 24+ 的多平台 Agent 机器人框架：Bot、插件系统、AIStream 工作流、HTTP/WebSocket API。业务在 `plugins/`，基础设施在 `lib/`。
 
+运行时对话 Agent 的规则在 `data/ai-workspace/{id}/`；仓库种子在 `agents/`（`workspace/` 模板、`skills/standard`）。见 [agents/README.md](agents/README.md)。
+
 ## 开发规范（首读）
 
 | 文档 | 用途 |

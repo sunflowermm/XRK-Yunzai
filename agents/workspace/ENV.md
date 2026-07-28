@@ -42,8 +42,8 @@
 ## 相关配置路径（XRK）
 
 - 工作区：`data/ai-workspace/{id}/`
-- 技能种子：`skills/standard/`（含 `core/` 基础 + `office-*` 扩展）→ 同步到工作区 `skills/`
+- 技能种子：`agents/skills/standard/`（含 `core/` 基础 + `office-*` 扩展）→ 同步到工作区 `skills/`
 - run 开关：`config/default_config/aistream.yaml` → `tools.file.runEnabled`
-- 技能注入：`agentWorkspace.customSkillRoots`（默认 `skills/standard/core` + `skills/standard`）
+- 技能注入：`agentWorkspace.customSkillRoots`（默认工作区 `skills`；种子见 `agents/skills/standard`）
 - 开放域检索：`web.web_search`（`aistream.crawl.webSearch` + 13 提供商；无 Key 默认 parallel-free）。查状态：`web.web_search_providers`
 - Web 抓取 / 浏览器：`aistream.crawl.webFetch` / `aistream.crawl.browser`；Playwright 启动参数另见 `renderer.playwright`（控制台 renderer 配置）
