@@ -4,6 +4,7 @@ import path from 'node:path';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
 import BotUtil from '../../../lib/util.js';
 import { resolveProjectPath, DATA_AI_CONFIG_REL } from '../../../lib/config/config-constants.js';
+import { flattenMessageSegs, segQq, segText } from '../../../lib/utils/onebot-message-seg.js';
 import ChatStream from '../stream/chat.js';
 
 const CONFIG_PATH = resolveProjectPath(DATA_AI_CONFIG_REL);
@@ -307,25 +308,31 @@ export class XRKAIAssistant extends plugin {
           Bot.makeLog('debug', `[XRK-AI] processMessageContent getReply 失败: ${err.message}`, 'XRK-AI');
         }
       }
-      for (const seg of message) {
-        if (seg.type === 'text') content += seg.text || '';
+      for (const seg of flattenMessageSegs(message)) {
+        if (seg.type === 'text') content += segText(seg);
         else if (seg.type === 'at') {
-          const qq = seg.qq ?? seg.user_id ?? seg.data?.qq ?? seg.data?.user_id;
-          if (qq != null && String(qq).trim() !== '' && String(qq) !== String(e.self_id)) {
-            let namePart = String(qq);
-            try {
-              const info = await e.group?.pickMember(qq)?.getInfo();
-              const card = (info?.card ?? '').trim();
-              const nickname = (info?.nickname ?? '').trim();
-              if (card || nickname) namePart = (card || nickname) + '(' + qq + ')';
-            } catch {
-              /* 使用 QQ 字面量 */
-            }
-            content += `@${namePart} `;
+          const qqStr = segQq(seg);
+          if (!qqStr) continue;
+          if (qqStr === String(e.self_id) || qqStr === 'all') {
+            content += `@机器人(${e.self_id}) `;
+            continue;
           }
-        } else if (seg.type === 'image') content += '[图片] ';
+          let namePart = qqStr;
+          try {
+            const info = await e.group?.pickMember(qqStr)?.getInfo();
+            const card = (info?.card ?? '').trim();
+            const nickname = (info?.nickname ?? '').trim();
+            if (card || nickname) namePart = (card || nickname) + '(' + qqStr + ')';
+          } catch {
+            /* 使用 QQ 字面量 */
+          }
+          content += `@${namePart} `;
+        } else if (seg.type === 'image' || seg.type === 'mface') content += '[图片] ';
+        else if (seg.type === 'video') content += '[视频] ';
+        else if (seg.type === 'record' || seg.type === 'audio') content += '[语音] ';
+        else if (seg.type === 'file') content += '[文件] ';
       }
-      if (this.config.prefix) content = content.replace(new RegExp(`^${this.config.prefix}`), '');
+      // 保留触发前缀与 @机器人，勿抹掉
       const trimmed = content.trim();
       const text = stripAiFullPromptDumpMark(trimmed);
       Bot.makeLog('debug', `[XRK-AI] processMessageContent segs=${message.length} len=${text.length}`, 'XRK-AI');
