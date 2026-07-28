@@ -1,5 +1,6 @@
 import path from "node:path"
 import { ulid } from "ulid"
+import { FileUtils } from "../../../lib/utils/file-utils.js"
 
 /** NapCat 出站：url/path 优先；Buffer 勿 String()（TRSS 直传 makeFile） */
 function pickOutboundFileRef(data) {
@@ -117,6 +118,14 @@ Bot.adapter.push(
     }
 
     async makeFile(file, opts = {}) {
+      // 本地路径 + preferPath：直接交路径，避免整段视频读进内存
+      if (opts.preferPath && typeof file === "string") {
+        const local = file.replace(/^file:\/\//, "").trim()
+        if (local && !/^https?:\/\//i.test(local) && !local.startsWith("base64://")) {
+          const st = await FileUtils.stat(local)
+          if (st?.isFile()) return path.resolve(local)
+        }
+      }
       file = await Bot.Buffer(file, {
         http: true,
         size: opts.preferPath ? 1 : 1048576,
