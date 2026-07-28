@@ -4,14 +4,12 @@ import BotUtil from '../../../lib/util.js';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
 import { readImageBuffer } from '../../../lib/utils/entry-media.js';
 import { BaseTools } from '../../../lib/utils/base-tools.js';
-import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
-import { prepareOpenAIChatVisionMessages } from '../../../lib/utils/llm/image-utils.js';
 import {
   ensureAgentWorkspaceSync,
   getConfiguredDefaultWorkspaceId,
   resolveWorkspaceAbsFromContext
 } from '../../../lib/utils/agent-workspace-paths.js';
-import { resolveProjectPath, RESOURCES_AIIMAGES_DIR, DATA_DIR } from '../../../lib/config/config-constants.js';
+import { resolveProjectPath, RESOURCES_AIIMAGES_DIR } from '../../../lib/config/config-constants.js';
 import {
   buildFabricatorMsgList,
   fabricatorContextFromEvent,
@@ -26,7 +24,6 @@ import { chatSessionHistory } from '../../../lib/utils/chat-session-history.js';
 import { runWithStreamRequestContext, getStreamRequestContext } from '../../../lib/aistream/stream-request-context.js';
 import { bumpAgentSessionForEvent } from '../../../lib/aistream/agent-session.js';
 import { assembleChatLlmMessages } from '../../../lib/aistream/chat-pipeline.js';
-import { applyPromptCachePolicy } from '../../../lib/utils/llm/prompt-cache-policy.js';
 import { MemorySystem } from '../../../lib/aistream/memory.js';
 import {
   buildOutboundSegments,
@@ -81,7 +78,6 @@ export default class ChatStream extends AIStream {
   static GROUP_HISTORY_SYNC_FETCH = 120;
   static GROUP_HISTORY_PROMPT_DEFAULT = 45;
   static GROUP_HISTORY_PROMPT_GLOBAL = 60;
-  static GROUP_HISTORY_PROMPT_DEBUG = 120;
 
   /** 当前触发消息 ID（NapCat：message_id === real_id；勿用 real_seq / source） */
   static resolveEventMessageId(e) {
@@ -2724,8 +2720,7 @@ export default class ChatStream extends AIStream {
     const { images, replyImages } = await this._extractImagesFromEvent(e);
 
     const triggerFlags = {
-      isGlobalTrigger: !!question?.isGlobalTrigger,
-      debugDumpFullPrompt: !!question?.debugDumpFullPrompt
+      isGlobalTrigger: !!question?.isGlobalTrigger
     };
 
     // 若无图片，则仍然用纯文本；附带触发标记供 mergeMessageHistory 使用（勿仅靠纯字符串否则丢失）
@@ -2990,17 +2985,14 @@ export default class ChatStream extends AIStream {
 
     const userMessage = messages[messages.length - 1];
     const isGlobalTrigger = userMessage.content?.isGlobalTrigger || false;
-    const debugDumpFullPrompt = userMessage.content?.debugDumpFullPrompt || false;
 
     await this.syncHistoryFromAdapter(e);
 
     const history = ChatStream.getGroupHistoryForPrompt(e.group_id);
-    const historyLimit = debugDumpFullPrompt
-      ? ChatStream.GROUP_HISTORY_PROMPT_DEBUG
-      : (isGlobalTrigger ? ChatStream.GROUP_HISTORY_PROMPT_GLOBAL : ChatStream.GROUP_HISTORY_PROMPT_DEFAULT);
-    const historyHeader = debugDumpFullPrompt
-      ? `[群聊·最近${historyLimit}条]`
-      : '[群聊记录]';
+    const historyLimit = isGlobalTrigger
+      ? ChatStream.GROUP_HISTORY_PROMPT_GLOBAL
+      : ChatStream.GROUP_HISTORY_PROMPT_DEFAULT;
+    const historyHeader = '[群聊记录]';
 
     const mergedMessages = [messages[0]];
     const currentMsgId = ChatStream.resolveEventMessageId(e) || '';
@@ -3028,8 +3020,7 @@ export default class ChatStream extends AIStream {
     }
 
     if (!isGlobalTrigger) {
-      const showCurrentLine =
-        Boolean(currentMsgId) && (Boolean(currentContent) || debugDumpFullPrompt);
+      const showCurrentLine = Boolean(currentMsgId) && Boolean(currentContent);
       const hasMedia =
         typeof userMessage.content === 'object' &&
         userMessage.content !== null &&
@@ -3085,37 +3076,17 @@ export default class ChatStream extends AIStream {
       if (msg.role !== 'user' || msg.content == null || typeof msg.content !== 'object' || Array.isArray(msg.content)) {
         return msg;
       }
-      if (msg.content.debugDumpFullPrompt === undefined && msg.content.isGlobalTrigger === undefined) {
+      if (msg.content.isGlobalTrigger === undefined) {
         return msg;
       }
-      const { debugDumpFullPrompt: _d, isGlobalTrigger: _g, ...content } = msg.content;
+      const { isGlobalTrigger: _g, ...content } = msg.content;
       return { ...msg, content };
     });
   }
 
-  /**
-   * 调试：在请求 LLM 前将首轮 POST 请求体（及组装 messages）写入 data/ai_llm_request_*.json。
-   */
   async callAI(messages, apiConfig = {}) {
-    const { debugDumpFullPrompt, _debugDumpEvent: dumpEvent, ...rest } = apiConfig;
     const forApi = ChatStream.stripInternalMessageFlags(messages);
-
-    if (debugDumpFullPrompt && dumpEvent && Array.isArray(forApi) && forApi.length > 0) {
-      try {
-        const r = await ChatStream.dumpLlmRequestSnapshot(this, dumpEvent, forApi, rest);
-        Bot.makeLog(
-          r.success ? 'info' : 'warn',
-          r.success
-            ? `[ChatStream] 已导出 LLM 请求体: ${r.path}`
-            : `[ChatStream] 请求体导出失败: ${r.error || '未知'}`,
-          'ChatStream'
-        );
-      } catch (err) {
-        Bot.makeLog('error', `[ChatStream] 请求体导出异常: ${err?.message}`, 'ChatStream');
-      }
-    }
-
-    return super.callAI(forApi, rest);
+    return super.callAI(forApi, apiConfig);
   }
 
   /** 是否像工具 JSON 泄漏（仅拦整段 JSON，允许 [回复:id]、[开心] 等协议文本） */
@@ -3272,11 +3243,6 @@ export default class ChatStream extends AIStream {
   }
 
   async execute(e, question, config) {
-    let debugDumpFullPrompt = false;
-    if (!Array.isArray(question) && question && typeof question === 'object') {
-      debugDumpFullPrompt = !!question.debugDumpFullPrompt;
-    }
-
     const runTurn = async () => {
       if (e) this.recordMessage(e);
 
@@ -3285,8 +3251,7 @@ export default class ChatStream extends AIStream {
         : null;
 
       const messages = await assembleChatLlmMessages(this, e, questionObj ?? question);
-      const callOpts = { ...config, debugDumpFullPrompt, _debugDumpEvent: e };
-      let llm = await this.callAI(messages, callOpts);
+      let llm = await this.callAI(messages, config);
       if (llm == null) return null;
 
       let text = String(llm.text ?? '').trim();
@@ -3522,149 +3487,6 @@ export default class ChatStream extends AIStream {
         ChatStream.messageHistory.set(groupId, sorted.slice(-ChatStream.GROUP_HISTORY_STORE_MAX));
       }
     }
-  }
-
-  /** 导出 JSON 中的 LLM 配置副本脱敏（与真实内存对象分离） */
-  static _redactLlmConfigForDump(cfg) {
-    if (!cfg || typeof cfg !== 'object') return cfg;
-    let clone;
-    try {
-      clone = typeof structuredClone === 'function' ? structuredClone(cfg) : JSON.parse(JSON.stringify(cfg));
-    } catch {
-      return { _note: '配置无法完整克隆，已省略' };
-    }
-    const mask = (o) => {
-      if (!o || typeof o !== 'object') return;
-      for (const k of Object.keys(o)) {
-        const lk = k.toLowerCase();
-        const v = o[k];
-        if (typeof v === 'string' && v.length > 0) {
-          const sensitive =
-            lk === 'apikey' ||
-            lk === 'api_key' ||
-            lk === 'authorization' ||
-            lk.endsWith('_token') ||
-            lk === 'access_token' ||
-            lk === 'refresh_token' ||
-            lk.includes('secret') ||
-            lk.includes('password');
-          if (sensitive) {
-            o[k] = '***';
-          }
-        } else if (v && typeof v === 'object' && !Array.isArray(v)) {
-          mask(v);
-        }
-      }
-    };
-    mask(clone);
-    return clone;
-  }
-
-  /**
-   * 与 lib/aistream/aistream.js `callAI` 首轮一致：`resolveLLMConfig` + `{ stream:false, streams }` 再 `buildBody`。
-   */
-  static async _buildRound1RequestBody(client, ctor, messagesAssembled, overrides, timeoutMs) {
-    const openAiVisionFirst = new Set([
-      'OpenAICompatibleLLMClient',
-      'OpenAILLMClient',
-      'AzureOpenAICompatibleLLMClient'
-    ]);
-
-    if (ctor === 'OllamaCompatibleLLMClient' && typeof client.transformMessages === 'function' && typeof client.toOllamaMessages === 'function') {
-      const t = await client.transformMessages(messagesAssembled);
-      const ollamaMsgs = await client.toOllamaMessages(t);
-      return client.buildBody(ollamaMsgs, overrides, false);
-    }
-    if (openAiVisionFirst.has(ctor)) {
-      const prepared = await prepareOpenAIChatVisionMessages(messagesAssembled, client.config, { timeoutMs });
-      return client.buildBody(prepared, overrides);
-    }
-    if (ctor === 'OpenAIResponsesCompatibleLLMClient') {
-      const transformed = await prepareOpenAIChatVisionMessages(messagesAssembled, client.config, { timeoutMs });
-      const input = transformed.map((m) => ({
-        role: m.role || 'user',
-        content: Array.isArray(m.content)
-          ? m.content.map((part) => {
-              if (part?.type === 'text') return { type: 'input_text', text: String(part.text || '') };
-              if (part?.type === 'image_url' && part.image_url?.url) {
-                return { type: 'input_image', image_url: String(part.image_url.url) };
-              }
-              return part;
-            })
-          : typeof m.content === 'string'
-            ? [{ type: 'input_text', text: m.content }]
-            : [{ type: 'input_text', text: m.content?.text || '' }]
-      }));
-      return client.buildBody(input, overrides, { stream: false });
-    }
-    if (typeof client.transformMessages === 'function') {
-      const prepared = await client.transformMessages(messagesAssembled);
-      return client.buildBody(prepared, overrides);
-    }
-    const prepared = await prepareOpenAIChatVisionMessages(messagesAssembled, client.config, { timeoutMs });
-    return client.buildBody(prepared, overrides);
-  }
-
-  /**
-   * 导出与真实 API 首轮 POST 一致的 `request_body`，并附带脱敏后的合并配置（与线上一致）。
-   * @returns {Promise<{ success: boolean, path?: string, error?: string }>}
-   */
-  static async dumpLlmRequestSnapshot(stream, e, messagesAssembled, apiConfigRest) {
-    const result = { success: false };
-    try {
-      const resolved = applyPromptCachePolicy(stream.resolveLLMConfig(apiConfigRest || {}), { stream, e });
-      const client = LLMFactory.createClient(resolved);
-      const overrides = { ...resolved, stream: false, streams: stream._getToolStreamNames() };
-      const timeoutMs = client.timeout ?? client._timeout ?? 360000;
-      const ctor = client.constructor?.name || '';
-
-      let requestBody = null;
-      let requestBodyError = null;
-
-      if (typeof client.buildBody === 'function' && client.config) {
-        try {
-          requestBody = await ChatStream._buildRound1RequestBody(client, ctor, messagesAssembled, overrides, timeoutMs);
-        } catch (prepErr) {
-          requestBodyError = prepErr.message;
-          Bot.makeLog('warn', `[ChatStream] request_body 构建失败，仅写入 messages_assembled: ${prepErr.message}`, 'ChatStream');
-        }
-      }
-
-      const payload = {
-        at: new Date().toISOString(),
-        workflow: stream.name,
-        client_class: ctor,
-        group_id: e?.group_id ?? null,
-        user_id: e?.user_id ?? null,
-        endpoint: typeof client.endpoint === 'string' ? client.endpoint : null,
-        llm_resolved: ChatStream._redactLlmConfigForDump(resolved),
-        call_overrides: ChatStream._redactLlmConfigForDump(overrides),
-        messages_assembled: messagesAssembled,
-        ...(requestBody != null ? { request_body: requestBody } : {}),
-        ...(requestBodyError ? { request_body_error: requestBodyError } : {})
-      };
-
-      let bodyText;
-      try {
-        bodyText = JSON.stringify(payload, null, 2);
-      } catch (serErr) {
-        payload.messages_assembled = `[序列化失败: ${serErr.message}]`;
-        bodyText = JSON.stringify(payload, null, 2);
-      }
-
-      const fpath = resolveProjectPath(DATA_DIR, `ai_llm_request_${Date.now()}.json`);
-      const ok = await FileUtils.writeFile(fpath, bodyText, 'utf8');
-      if (!ok) {
-        result.error = 'writeFile 失败';
-        return result;
-      }
-      result.success = true;
-      result.path = fpath;
-    } catch (error) {
-      result.error = error.message;
-      Bot.makeLog('error', `[ChatStream] dumpLlmRequestSnapshot 失败: ${error.message}`, 'ChatStream');
-    }
-    return result;
   }
 
   /**

@@ -11,26 +11,6 @@ const CONFIG_PATH = resolveProjectPath(DATA_AI_CONFIG_REL);
 const CHAT_MERGED_NAME = 'chat-merged';
 const cooldownState = new Map();
 
-/** 调试：消息中含此口令则导出本轮完整 messages 到 data/；剥离后再送模型（与「清空对话」同在 handleMessage 早判） */
-const AI_FULL_PROMPT_DUMP_REGEX = /#?XRK完整AI上下文/;
-
-function stripAiFullPromptDumpMark(raw) {
-  if (raw == null || typeof raw !== 'string') return '';
-  return raw
-    .replace(AI_FULL_PROMPT_DUMP_REGEX, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-}
-
-/** 与触发判定一致：优先 e.msg，否则拼 message 段文本（避免仅靠随机概率时嗅不到口令） */
-function rawMessageTextForAiTrigger(e) {
-  if (e?.msg != null && String(e.msg).trim() !== '') {
-    return String(e.msg);
-  }
-  if (!Array.isArray(e?.message)) return '';
-  return e.message.map(seg => (seg?.type === 'text' ? (seg.text || '') : '')).join('');
-}
-
 export class XRKAIAssistant extends plugin {
   constructor() {
     super({
@@ -189,17 +169,7 @@ export class XRKAIAssistant extends plugin {
 
       if (!this.config) this.config = await this.loadConfig();
 
-      const rawForDump = rawMessageTextForAiTrigger(e);
-      const debugDumpFullPrompt = AI_FULL_PROMPT_DUMP_REGEX.test(rawForDump);
-      if (debugDumpFullPrompt && !this.isInAiWhitelist(e)) {
-        Bot.makeLog('debug', `[XRK-AI] 调试口令 dump context 非白名单 group=${e.group_id}`, 'XRK-AI');
-        return false;
-      }
-
-      let trigger = true;
-      if (!debugDumpFullPrompt) {
-        trigger = await this.shouldTriggerAI(e);
-      }
+      const trigger = await this.shouldTriggerAI(e);
       if (!trigger) return false;
 
       const stream = this._resolveChatStream();
@@ -211,11 +181,9 @@ export class XRKAIAssistant extends plugin {
 
       const isRandom = !e.atBot && !(this.config.prefix && e.msg?.startsWith(this.config.prefix));
       const text = await this.processMessageContent(e);
-      // 调试导出：勿走「随机撸猫」群合并分支，便于对照真实 messages
-      const isGlobalTrigger = isRandom && !debugDumpFullPrompt;
-      Bot.makeLog('debug', `[XRK-AI] 消息内容 isRandom=${isRandom} isGlobalTrigger=${isGlobalTrigger} len=${text?.length ?? 0} debugDump=${!!debugDumpFullPrompt}`, 'XRK-AI');
-      // 仅调试口令、剥离后无正文时也必须走 stream（否则会跳过 execute 里的 dumpLlmRequestSnapshot）
-      if (!debugDumpFullPrompt && !isGlobalTrigger && !text) {
+      const isGlobalTrigger = isRandom;
+      Bot.makeLog('debug', `[XRK-AI] 消息内容 isRandom=${isRandom} isGlobalTrigger=${isGlobalTrigger} len=${text?.length ?? 0}`, 'XRK-AI');
+      if (!isGlobalTrigger && !text) {
         const img = stream.getRandomEmotionImage?.('惊讶');
         if (img) await e.reply(segment.image(img));
         await BotUtil.sleep(300);
@@ -231,8 +199,7 @@ export class XRKAIAssistant extends plugin {
           content: text,
           text,
           persona: this.config.persona ?? '',
-          isGlobalTrigger,
-          debugDumpFullPrompt: !!debugDumpFullPrompt
+          isGlobalTrigger
         },
         {}
       );
@@ -291,7 +258,7 @@ export class XRKAIAssistant extends plugin {
     const message = e.message;
     if (!Array.isArray(message)) {
       Bot.makeLog('debug', `[XRK-AI] processMessageContent 非数组 len=${String(fallback).length}`, 'XRK-AI');
-      return stripAiFullPromptDumpMark(String(fallback));
+      return String(fallback);
     }
 
     try {
@@ -333,13 +300,12 @@ export class XRKAIAssistant extends plugin {
         else if (seg.type === 'file') content += '[文件] ';
       }
       // 保留触发前缀与 @机器人，勿抹掉
-      const trimmed = content.trim();
-      const text = stripAiFullPromptDumpMark(trimmed);
+      const text = content.trim();
       Bot.makeLog('debug', `[XRK-AI] processMessageContent segs=${message.length} len=${text.length}`, 'XRK-AI');
       return text;
     } catch (err) {
       Bot.makeLog('error', `[XRK-AI] processMessageContent: ${err.message}`, 'XRK-AI');
-      return stripAiFullPromptDumpMark(String(fallback));
+      return String(fallback);
     }
   }
 }
