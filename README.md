@@ -90,7 +90,7 @@ pnpm install   # 或 npm install / yarn
 ### 首次运行
 
 ```bash
-node app   # 自动检查依赖 & 引导登录
+node app   # 交互菜单；启动服务时检查依赖
 ```
 
 按提示完成登录后即可在 `plugins/` 中开发工作流或 API。
@@ -101,7 +101,7 @@ node app   # 自动检查依赖 & 引导登录
 
 | 方式 | 步骤 | 适用场景 |
 |------|------|---------|
-| 原生 Node | `node app` | 开发/调试最快捷，自动检查依赖与 Redis 连接。 |
+| 原生 Node | `node app` | 开发/调试最快捷；启动服务时检查依赖与 Redis。 |
 | Docker Compose | `docker-compose up -d` | 推荐；可一键启 Redis 与主程序、Volume 保留数据。 |
 | Dockerfile | `docker build -t xrk-yunzai:latest .` → `docker run ...` | 适合 CI/CD、自托管。 |
 | PM2 | `pm2 start app.js --name xrk-yunzai` | 持续运行、日志切割、自动拉起。 |
@@ -114,8 +114,8 @@ node app   # 自动检查依赖 & 引导登录
 
 ```
 XRK-Yunzai/
-├── app.js                 # 依赖检查 & 登录引导
-├── start.js               # 生产入口（pm2 / docker 调用）
+├── app.js                 # 引导（菜单轻量；server 查依赖）
+├── start.js               # 菜单 / server 入口（经 app.js）
 ├── package.json
 ├── docker-compose.yml / Dockerfile / docker.sh
 │

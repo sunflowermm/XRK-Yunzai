@@ -8,6 +8,7 @@ import { FileUtils } from "../../../lib/utils/file-utils.js";
 import { cropTopAndBottom } from "../../../lib/renderer/crop.js";
 import { toBuffer, toFileUrl } from "../../../lib/renderer/screenshot-utils.js";
 import { resolveProjectPath } from "../../../lib/config/config-constants.js";
+import { buildPlaywrightLaunchOptions } from "../../../lib/utils/system-browser.js";
 
 export default class PlaywrightRenderer extends Renderer {
   constructor(config = {}) {
@@ -39,15 +40,17 @@ export default class PlaywrightRenderer extends Renderer {
     this._fileCache = new Map();
 
     this.config = {
-      headless: config.headless ?? rendererCfg.headless ?? true,
-      args: config.args ?? rendererCfg.args ?? [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-      ],
-      channel: config.channel ?? rendererCfg.channel,
-      executablePath: config.chromiumPath ?? rendererCfg.chromiumPath,
+      ...buildPlaywrightLaunchOptions({
+        headless: config.headless ?? rendererCfg.headless ?? true,
+        args: config.args ?? rendererCfg.args ?? [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-gpu",
+        ],
+        channel: config.channel ?? rendererCfg.channel,
+        configuredPath: config.chromiumPath ?? rendererCfg.chromiumPath,
+      }),
       wsEndpoint: config.playwrightWS ?? rendererCfg.wsEndpoint,
     };
 
@@ -248,8 +251,9 @@ export default class PlaywrightRenderer extends Renderer {
 
       if (!this.browser) {
         BotUtil.makeLog("info", `Launching new ${this.browserType} instance...`, "PlaywrightRenderer");
-        this.browser = await playwright[this.browserType].launch(this.config);
-        
+        const { wsEndpoint: _ws, ...launchOpts } = this.config;
+        this.browser = await playwright[this.browserType].launch(launchOpts);
+
         if (this.browser) {
           BotUtil.makeLog("info", `Playwright ${this.browserType} started successfully`, "PlaywrightRenderer");
           const endpoint = this.browser.wsEndpoint();
@@ -279,6 +283,13 @@ export default class PlaywrightRenderer extends Renderer {
       this.startHealthCheck();
     } catch (e) {
       BotUtil.makeLog("error", `Browser initialization failed: ${e.message}`, "PlaywrightRenderer");
+      if (/Executable doesn't exist|browserType\.launch|Failed to launch/i.test(e.message || "")) {
+        BotUtil.makeLog(
+          "error",
+          "未找到浏览器：请安装系统 Chrome/Edge，或配置 renderer.playwright.chromiumPath / bot.chromium_path",
+          "PlaywrightRenderer"
+        );
+      }
       this.browser = null;
     } finally {
       this.lock = false;

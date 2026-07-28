@@ -8,6 +8,7 @@ import { FileUtils } from "../../../lib/utils/file-utils.js";
 import { cropTopAndBottom } from "../../../lib/renderer/crop.js";
 import { toBuffer, toFileUrl, isScreenshotClip, toStringList } from "../../../lib/renderer/screenshot-utils.js";
 import { resolveProjectPath } from "../../../lib/config/config-constants.js";
+import { resolveChromiumExecutable } from "../../../lib/utils/system-browser.js";
 
 export default class PuppeteerRenderer extends Renderer {
   constructor(config = {}) {
@@ -39,7 +40,7 @@ export default class PuppeteerRenderer extends Renderer {
     this._fileCache = new Map();
 
     this.config = {
-      headless: config.headless ?? rendererCfg.headless ?? true,
+      headless: config.headless ?? rendererCfg.headless ?? "new",
       args: config.args ?? rendererCfg.args ?? [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -49,12 +50,9 @@ export default class PuppeteerRenderer extends Renderer {
       wsEndpoint: config.puppeteerWS ?? rendererCfg.wsEndpoint,
       ignoreHTTPSErrors: config.ignoreHTTPSErrors ?? rendererCfg.ignoreHTTPSErrors ?? false,
     };
-    const chromiumExe =
-      config.chromiumPath ||
-      rendererCfg.chromiumPath ||
-      process.env.PUPPETEER_EXECUTABLE_PATH ||
-      process.env.CHROME_PATH ||
-      "";
+    const chromiumExe = resolveChromiumExecutable(
+      config.chromiumPath ?? rendererCfg.chromiumPath
+    );
     if (chromiumExe) {
       this.config.executablePath = chromiumExe;
     }
@@ -415,11 +413,16 @@ export default class PuppeteerRenderer extends Renderer {
       }
 
       if (!this.browser) {
-        this.browser = await puppeteer.launch(this.config).catch(err => {
+        const { wsEndpoint: _ws, ignoreHTTPSErrors: _https, ...launchOpts } = this.config;
+        this.browser = await puppeteer.launch(launchOpts).catch(err => {
           BotUtil.makeLog("error", `Failed to start Chromium: ${err.message}`, "PuppeteerRenderer");
           
-          if (err.message.includes("Could not find Chromium")) {
-            BotUtil.makeLog("error", "Chromium not installed. Try: node node_modules/puppeteer/install.js", "PuppeteerRenderer");
+          if (err.message.includes("Could not find Chromium") || /Executable doesn't exist|Failed to launch/i.test(err.message)) {
+            BotUtil.makeLog(
+              "error",
+              "未找到 Chromium：请安装系统 Chrome/Edge，或配置 renderer.puppeteer.chromiumPath / bot.chromium_path / PUPPETEER_EXECUTABLE_PATH",
+              "PuppeteerRenderer"
+            );
           } else if (err.message.includes("cannot open shared object file")) {
             BotUtil.makeLog("error", "Chromium runtime libraries not installed", "PuppeteerRenderer");
           }

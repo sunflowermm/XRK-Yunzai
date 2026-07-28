@@ -14,6 +14,10 @@ import {
   resolveProjectPath,
 } from './lib/config/config-constants.js';
 import { FileUtils } from './lib/utils/file-utils.js';
+import {
+  getBrowserStatus,
+  installPlaywrightChromium,
+} from './lib/utils/browser-bootstrap.js';
 
 const projectRoot = resolveProjectPath();
 
@@ -29,7 +33,8 @@ process.setMaxListeners(30);
 
 const entry = process.argv[1];
 const cliCommand = process.argv[2];
-if (entry && path.basename(entry) === 'start.js' && cliCommand !== 'server' && cliCommand !== 'stop') {
+// 直接跑 start.js（含 server）一律经 app.js：菜单轻量校验，server 拉起时查依赖
+if (entry && path.basename(entry) === 'start.js' && cliCommand !== 'stop') {
   const appPath = resolveProjectPath(APP_ENTRY_REL);
   const result = spawnSync(process.argv[0], [appPath, ...process.argv.slice(2)], { stdio: 'inherit', cwd: projectRoot });
   process.exit(result.status !== null ? result.status : 1);
@@ -335,12 +340,15 @@ class ServerManager extends BaseManager {
 
   async runServerProcess(port, skipConfigCheck = false) {
     const nodeArgs = getNodeArgs();
-    const startScript = resolveProjectPath('start.js');
-    const startArgs = [...nodeArgs, startScript, 'server', port.toString()];
+    // 经 app.js server：每次拉起（含 Ctrl+C 重启）先查依赖，再进 start.js
+    const entryScript = resolveProjectPath(APP_ENTRY_REL);
+    const startArgs = [...nodeArgs, entryScript, 'server', port.toString()];
     const cleanEnv = {
       ...process.env,
       XRK_SERVER_PORT: port.toString(),
-      XRK_SKIP_CONFIG_CHECK: skipConfigCheck ? '1' : '0'
+      XRK_SKIP_CONFIG_CHECK: skipConfigCheck ? '1' : '0',
+      // 热重启跳过前端依赖扫描即可；根/插件依赖仍由 app.js initializeRuntime 检查
+      XRK_SKIP_FRONTEND_BOOTSTRAP: skipConfigCheck ? '1' : (process.env.XRK_SKIP_FRONTEND_BOOTSTRAP || '0'),
     };
     return new Promise((resolve) => {
       this.signalHandler._closeReadline();
@@ -518,7 +526,24 @@ class MenuManager {
 
   async showMainMenu() {
     const availablePorts = await this.serverManager.getAvailablePorts();
-    
+    const browser = await getBrowserStatus();
+    const pwLabel = !browser.playwrightInstalled
+      ? chalk.gray('Playwright 未安装')
+      : browser.browserInstalled
+        ? chalk.green('Playwright Chromium 已安装')
+        : chalk.yellow('Playwright Chromium 未安装');
+
+    if (browser.needsBrowserReminder) {
+      console.log(chalk.yellow.bold('\n! 未检测到系统浏览器（Chrome / Chromium / Edge）'));
+      console.log(
+        chalk.yellow(
+          '  默认 Puppeteer / browser 工作流需要浏览器：请安装系统 Chrome，或在下方菜单安装 Playwright Chromium\n'
+        )
+      );
+    } else if (browser.systemBrowserPath) {
+      console.log(chalk.gray(`  系统浏览器: ${browser.systemBrowserPath}`));
+    }
+
     const choices = [
       ...availablePorts.map(port => ({
         name: chalk.green(`> 启动服务器 (端口: ${port})`),
@@ -539,6 +564,11 @@ class MenuManager {
         name: chalk.cyan('* PM2管理'), 
         value: { action: 'pm2_menu' },
         short: 'PM2管理'
+      },
+      {
+        name: `${chalk.magenta('◎ Playwright 浏览器')} ${chalk.gray('[')}${pwLabel}${chalk.gray(']')}`,
+        value: { action: 'playwright_browser' },
+        short: 'Playwright 浏览器'
       },
       new inquirer.Separator(chalk.gray('─────────────────────────────')),
       { 
@@ -586,6 +616,10 @@ class MenuManager {
       case 'pm2_menu':
         await this.showPM2Menu();
         break;
+
+      case 'playwright_browser':
+        await this.showPlaywrightBrowserMenu();
+        break;
         
       case 'exit':
         console.log(chalk.cyan('\n' + '='.repeat(50)));
@@ -620,6 +654,87 @@ class MenuManager {
 
     if (confirm) {
       await this.serverManager.removePortConfig(port);
+    }
+  }
+
+  async showPlaywrightBrowserMenu() {
+    const status = await getBrowserStatus();
+
+    console.log(chalk.cyan.bold('\n── Playwright 浏览器 ──'));
+    if (status.systemBrowserPath) {
+      console.log(chalk.green(`  系统浏览器: ${status.systemBrowserPath}`));
+      console.log(chalk.gray('  （默认 Puppeteer 渲染器已优先使用；browser 工作流亦可走系统 Chrome）'));
+    } else {
+      console.log(chalk.yellow('  系统浏览器: 未检测到'));
+      console.log(chalk.gray('  可安装系统 Chrome/Edge，或在本菜单从 cdn.playwright.dev 下载 Playwright Chromium'));
+    }
+    if (!status.playwrightInstalled) {
+      console.log(chalk.yellow('\n  npm 包 playwright 未安装，请先完成 pnpm install'));
+    } else if (status.browserInstalled) {
+      console.log(chalk.green('\n  Playwright Chromium: 已安装'));
+      if (status.executablePath) {
+        console.log(chalk.gray(`  路径: ${status.executablePath}`));
+      }
+    } else {
+      console.log(chalk.yellow('\n  Playwright Chromium: 未安装（可选；无系统浏览器时截图 / browser 工作流需要）'));
+    }
+    console.log('');
+
+    if (!status.playwrightInstalled) {
+      await inquirer.prompt([{
+        type: 'input',
+        name: 'back',
+        message: chalk.gray('按 Enter 返回主菜单')
+      }]);
+      return;
+    }
+
+    const choices = [];
+    if (!status.browserInstalled) {
+      choices.push({
+        name: chalk.green('> 安装 Chromium'),
+        value: 'install',
+        short: '安装 Chromium'
+      });
+    } else {
+      choices.push({
+        name: chalk.cyan('* 重新安装 Chromium'),
+        value: 'reinstall',
+        short: '重新安装'
+      });
+    }
+    choices.push(
+      new inquirer.Separator(chalk.gray('─────────────────────────────')),
+      { name: chalk.gray('< 返回主菜单'), value: 'back', short: '返回' }
+    );
+
+    const { action } = await inquirer.prompt([{
+      type: 'list',
+      name: 'action',
+      message: chalk.bold('请选择:'),
+      choices,
+      pageSize: 10
+    }]);
+
+    if (action === 'back') return;
+
+    if (action === 'reinstall') {
+      const { confirm } = await inquirer.prompt([{
+        type: 'confirm',
+        name: 'confirm',
+        message: chalk.bold.yellow('确定重新下载 Chromium？'),
+        default: false
+      }]);
+      if (!confirm) return;
+    }
+
+    console.log(chalk.cyan('\n正在从 cdn.playwright.dev 下载 Playwright Chromium...\n'));
+    try {
+      await installPlaywrightChromium();
+      console.log(chalk.green('\n✓ Playwright Chromium 安装完成\n'));
+    } catch (err) {
+      console.error(chalk.red(`\n✗ 安装失败: ${err.message}\n`));
+      await this.serverManager.logger.error(`Playwright 浏览器安装失败: ${err.message}`);
     }
   }
 

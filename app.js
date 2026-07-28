@@ -1,6 +1,6 @@
 /**
  * @file app.js
- * @description 应用程序引导（依赖检查后加载 start.js）
+ * @description 应用程序引导：菜单轻量校验；server 模式查依赖后加载 start.js
  */
 
 import path from 'path';
@@ -206,7 +206,7 @@ class Bootstrap {
     this.dependencyManager = new DependencyManager(this.logger);
   }
 
-  async initialize() {
+  async initializeRuntime() {
     await validateEnvironment();
     const root = resolveProjectPath();
     await this.dependencyManager.checkAndInstall(
@@ -214,13 +214,25 @@ class Bootstrap {
       path.join(root, 'node_modules')
     );
     await this.dependencyManager.ensurePluginDependencies(root);
-    await this.dependencyManager.ensureFrontendDependencies(root);
+    if (process.env.XRK_SKIP_FRONTEND_BOOTSTRAP !== '1') {
+      await this.dependencyManager.ensureFrontendDependencies(root);
+    }
+    const { logBrowserEnvironment } = await import('./lib/utils/browser-bootstrap.js');
+    await logBrowserEnvironment(this.logger, root);
   }
 
   async run() {
     try {
-      await this.initialize();
+      // 菜单：只做环境校验，进菜单要快
+      // server（含 Ctrl+C 后父进程再拉起）：第一时间查/补依赖
+      const isServer = process.argv[2] === 'server';
+      if (isServer) {
+        await this.initializeRuntime();
+      } else {
+        await validateEnvironment();
+      }
       global.bootstrapLogger = this.logger;
+      process.env.XRK_FROM_APP = '1';
       await new Promise(r => setImmediate(r));
       await import('./start.js');
     } catch (e) {
