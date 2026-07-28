@@ -45,7 +45,7 @@
     "pino": "^9.7.0",
     "playwright": "^1.56.0",
     "pm2": "^5.4.3",
-    "puppeteer": "*",
+    "puppeteer": "19.8.3",
     "redis": "^4.7.0",
     "rotating-file-stream": "^3.2.7",
     "sequelize": "^6.37.5",

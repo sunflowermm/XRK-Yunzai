@@ -80,15 +80,40 @@ class DependencyManager {
     const prefix = cwd !== projectRoot ? `[${path.basename(cwd)}] ` : '';
     await this.logger.warning(`${prefix}发现 ${missingDeps.length} 个缺失依赖，使用 pnpm 安装...`);
     await this.logger.log(`${prefix}正在安装依赖，若出现 DEP0190 警告可忽略，请稍候...`);
-    const runInstall = (extraArgs = []) => spawnSync('pnpm', ['install', ...extraArgs], {
-      cwd,
-      stdio: 'inherit',
-      shell: process.platform === 'win32',
-      env: { ...process.env }
-    });
-    let result = runInstall();
-    if (result.status !== 0) {
-      result = runInstall(['--no-frozen-lockfile']);
+    const registries = [
+      process.env.npm_config_registry,
+      process.env.XRK_NPM_REGISTRY,
+      'https://mirrors.cloud.tencent.com/npm/',
+      'https://repo.huaweicloud.com/repository/npm/',
+      'https://registry.npmmirror.com',
+      'https://registry.npmjs.org',
+    ].filter((r, i, a) => r && a.indexOf(r) === i);
+
+    const runInstall = (registry, extraArgs = []) => {
+      const env = {
+        ...process.env,
+        PUPPETEER_SKIP_DOWNLOAD: process.env.PUPPETEER_SKIP_DOWNLOAD ?? '1',
+        PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD ?? '1',
+        npm_config_registry: registry,
+        NPM_CONFIG_REGISTRY: registry,
+        npm_config_fetch_timeout: process.env.npm_config_fetch_timeout || '45000',
+      };
+      return spawnSync('pnpm', ['install', ...extraArgs], {
+        cwd,
+        stdio: 'inherit',
+        shell: process.platform === 'win32',
+        env,
+      });
+    };
+
+    let result = { status: 1 };
+    for (const reg of registries) {
+      await this.logger.log(`${prefix}pnpm install registry=${reg}`);
+      result = runInstall(reg);
+      if (result.status === 0) break;
+      result = runInstall(reg, ['--no-frozen-lockfile']);
+      if (result.status === 0) break;
+      await this.logger.warning(`${prefix}registry 失败，尝试下一镜像…`);
     }
     if (result.status !== 0) {
       const err = result.error || new Error(`pnpm install 退出码 ${result.status}`);

@@ -39,17 +39,25 @@ export default class PuppeteerRenderer extends Renderer {
     this._fileCache = new Map();
 
     this.config = {
-      headless: config.headless ?? rendererCfg.headless ?? "new",
+      headless: config.headless ?? rendererCfg.headless ?? true,
       args: config.args ?? rendererCfg.args ?? [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu',
       ],
-      executablePath: config.chromiumPath ?? rendererCfg.chromiumPath,
       wsEndpoint: config.puppeteerWS ?? rendererCfg.wsEndpoint,
       ignoreHTTPSErrors: config.ignoreHTTPSErrors ?? rendererCfg.ignoreHTTPSErrors ?? false,
     };
+    const chromiumExe =
+      config.chromiumPath ||
+      rendererCfg.chromiumPath ||
+      process.env.PUPPETEER_EXECUTABLE_PATH ||
+      process.env.CHROME_PATH ||
+      "";
+    if (chromiumExe) {
+      this.config.executablePath = chromiumExe;
+    }
 
     this.healthCheckTimer = null;
 
