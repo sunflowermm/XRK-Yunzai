@@ -17,6 +17,29 @@ function pickOutboundFileRef(data) {
 }
 
 const RICH_MEDIA = new Set(["image", "video", "record"])
+/** 不可与普通消息同条（图片可混）；语音/视频各自单独 send_msg */
+const SOLO_MSG = new Set(["video", "record"])
+
+/** 将混排消息拆成可发送批次：text/image/at/… 可同批，video/record 各一批 */
+function splitOutboundBatches(message) {
+  if (!message.length) return []
+  if (!message.some(s => SOLO_MSG.has(s?.type))) return [message]
+  const batches = []
+  let mix = []
+  for (const seg of message) {
+    if (SOLO_MSG.has(seg?.type)) {
+      if (mix.length) {
+        batches.push(mix)
+        mix = []
+      }
+      batches.push([seg])
+    } else {
+      mix.push(seg)
+    }
+  }
+  if (mix.length) batches.push(mix)
+  return batches
+}
 
 /** gml 成员 Map：统一以 string QQ 为键，读取时兼容历史 number 键 */
 function gmlMemberGet(map, userId) {
@@ -163,7 +186,11 @@ Bot.adapter.push(
         else ret.push(data)
       }
 
-      if (message.length) ret.push(await send(message))
+      if (message.length) {
+        for (const batch of splitOutboundBatches(message)) {
+          ret.push(await send(batch))
+        }
+      }
       if (ret.length === 1) return ret[0]
 
       const message_id = []
