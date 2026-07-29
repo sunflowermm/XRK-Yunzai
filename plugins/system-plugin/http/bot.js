@@ -171,12 +171,17 @@ export default {
         try {
           switch (action) {
             case 'shutdown':
+            case 'hot_shutdown':
               await global.redis.set(`Yz:shutdown:${uin}`, 'true');
-              res.json({ success: true, message: '已关机' });
+              res.json({ success: true, message: '已热关机' });
               break;
             case 'startup':
               await global.redis.del(`Yz:shutdown:${uin}`);
               res.json({ success: true, message: '已开机' });
+              break;
+            case 'poweroff':
+              res.json({ success: true, message: '正在关机，返回菜单' });
+              setTimeout(() => process.exit(0), 500);
               break;
             default:
               res.status(400).json({ success: false, message: '不支持的操作' });

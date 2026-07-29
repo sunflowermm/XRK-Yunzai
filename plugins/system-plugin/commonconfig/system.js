@@ -80,7 +80,18 @@ export default class SystemConfig extends ConfigBase {
             online_msg_exp: { type: 'number', label: '上线推送冷却(秒)', description: 'Bot 上线后在此时间内不重复推送上线通知', min: 0, default: 86400, component: 'InputNumber' },
             file_to_url_time: { type: 'number', label: '文件URL有效时间(分钟)', description: '临时文件 URL 的有效时长', min: 1, default: 60, component: 'InputNumber' },
             file_to_url_times: { type: 'number', label: '文件URL访问次数', description: '同一临时 URL 最大可访问次数', min: 1, default: 5, component: 'InputNumber' },
-            cache_group_member: { type: 'boolean', label: '缓存群成员列表', description: '是否缓存群成员以减少 API 调用', default: true, component: 'Switch' }
+            cache_group_member: { type: 'boolean', label: '缓存群成员列表', description: '是否缓存群成员以减少 API 调用', default: true, component: 'Switch' },
+            autoUpdate: {
+              type: 'object',
+              label: '自动更新',
+              description: '定时静默更新主仓与 plugins/*；有更新或失败才推主人',
+              component: 'SubForm',
+              fields: {
+                enabled: { type: 'boolean', label: '启用定时更新', default: true, component: 'Switch' },
+                cron: { type: 'string', label: 'Cron', description: '秒 分 时 日 月 周，默认每天 12:00', default: '0 0 12 * * *', component: 'Input' },
+                forceOnConflict: { type: 'boolean', label: '冲突才强制', description: '先普通 pull，仅冲突时 reset --hard', default: true, component: 'Switch' }
+              }
+            }
           }
         }
       },
