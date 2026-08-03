@@ -1443,7 +1443,7 @@ export default class SystemConfig extends ConfigBase {
                 defaultWorkflows: {
                   type: 'array',
                   label: '默认启用的工作流',
-                  description: '控制台未勾选时 HTTP 默认工具面；可含 remote-mcp.*；留空=不自动挂',
+                  description: '控制台未勾选时 HTTP 默认工具面；可含 remote-mcp.*；保存后按勾选同步挂载',
                   itemType: 'string',
                   default: [],
                   component: 'MultiSelect'
@@ -1451,7 +1451,7 @@ export default class SystemConfig extends ConfigBase {
                 remote: {
                   type: 'object',
                   label: '远程MCP连接',
-                  description: '声明可用远程 MCP；在 AI 助手「合并工作流」勾选 remote-mcp.* 后才连接',
+                  description: '声明可用远程 MCP；在 AI 助手「合并工作流」勾选并保存后连接',
                   component: 'SubForm',
                   fields: {
                     mcpServers: {

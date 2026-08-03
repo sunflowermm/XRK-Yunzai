@@ -13,7 +13,7 @@ function getConfigManager(Bot) {
 /** 配置保存后清除 cfg 缓存，确保 LLMFactory 等读取到最新 providers 子配置 */
 function invalidateCfgCache(configName) {
   try {
-    if (cfg?.clearConfig) cfg.clearConfig(configName);
+    if (configName && cfg?.clearConfig) cfg.clearConfig(configName);
   } catch (err) {
     Bot.makeLog('debug', `[config] clearConfig 跳过: ${err?.message || err}`, 'ConfigAPI');
   }
@@ -219,6 +219,7 @@ export default {
           }
 
           invalidateCfgCache(configName);
+          if (keyPath) invalidateCfgCache(keyPath);
 
           res.json({
             success: result,

@@ -228,7 +228,10 @@ async function handleChatCompletionsV3(req, res, Bot) {
   if (workflowStreams?.length) {
     const { mergeable, toolOnly } = partitionToolStreamNames(workflowStreams);
     overrides.streams = [...mergeable, ...toolOnly];
-    await Bot?.AiWorkflowLoader?.ensureRemoteMCPServers?.(overrides.streams);
+    // 请求临时名单里的 remote-mcp 若尚未被配置同步挂上，补挂一次
+    if (toolOnly.length) {
+      await Bot?.AiWorkflowLoader?.ensureRemoteMCPServers?.(overrides.streams);
+    }
   }
   overrides.mcpToolMode = workflowStreams?.length ? 'execute' : 'passthrough';
   Object.assign(

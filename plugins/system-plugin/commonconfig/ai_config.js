@@ -62,7 +62,7 @@ function mergeWorkflowField(extra = [], overrides = {}) {
   return {
     type: 'array',
     label: '合并工作流',
-    description: '并入 chat 的副工作流 / remote-mcp；勾选即严格生效，不会自动挂其它 MCP',
+    description: '并入 chat 的副工作流 / remote-mcp；勾选并保存后即挂载，对话只消费白名单',
     itemType: 'string',
     enum: listMergeWorkflows(extra),
     default: [...DEFAULT_MERGE_WORKFLOWS],
