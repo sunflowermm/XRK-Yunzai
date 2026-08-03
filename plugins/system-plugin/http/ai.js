@@ -2,9 +2,10 @@ import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
 import { getAiWorkflowConfigOptional } from '../../../lib/utils/ai-workflow-config.js';
 import { mergeAgentWorkspaceIntoMessages } from '../../../lib/utils/agent-workspace.js';
 import { transformOpenAIStyleVisionMessages } from '../../../lib/utils/llm/message-transform.js';
-import { expandChatToolWorkflowWhitelist } from '../../../lib/ai-workflow/chat-tool-workflows.js';
+import { partitionToolStreamNames } from '../../../lib/ai-workflow/chat-tool-workflows.js';
 import { parseMultipartData } from '../../../lib/utils/multipart-parser.js';
 import { getServerUploadLimits } from '../../../lib/utils/upload-limits.js';
+import { normalizeStringArray } from '../../../lib/utils/string-array-utils.js';
 import {
   parseRequestWorkspace,
   buildAiWorkflowCfgForAgentRoot,
@@ -215,10 +216,18 @@ async function handleChatCompletionsV3(req, res, Bot) {
       ...(Array.isArray(workflowConfig.streams) ? workflowConfig.streams.filter(Boolean) : []),
       ...(typeof workflowConfig.workflow === 'string' && workflowConfig.workflow.trim() ? [workflowConfig.workflow.trim()] : [])
     ];
-    workflowStreams = list.length ? [...new Set(list)] : null;
+    workflowStreams = list.length ? normalizeStringArray(list) : null;
   }
+  if (!workflowStreams?.length) {
+    const defaults = getAiWorkflowConfigOptional()?.mcp?.defaultWorkflows;
+    if (Array.isArray(defaults) && defaults.length) {
+      workflowStreams = normalizeStringArray(defaults);
+    }
+  }
+  // 勾选 / defaultWorkflows 即严格白名单，不自动追加 remote-mcp / web / browser
   if (workflowStreams?.length) {
-    overrides.streams = expandChatToolWorkflowWhitelist(workflowStreams);
+    const { mergeable, toolOnly } = partitionToolStreamNames(workflowStreams);
+    overrides.streams = [...mergeable, ...toolOnly];
   }
   overrides.mcpToolMode = workflowStreams?.length ? 'execute' : 'passthrough';
   Object.assign(
@@ -399,27 +408,35 @@ async function handleModels(req, res, Bot) {
   }
 
   const vendors = LLMFactory.listVendors(profiles);
-  const allStreams = Bot.AiWorkflowLoader?.getWorkflowsByPriority?.() ?? [];
-  const workflows = allStreams
-    .filter((s) => !s.primaryStream && !s.secondaryStreams && (s.mcpTools?.size || 0) > 0)
-    .map((s) => ({
+  const seen = new Set();
+  const workflows = [];
+  for (const s of Bot.AiWorkflowLoader?.getWorkflowsByPriority?.() ?? []) {
+    if (!s?.name || s.primaryStream || s.secondaryStreams || !(s.mcpTools?.size > 0)) continue;
+    if (seen.has(s.name)) continue;
+    seen.add(s.name);
+    workflows.push({
       key: s.name,
       label: s.description || s.name,
       description: s.description || '',
       profile: null,
       persona: null,
       uiHidden: false
-    }));
+    });
+  }
 
-  const remoteServers = Bot.AiWorkflowLoader?.listRemoteMCPServers?.() || [];
-  const remoteWorkflows = remoteServers.map((name) => ({
-    key: `remote-mcp.${name}`,
-    label: `远程 MCP：${name}`,
-    description: `远程 MCP 服务器 ${name}`,
-    profile: null,
-    persona: null,
-    uiHidden: false
-  }));
+  for (const name of Bot.AiWorkflowLoader?.listRemoteMCPServers?.() || []) {
+    const key = `remote-mcp.${name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    workflows.push({
+      key,
+      label: `远程 MCP：${name}`,
+      description: `远程 MCP 服务器 ${name}`,
+      profile: null,
+      persona: null,
+      uiHidden: false
+    });
+  }
 
   return res.json({
     success: true,
@@ -430,7 +447,7 @@ async function handleModels(req, res, Bot) {
       persona: llm.persona || '',
       profiles,
       vendors,
-      workflows: [...workflows, ...remoteWorkflows]
+      workflows
     }
   });
 }

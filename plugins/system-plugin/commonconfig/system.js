@@ -1314,62 +1314,15 @@ export default class SystemConfig extends ConfigBase {
             global: {
               type: 'object',
               label: '全局设置',
-              description: '工作流引擎的全局超时、并发与调试开关',
+              description: '工作流系统级调试与通用开关',
               component: 'SubForm',
               fields: {
-                maxTimeout: {
-                  type: 'number',
-                  label: '最大执行超时（毫秒）',
-                  description: '单条工作流运行超过此时长将中止',
-                  min: 1000,
-                  default: 30000,
-                  component: 'InputNumber'
-                },
                 debug: {
                   type: 'boolean',
                   label: '调试日志',
-                  description: '是否输出工作流执行过程的调试日志',
+                  description: '启用后会输出更详细的工作流调试日志，仅建议在开发/排错时打开',
                   default: false,
                   component: 'Switch'
-                },
-                maxConcurrent: {
-                  type: 'number',
-                  label: '并发执行限制',
-                  description: '同一时刻允许运行的工作流实例数量上限',
-                  min: 1,
-                  default: 5,
-                  component: 'InputNumber'
-                }
-              }
-            },
-            cache: {
-              type: 'object',
-              label: '缓存设置',
-              description: '工作流结果或中间缓存的 TTL 与条数上限',
-              component: 'SubForm',
-              fields: {
-                enabled: {
-                  type: 'boolean',
-                  label: '启用缓存',
-                  description: '仅对无 MCP 工具且工作流 config.cache: true 的只读流生效；chat 等 Agent 流始终不缓存整轮结果',
-                  default: false,
-                  component: 'Switch'
-                },
-                ttl: {
-                  type: 'number',
-                  label: '缓存过期时间（秒）',
-                  description: '缓存条目过期时间',
-                  min: 1,
-                  default: 300,
-                  component: 'InputNumber'
-                },
-                maxSize: {
-                  type: 'number',
-                  label: '最大缓存条数',
-                  description: '缓存中最多保留的条目数',
-                  min: 1,
-                  default: 100,
-                  component: 'InputNumber'
                 }
               }
             },
@@ -1392,48 +1345,6 @@ export default class SystemConfig extends ConfigBase {
                   description: '默认360000（6分钟），超时会触发"operation was aborted"错误',
                   min: 1000,
                   default: 360000,
-                  component: 'InputNumber'
-                },
-                temperature: {
-                  type: 'number',
-                  label: '默认 temperature',
-                  description: '全局默认采样温度，工作流/单次请求/各 *_llm 可覆盖',
-                  min: 0,
-                  max: 2,
-                  default: 0.8,
-                  component: 'InputNumber'
-                },
-                maxTokens: {
-                  type: 'number',
-                  label: '默认 max_tokens',
-                  description: '全局默认最大输出 token',
-                  min: 1,
-                  default: 6000,
-                  component: 'InputNumber'
-                },
-                topP: {
-                  type: 'number',
-                  label: '默认 top_p',
-                  description: '全局默认核采样',
-                  min: 0,
-                  max: 1,
-                  default: 0.9,
-                  component: 'InputNumber'
-                },
-                presencePenalty: {
-                  type: 'number',
-                  label: '默认 presence_penalty',
-                  min: -2,
-                  max: 2,
-                  default: 0.6,
-                  component: 'InputNumber'
-                },
-                frequencyPenalty: {
-                  type: 'number',
-                  label: '默认 frequency_penalty',
-                  min: -2,
-                  max: 2,
-                  default: 0.6,
                   component: 'InputNumber'
                 },
                 promptCache: {
@@ -1529,17 +1440,10 @@ export default class SystemConfig extends ConfigBase {
                   default: true,
                   component: 'Switch'
                 },
-                autoRegister: {
-                  type: 'boolean',
-                  label: '自动注册工具',
-                  description: '自动从工作流中收集并注册MCP工具',
-                  default: true,
-                  component: 'Switch'
-                },
                 defaultWorkflows: {
                   type: 'array',
-                  label: '默认 MCP 工作流',
-                  description: 'MCP 工具默认暴露的工作流名列表',
+                  label: '默认启用的工作流',
+                  description: '控制台未勾选时 HTTP 默认工具面；留空=不自动挂 MCP',
                   itemType: 'string',
                   default: [],
                   component: 'MultiSelect'

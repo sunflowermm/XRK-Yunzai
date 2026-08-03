@@ -3,6 +3,7 @@
  */
 import { flattenMessageSegs, segQq, segText } from '../../../lib/utils/onebot-message-seg.js';
 import { normalizeStringArray } from '../../../lib/utils/string-array-utils.js';
+import { partitionToolStreamNames } from '../../../lib/ai-workflow/chat-tool-workflows.js';
 import ChatStream from '../workflow/chat.js';
 
 const cooldownState = new Map();
@@ -84,15 +85,15 @@ export async function loadAiAssistantConfig() {
   return new AIConfig().read(true);
 }
 
-/** @param {object} plugin @param {string[]} [mergeList] */
+/** @param {object} plugin @param {string[]} [mergeList] 仅实体工作流名，勿含 remote-mcp.* */
 export function resolveChatStream(plugin, mergeList) {
-  const secondaries = normalizeStringArray(mergeList);
+  const { mergeable } = partitionToolStreamNames(mergeList);
   const loader = Bot?.AiWorkflowLoader;
   const get = (name) => plugin?.getWorkflow?.(name) ?? loader?.getWorkflow?.(name) ?? null;
 
-  if (!secondaries.length) return get('chat');
+  if (!mergeable.length) return get('chat');
 
-  const mergedName = `chat-merged:${secondaries.join('+')}`;
+  const mergedName = `chat-merged:${mergeable.join('+')}`;
   const existing = get(mergedName);
   if (existing) return existing;
 
@@ -100,7 +101,7 @@ export function resolveChatStream(plugin, mergeList) {
     const merged = loader.mergeWorkflows({
       name: mergedName,
       main: 'chat',
-      secondary: secondaries,
+      secondary: mergeable,
       prefixSecondary: true
     });
     if (merged) return merged;
@@ -199,13 +200,17 @@ export async function runChatAgent(plugin, e, {
   isGlobalTrigger = false
 } = {}) {
   const effective = resolveEffectiveAiConfig(e, config);
-  const stream = resolveChatStream(plugin, effective.mergeWorkflows);
+  const { mergeable, toolOnly } = partitionToolStreamNames(effective.mergeWorkflows);
+  const stream = resolveChatStream(plugin, mergeable);
   if (!stream) {
     Bot.makeLog('error', '[XRK-AI] chat 工作流未加载', 'XRK-AI');
     return false;
   }
 
-  const apiConfig = {};
+  const apiConfig = {
+    // 勾选即严格：仅 chat + 已选副流 + 已选 remote-mcp.*，不自动挂其它 MCP
+    toolStreamNames: ['chat', ...mergeable, ...toolOnly]
+  };
   if (effective.llmProvider) apiConfig.provider = effective.llmProvider;
 
   await Bot.AiWorkflowLoader.executeWorkflow(

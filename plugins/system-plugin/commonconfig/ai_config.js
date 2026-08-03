@@ -35,14 +35,13 @@ function listMergeWorkflows(extra = []) {
     Bot.makeLog('warn', `[AIConfig] 获取工作流列表失败: ${e.message}`, 'AIConfig');
   }
   try {
-    const remote = Bot?.AiWorkflowLoader?.remoteMCPServers;
-    if (remote?.keys) {
-      for (const key of remote.keys()) names.push(`remote-mcp.${key}`);
+    for (const remote of Bot?.AiWorkflowLoader?.listRemoteMCPServers?.() || []) {
+      names.push(`remote-mcp.${remote}`);
     }
   } catch (e) {
     Bot.makeLog('warn', `[AIConfig] 获取远程 MCP 列表失败: ${e.message}`, 'AIConfig');
   }
-  return mergeUniqueStrings([...FALLBACK_MERGE_WORKFLOWS, ...names], extra);
+  return mergeUniqueStrings(names.length ? names : FALLBACK_MERGE_WORKFLOWS, extra);
 }
 
 /** Select 可清空；空=回落。不把 '' 放进 enum。 */
@@ -65,7 +64,7 @@ function mergeWorkflowField(extra = [], overrides = {}) {
   return {
     type: 'array',
     label: '合并工作流',
-    description: '并入 chat 的副工作流 / remote-mcp；勾选即严格生效',
+    description: '并入 chat 的副工作流 / remote-mcp；勾选即严格生效，不会自动挂其它 MCP',
     itemType: 'string',
     enum: listMergeWorkflows(extra),
     default: ['memory', 'database', 'tools'],

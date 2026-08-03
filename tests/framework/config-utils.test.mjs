@@ -147,5 +147,6 @@ describe('string-array-utils', () => {
     const { mergeUniqueStrings } = await import('../../lib/utils/string-array-utils.js');
     assert.deepEqual(mergeUniqueStrings(['a', 'b'], 'c'), ['a', 'b', 'c']);
     assert.deepEqual(mergeUniqueStrings(['a'], ['a', 'b']), ['a', 'b']);
+    assert.deepEqual(mergeUniqueStrings(['a', 'a', 'b'], ['b', 'c']), ['a', 'b', 'c']);
   });
 });

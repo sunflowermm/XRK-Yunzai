@@ -4,25 +4,12 @@
 enabled: true
 
 global:
-  maxTimeout: 30000
   debug: false
-  maxConcurrent: 5
-
-cache:
-  # Agent/聊天工作流默认不缓存整轮结果；仅无工具、显式 config.cache: true 的只读流可 opt-in
-  enabled: false
-  ttl: 300
-  maxSize: 100
 
 llm:
   # 填写各工厂 providers[] 条目的 key（先在 data/server_bots/*_llm.yaml 配置端点）
   Provider: ""
   timeout: 360000
-  temperature: 0.8
-  maxTokens: 6000
-  topP: 0.9
-  presencePenalty: 0.6
-  frequencyPenalty: 0.6
   retry:
     enabled: true
     maxAttempts: 3
@@ -40,7 +27,7 @@ llm:
 
 mcp:
   enabled: true
-  autoRegister: true
+  # 留空=不自动挂；控制台 / mergeWorkflows 勾选才进工具面
   defaultWorkflows: []
   toolMergeStrategy: preferRequest  # preferRequest | preferStream | merge
   remote:

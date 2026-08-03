@@ -399,14 +399,19 @@ const endpointHint = computed(() =>
 const workspaceOptions = computed(() =>
   (chat.workspacePresets || []).map((w) => ({ label: w.label || w.id, value: w.id })),
 );
-const workflowOptions = computed(() =>
-  (chat.llmOptions?.workflows || [])
+const workflowOptions = computed(() => {
+  const seen = new Set();
+  return (chat.llmOptions?.workflows || [])
     .map((w) => ({
       value: w.key || w.name || '',
       label: w.label || w.description || w.key || w.name || '',
     }))
-    .filter((w) => w.value),
-);
+    .filter((w) => {
+      if (!w.value || seen.has(w.value)) return false;
+      seen.add(w.value);
+      return true;
+    });
+});
 
 async function scrollBottom(force = false) {
   await nextTick();
