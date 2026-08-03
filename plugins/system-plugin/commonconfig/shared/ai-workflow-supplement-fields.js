@@ -1,20 +1,41 @@
 /**
  * ai-workflow.yaml 中 crawl / tools / agentWorkspace 扩展字段（与 default_config/ai-workflow.yaml 对齐）
+ * webSearch 各 Provider 的 label 须带提供商名，避免控制台扁平表单里一排同名「API Key」。
  */
 
-function providerScope(label, fields) {
+function providerScope(label, description, fields) {
   return {
     type: 'object',
     label,
+    description,
     component: 'SubForm',
     fields
   };
 }
 
-const API_KEY_BASE = {
-  apiKey: { type: 'string', label: 'API Key', default: '', component: 'InputPassword' },
-  baseUrl: { type: 'string', label: 'Base URL', default: '', component: 'Input' }
-};
+/** @param {string} name 提供商显示名 */
+function providerApiFields(name, extra = {}) {
+  const who = name || '该搜索提供商';
+  return {
+    apiKey: {
+      type: 'string',
+      label: `${name} API Key`,
+      description: `${who} 的鉴权密钥。留空则跳过，不参与 web_search 自动选择。`,
+      default: '',
+      component: 'InputPassword',
+      layout: 'full'
+    },
+    baseUrl: {
+      type: 'string',
+      label: `${name} Base URL（可选）`,
+      description: `一般留空用官方默认地址。仅自建或反向代理 ${who} 时填写 API 根 URL。`,
+      default: '',
+      component: 'Input',
+      layout: 'full'
+    },
+    ...extra
+  };
+}
 
 /** agentWorkspace 段内补充字段（合并进 system.js 既有 SubForm） */
 export const AGENT_WORKSPACE_SUPPLEMENT_FIELDS = {
@@ -115,51 +136,200 @@ export const AI_WORKFLOW_CRAWL_FIELDS = {
   webSearch: {
     type: 'object',
     label: 'web_search',
-    description: '开放域检索（13 提供商；无 Key 时 parallel-free）',
+    description: '联网搜索：全局选项 + 各 Provider 凭据（只用到的填 Key，其余留空）',
     component: 'SubForm',
     fields: {
-      enabled: { type: 'boolean', label: '启用 web_search', default: true, component: 'Switch' },
-      provider: { type: 'string', label: '默认提供商', default: '', component: 'Input' },
-      timeoutSeconds: { type: 'number', label: '超时（秒）', min: 1, default: 20, component: 'InputNumber' },
-      cacheTtlMinutes: { type: 'number', label: '缓存 TTL（分钟）', min: 0, default: 15, component: 'InputNumber' },
-      region: { type: 'string', label: '区域', default: '', component: 'Input' },
-      safeSearch: { type: 'string', label: 'SafeSearch', enum: ['off', 'moderate', 'strict'], default: 'moderate', component: 'Select' },
-      country: { type: 'string', label: '国家/地区', default: '', component: 'Input' },
-      parallelFree: providerScope('Parallel Free', {
-        url: { type: 'string', label: 'MCP URL', default: 'https://search.parallel.ai/mcp', component: 'Input' }
+      enabled: {
+        type: 'boolean',
+        label: '启用 web_search',
+        description: '关闭后 Agent / MCP 无法调用 web_search 工具',
+        default: true,
+        component: 'Switch'
+      },
+      provider: {
+        type: 'string',
+        label: '默认提供商 ID',
+        description:
+          '强制指定一家：brave / perplexity / exa / tavily / parallel / parallel-free / gemini / kimi / minimax / firecrawl / ollama / searxng / duckduckgo。留空=按已填 Key 自动选；都无 Key 时用 parallel-free，再回退 duckduckgo',
+        default: '',
+        component: 'Input',
+        layout: 'full'
+      },
+      timeoutSeconds: {
+        type: 'number',
+        label: '搜索超时（秒）',
+        description: '单次搜索 API 最长等待；超时则失败或换回退提供商',
+        min: 1,
+        default: 20,
+        component: 'InputNumber'
+      },
+      cacheTtlMinutes: {
+        type: 'number',
+        label: '结果缓存（分钟）',
+        description: '相同查询命中内存缓存的时长；0=不缓存',
+        min: 0,
+        default: 15,
+        component: 'InputNumber'
+      },
+      region: {
+        type: 'string',
+        label: 'DuckDuckGo region',
+        description: '仅 duckduckgo 使用。地区码，如 wt-wt（全球）、us-en、cn-zh；留空用默认',
+        default: '',
+        component: 'Input'
+      },
+      safeSearch: {
+        type: 'string',
+        label: 'DuckDuckGo SafeSearch',
+        description: '仅 duckduckgo：strict / moderate / off',
+        enum: ['off', 'moderate', 'strict'],
+        default: 'moderate',
+        component: 'Select'
+      },
+      country: {
+        type: 'string',
+        label: '国家码（2 字母，可选）',
+        description: '部分付费 Provider（如 Brave）的地区偏好，ISO 3166-1，如 CN、US；不用可留空',
+        default: '',
+        component: 'Input'
+      },
+      parallelFree: providerScope(
+        'parallel-free（免 Key）',
+        '默认零配置搜索：走 Parallel 免费 MCP，无需 API Key',
+        {
+          url: {
+            type: 'string',
+            label: 'parallel-free MCP URL',
+            description: '免费搜索 MCP 地址；一般保持默认即可',
+            default: 'https://search.parallel.ai/mcp',
+            component: 'Input',
+            layout: 'full'
+          }
+        }
+      ),
+      brave: providerScope('Brave', 'Brave Search API（需 api.brave.com 密钥）', providerApiFields('Brave')),
+      perplexity: providerScope('Perplexity', 'Perplexity 搜索；可直连或经 OpenRouter', {
+        ...providerApiFields('Perplexity'),
+        openRouterApiKey: {
+          type: 'string',
+          label: 'Perplexity · OpenRouter Key（可选）',
+          description:
+            '走 OpenRouter 中转 Perplexity 时填此项；与上方「Perplexity API Key」二选一，不要两个都填',
+          default: '',
+          component: 'InputPassword',
+          layout: 'full'
+        },
+        model: {
+          type: 'string',
+          label: 'Perplexity Model（可选）',
+          description: '覆盖默认模型名；直连与 OpenRouter 均可；留空用内置默认',
+          default: '',
+          component: 'Input',
+          layout: 'full'
+        }
       }),
-      brave: providerScope('Brave', API_KEY_BASE),
-      perplexity: providerScope('Perplexity', {
-        ...API_KEY_BASE,
-        openRouterApiKey: { type: 'string', label: 'OpenRouter API Key', default: '', component: 'InputPassword' },
-        model: { type: 'string', label: 'Model', default: '', component: 'Input' }
+      exa: providerScope('Exa', 'Exa 神经搜索 API', providerApiFields('Exa')),
+      tavily: providerScope('Tavily', 'Tavily 搜索 API', providerApiFields('Tavily')),
+      parallel: providerScope(
+        'Parallel（付费）',
+        'Parallel.ai 付费搜索（与上方免 Key 的 parallel-free 不同）',
+        providerApiFields('Parallel 付费')
+      ),
+      gemini: providerScope('Gemini', 'Google Gemini 带联网的搜索能力', {
+        ...providerApiFields('Gemini'),
+        model: {
+          type: 'string',
+          label: 'Gemini Model（可选）',
+          description: 'Gemini 模型名，留空用内置默认',
+          default: '',
+          component: 'Input',
+          layout: 'full'
+        }
       }),
-      exa: providerScope('Exa', API_KEY_BASE),
-      tavily: providerScope('Tavily', API_KEY_BASE),
-      parallel: providerScope('Parallel', API_KEY_BASE),
-      gemini: providerScope('Gemini', {
-        ...API_KEY_BASE,
-        model: { type: 'string', label: 'Model', default: '', component: 'Input' }
+      kimi: providerScope('Kimi / Moonshot', '月之暗面（Moonshot）搜索接口', {
+        ...providerApiFields('Kimi'),
+        model: {
+          type: 'string',
+          label: 'Kimi Model（可选）',
+          description: 'Kimi 模型名，留空用内置默认',
+          default: '',
+          component: 'Input',
+          layout: 'full'
+        }
       }),
-      kimi: providerScope('Kimi', {
-        ...API_KEY_BASE,
-        model: { type: 'string', label: 'Model', default: '', component: 'Input' }
+      minimax: providerScope('MiniMax', 'MiniMax 搜索；可指定 region / host', {
+        ...providerApiFields('MiniMax'),
+        region: {
+          type: 'string',
+          label: 'MiniMax Region',
+          description: 'global=国际 / cn=国内；留空则按下方 API Host 推断',
+          enum: ['', 'global', 'cn'],
+          default: '',
+          component: 'Select'
+        },
+        apiHost: {
+          type: 'string',
+          label: 'MiniMax API Host（可选）',
+          description: '自定义主机名；含国内域名时按 cn 处理；一般留空',
+          default: '',
+          component: 'Input',
+          layout: 'full'
+        }
       }),
-      minimax: providerScope('MiniMax', {
-        ...API_KEY_BASE,
-        region: { type: 'string', label: 'Region', default: '', component: 'Input' },
-        apiHost: { type: 'string', label: 'API Host', default: '', component: 'Input' }
+      firecrawl: providerScope(
+        'Firecrawl Search',
+        'Firecrawl 搜索（可与 scrape 共用同一套密钥）',
+        providerApiFields('Firecrawl')
+      ),
+      searxng: providerScope('SearXNG', '自建 SearXNG 元搜索；填实例地址即可，无需商业 Key', {
+        baseUrl: {
+          type: 'string',
+          label: 'SearXNG 实例 URL',
+          description: '必填才启用，如 http://127.0.0.1:8080',
+          default: '',
+          component: 'Input',
+          layout: 'full'
+        },
+        categories: {
+          type: 'string',
+          label: 'SearXNG categories（可选）',
+          description: 'categories 参数，如 general 或 general,news；留空用实例默认',
+          default: '',
+          component: 'Input'
+        },
+        language: {
+          type: 'string',
+          label: 'SearXNG language（可选）',
+          description: 'language 参数，如 zh-CN、en；留空用实例默认',
+          default: '',
+          component: 'Input'
+        }
       }),
-      firecrawl: providerScope('Firecrawl', API_KEY_BASE),
-      searxng: providerScope('SearXNG', {
-        baseUrl: { type: 'string', label: 'Base URL', default: '', component: 'Input' },
-        categories: { type: 'string', label: 'Categories', default: '', component: 'Input' },
-        language: { type: 'string', label: 'Language', default: '', component: 'Input' }
-      }),
-      ollama: providerScope('Ollama', {
-        baseUrl: { type: 'string', label: 'Base URL', default: 'http://127.0.0.1:11434', component: 'Input' },
-        apiKey: { type: 'string', label: 'API Key', default: '', component: 'InputPassword' },
-        cloudApiKey: { type: 'string', label: 'Cloud API Key', default: '', component: 'InputPassword' }
+      ollama: providerScope('Ollama', '本地 Ollama 或 Ollama Cloud 的 web search', {
+        baseUrl: {
+          type: 'string',
+          label: 'Ollama Base URL',
+          description: '本地服务地址，默认 http://127.0.0.1:11434',
+          default: 'http://127.0.0.1:11434',
+          component: 'Input',
+          layout: 'full'
+        },
+        apiKey: {
+          type: 'string',
+          label: 'Ollama 本地 API Key（可选）',
+          description: '仅当本地实例开启了鉴权时填写',
+          default: '',
+          component: 'InputPassword',
+          layout: 'full'
+        },
+        cloudApiKey: {
+          type: 'string',
+          label: 'Ollama Cloud API Key（可选）',
+          description: '使用 Ollama 云端搜索时填写；与本地地址二选场景',
+          default: '',
+          component: 'InputPassword',
+          layout: 'full'
+        }
       })
     }
   },
