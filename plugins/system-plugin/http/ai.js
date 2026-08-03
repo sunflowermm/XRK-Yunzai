@@ -10,7 +10,7 @@ import {
   buildAiWorkflowCfgForAgentRoot,
   applyRequestWorkspaceToWorkflows
 } from '../lib/ai-workspace-runtime.js';
-import { runWithAiConsoleContext } from '../lib/ai-workspace-context.js';
+import { runWithAiConsoleContext, installMcpAuditHook } from '../lib/ai-workspace-context.js';
 import { pickPromptCacheOverrides } from '../../../lib/utils/llm/prompt-cache-policy.js';
 import { assembleChatLlmMessages } from '../../../lib/ai-workflow/chat-pipeline.js';
 
@@ -67,6 +67,7 @@ function estimateTokens(text) {
 }
 
 async function handleChatCompletionsV3(req, res, Bot) {
+  installMcpAuditHook();
   const contentType = req.headers['content-type'] || '';
   const body = req.body || {};
   let messages = Array.isArray(body.messages) ? body.messages : null;
@@ -377,16 +378,18 @@ async function handleChatCompletionsV3(req, res, Bot) {
 }
 
 async function handleModels(req, res, Bot) {
-  const providers = LLMFactory.listProviders();
-  const defaultProvider = LLMFactory.resolveProvider({}) ?? LLMFactory.listProviders()[0] ?? null;
+  installMcpAuditHook();
+  const llm = getAiWorkflowConfigOptional().llm || {};
+  const defaultProvider = LLMFactory.resolveProvider({}) ?? null;
   const format = (req.query.format || '').toLowerCase();
+  const profiles = LLMFactory.listModelProfiles();
 
   if (format === 'openai' || req.path === '/api/v3/models') {
-    const list = providers.length ? providers : (defaultProvider ? [defaultProvider] : []);
+    const list = profiles.map((p) => p.key);
     const now = Math.floor(Date.now() / 1000);
     return res.json({
       object: 'list',
-      data: list.map((p) => ({
+      data: (list.length ? list : (defaultProvider ? [defaultProvider] : [])).map((p) => ({
         id: p,
         object: 'model',
         created: now,
@@ -395,52 +398,39 @@ async function handleModels(req, res, Bot) {
     });
   }
 
-  const profiles = providers.map((provider) => {
-    const c = LLMFactory.getProviderConfig(provider) || {};
-    const model = c.model ?? null;
-    const baseUrl = c.baseUrl ?? null;
-    const maxTokens = c.maxTokens ?? null;
-    const temperature = c.temperature ?? null;
-    const hasApiKey = Boolean((c.apiKey || '').toString().trim());
+  const vendors = LLMFactory.listVendors(profiles);
+  const allStreams = Bot.AiWorkflowLoader?.getWorkflowsByPriority?.() ?? [];
+  const workflows = allStreams
+    .filter((s) => !s.primaryStream && !s.secondaryStreams && (s.mcpTools?.size || 0) > 0)
+    .map((s) => ({
+      key: s.name,
+      label: s.description || s.name,
+      description: s.description || '',
+      profile: null,
+      persona: null,
+      uiHidden: false
+    }));
 
-    const capabilities = [];
-    if (c.enableStream !== false) capabilities.push('stream');
-    if (c.enableTools === true) capabilities.push('tools');
-
-    return {
-      key: provider,
-      label: provider,
-      description: `LLM提供商: ${provider}`,
-      tags: [],
-      model,
-      baseUrl,
-      maxTokens,
-      temperature,
-      hasApiKey,
-      capabilities
-    };
-  });
-
-  // 工作流列表：使用 Bot 已注册的 AiWorkflowLoader，返回所有已加载工作流（控制台用于运营商与 MCP 工具工作流选择）
-  const allStreams = Bot.AiWorkflowLoader?.getAllStreams?.() ?? [];
-  const workflows = allStreams.map(stream => ({
-    key: stream.name,
-    label: stream.description || stream.name,
-    description: stream.description || '',
+  const remoteServers = Bot.AiWorkflowLoader?.listRemoteMCPServers?.() || [];
+  const remoteWorkflows = remoteServers.map((name) => ({
+    key: `remote-mcp.${name}`,
+    label: `远程 MCP：${name}`,
+    description: `远程 MCP 服务器 ${name}`,
     profile: null,
     persona: null,
     uiHidden: false
   }));
 
-  const aiWorkflowConfig = getAiWorkflowConfigOptional();
   return res.json({
     success: true,
     data: {
-      enabled: aiWorkflowConfig.enabled !== false,
+      enabled: llm.enabled !== false,
       defaultProfile: defaultProvider || '',
-      persona: aiWorkflowConfig.persona || '',
+      defaultWorkflow: null,
+      persona: llm.persona || '',
       profiles,
-      workflows
+      vendors,
+      workflows: [...workflows, ...remoteWorkflows]
     }
   });
 }

@@ -460,19 +460,21 @@ export default {
 
           let workflows = { stats: {}, items: [], total: 0 };
           try {
-            const allStreams = Bot.AiWorkflowLoader?.getAllStreams?.() ?? [];
-            const enabledStreams = allStreams.filter(s => s.config && s.config.enabled !== false);
+            const loader = Bot.AiWorkflowLoader;
+            const stats = loader?.getStats?.() ?? { total: 0, enabled: 0 };
+            const list = loader?.getWorkflowsByPriority?.() ?? [];
             workflows = {
               stats: {
-                total: allStreams.length,
-                enabled: enabledStreams.length
+                total: stats.total ?? list.length,
+                enabled: stats.enabled ?? list.filter((s) => s.config?.enabled !== false).length,
               },
-              items: allStreams.map(s => ({
+              items: list.map((s) => ({
                 name: s.name || 'unknown',
                 description: s.description || '',
-                enabled: s.config && s.config.enabled !== false
+                priority: s.priority,
+                enabled: s.config?.enabled !== false,
               })),
-              total: allStreams.length
+              total: stats.total ?? list.length,
             };
             panels.workflows = workflows;
           } catch (e) {

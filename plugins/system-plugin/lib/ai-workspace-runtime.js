@@ -104,10 +104,7 @@ export function listWorkspacePresets() {
 export function resolvePresetOrThrow(presetId) {
   const id = normalizePresetId(presetId);
   if (id === 'project') return { ...BUILTIN_PROJECT };
-  const abs = getAgentWorkspaceAbs(id);
-  if (!FileUtils.existsSync(abs)) {
-    throw new Error(`无效工作区: ${id}`);
-  }
+  ensureAgentWorkspaceSync(id);
   return resolveWorkspacePreset(id);
 }
 

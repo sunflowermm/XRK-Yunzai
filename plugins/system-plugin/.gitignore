@@ -26,6 +26,7 @@ stream/*
 # http/
 http/*
 !http/ai.js
+!http/ai-workspace.js
 !http/bot.js
 !http/config.js
 !http/core.js

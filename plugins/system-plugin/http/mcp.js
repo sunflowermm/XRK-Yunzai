@@ -138,6 +138,87 @@ export default {
     },
     {
       method: 'GET',
+      path: '/api/mcp/connect',
+      handler: async (req, res) => {
+        const mcpServer = getMCPServer();
+        const toolsCount = mcpServer ? mcpServer.tools.size : 0;
+        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        if (res.flushHeaders) res.flushHeaders();
+
+        res.write(`data: ${JSON.stringify({
+          type: 'connected',
+          message: 'MCP连接已建立',
+          timestamp: Date.now(),
+          toolsCount
+        })}\n\n`);
+
+        const heartbeat = setInterval(() => {
+          if (!res.writableEnded) {
+            res.write(`data: ${JSON.stringify({
+              type: 'ping',
+              timestamp: Date.now(),
+              toolsCount: getMCPServer()?.tools?.size ?? toolsCount
+            })}\n\n`);
+          }
+        }, 30000);
+
+        const cleanup = () => clearInterval(heartbeat);
+        req.on('close', cleanup);
+        req.on('error', cleanup);
+      }
+    },
+    {
+      method: 'GET',
+      path: '/api/mcp/resources',
+      handler: async (req, res) => {
+        const mcpServer = requireMCP(res);
+        if (!mcpServer) return;
+        const resources = mcpServer.listResources();
+        success(res, { resources, count: resources.length });
+      }
+    },
+    {
+      method: 'GET',
+      path: '/api/mcp/resources/:uri',
+      handler: async (req, res) => {
+        const mcpServer = requireMCP(res);
+        if (!mcpServer) return;
+        try {
+          const resource = await mcpServer.getResource(decodeURIComponent(req.params.uri));
+          success(res, { resource });
+        } catch (error) {
+          errorRes(res, error, 404, `资源未找到: ${req.params.uri}`);
+        }
+      }
+    },
+    {
+      method: 'GET',
+      path: '/api/mcp/prompts',
+      handler: async (req, res) => {
+        const mcpServer = requireMCP(res);
+        if (!mcpServer) return;
+        const prompts = mcpServer.listPrompts();
+        success(res, { prompts, count: prompts.length });
+      }
+    },
+    {
+      method: 'POST',
+      path: '/api/mcp/prompts/:name',
+      handler: async (req, res) => {
+        const mcpServer = requireMCP(res);
+        if (!mcpServer) return;
+        try {
+          const result = await mcpServer.getPrompt(req.params.name, req.body?.arguments || {});
+          success(res, { prompt: result });
+        } catch (error) {
+          errorRes(res, error, 404, `提示词未找到: ${req.params.name}`);
+        }
+      }
+    },
+    {
+      method: 'GET',
       path: '/api/mcp/health',
       handler: async (req, res) => {
         const mcpServer = getMCPServer();
