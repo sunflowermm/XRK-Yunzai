@@ -1,5 +1,6 @@
 import EventListener from '../../../lib/listener/listener.js';
 
+/** [compat] online */
 export default class onlineEvent extends EventListener {
   constructor() {
     super({ event: 'online', once: true });

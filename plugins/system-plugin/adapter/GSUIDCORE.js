@@ -1,3 +1,4 @@
+/** [ext] GSUIDCore 适配器 */
 Bot.adapter.push(
   new (class GSUIDCoreAdapter {
     id = "GSUIDCore"

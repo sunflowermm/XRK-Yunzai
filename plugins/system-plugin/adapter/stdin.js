@@ -8,6 +8,7 @@ import BotUtil from "../../../lib/util.js";
 import { FileUtils } from "../../../lib/utils/file-utils.js";
 import { resolveProjectPath, WWW_STDIN_DIR, WWW_MEDIA_DIR } from "../../../lib/config/config-constants.js";
 
+/** [ext] stdin / 控制台调试适配器 */
 const tempDir = resolveProjectPath(WWW_STDIN_DIR);
 const mediaDir = resolveProjectPath(WWW_MEDIA_DIR);
 const TEMP_MAX_AGE_MS = 3600000;  // 1 小时

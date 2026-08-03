@@ -34,6 +34,7 @@ node scripts/validate-skills.mjs
 - [docs/BASE_CLASSES.md](docs/BASE_CLASSES.md) — 基类详述
 - [docs/reference/AISTREAM_AND_MCP.md](docs/reference/AISTREAM_AND_MCP.md) — aistream / MCP / Provider
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 架构
+- [docs/VS_YUNZAI.md](docs/VS_YUNZAI.md) — 多端口核心、单端口多 Bot、入口与基类对照
 - [docs/文档审查清单.md](docs/文档审查清单.md) — 发布前文档审计
 - [plugins/system-plugin/SYSTEM-PLUGIN.md](plugins/system-plugin/SYSTEM-PLUGIN.md) — 内置插件
 

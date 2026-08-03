@@ -127,7 +127,7 @@ rule: [
 
 | 分类 | 方法 | 说明 |
 |------|------|------|
-| 工作流 | `getStream(name)` | 获取工作流实例 |
+| 工作流 | `getWorkflow(name)` | 获取工作流实例 |
 | | `getAllStreams()` | 返回 `Map<name, AIStream>` |
 | | `callWorkflow(name, params, context)` | 调用单个工作流 |
 | | `callWorkflows(workflows, sharedParams, context)` | 并行多工作流 |
@@ -209,7 +209,7 @@ export default class ContextPlugin extends plugin {
 }
 ```
 
-> **注意**: 插件为 `plugins/<插件名>/` 目录，入口通常为 `index.js`；工作流存放路径见 [工作流基类文档](./WORKFLOW_BASE_CLASS.md)。
+> **注意**: 插件为 `plugins/<插件名>/` 目录，入口通常为 `index.js`（system-plugin 故意无 index，见 [VS_YUNZAI.md](./VS_YUNZAI.md)）；工作流见 [工作流基类文档](./WORKFLOW_BASE_CLASS.md)。
 
 ## 权限控制
 

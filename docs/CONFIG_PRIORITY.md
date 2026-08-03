@@ -1,48 +1,57 @@
-# 配置优先级（工作流 / LLM）
+# 配置优先级（工作流 / LLM）与端口
 
-## 总览
+## 多端口配置落盘（框架核心）
 
-与 **单次 LLM 请求**相关的字段，在 `AIStream.resolveLLMConfig(apiConfig)` 中按 **字段** 选择来源（不是整对象一层层覆盖）。同一字段的常见优先级为：
+| 类型 | 位置 |
+|------|------|
+| 端口级 | `data/server_bots/<port>/{bot,other,server,group,renderer,ai-workflow}.yaml` |
+| 全局 | `data/server_bots/{device,monitor,notice,redis,db}.yaml` |
+| 工厂 LLM | `data/server_bots/*_llm.yaml`（根级） |
+| 模板 | `config/default_config/` |
 
-**`apiConfig`（含 `execute` 第三参数）> `this.config` > `LLMFactory.getProviderConfig(provider)` > `getAiWorkflowConfigOptional().llm`**（`ai-workflow.yaml`：`Provider`、`timeout`、`temperature`、`maxTokens`、`retry` 等）；超时兜底 **`global.maxTimeout`**
+启动时选端口 → `cfg.ensurePortConfigs(port)` → `Bot.run({ port })`。对照：[VS_YUNZAI.md](./VS_YUNZAI.md)。
 
-其中 `provider` 本身由 `apiConfig.provider` → `this.config.provider` → `aistream.llm.Provider` → `LLMFactory.resolveProvider({})` 解析。
+---
 
-基类 **`execute`**（`lib/ai-workflow/aistream.js`）对 LLM 的调用为 **`callAI(messages, userConfig)`**：只把传入的第三参数当作 **`apiConfig`**；**不会**把 `cfg.aiWorkflow` 整对象与 `cfg.getLLMConfig` 在 `execute` 里再拼进一个「大 finalConfig」后交给 `callAI`。全局与提供商配置是在 **`resolveLLMConfig`** 内部按字段读入的。
+## LLM 字段优先级
+
+与单次 LLM 请求相关的字段，在 `AiWorkflow.resolveLLMConfig(apiConfig)` 中按**字段**选择：
+
+**`apiConfig`（`execute` 第三参数）> `this.config` > `LLMFactory.getProviderConfig(provider)` > `getAiWorkflowConfigOptional().llm`**；超时还可兜底 `global.maxTimeout`。
+
+`provider`：`apiConfig.provider` → `this.config.provider` → `ai-workflow.yaml` 的 `llm.Provider` → `LLMFactory.resolveProvider({})`。
+
+`execute` 只把第三参数当作 `apiConfig`，不会在 `execute` 里先拼「大 finalConfig」。
 
 ## 构造函数 `config`
 
-`super({ config: { ... } })` 会与基类默认值合并为 **`this.config`**，仅影响未在 `apiConfig` / 提供商 / `aistream.llm` 中出现的字段。
+`super({ config: { … } })` 合并为 `this.config`，只补全未在 apiConfig / 提供商 / 全局 llm 中出现的字段。
 
-## 字段别名（`resolveLLMConfig` 支持）
+## 字段别名
 
-| 常用写法 | 说明 |
-|---------|------|
-| `model`（`chatModel` 仅读别名，合并为 `model`） | 模型名 |
-| `maxTokens` / `max_tokens` / `max_completion_tokens` | 最大输出 |
+| 常用 | 说明 |
+|------|------|
+| `model`（`chatModel` 别名） | 模型名 |
+| `maxTokens` / `max_tokens` | 最大输出 |
 | `topP` / `top_p` | top_p |
-| `presencePenalty` / `presence_penalty` | presence_penalty |
-| `frequencyPenalty` / `frequency_penalty` | frequency_penalty |
 | `apiKey` / `api_key` | 密钥 |
-| `enableTools` / `enable_tools` | 是否启用工具链 |
-| `enableStream` / `enable_stream` | 是否流式（`false` 时 `callAIStream` 退化为 `callAI`） |
-| `tool_choice` / `toolChoice`、`parallel_tool_calls` / `parallelToolCalls` | OpenAI 协议透传 |
-| `headers`、`extraBody`、`proxy` | 浅合并（与 `openai_compat_llm` providers schema 一致） |
+| `enableTools` / `enableStream` | 工具链 / 流式 |
+| `headers`、`extraBody`、`proxy` | 浅合并 |
 
 ## 示例
 
 ```javascript
-const chatStream = Bot.AiWorkflowLoader.getStream('chat');
-await chatStream.execute(e, e.msg, {
+const chat = Bot.AiWorkflowLoader.getWorkflow('chat');
+await chat.execute(e, e.msg, {
   provider: 'openai',
   model: 'gpt-4o-mini',
-  temperature: 0.7
+  temperature: 0.7,
 });
 ```
 
 ## 相关
 
-- 实现：`lib/ai-workflow/aistream.js` 中 `resolveLLMConfig`、`callAI`。
-- 配置读取：`getAiWorkflowConfigOptional()`（`lib/utils/ai-workflow-config.js`）。
-- 工厂：`docs/FACTORY.md`；`cfg.getLLMConfig(provider)` 封装自 `LLMFactory.getProviderConfig`。
-- MCP / aistream 全量说明：`docs/reference/AISTREAM_AND_MCP.md`。
+- 实现：`lib/ai-workflow/ai-workflow.js`（`resolveLLMConfig`、`callAI`）
+- 配置读取：`getAiWorkflowConfigOptional()`
+- 工厂：[FACTORY.md](./FACTORY.md)
+- MCP / 工作流：[reference/AISTREAM_AND_MCP.md](./reference/AISTREAM_AND_MCP.md)

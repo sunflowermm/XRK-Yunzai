@@ -2,7 +2,8 @@ import path from "node:path"
 import { ulid } from "ulid"
 import { FileUtils } from "../../../lib/utils/file-utils.js"
 
-/** NapCat 出站：url/path 优先；Buffer 勿 String()（TRSS 直传 makeFile） */
+/** [compat] OneBot v11 适配器 */
+/** 出站：url/path 优先；Buffer 勿 String() */
 function pickOutboundFileRef(data) {
   if (!data || typeof data !== "object") return data?.file
   const raw = data.file

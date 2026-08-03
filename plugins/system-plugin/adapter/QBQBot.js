@@ -1,3 +1,4 @@
+/** [ext] OPQBot 适配器 */
 Bot.adapter.push(
   new (class OPQBotAdapter {
     id = "QQ"

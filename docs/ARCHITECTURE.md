@@ -14,20 +14,21 @@
 
 <h2 align="center">1. 系统架构概览</h2>
 
-XRK-Yunzai 采用 **事件驱动、模块化** 的架构设计，核心组件包括：
+XRK-Yunzai 采用 **事件驱动、模块化** 架构。与经典 Yunzai 的入口 / 插件布局对照见 **[VS_YUNZAI.md](./VS_YUNZAI.md)**。
+
+核心组件：
 
 ```mermaid
 graph TB
-    subgraph Entry["🚀 应用入口层"]
-        App["app.js"]
-        Start["start.js"]
-        Debug["debug.js"]
+    subgraph Entry["应用入口层"]
+        App["app.js 引导"]
+        Start["start.js 菜单/server"]
     end
     
-    subgraph Core["🤖 Bot 核心层"]
-        HTTP["HTTP/HTTPS<br/>服务器"]
-        WS["WebSocket<br/>服务器"]
-        Proxy["代理服务"]
+    subgraph Core["Bot 核心层"]
+        HTTP["HTTP/HTTPS"]
+        WS["WebSocket"]
+        Proxy["代理"]
         
         PluginSys["插件系统<br/>PluginsLoader"]
         WorkflowSys["工作流系统<br/>AIStream"]
@@ -76,7 +77,7 @@ graph TB
 - **Redis**: `redisInit()`、`global.redis`；AI 记忆、限流、会话锁。详见 [CONFIG_AND_REDIS.md](./reference/CONFIG_AND_REDIS.md)。
 - **logger** (`lib/config/log.js`): Pino、多级别、轮转与清理。详见 [LOGGER.md](./reference/LOGGER.md)。
 - **plugin** (`lib/plugins/plugin.js`): 工作流调用、上下文、规则匹配。详见 [PLUGIN_BASE_CLASS.md](./PLUGIN_BASE_CLASS.md)、[PLUGINS.md](./reference/PLUGINS.md)。
-- **AIStream** (`lib/ai-workflow/aistream.js`): 对话、记忆、函数调用。详见 [WORKFLOW_BASE_CLASS.md](./WORKFLOW_BASE_CLASS.md)、[WORKFLOWS.md](./reference/WORKFLOWS.md)。
+- **AIWorkflow** (`lib/ai-workflow/ai-workflow.js`): 对话、记忆、函数调用。详见 [WORKFLOW_BASE_CLASS.md](./WORKFLOW_BASE_CLASS.md)、[WORKFLOWS.md](./reference/WORKFLOWS.md)、[VS_YUNZAI.md](./VS_YUNZAI.md)。
 
 ---
 

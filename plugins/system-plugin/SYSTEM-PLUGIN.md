@@ -13,7 +13,13 @@
 - **AI 助手入口**：`plugin/ai.js` 根据 `data/ai/config.yaml` 触发聊天、合并工作流，并处理白名单与冷却。
 - **通用能力**：HTTP API（插件列表、MCP、设备、文件等）、事件监听（消息、连接、请求、通知）、进群/退群/撤回/邀请等小功能。
 
-工作流由全局 `Bot.AiWorkflowLoader` 从各插件的 `workflow/` 目录扫描并加载；AI 助手只负责“何时触发、用哪个流、传什么人设”。
+工作流由全局 `Bot.AiWorkflowLoader` 从各插件的 `workflow/` 目录扫描并加载；AI 助手只负责「何时触发、用哪个流、传什么人设」。
+
+### 为何没有根目录 `index.js`
+
+经典 Yunzai 规则：**有 `index.js` 就只加载它**。system-plugin 同时含 `plugin/`、`events/`、`adapter/`、`http/`、`workflow/`、`commonconfig/`、`www/`，由不同 Loader 加载。若放根 `index.js`，消息插件与其它子系统无法按现结构分开挂载。
+
+因此 **故意不设 index**；`PluginsLoader` 对 `system-plugin` 特判扫描 `plugin/*.js`。说明与框架对照见 [docs/VS_YUNZAI.md](../../docs/VS_YUNZAI.md)。
 
 ---
 

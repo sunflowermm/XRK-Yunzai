@@ -6,6 +6,7 @@ import path from 'path'
 import { FileUtils } from '../../../lib/utils/file-utils.js'
 import { resolveProjectPath, DATA_DIR } from "../../../lib/config/config-constants.js"
 
+/** [compat] connect；[ext] eventSubscribe 静态订阅 */
 const RESTART_KEY = 'Yz:restart'
 
 export default class connectEvent extends EventListener {

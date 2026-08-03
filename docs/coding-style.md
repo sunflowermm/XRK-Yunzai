@@ -1,7 +1,7 @@
 # 底层与插件写法规范
 
 > **读者**：在 `lib/`、`plugins/` 写代码的开发者与 AI  
-> **关联**：[runtime-surface.md](runtime-surface.md) · [base-classes.md](base-classes.md)  
+> **关联**：[runtime-surface.md](runtime-surface.md) · [base-classes.md](base-classes.md) · [VS_YUNZAI.md](VS_YUNZAI.md)  
 > **规则副本**：`.cursor/rules/xrk-dev-requirements.mdc` · skill **`xrk-coding-style`**
 
 **原则**：业务放 `plugins/`（**含内置 `system-plugin/`**）；基础设施放 `lib/`；能复用 `FileUtils` / `ObjectUtils` 就不在业务里再写一遍。
@@ -15,9 +15,9 @@
 | 放码 | 业务 `plugins/<名>/`；内置底层 `plugins/system-plugin/`；基类/Loader `lib/` | 业务写进 `lib/` 应付需求 |
 | 全局 | 裸名 `Bot`、`segment`、`cfg`（启动挂载）；`lib/` 可读 `import cfg` | `import Bot`；`global.Bot` / `global.cfg` |
 | 基类 | `import plugin from '../../lib/plugins/plugin.js'` | 新代码依赖 `global.plugin` |
-| 配置路径 | `getServerConfigPath(port, name)`（`config-constants.js`） | 手写 `data/server_bots/...` 字符串 |
-| aistream（`lib/`） | `getAiWorkflowConfigOptional()` | 散落 `cfg?.aistream` |
-| MCP | `StreamLoader.mcpServer` | 已移除的全局 MCP 挂载 |
+| 配置路径 | `getServerConfigPath(port, name)`（多端口，见 VS_YUNZAI） | 手写 `data/server_bots/...` 字符串 |
+| ai-workflow（`lib/`） | `getAiWorkflowConfigOptional()` | 散落 `cfg?.aistream` / `cfg?.aiWorkflow` 乱读 |
+| MCP | `Bot.AiWorkflowLoader.mcpServer` | 已移除的全局 MCP 挂载 |
 | 历史插件配置 | `lib/plugins/config.js` 的 `makeConfig()` | 删除兼容层（zmd-plugin 等依赖） |
 | 文件 I/O | `FileUtils`（含 `createReadStream` / `createWriteStream`） | 业务中 `fs.existsSync` / `import fs` |
 | 对象工具 | `ObjectUtils` 类型判断、合并、克隆 | 重复实现 `isPlainObject` 等 |
@@ -38,10 +38,10 @@ Node ≥ 24；与 XRK-AGT 的 Node 26 专项 API（`Error.isError`、`Map.getOrI
 
 | 层 | 路径 | 写什么 |
 |----|------|--------|
-| 业务 | `plugins/<插件名>/plugin|http|stream|events|commonconfig|adapter|www/` | 插件、API、工作流、配置 schema |
+| 业务 | `plugins/<名>/{plugin,http,workflow,events,commonconfig,adapter,www}/` | 插件、API、工作流、配置 schema |
 | 基础设施 | `lib/` | Bot、Loader、基类、工厂、工具 |
-| 入口 | `app.js`、`lib/bot.js` | 启动、中间件、挂载 |
-| 默认配置 | `config/default_config/*.yaml` | 模板；运行时在 `data/server_bots/` |
+| 入口 | `app.js` → `start.js` 选端口 → `lib/bot.js` | 绕过引导/端口直接乱改配置路径 |
+| 默认配置 | `config/default_config/*.yaml` 作模板 | 只改模板不跑 `ensurePortConfigs` |
 
 ---
 

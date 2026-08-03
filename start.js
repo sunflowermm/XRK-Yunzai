@@ -258,6 +258,7 @@ class ServerManager extends BaseManager {
   }
 
   async addNewPort() {
+    // 多端口核心：每端口一套 data/server_bots/<port>/，见 docs/VS_YUNZAI.md
     const { port } = await inquirer.prompt([{
       type: 'input',
       name: 'port',
