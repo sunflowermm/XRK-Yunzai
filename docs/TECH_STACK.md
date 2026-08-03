@@ -9,7 +9,7 @@
 
 </div>
 
-> 🛠️ 本文档盘点 XRK-Yunzai 的核心技术栈、依赖与关键决策，帮助开发者快速理解系统边界与可扩展点。
+> 🛠️ 技术栈与边界。与经典 Yunzai 的能力对照见 **[VS_YUNZAI.md](./VS_YUNZAI.md)**。
 
 ---
 
@@ -60,7 +60,7 @@ Redis 连接策略：
 
 | 组件 | 说明 |
 |------|------|
-| `lib/ai-workflow/aistream.js` | AI 工作流基架，封装 Chat Completion、功能解析、上下文增强。 |
+| `lib/ai-workflow/ai-workflow.js` | AI 工作流基架，封装 Chat Completion、功能解析、上下文增强。 |
 | Memory System | Redis ZSet + JSON 存储长短期记忆，按场景隔离。 |
 | Workflow Manager | 注册/串行/并行执行工作流，带超时控制。 |
 | `node-fetch` | 统一对外 HTTP 请求，支持 Abort 超时。 |

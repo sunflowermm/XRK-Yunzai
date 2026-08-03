@@ -1,5 +1,7 @@
 # lib/ai-workflow（工作流与 LLM 解析）
 
+与经典 Yunzai 对照及多端口说明：[docs/VS_YUNZAI.md](../../docs/VS_YUNZAI.md)。短契约：[docs/base-classes.md](../../docs/base-classes.md)。
+
 ## 模块
 
 | 文件 | 职责 |

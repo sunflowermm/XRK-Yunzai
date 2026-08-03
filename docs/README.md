@@ -12,7 +12,7 @@
 |------|------|------|
 | **概览** | [TECH_STACK.md](./TECH_STACK.md) | 技术栈、运行时、Web/Redis/工作流/插件、DevOps |
 | **概览** | [ARCHITECTURE.md](./ARCHITECTURE.md) | 系统架构、核心对象、数据流与事件流、扩展点 |
-| **对照** | [VS_YUNZAI.md](./VS_YUNZAI.md) | 多端口核心、单端口多 Bot、入口/`index.js`、XRK 多出的基类 |
+| **对照** | [VS_YUNZAI.md](./VS_YUNZAI.md) | **全量**特性对照：多端口、消息链、HTTP/AI/device、Redis 双写、热更、Node… |
 | **写法** | [coding-style.md](./coding-style.md) | 底层与插件写法速查（对齐 AGT 方法论） |
 | **运行时** | [runtime-surface.md](./runtime-surface.md) | Bot/segment/cfg 全局挂载面 |
 | **质量** | [框架测试指南.md](./框架测试指南.md) | 框架基准测试、`pnpm test` |
