@@ -245,6 +245,23 @@ class Bootstrap {
     if (process.env.XRK_SKIP_FRONTEND_BOOTSTRAP !== '1') {
       await this.dependencyManager.ensureFrontendDependencies(root);
     }
+    // 对齐 AGT：冷/热启动均在引导阶段按 stale 编静态前端（与依赖检测同层）
+    if (process.env.XRK_SKIP_WWW_BUILD !== '1') {
+      const { buildSignedStaticWwwBeforeRuntime } = await import('./lib/www/www-static-build.js');
+      const r = await buildSignedStaticWwwBeforeRuntime({
+        log: (level, msg) => {
+          if (level === 'error') return this.logger.error(msg);
+          if (level === 'warn' || level === 'warning') return this.logger.warning(msg);
+          if (level === 'success') return this.logger.success(msg);
+          return this.logger.log(msg);
+        },
+      });
+      if (r.failed?.length) {
+        await this.logger.warning(
+          `启动过程前端构建失败: ${r.failed.join(', ')}（将尝试挂已有 dist；可手动 pnpm run build:www）`,
+        );
+      }
+    }
     const { logBrowserEnvironment } = await import('./lib/utils/browser-bootstrap.js');
     await logBrowserEnvironment(this.logger, root);
   }

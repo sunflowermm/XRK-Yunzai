@@ -347,8 +347,7 @@ class ServerManager extends BaseManager {
       ...process.env,
       XRK_SERVER_PORT: port.toString(),
       XRK_SKIP_CONFIG_CHECK: skipConfigCheck ? '1' : '0',
-      // 热重启跳过前端依赖扫描即可；根/插件依赖仍由 app.js initializeRuntime 检查
-      XRK_SKIP_FRONTEND_BOOTSTRAP: skipConfigCheck ? '1' : (process.env.XRK_SKIP_FRONTEND_BOOTSTRAP || '0'),
+      // 热重启同样走 app.js：根/插件/前端依赖 + stale www build（仅显式 XRK_SKIP_* 可关）
     };
     return new Promise((resolve) => {
       this.signalHandler._closeReadline();
