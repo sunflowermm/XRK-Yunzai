@@ -1457,7 +1457,7 @@ export default class SystemConfig extends ConfigBase {
                     mcpServers: {
                       type: 'array',
                       label: 'MCP Servers（JSON 列表）',
-                      description: '每条为一个 JSON 对象（可直接粘贴含 mcpServers 的完整片段）',
+                      description: '每条 JSON。推荐：{ "mcpServers": { "名": { "command":"npx","args":["-y","包名"],"env":{} } } }；也可直接贴 { "command","args","env" }（名从包名推断）',
                       component: 'ArrayForm',
                       itemType: 'object',
                       itemLabel: 'JSON 块',
@@ -1466,7 +1466,7 @@ export default class SystemConfig extends ConfigBase {
                         config: {
                           type: 'object',
                           label: 'JSON',
-                          description: '示例：{ "mcpServers": { "my-mcp": { "command": "npx", "args": ["-y","some-mcp-package"] } } }',
+                          description: '示例完整包装：{ "mcpServers": { "tarot": { "command": "npx", "args": ["-y", "tarot-mcp-server@latest"], "env": { "NODE_ENV": "production" } } } }',
                           component: 'json',
                           default: {}
                         }
