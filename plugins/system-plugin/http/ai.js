@@ -228,6 +228,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
   if (workflowStreams?.length) {
     const { mergeable, toolOnly } = partitionToolStreamNames(workflowStreams);
     overrides.streams = [...mergeable, ...toolOnly];
+    await Bot?.AiWorkflowLoader?.ensureRemoteMCPServers?.(overrides.streams);
   }
   overrides.mcpToolMode = workflowStreams?.length ? 'execute' : 'passthrough';
   Object.assign(
@@ -424,10 +425,10 @@ async function handleModels(req, res, Bot) {
     });
   }
 
-  for (const name of Bot.AiWorkflowLoader?.listRemoteMCPServers?.() || []) {
-    const key = `remote-mcp.${name}`;
+  for (const key of Bot.AiWorkflowLoader?.listRemoteMcpWorkflowKeys?.() || []) {
     if (seen.has(key)) continue;
     seen.add(key);
+    const name = key.slice('remote-mcp.'.length);
     workflows.push({
       key,
       label: `远程 MCP：${name}`,

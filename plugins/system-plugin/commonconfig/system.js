@@ -1443,35 +1443,21 @@ export default class SystemConfig extends ConfigBase {
                 defaultWorkflows: {
                   type: 'array',
                   label: '默认启用的工作流',
-                  description: '控制台未勾选时 HTTP 默认工具面；留空=不自动挂 MCP',
+                  description: '控制台未勾选时 HTTP 默认工具面；可含 remote-mcp.*；留空=不自动挂',
                   itemType: 'string',
                   default: [],
                   component: 'MultiSelect'
                 },
-                toolMergeStrategy: {
-                  type: 'string',
-                  label: '工具合并策略',
-                  enum: ['preferRequest', 'preferStream', 'merge'],
-                  default: 'preferRequest',
-                  component: 'Select'
-                },
                 remote: {
                   type: 'object',
                   label: '远程MCP连接',
-                  description: '远程 MCP 注册（建议：每条新增一个 JSON 块，直接粘贴社区的 { "mcpServers": { ... } } 即可）。',
+                  description: '声明可用远程 MCP；在 AI 助手「合并工作流」勾选 remote-mcp.* 后才连接',
                   component: 'SubForm',
                   fields: {
-                    enabled: {
-                      type: 'boolean',
-                      label: '启用远程MCP',
-                      description: '用户自增远程 MCP；开放域检索内置 web.web_search（parallel-free 零配置）',
-                      default: false,
-                      component: 'Switch'
-                    },
                     mcpServers: {
                       type: 'array',
                       label: 'MCP Servers（JSON 列表）',
-                      description: '每条为一个 JSON 对象（可直接粘贴含 mcpServers 的完整片段）。系统会把所有条目合并为最终可用的远程 MCP 列表。',
+                      description: '每条为一个 JSON 对象（可直接粘贴含 mcpServers 的完整片段）',
                       component: 'ArrayForm',
                       itemType: 'object',
                       itemLabel: 'JSON 块',
@@ -2427,9 +2413,37 @@ export default class SystemConfig extends ConfigBase {
 
       const snap = validateSnapshot || getAiWorkflowConfigOptional();
       this._refreshAiWorkflowLlmProviderEnum(aiWorkflowSchema.llm?.fields, snap);
+      this._refreshAiWorkflowMcpEnums(aiWorkflowSchema.mcp?.fields, snap);
     } catch (e) {
       Bot.makeLog('error', `[SystemConfig] 刷新动态 schema 失败: ${e.message}`, 'SystemConfig');
     }
+  }
+
+  _refreshAiWorkflowMcpEnums(mcpFields, snap) {
+    if (!mcpFields?.defaultWorkflows) return;
+
+    let workflowKeys = [];
+    try {
+      const streams = Bot?.AiWorkflowLoader?.getWorkflowsByPriority?.() || [];
+      workflowKeys = streams
+        .filter((s) => !s.primaryStream && !s.secondaryStreams)
+        .map((s) => s.name)
+        .filter(Boolean);
+    } catch (e) {
+      Bot.makeLog('warn', `[SystemConfig] 获取工作流列表失败: ${e.message}`, 'SystemConfig');
+    }
+
+    let remoteKeys = [];
+    try {
+      remoteKeys = Bot?.AiWorkflowLoader?.listRemoteMcpWorkflowKeys?.() || [];
+    } catch (e) {
+      Bot.makeLog('warn', `[SystemConfig] 获取远程 MCP 列表失败: ${e.message}`, 'SystemConfig');
+    }
+
+    mcpFields.defaultWorkflows.enum = mergeUniqueStrings(
+      [...workflowKeys, ...remoteKeys],
+      snap?.mcp?.defaultWorkflows
+    );
   }
 
   _refreshAiWorkflowLlmProviderEnum(llmFields, snap) {

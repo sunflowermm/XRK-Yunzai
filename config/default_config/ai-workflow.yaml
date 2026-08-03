@@ -27,11 +27,10 @@ llm:
 
 mcp:
   enabled: true
-  # 留空=不自动挂；控制台 / mergeWorkflows 勾选才进工具面
+  # 留空=不自动挂；控制台 / mergeWorkflows 勾选才进工具面（可含 remote-mcp.*）
   defaultWorkflows: []
-  toolMergeStrategy: preferRequest  # preferRequest | preferStream | merge
   remote:
-    enabled: false
+    # 声明远程 MCP；仅勾选 remote-mcp.<名> 时才连接
     mcpServers: []
 
 workspace:

@@ -12,7 +12,9 @@ import {
 } from '../../../lib/config/config-constants.js';
 
 const DEFAULT_TEMPLATE_REL = 'plugins/system-plugin/default/ai_config.yaml';
-const FALLBACK_MERGE_WORKFLOWS = ['memory', 'database', 'tools', 'desktop', 'web', 'browser'];
+/** schema default / 工作流未齐时的兜底选项 */
+const DEFAULT_MERGE_WORKFLOWS = ['memory', 'database', 'tools'];
+const FALLBACK_MERGE_WORKFLOWS = [...DEFAULT_MERGE_WORKFLOWS, 'desktop', 'web', 'browser'];
 
 function listLlmProviders(extra = []) {
   try {
@@ -31,18 +33,13 @@ function listMergeWorkflows(extra = []) {
       if (!s?.name || s.name === 'chat' || s.primaryStream || s.secondaryStreams) continue;
       names.push(s.name);
     }
+    names.push(...(loader?.listRemoteMcpWorkflowKeys?.() || []));
   } catch (e) {
     Bot.makeLog('warn', `[AIConfig] 获取工作流列表失败: ${e.message}`, 'AIConfig');
   }
-  try {
-    for (const remote of Bot?.AiWorkflowLoader?.listRemoteMCPServers?.() || []) {
-      names.push(`remote-mcp.${remote}`);
-    }
-  } catch (e) {
-    Bot.makeLog('warn', `[AIConfig] 获取远程 MCP 列表失败: ${e.message}`, 'AIConfig');
-  }
-  // 始终并入 FALLBACK，保证 schema default（memory/database/tools）在工作流未齐时也能通过校验
-  return mergeUniqueStrings([...FALLBACK_MERGE_WORKFLOWS, ...names], extra);
+  // live 优先；空则整表 FALLBACK；始终并入 DEFAULT 以保证 schema default 合法
+  const base = names.length ? names : FALLBACK_MERGE_WORKFLOWS;
+  return mergeUniqueStrings(base, [...DEFAULT_MERGE_WORKFLOWS, ...normalizeStringArray(extra)]);
 }
 
 /** Select 可清空；空=回落。不把 '' 放进 enum。 */
@@ -68,7 +65,7 @@ function mergeWorkflowField(extra = [], overrides = {}) {
     description: '并入 chat 的副工作流 / remote-mcp；勾选即严格生效，不会自动挂其它 MCP',
     itemType: 'string',
     enum: listMergeWorkflows(extra),
-    default: ['memory', 'database', 'tools'],
+    default: [...DEFAULT_MERGE_WORKFLOWS],
     component: 'MultiSelect',
     group: '工作流',
     ...overrides
