@@ -41,7 +41,8 @@ function listMergeWorkflows(extra = []) {
   } catch (e) {
     Bot.makeLog('warn', `[AIConfig] 获取远程 MCP 列表失败: ${e.message}`, 'AIConfig');
   }
-  return mergeUniqueStrings(names.length ? names : FALLBACK_MERGE_WORKFLOWS, extra);
+  // 始终并入 FALLBACK，保证 schema default（memory/database/tools）在工作流未齐时也能通过校验
+  return mergeUniqueStrings([...FALLBACK_MERGE_WORKFLOWS, ...names], extra);
 }
 
 /** Select 可清空；空=回落。不把 '' 放进 enum。 */
