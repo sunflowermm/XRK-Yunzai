@@ -16,7 +16,7 @@
 | 全局 | 裸名 `Bot`、`segment`、`cfg`（启动挂载）；`lib/` 可读 `import cfg` | `import Bot`；`global.Bot` / `global.cfg` |
 | 基类 | `import plugin from '../../lib/plugins/plugin.js'` | 新代码依赖 `global.plugin` |
 | 配置路径 | `getServerConfigPath(port, name)`（`config-constants.js`） | 手写 `data/server_bots/...` 字符串 |
-| aistream（`lib/`） | `getAistreamConfigOptional()` | 散落 `cfg?.aistream` |
+| aistream（`lib/`） | `getAiWorkflowConfigOptional()` | 散落 `cfg?.aistream` |
 | MCP | `StreamLoader.mcpServer` | 已移除的全局 MCP 挂载 |
 | 历史插件配置 | `lib/plugins/config.js` 的 `makeConfig()` | 删除兼容层（zmd-plugin 等依赖） |
 | 文件 I/O | `FileUtils`（含 `createReadStream` / `createWriteStream`） | 业务中 `fs.existsSync` / `import fs` |
@@ -25,7 +25,7 @@
 | 日志 | `Bot.makeLog(level, msg, tag[, trace])` | `BotUtil.makeLog`；业务中 `logger.*`；空 `catch {}` |
 | 文件工具 | `BaseTools` + `path-guards` / `InputValidator`（对齐 AGT system-Core） | 业务直连 `fs`；无校验的 `run` |
 | HTTP handler | `(req, res, Bot)`，对象导出 `{ name, routes }` | 在 handler 内 `import Bot` |
-| 工作流目录 | **仅** `plugins/<名>/stream/` | `streams/`（Loader 不扫描） |
+| 工作流目录 | **仅** `plugins/<名>/workflow/` | `streams/`（Loader 不扫描） |
 | 热重载 | `HotReloadBase` | 业务层直接 `chokidar` |
 | 资源释放 | 插件 `destroy()`；工作流 `cleanup()` | watcher/定时器泄漏 |
 | Loader 热重载 | `HotReloadBase.WATCH_DEBOUNCE_MS`；`watch(false)` 用 `closeWatcher`/`closeWatchers` | 各 Loader 手写 `debounceMs: 300` 或重复 close 逻辑 |
@@ -97,7 +97,7 @@ export default class Demo extends plugin {
 
 ## 4. 工作流（AIStream）
 
-- 文件：`plugins/<名>/stream/*.js`
+- 文件：`plugins/<名>/workflow/*.js`
 - `init()` 中 `registerMCPTool` / `registerFunction`，不在 constructor
 - `callAI` 返回 `{ text, usedReplyTool } | null`
 - LLM 配置合并见 [CONFIG_PRIORITY.md](CONFIG_PRIORITY.md)
@@ -108,7 +108,7 @@ export default class Demo extends plugin {
 
 - [ ] 业务是否误用 `fs.*Sync`
 - [ ] constructor 是否 new 了 Map/缓存
-- [ ] 工作流是否放在 `stream/` 而非 `streams/`
+- [ ] 工作流是否放在 `workflow/` 而非 `streams/`
 - [ ] HTTP 是否使用注入的 `Bot`
 - [ ] 插件/工作流是否实现 `destroy()` / `cleanup()`
 - [ ] 配置路径是否经 `getServerConfigPath` / `config-constants`

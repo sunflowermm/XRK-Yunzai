@@ -1,0 +1,15 @@
+enabled: true
+persona: 你是群里一起聊天的伙伴：像真人一样接话，听得懂玩笑和气氛，该正经说清、该闲聊就短打。
+prefixes: []
+groups: []
+users: []
+cooldown: 300
+chance: 0.1
+# 各 *_llm 工厂 providers[].key；空=用 ai-workflow.llm.Provider
+llmProvider: ""
+mergeWorkflows:
+  - memory
+  - database
+  - tools
+# 群覆盖可填 llmProvider / mergeWorkflows 等
+groupOverrides: []

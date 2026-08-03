@@ -2,7 +2,7 @@
  * 设备 HTTP/WebSocket 业务层（与 XRK-AGT 协议对齐）
  * - REST: 注册、设备列表、单设备、AI 工作流
  * - WS 下行：reply(segments)、typing、error
- * - 事件链用 Bot.PluginsLoader，工作流用 Bot.StreamLoader
+ * - 事件链用 Bot.PluginsLoader，工作流用 Bot.AiWorkflowLoader
  */
 import path from 'node:path';
 import { FileUtils } from '../../../lib/utils/file-utils.js';
@@ -301,7 +301,7 @@ export default {
       handler: async (req, res, Bot) => {
         const deviceId = req.params.deviceId;
         const { text, workflow = 'chat' } = req.body || {};
-        const stream = Bot.StreamLoader.getStream(workflow);
+        const stream = Bot.AiWorkflowLoader.getWorkflow(workflow);
         if (!stream || typeof stream.execute !== 'function') {
           return res.status(400).json({ success: false, message: `工作流不存在或不支持执行: ${workflow}` });
         }

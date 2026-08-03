@@ -276,7 +276,7 @@ export default class MyApi extends HttpApi {
 
 ### 示例5: 调用工作流
 
-在 handler 中：`const stream = Bot.StreamLoader.getStream('chat'); const result = await stream.execute(null, req.body?.question);` 详见 [工作流基类](./WORKFLOW_BASE_CLASS.md)。
+在 handler 中：`const stream = Bot.AiWorkflowLoader.getStream('chat'); const result = await stream.execute(null, req.body?.question);` 详见 [工作流基类](./WORKFLOW_BASE_CLASS.md)。
 
 > API 文件放在 `plugins/<插件名>/http/*.js`，由 ApiLoader 自动加载。
 

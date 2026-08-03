@@ -35,7 +35,7 @@ export default class MyPlugin extends plugin {
 }
 ```
 
-- 工作流优先：`this.callWorkflow(name, params, { e })`；低层：`this.getStream(name)?.execute(e, question, config)`。
+- 工作流优先：`this.callWorkflow(name, params, { e })`；低层：`this.getWorkflow(name)?.execute(e, question, config)`。
 - 持有 chokidar / 定时器等资源的插件，实现 `async destroy()`；热重载时由加载器清理（见 `PluginsLoader`）。
 
 ## HttpApi（`lib/http/http.js`）
@@ -55,12 +55,12 @@ export default {
 
 亦可 `export default class extends HttpApi`。
 
-## AIStream（`lib/aistream/aistream.js`）
+## AIStream（`lib/ai-workflow/aistream.js`）
 
 ```javascript
-import AIStream from '../../lib/aistream/aistream.js';
+import AiWorkflow from '../../lib/ai-workflow/aistream.js';
 
-export default class MyStream extends AIStream {
+export default class MyStream extends AiWorkflow {
   constructor() {
     super({
       name: 'my-stream',
@@ -79,7 +79,7 @@ export default class MyStream extends AIStream {
 }
 ```
 
-- 扫描路径：`plugins/<插件根>/stream/*.js`（`PluginDirScanner.listStreamDirs()`，**仅** `stream/`，不扫 `streams/`）。
+- 扫描路径：`plugins/<插件根>/workflow/*.js`（`PluginDirScanner.listWorkflowDirs()`，**仅** `workflow/`，不扫 `streams/`）。
 - `callAI` 返回 `{ text, usedReplyTool } | null`；配置合并见 `CONFIG_PRIORITY.md`。
 - 可选 `async cleanup()` 释放资源。
 
@@ -127,12 +127,12 @@ export default class MyListener extends EventListener {
 
 ## LLMFactory（`lib/factory/llm/LLMFactory.js`）
 
-LLM 端点从各 `*_llm.yaml` 的 `providers[]` 解析；注册表见 `lib/factory/llm/factory-registry.js`。默认 Provider 读 `getAistreamConfigOptional().llm`。
+LLM 端点从各 `*_llm.yaml` 的 `providers[]` 解析；注册表见 `lib/factory/llm/factory-registry.js`。默认 Provider 读 `getAiWorkflowConfigOptional().llm`。
 
-## StreamLoader / MCP（`lib/aistream/loader.js`）
+## StreamLoader / MCP（`lib/ai-workflow/loader.js`）
 
-- 扫描 `plugins/<名>/stream/`；MCP 实例为 **`StreamLoader.mcpServer`**
-- 配置：`getAistreamConfigOptional()`；远程 MCP 用 `aistream.mcp.remote.mcpServers` JSON 块（非 `servers`/`selected`）
+- 扫描 `plugins/<名>/workflow/`；MCP 实例为 **`StreamLoader.mcpServer`**
+- 配置：`getAiWorkflowConfigOptional()`；远程 MCP 用 `aistream.mcp.remote.mcpServers` JSON 块（非 `servers`/`selected`）
 - 详见 [reference/AISTREAM_AND_MCP.md](reference/AISTREAM_AND_MCP.md)
 
 ## 热重载与基础设施工具

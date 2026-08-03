@@ -14,7 +14,7 @@ description: 在 XRK-Yunzai 中开发或修改插件时使用；涉及 plugins/ 
 ## 适用场景
 
 - 新增/修改 `plugins/<名>/` 下消息、通知、请求类插件
-- 修改内置底层 `plugins/system-plugin/`（http/stream/plugin/events/adapter/commonconfig）
+- 修改内置底层 `plugins/system-plugin/`（http/workflow/plugin/events/adapter/commonconfig）
 - 插件内调用工作流、回复消息、权限与冷却
 
 ## 非适用场景

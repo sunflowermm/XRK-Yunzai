@@ -20,7 +20,7 @@ description: 需要从整体理解 XRK-Yunzai 的架构、目录、运行流程�
 
 ## 分层
 
-- **业务**：`plugins/<插件名>/`（`plugin/`、`http/`、`stream/`、`events/`、`commonconfig/`、`adapter/`、`www/`）
+- **业务**：`plugins/<插件名>/`（`plugin/`、`http/`、`workflow/`、`events/`、`commonconfig/`、`adapter/`、`www/`）
 - **基础设施**：`lib/`（基类、Loader、工具、LLM 工厂）
 - **入口**：`app.js` → `lib/bot.js`
 
@@ -29,7 +29,7 @@ description: 需要从整体理解 XRK-Yunzai 的架构、目录、运行流程�
 | 类型 | 基类 | 业务目录 |
 |------|------|----------|
 | 插件 | `lib/plugins/plugin.js` | `plugins/<名>/plugin/` 或插件根入口 |
-| 工作流 | `lib/aistream/aistream.js` | `plugins/<名>/stream/` |
+| 工作流 | `lib/ai-workflow/aistream.js` | `plugins/<名>/workflow/` |
 | HTTP | `lib/http/http.js` | `plugins/<名>/http/` |
 | 配置 | `lib/commonconfig/commonconfig.js` | `plugins/system-plugin/commonconfig/` |
 

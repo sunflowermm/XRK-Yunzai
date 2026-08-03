@@ -16,7 +16,7 @@
 | [xrk-coding-style](xrk-coding-style/SKILL.md) | 写法规范、Code review |
 | [xrk-base-layer](xrk-base-layer/SKILL.md) | lib/ 基类、Loader、工厂、审计 |
 | [xrk-plugin-development](xrk-plugin-development/SKILL.md) | plugins/ 消息插件 |
-| [xrk-workflow-stream](xrk-workflow-stream/SKILL.md) | stream/ 工作流、MCP、LLM |
+| [xrk-workflow-stream](xrk-workflow-workflow/SKILL.md) | workflow/ 工作流、MCP、LLM |
 | [xrk-http-api](xrk-http-api/SKILL.md) | http/ API、WebSocket |
 | [xrk-config-commonconfig](xrk-config-commonconfig/SKILL.md) | CommonConfig schema |
 | [xrk-framework-tests](xrk-framework-tests/SKILL.md) | 框架基准测试、配置三件套 |

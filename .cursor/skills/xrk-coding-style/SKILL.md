@@ -1,6 +1,6 @@
 ---
 name: xrk-coding-style
-description: 编写或审查 lib/plugins 代码时的写法规范（全局裸名、FileUtils、类字段、stream/ 目录、HTTP handler）。改业务或底层前必读。
+description: 编写或审查 lib/plugins 代码时的写法规范（全局裸名、FileUtils、类字段、workflow/ 目录、HTTP handler）。改业务或底层前必读。
 ---
 
 # XRK-Yunzai 编码风格
@@ -29,7 +29,7 @@ description: 编写或审查 lib/plugins 代码时的写法规范（全局裸名
 2. 裸名 **`Bot`** / **`segment`**；HTTP 用注入的 **`Bot`**
 3. **类字段**存 Map/缓存；constructor 只 `super()` + 固定配置
 4. 文件 **`FileUtils`**；配置 **`getServerConfigPath`**
-5. 工作流**仅** `stream/`，不扫 `streams/`
+5. 工作流**仅** `workflow/`，不扫 `streams/`
 
 ## 审查
 

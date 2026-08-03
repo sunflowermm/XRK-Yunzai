@@ -20,7 +20,7 @@
 
 | 分类 | 能力 |
 |------|------|
-| 模块化工作流 | chat / memory / tools / database / desktop 等工作流，支持 mergeStreams 合并与 MCP 工具调用。 |
+| 模块化工作流 | chat / memory / tools / database / desktop 等工作流，支持 mergeWorkflows 合并与 MCP 工具调用。 |
 | 统一对象 | `Bot`、事件 `e`、`logger`、`cfg`、`segment` 与全局 `redis` 客户端开箱即用，协议与设备场景一致。 |
 | 现代 HTTP 栈 | Express + WebSocket + 反向代理 + HTTPS/HTTP2 + CORS + 限流 + 静态资源热重载。 |
 | 插件生态 | 热重载、权限/优先级、上下文管理、多账号发送、转发消息、工作流调用。 |
@@ -121,7 +121,7 @@ XRK-Yunzai/
 │
 ├── lib/
 │   ├── bot.js             # Bot 主类
-│   ├── aistream/
+│   ├── aiworkflow/
 │   │   ├── aistream.js    # AIStream 基类
 │   │   ├── memory.js      # MemorySystem
 │   │   ├── workflow-manager.js
@@ -141,7 +141,7 @@ XRK-Yunzai/
 │       ├── adapter/       # 协议适配器（如 system-plugin 内 OneBotv11、stdin）
 │       ├── commonconfig/  # 公共配置（ConfigLoader 仅从此目录加载，键名 插件名_文件名）
 │       ├── http/          # REST/WS/SSE
-│       ├── stream/        # AI 工作流（chat/memory/tools/…，仅 stream/）
+│       ├── workflow/        # AI 工作流（chat/memory/tools/…，仅 workflow/）
 │       ├── events/        # 消息/系统事件
 │       └── …
 │
@@ -162,7 +162,7 @@ XRK-Yunzai/
 | 主题 | 入口 | 说明 |
 |------|------|------|
 | **文档索引** | [`docs/README.md`](./docs/README.md) | 底层文档一览与推荐阅读顺序。 |
-| **写法规范** | [`docs/coding-style.md`](./docs/coding-style.md) | 全局裸名、FileUtils、stream/ 目录等速查。 |
+| **写法规范** | [`docs/coding-style.md`](./docs/coding-style.md) | 全局裸名、FileUtils、workflow/ 目录等速查。 |
 | **运行挂载** | [`docs/runtime-surface.md`](./docs/runtime-surface.md) | Bot / segment / cfg 唯一说明。 |
 | **框架测试** | [`docs/框架测试指南.md`](./docs/框架测试指南.md) | `pnpm test`、配置三件套、模块基准。 |
 | 技术栈全景 | [`docs/TECH_STACK.md`](./docs/TECH_STACK.md) | 框架栈、依赖、部署策略。 |
@@ -187,7 +187,7 @@ XRK-Yunzai/
 
 主要配置位于 `config/default_config/*.yaml`，首次运行自动复制到 `data/server_bots/<port>/`。
 
-- `aistream.yaml`：工作流开关、目录、缓存、MCP（无「默认运营商」配置项；未传 model 时使用第一个启用的 LLM 提供商）。
+- `ai-workflow.yaml`：工作流开关、目录、缓存、MCP（无「默认运营商」配置项；未传 model 时使用第一个启用的 LLM 提供商）。
 - LLM 提供商配置：通过 CommonConfig 系统管理（插件内 `commonconfig/*.js`，如 `plugins/system-plugin/commonconfig/openai_llm.js`），在 Web 面板或请求中选择运营商。
 - `server.yaml`：HTTP/HTTPS、CORS、安全策略、静态目录。
 - `redis.yaml`：Redis 连接信息与数据库序号。
@@ -215,7 +215,7 @@ node scripts/validate-skills.mjs
 <summary>插件内调用 Chat 工作流</summary>
 
 ```js
-// plugins/<插件名>/stream/ 或 插件目录下 stream/*.js
+// plugins/<插件名>/workflow/ 或 插件目录下 workflow/*.js
 import plugin from '../../lib/plugins/plugin.js';
 
 export default class WorkflowDemo extends plugin {
@@ -260,13 +260,13 @@ export default {
 <details>
 <summary>自定义工作流</summary>
 
-工作流仅从插件目录加载：`plugins/<插件名>/stream/*.js`。
+工作流仅从插件目录加载：`plugins/<插件名>/workflow/*.js`。
 
 ```js
-// plugins/myplugin/stream/file-builder.js
-import AIStream from '../../../lib/aistream/aistream.js';
+// plugins/myplugin/workflow/file-builder.js
+import AiWorkflow from '../../../lib/ai-workflow/aistream.js';
 
-export default class FileBuilder extends AIStream {
+export default class FileBuilder extends AiWorkflow {
   constructor() {
     super({ name: 'file-builder', description: '根据提示生成文本，落地为文件', config: { temperature: 0.6 } });
   }

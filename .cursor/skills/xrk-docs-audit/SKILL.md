@@ -19,7 +19,7 @@ description: 审计 XRK-Yunzai 文档与代码一致性、清理 ASR/TTS/streams
 ## 执行步骤
 
 1. `pnpm test`（含 doc-consistency）
-2. 全文 grep：`streams/`、`ASR`、`TTS`、`stream/device`、`volcengine_asr`、`asr_interim`
+2. 全文 grep：`streams/`、`ASR`、`TTS`、`workflow/device`、`volcengine_asr`、`asr_interim`
 3. 核对 `SYSTEM_PLUGIN_BASELINE` 与 `SYSTEM-PLUGIN.md` 数字
 4. 更新 `docs/README.md`、`.cursor/skills/SKILL_INDEX.md`
 5. `node scripts/validate-skills.mjs`
@@ -35,12 +35,12 @@ description: 审计 XRK-Yunzai 文档与代码一致性、清理 ASR/TTS/streams
 ## 已废弃（不得再写回文档）
 
 - `streams/` 工作流目录
-- `stream/device.js` 语音工作流
+- `workflow/device.js` 语音工作流
 - ASR/TTS 工厂与 volcengine_asr/tts 配置
 - 设备 WS 的 asr/play_tts 下行
 
 ## 常见陷阱
 
-- `http/device.js` **保留**（Event 设备 API），与已删 `stream/device.js` 不同
+- `http/device.js` **保留**（Event 设备 API），与已删 `workflow/device.js` 不同
 - README 中「Device 工作流」若指场景而非文件，应明确为 `chat` + 设备 HTTP
 - CHANGELOG 历史条目可保留，新文档勿复述已移除能力

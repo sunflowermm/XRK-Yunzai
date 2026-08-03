@@ -1,18 +1,18 @@
 import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
-import { getAistreamConfigOptional } from '../../../lib/utils/aistream-config.js';
+import { getAiWorkflowConfigOptional } from '../../../lib/utils/ai-workflow-config.js';
 import { mergeAgentWorkspaceIntoMessages } from '../../../lib/utils/agent-workspace.js';
 import { transformOpenAIStyleVisionMessages } from '../../../lib/utils/llm/message-transform.js';
-import { expandChatToolStreamWhitelist } from '../../../lib/aistream/chat-tool-streams.js';
+import { expandChatToolWorkflowWhitelist } from '../../../lib/ai-workflow/chat-tool-workflows.js';
 import { parseMultipartData } from '../../../lib/utils/multipart-parser.js';
 import { getServerUploadLimits } from '../../../lib/utils/upload-limits.js';
 import {
   parseRequestWorkspace,
-  buildAistreamCfgForAgentRoot,
-  applyRequestWorkspaceToStreams
+  buildAiWorkflowCfgForAgentRoot,
+  applyRequestWorkspaceToWorkflows
 } from '../lib/ai-workspace-runtime.js';
 import { runWithAiConsoleContext } from '../lib/ai-workspace-context.js';
 import { pickPromptCacheOverrides } from '../../../lib/utils/llm/prompt-cache-policy.js';
-import { assembleChatLlmMessages } from '../../../lib/aistream/chat-pipeline.js';
+import { assembleChatLlmMessages } from '../../../lib/ai-workflow/chat-pipeline.js';
 
 /**
  * POST /api/v3/chat/completions
@@ -147,11 +147,11 @@ async function handleChatCompletionsV3(req, res, Bot) {
   }
 
   const workspaceCtx = parseRequestWorkspace(body);
-  const aistreamCfgForRequest = buildAistreamCfgForAgentRoot(
-    getAistreamConfigOptional(),
+  const aiWorkflowCfgForRequest = buildAiWorkflowCfgForAgentRoot(
+    getAiWorkflowConfigOptional(),
     workspaceCtx.agentRootAbs
   );
-  await mergeAgentWorkspaceIntoMessages(messages, aistreamCfgForRequest, 'v3');
+  await mergeAgentWorkspaceIntoMessages(messages, aiWorkflowCfgForRequest, 'v3');
 
   const streamFlag = toBool(pickFirst(body, ['stream'])) ?? false;
   const provider = LLMFactory.resolveProvider({
@@ -164,12 +164,12 @@ async function handleChatCompletionsV3(req, res, Bot) {
   if (!provider) {
     return res.status(400).json({
       success: false,
-      message: '未指定有效的LLM提供商：请检查 aistream 的 llm.Provider 是否已配置，或在请求中传入 model/provider。'
+      message: '未指定有效的LLM提供商：请检查 ai-workflow 的 llm.Provider 是否已配置，或在请求中传入 model/provider。'
     });
   }
 
   const base = LLMFactory.getProviderConfig(provider);
-  const llmConfig = { provider, ...base, promptCache: aistreamCfgForRequest.llm?.promptCache };
+  const llmConfig = { provider, ...base, promptCache: aiWorkflowCfgForRequest.llm?.promptCache };
   Bot.makeLog('debug', `[AI] 运营商=${provider}, stream=${streamFlag}, messages=${messages?.length ?? 0}`, 'HTTP');
 
   if (streamFlag && base.enableStream === false) {
@@ -217,7 +217,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
     workflowStreams = list.length ? [...new Set(list)] : null;
   }
   if (workflowStreams?.length) {
-    overrides.streams = expandChatToolStreamWhitelist(workflowStreams);
+    overrides.streams = expandChatToolWorkflowWhitelist(workflowStreams);
   }
   overrides.mcpToolMode = workflowStreams?.length ? 'execute' : 'passthrough';
   Object.assign(
@@ -226,7 +226,7 @@ async function handleChatCompletionsV3(req, res, Bot) {
   );
 
   const fileWorkspaceAbs = workspaceCtx.fileRootAbs || workspaceCtx.agentRootAbs;
-  const restoreStreamWorkspace = applyRequestWorkspaceToStreams(Bot?.StreamLoader, fileWorkspaceAbs);
+  const restoreStreamWorkspace = applyRequestWorkspaceToWorkflows(Bot?.AiWorkflowLoader, fileWorkspaceAbs);
   const consoleWorkspaceId = workspaceCtx.presetId || null;
 
   if (streamFlag) {
@@ -421,8 +421,8 @@ async function handleModels(req, res, Bot) {
     };
   });
 
-  // 工作流列表：使用 Bot 已注册的 StreamLoader，返回所有已加载工作流（控制台用于运营商与 MCP 工具工作流选择）
-  const allStreams = Bot.StreamLoader?.getAllStreams?.() ?? [];
+  // 工作流列表：使用 Bot 已注册的 AiWorkflowLoader，返回所有已加载工作流（控制台用于运营商与 MCP 工具工作流选择）
+  const allStreams = Bot.AiWorkflowLoader?.getAllStreams?.() ?? [];
   const workflows = allStreams.map(stream => ({
     key: stream.name,
     label: stream.description || stream.name,
@@ -432,13 +432,13 @@ async function handleModels(req, res, Bot) {
     uiHidden: false
   }));
 
-  const aistreamConfig = getAistreamConfigOptional();
+  const aiWorkflowConfig = getAiWorkflowConfigOptional();
   return res.json({
     success: true,
     data: {
-      enabled: aistreamConfig.enabled !== false,
+      enabled: aiWorkflowConfig.enabled !== false,
       defaultProfile: defaultProvider || '',
-      persona: aistreamConfig.persona || '',
+      persona: aiWorkflowConfig.persona || '',
       profiles,
       workflows
     }
@@ -451,7 +451,7 @@ async function handleAiStream(req, res, Bot) {
   const workflow = (req.query.workflow || 'chat').toString().trim();
   const persona = (req.query.persona || '').toString().trim();
 
-  const stream = Bot.StreamLoader.getStream(workflow);
+  const stream = Bot.AiWorkflowLoader.getWorkflow(workflow);
   if (!stream) {
     return res.status(400).json({ success: false, message: `工作流不存在: ${workflow}` });
   }

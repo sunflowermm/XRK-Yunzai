@@ -35,7 +35,7 @@ const DOC_FILES = [
   'docs/CORE_OBJECTS.md',
   'docs/reference/CONFIG_AND_REDIS.md',
   'docs/reference/DEVICE.md',
-  'lib/aistream/README.md',
+  'lib/ai-workflow/README.md',
   'lib/plugins/README.md',
   'lib/factory/llm/README.md',
   'lib/utils/llm/README.md',
@@ -43,7 +43,7 @@ const DOC_FILES = [
   '.cursor/skills/xrk-base-layer/SKILL.md',
   '.cursor/skills/xrk-coding-style/SKILL.md',
   '.cursor/skills/xrk-plugin-development/SKILL.md',
-  '.cursor/skills/xrk-workflow-stream/SKILL.md',
+  '.cursor/skills/xrk-workflow-workflow/SKILL.md',
   '.cursor/skills/xrk-http-api/SKILL.md',
   '.cursor/skills/xrk-config-commonconfig/SKILL.md',
   '.cursor/skills/xrk-project-overview/SKILL.md',
@@ -51,7 +51,7 @@ const DOC_FILES = [
 
 const FORBIDDEN_PATTERNS = [
   { name: 'streams 工作流目录（正向错误）', re: /或\s+`?streams\/`?|streams\/\*\.js/ },
-  { name: 'stream/device 语音工作流文件', re: /stream\/device\.js/ },
+  { name: 'workflow/device 语音工作流文件', re: /stream\/device\.js/ },
   { name: 'ASRFactory', re: /ASRFactory/ },
   { name: 'TTSFactory', re: /TTSFactory/ },
   { name: 'volcengine_asr 配置', re: /volcengine_asr/ },

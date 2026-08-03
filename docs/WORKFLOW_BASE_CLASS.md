@@ -4,18 +4,18 @@
 
 `AIStream` 是所有工作流的基类，提供了统一的AI调用、记忆系统、功能管理等能力。继承此基类可以快速创建自定义工作流。
 
-**文件路径**: `lib/aistream/aistream.js`
+**文件路径**: `lib/ai-workflow/aistream.js`
 
-**工作流存放路径**：仅从插件目录加载，路径为 `plugins/<插件根>/stream/`。
+**工作流存放路径**：仅从插件目录加载，路径为 `plugins/<插件根>/workflow/`。
 
 ```
-plugins/<插件根>/stream/
+plugins/<插件根>/workflow/
 ├── chat.js          # 聊天工作流
 ├── memory.js        # 记忆工作流
 └── [自定义].js      # 自定义工作流
 ```
 
-`StreamLoader` 扫描各插件的 `stream/` 目录并加载，不扫描根级 `plugins/stream/` 或 `core/*/stream/`。
+`AiWorkflowLoader` 扫描各插件的 `workflow/` 目录并加载，不扫描根级 `plugins/workflow/` 或 `core/*/workflow/`。
 
 **注意:** 
 - 工作流必须继承 `AIStream` 基类
@@ -25,9 +25,9 @@ plugins/<插件根>/stream/
 ## 类结构
 
 ```javascript
-import AIStream from '../../lib/aistream/aistream.js';
+import AiWorkflow from '../../lib/ai-workflow/aistream.js';
 
-export default class MyWorkflow extends AIStream {
+export default class MyWorkflow extends AiWorkflow {
   constructor() {
     super({
       name: 'myworkflow',              // 工作流名称（必填）
@@ -115,9 +115,9 @@ export default class MyWorkflow extends AIStream {
 
 ```javascript
 import { FileUtils } from '../../lib/utils/file-utils.js';
-import AIStream from '../../lib/aistream/aistream.js';
+import AiWorkflow from '../../lib/ai-workflow/aistream.js';
 
-export default class FileWorkflow extends AIStream {
+export default class FileWorkflow extends AiWorkflow {
   constructor() {
     super({
       name: 'file',
@@ -209,10 +209,10 @@ ${this.buildFunctionsPrompt()}`;
 
 ### aistream 配置
 
-完整字段与 MCP 约定见 [reference/AISTREAM_AND_MCP.md](./reference/AISTREAM_AND_MCP.md)。默认模板：`config/default_config/aistream.yaml`。
+完整字段与 MCP 约定见 [reference/AISTREAM_AND_MCP.md](./reference/AISTREAM_AND_MCP.md)。默认模板：`config/default_config/ai-workflow.yaml`。
 
 ```yaml
-# config/default_config/aistream.yaml（节选）
+# config/default_config/ai-workflow.yaml（节选）
 enabled: true
 
 global:
@@ -248,7 +248,7 @@ A: 使用 `this.getMemorySystem()` 或 `this.buildMemorySummary(e)`。所有工�
 A: AI在回复中使用特定格式（如`[创建文件:test.txt:内容]`），系统解析后执行对应handler，返回结果会合并到最终回复中。
 
 **Q: 工作流如何被加载？**
-A: 工作流由 `lib/aistream/loader.js` 自动扫描 `plugins/<插件根>/stream/` 目录并加载。确保文件导出默认类并继承 `AIStream`。
+A: 工作流由 `lib/ai-workflow/loader.js` 自动扫描 `plugins/<插件根>/workflow/` 目录并加载。确保文件导出默认类并继承 `AIStream`。
 
 ## 相关文档
 

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { SYSTEM_PLUGIN_DIR } from '../helpers/system-plugin-baseline.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const BACKEND_SUBDIRS = ['http', 'stream', 'plugin', 'events', 'adapter', 'commonconfig'];
+const BACKEND_SUBDIRS = ['http', 'workflow', 'plugin', 'events', 'adapter', 'commonconfig', 'lib'];
 
 function walkBackendJs(out = []) {
   for (const sub of BACKEND_SUBDIRS) {
@@ -84,9 +84,9 @@ describe('system-plugin 底层约定', () => {
         const full = path.join(dir, name);
         const st = fs.statSync(full);
         if (st.isDirectory()) {
-          if (name === 'lib') continue;
+          if (name === 'lib' || name === 'dist' || name === 'node_modules') continue;
           walk(full);
-        } else if (name.endsWith('.js')) {
+        } else if (name.endsWith('.js') && !name.endsWith('.min.js')) {
           files.push(full);
         }
       }
@@ -99,33 +99,46 @@ describe('system-plugin 底层约定', () => {
     }
   });
 
-  it('stream 工作流不在 constructor 内 new Map/{}', () => {
-    const streamDir = path.join(SYSTEM_PLUGIN_DIR, 'stream');
+  it('workflow 工作流不在 constructor 内 new Map/{}', () => {
+    const workflowDir = path.join(SYSTEM_PLUGIN_DIR, 'workflow');
+    assert.ok(fs.existsSync(workflowDir), '缺少 plugins/system-plugin/workflow/');
     const bad = /constructor\s*\([^)]*\)\s*\{[\s\S]*?this\.\w+\s*=\s*(new Map\(\)|\{\})/;
-    for (const name of fs.readdirSync(streamDir)) {
+    for (const name of fs.readdirSync(workflowDir)) {
       if (!name.endsWith('.js')) continue;
-      const file = path.join(streamDir, name);
+      const file = path.join(workflowDir, name);
       const text = fs.readFileSync(file, 'utf8');
       assert.ok(!bad.test(text), `${path.relative(root, file)} 可变状态应使用类字段`);
     }
   });
 
-  it('工作流仅位于 stream/ 目录', () => {
+  it('不应存在废弃 streams/ 目录下的工作流', () => {
     const streamsDir = path.join(SYSTEM_PLUGIN_DIR, 'streams');
     if (fs.existsSync(streamsDir)) {
       const stray = fs.readdirSync(streamsDir).filter((f) => f.endsWith('.js'));
       assert.equal(stray.length, 0, `不应存在 plugins/system-plugin/streams/ 工作流: ${stray.join(', ')}`);
     }
+    assert.ok(
+      fs.existsSync(path.join(SYSTEM_PLUGIN_DIR, 'workflow')),
+      '缺少 plugins/system-plugin/workflow/'
+    );
   });
 
-  it('commonconfig/shared LLM schema 必须存在（勿被 gitignore 排除）', () => {
+  it('commonconfig LLM 工厂聚合必须存在（勿被 gitignore 排除）', () => {
     const shared = path.join(SYSTEM_PLUGIN_DIR, 'commonconfig', 'shared');
-    for (const name of ['create-llm-factory-config.js', 'llm-provider-fields.js']) {
+    for (const name of ['llm-factory-registry.js', 'llm-provider-fields.js']) {
       assert.ok(fs.existsSync(path.join(shared, name)), `缺少 commonconfig/shared/${name}`);
     }
     assert.ok(
-      fs.existsSync(path.join(SYSTEM_PLUGIN_DIR, 'commonconfig', 'deepseek_llm.js')),
-      '缺少 commonconfig/deepseek_llm.js'
+      fs.existsSync(path.join(SYSTEM_PLUGIN_DIR, 'commonconfig', 'llm_factories.js')),
+      '缺少 commonconfig/llm_factories.js'
+    );
+    assert.ok(
+      fs.existsSync(path.join(SYSTEM_PLUGIN_DIR, 'commonconfig', 'ai_config.js')),
+      '缺少 commonconfig/ai_config.js'
+    );
+    assert.ok(
+      fs.existsSync(path.join(SYSTEM_PLUGIN_DIR, 'default', 'ai_config.yaml')),
+      '缺少 default/ai_config.yaml'
     );
   });
 });

@@ -14,7 +14,7 @@ description: 新增或修改 XRK-Yunzai 的 CommonConfig schema 时使用；涉�
 
 ## 适用场景
 
-- 新增/修改 `system.js` 配置段或独立 `*_llm.js` schema
+- 新增/修改 `system.js` 配置段或 `llm_factories` / `ai_config` schema
 - 对齐 `config/default_config/*.yaml` 与表单字段
 
 ## 非适用场景

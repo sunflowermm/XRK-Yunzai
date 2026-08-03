@@ -3,7 +3,7 @@
  */
 import { respondFail, sanitizeErrorMessage } from '../../../lib/http/utils/helpers.js';
 
-const getMCPServer = () => Bot.StreamLoader?.mcpServer;
+const getMCPServer = () => Bot.AiWorkflowLoader?.mcpServer;
 
 function requireMCP(res) {
   const mcpServer = getMCPServer();
@@ -70,24 +70,28 @@ export default {
     },
     {
       method: 'GET',
-      path: '/api/mcp/tools/streams',
+      path: '/api/mcp/tools/workflows',
       handler: async (req, res) => {
         const mcpServer = requireMCP(res);
         if (!mcpServer) return;
-        const streams = mcpServer.listStreams();
-        const groups = mcpServer.listToolsByStream();
-        success(res, { streams, groups, count: streams.length });
+        const workflows = typeof mcpServer.listWorkflows === 'function'
+          ? mcpServer.listWorkflows()
+          : (mcpServer.listStreams?.() || []);
+        const groups = typeof mcpServer.listToolsByWorkflow === 'function'
+          ? mcpServer.listToolsByWorkflow()
+          : (mcpServer.listToolsByStream?.() || {});
+        success(res, { workflows, groups, count: workflows.length });
       }
     },
     {
       method: 'GET',
-      path: '/api/mcp/tools/stream/:streamName',
+      path: '/api/mcp/tools/workflow/:workflowName',
       handler: async (req, res) => {
         const mcpServer = requireMCP(res);
         if (!mcpServer) return;
-        const streamName = req.params.streamName;
-        const tools = mcpServer.listTools(streamName);
-        success(res, { stream: streamName, tools, count: tools.length });
+        const workflowName = req.params.workflowName;
+        const tools = mcpServer.listTools(workflowName);
+        success(res, { workflow: workflowName, tools, count: tools.length });
       }
     },
     {

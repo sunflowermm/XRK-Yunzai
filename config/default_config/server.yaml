@@ -268,34 +268,25 @@ auth:
   onebot:
     # requireLoopbackAuth: true 时即使来自 127.* 也要求 Bearer/access_token（与 api_key.json 一致）
     requireLoopbackAuth: true
+  # loopbackExempt: 是否允许本机 127 免除 API Key。默认 false（公网/反代安全）。
+  # 仅本机开发且确认无反代把公网流量转到 127 时，才可设为 true。
+  loopbackExempt: false
+  # tools.file.runEnabled=true 时，loopback 也强制 API Key（默认开启该强制）
+  requireLoopbackAuthWhenToolsRun: true
   # uiCookie: 同源前端免认证（与 XRK-AGT 对齐）
   uiCookie:
-    # enabled: 是否启用同源 Cookie 放行
     enabled: false
-    # pathPrefix: 仅对此路径前缀设置 Cookie（默认 /xrk）
     pathPrefix: "/xrk"
-    # name: Cookie 名称
     name: "xrk_ui"
-    # value: Cookie 值，校验通过则放行
     value: "1"
-    # allowPublicSameOrigin: 为 true 时，同源请求且携带该 Cookie 可免 API Key
     allowPublicSameOrigin: false
-    # httpOnly / sameSite / maxAgeMs: 可选，同 res.cookie 参数
     httpOnly: true
     sameSite: "lax"
     maxAgeMs: 86400000
-  # whitelist: 无需认证的路径列表，可直接访问
-  whitelist:
-    - "/"              # 根目录
-    - "/favicon.ico"   # 网站图标
-    - "/health"        # 健康检查
-    - "/status"        # 状态接口
-    - "/robots.txt"    # 爬虫规则
-    - "/xrk"           # 葵崽的API接口测试页面
-    - "/media/*"       # 媒体文件目录
-    - "/uploads/*"     # 上传文件目录
-    - "/device"        # 控制台 WebSocket 设备连接
-    # 注意：静态文件默认允许访问
+  # whitelist: 仅影响 /api 的 Key 校验（对齐 XRK-AGT）
+  # 禁止填 "/" 或 "/api"（会放行全部，代码会忽略并打警告）
+  # /health、/status、静态 /xrk、SPA 入口本就不走 API Key，无需列入
+  whitelist: []
 
 # ----------------------------------------
 #            速率限制

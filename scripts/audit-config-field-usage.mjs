@@ -57,7 +57,7 @@ function hasCodeReference(fieldPath, configName, code) {
     candidates.add(`cfg.server.${fieldPath}`);
     candidates.add(`server.${fieldPath}`);
   }
-  if (configName === 'aistream') {
+  if (configName === 'ai-workflow') {
     candidates.add(`getCrawlConfigSection().${fieldPath}`);
     candidates.add(fieldPath.replace(/^crawl\./, ''));
   }

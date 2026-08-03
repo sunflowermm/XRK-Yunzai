@@ -18,7 +18,7 @@ Cursor 技能文档，与 `.cursor/rules/` 配合使用。**唯一维护目录**
 | xrk-coding-style | 写法规范（对齐 AGT 方法论，Yunzai 路径） |
 | xrk-base-layer | 底层基类契约、Loader、工具、审计清单 |
 | xrk-plugin-development | 插件：类字段、destroy、工作流调用 |
-| xrk-workflow-stream | 工作流：stream/、MCP、LLM |
+| xrk-workflow-stream | 工作流：workflow/、MCP、LLM |
 | xrk-http-api | HTTP API：对象导出、routes、ws |
 | xrk-config-commonconfig | CommonConfig schema 与路径 |
 | xrk-framework-tests | 框架基准测试、配置三件套 |

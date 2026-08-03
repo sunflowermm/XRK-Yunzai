@@ -20,7 +20,7 @@ OpenAI 系请求构建、SSE 解析、代理与 MCP 工具注入。
 ## MCP 访问
 
 ```javascript
-import StreamLoader from '../../aistream/loader.js';
+import AiWorkflowLoader from '../../ai-workflow/loader.js';
 
 // MCPToolAdapter.getMCPServer() 等价于：
 StreamLoader.mcpServer;

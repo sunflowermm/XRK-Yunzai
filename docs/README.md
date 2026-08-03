@@ -2,7 +2,7 @@
 
 本目录为框架底层与开发参考文档，与主 [README](../README.md)、[USER_GUIDE](../USER_GUIDE.md) 配合使用。
 
-**文档结构约定**：根目录为概览与基类指南，`reference/` 为 API 与规范手册，`overview/` 为可视化导航。配置与工厂等专题独立成篇，与代码结构（如 `lib/commonconfig` 仅从插件加载、工作流仅从 `plugins/<名>/stream` 加载）保持一致。
+**文档结构约定**：根目录为概览与基类指南，`reference/` 为 API 与规范手册，`overview/` 为可视化导航。配置与工厂等专题独立成篇，与代码结构（如 `lib/commonconfig` 仅从插件加载、工作流仅从 `plugins/<名>/workflow` 加载）保持一致。
 
 ---
 
@@ -33,7 +33,7 @@
 | [reference/BOT.md](./reference/BOT.md) | Bot 生命周期、HTTP/代理、好友/群/消息、WS |
 | [reference/PLUGINS.md](./reference/PLUGINS.md) | 插件运行时手册（工作流调用、上下文、渲染） |
 | [reference/WORKFLOWS.md](./reference/WORKFLOWS.md) | AIStream、MemorySystem、WorkflowManager |
-| [reference/AISTREAM_AND_MCP.md](./reference/AISTREAM_AND_MCP.md) | aistream.yaml、MCP、Provider、配置读取约定 |
+| [reference/AISTREAM_AND_MCP.md](./reference/AISTREAM_AND_MCP.md) | ai-workflow.yaml、MCP、Provider、配置读取约定 |
 | [reference/HTTP.md](./reference/HTTP.md) | HttpApi、路由与 WS 注册 |
 | [reference/CONFIG_AND_REDIS.md](./reference/CONFIG_AND_REDIS.md) | cfg API、Redis 初始化与事件 |
 | [reference/LOGGER.md](./reference/LOGGER.md) | logger 方法与格式化 |

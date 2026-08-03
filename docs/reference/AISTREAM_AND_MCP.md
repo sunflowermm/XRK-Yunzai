@@ -1,6 +1,6 @@
 # AIStream 配置与 MCP 手册
 
-> 覆盖 `config/default_config/aistream.yaml`、`lib/aistream/loader.js`、`lib/utils/aistream-config.js`、控制台 **系统配置 → aistream** 段。
+> 覆盖 `config/default_config/ai-workflow.yaml`、`lib/ai-workflow/loader.js`、`lib/utils/ai-workflow-config.js`、控制台 **系统配置 → aistream** 段。
 
 ---
 
@@ -8,19 +8,19 @@
 
 | API | 路径 | 用途 |
 |-----|------|------|
-| `getAistreamConfigOptional()` | `lib/utils/aistream-config.js` | **`lib/` 内读 aistream 的唯一入口**；无配置时返回 `{}` |
-| `cfg.aistream` | `lib/config/config.js` 单例 | 运行时合并后的有效配置（启动后裸名 `cfg` 可用） |
-| `cfg.getMergedConfig('aistream')` | 同上 | default_config + data 深合并 |
+| `getAiWorkflowConfigOptional()` | `lib/utils/ai-workflow-config.js` | **`lib/` 内读 aistream 的唯一入口**；无配置时返回 `{}` |
+| `cfg.aiWorkflow` | `lib/config/config.js` 单例 | 运行时合并后的有效配置（启动后裸名 `cfg` 可用） |
+| `cfg.getMergedConfig('ai-workflow')` | 同上 | default_config + data 深合并 |
 
-**规范**：`lib/aistream/*`、`lib/factory/llm/*`、`lib/crawl/*` 等底层模块应使用 `getAistreamConfigOptional()`，避免散落 `cfg?.aistream?.…`。
+**规范**：`lib/ai-workflow/*`、`lib/factory/llm/*`、`lib/crawl/*` 等底层模块应使用 `getAiWorkflowConfigOptional()`，避免散落 `cfg?.aistream?.…`。
 
 ---
 
-## 2. 配置文件结构（`aistream.yaml`）
+## 2. 配置文件结构（`ai-workflow.yaml`）
 
 | 段 | 说明 |
 |----|------|
-| `enabled` | 工作流总开关；`false` 时 `StreamLoader` 跳过加载 |
+| `enabled` | 工作流总开关；`false` 时 `AiWorkflowLoader` 跳过加载 |
 | `global` | `maxTimeout`、`maxConcurrent`、`debug` 等 |
 | `llm` | 全局 LLM 参数与 **`Provider`**（`providers[].key`） |
 | `mcp` | MCP 服务、`autoRegister`、远程 `mcpServers` |
@@ -28,8 +28,8 @@
 | `llm.promptCache` | Provider 提示前缀缓存（OpenAI `prompt_cache_key` / Anthropic `cache_control`） |
 | `crawl` | `web_fetch` / `web_search` / `browser` 等 |
 
-默认模板：`config/default_config/aistream.yaml`。  
-运行时：全局 `data/server_bots/aistream.yaml`（`GLOBAL_CONFIG_NAMES`）。
+默认模板：`config/default_config/ai-workflow.yaml`。  
+运行时：全局 `data/server_bots/ai-workflow.yaml`（`GLOBAL_CONFIG_NAMES`）。
 
 > MCP 默认工作流、工具合并策略等进阶能力在 **[XRK-AGT](https://github.com/sunflowermm/XRK-AGT)** 演进，Yunzai 仅保留已接入运行时的字段。
 
@@ -108,7 +108,7 @@ export const mcpServers = {
 };
 ```
 
-或由 `getMcpServers()` 返回同等结构。`StreamLoader` 加载 stream 时自动登记，**无需**在 `aistream.yaml` 重复配置。
+或由 `getMcpServers()` 返回同等结构。`AiWorkflowLoader` 加载 stream 时自动登记，**无需**在 `ai-workflow.yaml` 重复配置。
 
 ---
 
@@ -141,4 +141,4 @@ export const mcpServers = {
 - [CONFIG_PRIORITY.md](../CONFIG_PRIORITY.md) — `resolveLLMConfig` 字段优先级  
 - [WORKFLOW_BASE_CLASS.md](../WORKFLOW_BASE_CLASS.md) — 工作流基类  
 - [reference/WORKFLOWS.md](./WORKFLOWS.md) — AIStream API 手册  
-- [lib/aistream/README.md](../../lib/aistream/README.md) — 模块索引
+- [lib/ai-workflow/README.md](../../lib/ai-workflow/README.md) — 模块索引

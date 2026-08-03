@@ -4,19 +4,19 @@ import cfg from '../../../lib/config/config.js';
 import { getServerConfigPath, SERVER_BOTS_DIR, RENDERERS_DIR, DATA_DB_DEFAULT_REL, resolveProjectPath } from '../../../lib/config/config-constants.js';
 import LLMFactory from '../../../lib/factory/llm/LLMFactory.js';
 import { mergeUniqueStrings } from '../../../lib/utils/string-array-utils.js';
-import { getAistreamConfigOptional } from '../../../lib/utils/aistream-config.js';
+import { getAiWorkflowConfigOptional } from '../../../lib/utils/ai-workflow-config.js';
 import {
   AGENT_WORKSPACE_SUPPLEMENT_FIELDS,
-  AISTREAM_CRAWL_FIELDS,
-  AISTREAM_TOOLS_FIELDS
-} from './shared/aistream-supplement-fields.js';
+  AI_WORKFLOW_CRAWL_FIELDS,
+  AI_WORKFLOW_TOOLS_FIELDS
+} from './shared/ai-workflow-supplement-fields.js';
 
 /**
  * 系统配置管理（与 XRK-AGT 对齐）
  *
  * 路径约定（与 lib/config/config-constants.js 一致）：
- * - 全局配置（不随端口变化）：data/server_bots/{name}.yaml，见 GLOBAL_CONFIG_NAMES（device/monitor/notice/redis/db/aistream）
- * - 端口级配置（随端口变化）：data/server_bots/{port}/{name}.yaml，见 PORT_CONFIG_NAMES（bot/other/server/group）
+ * - 全局配置（不随端口变化）：data/server_bots/{name}.yaml，见 GLOBAL_CONFIG_NAMES（device/monitor/notice/redis/db）
+ * - 端口级配置（随端口变化）：data/server_bots/{port}/{name}.yaml，见 PORT_CONFIG_NAMES（bot/other/server/group/ai-workflow 等）
  * - 默认/模板：config/default_config/{name}.yaml，作为合并基准
  *
  * getConfigPath(name) 返回 (cfg) => getServerConfigPath(cfg?._port, name)，由 config-constants 按全局/端口区分路径。
@@ -711,6 +711,35 @@ export default class SystemConfig extends ConfigBase {
                     }
                   }
                 },
+                onebot: {
+                  type: 'object',
+                  label: 'OneBot WS 鉴权',
+                  component: 'SubForm',
+                  fields: {
+                    requireLoopbackAuth: {
+                      type: 'boolean',
+                      label: '本机 OneBot 也须鉴权',
+                      description: 'true 时 127.* 连接 /OneBotv11 也须 Bearer/access_token',
+                      default: true,
+                      component: 'Switch'
+                    }
+                  }
+                },
+                loopbackExempt: {
+                  type: 'boolean',
+                  label: '本机回环免 API Key',
+                  description:
+                    '仅当对端为 127.* 时免 Key。默认关闭。公网/nginx/frp 部署务必保持关闭，否则可能裸奔',
+                  default: false,
+                  component: 'Switch'
+                },
+                requireLoopbackAuthWhenToolsRun: {
+                  type: 'boolean',
+                  label: '工具 run 开启时强制 loopback 鉴权',
+                  description: 'ai-workflow.tools.file.runEnabled=true 时，127.* 也须携带 API Key（默认 true）',
+                  default: true,
+                  component: 'Switch'
+                },
                 uiCookie: {
                   type: 'object',
                   label: '同源 UI Cookie',
@@ -729,9 +758,11 @@ export default class SystemConfig extends ConfigBase {
                 },
                 whitelist: {
                   type: 'array',
-                  label: '白名单路径',
+                  label: '白名单路径（免 API Key）',
+                  description:
+                    '仅作用于 /api 路由。勿填「/」或「/api」（会放行全部，启动时忽略）。/health、/status、/xrk 静态页本就不校验 Key，无需列入',
                   itemType: 'string',
-                  default: ['/', '/favicon.ico', '/health', '/status', '/robots.txt', '/xrk', '/media/*', '/uploads/*', '/device'],
+                  default: [],
                   component: 'Tags'
                 }
               }
@@ -1265,18 +1296,18 @@ export default class SystemConfig extends ConfigBase {
         }
       },
 
-      aistream: {
-        name: 'aistream',
+      'ai-workflow': {
+        name: 'ai-workflow',
         displayName: '工作流系统配置',
-        description: 'AI 工作流总开关与全局参数；LLM 运营商选择与详细配置在 data/server_bots/*_llm.yaml 等工厂配置中（全局配置，不随端口变化）',
-        filePath: getConfigPath('aistream'),
+        description: 'AI 工作流总开关与全局参数；LLM 运营商选择与详细配置在 data/server_bots/*_llm.yaml 等工厂配置中（端口级配置）',
+        filePath: getConfigPath('ai-workflow'),
         fileType: 'yaml',
         schema: {
           fields: {
             enabled: {
               type: 'boolean',
               label: '启用工作流',
-              description: '关闭后将禁用基于 AIStream 的工作流（含 Web 控制台与聊天中的 AI 能力）；其他模块仍可读本配置',
+              description: '关闭后将禁用基于 AiWorkflow 的工作流（含 Web 控制台与聊天中的 AI 能力）；其他模块仍可读本配置',
               default: true,
               component: 'Switch'
             },
@@ -1505,6 +1536,21 @@ export default class SystemConfig extends ConfigBase {
                   default: true,
                   component: 'Switch'
                 },
+                defaultWorkflows: {
+                  type: 'array',
+                  label: '默认 MCP 工作流',
+                  description: 'MCP 工具默认暴露的工作流名列表',
+                  itemType: 'string',
+                  default: [],
+                  component: 'MultiSelect'
+                },
+                toolMergeStrategy: {
+                  type: 'string',
+                  label: '工具合并策略',
+                  enum: ['preferRequest', 'preferStream', 'merge'],
+                  default: 'preferRequest',
+                  component: 'Select'
+                },
                 remote: {
                   type: 'object',
                   label: '远程MCP连接',
@@ -1551,6 +1597,44 @@ export default class SystemConfig extends ConfigBase {
                   label: '默认工作区 ID',
                   default: 'default',
                   component: 'Input'
+                },
+                audit: {
+                  type: 'object',
+                  label: '工作区审计',
+                  component: 'SubForm',
+                  fields: {
+                    enabled: {
+                      type: 'boolean',
+                      label: '启用审计日志',
+                      default: true,
+                      component: 'Switch'
+                    },
+                    maxEntries: {
+                      type: 'number',
+                      label: '审计条数上限',
+                      min: 10,
+                      max: 500,
+                      default: 200,
+                      component: 'InputNumber'
+                    }
+                  }
+                }
+              }
+            },
+            embedding: {
+              type: 'object',
+              label: 'RAG / 记忆增强',
+              description: '合并到各工作流 embeddingConfig（不含 ASR/TTS）',
+              component: 'SubForm',
+              fields: {
+                enabled: { type: 'boolean', label: '启用上下文增强', default: true, component: 'Switch' },
+                maxContexts: {
+                  type: 'number',
+                  label: '单次检索最大上下文条数',
+                  min: 1,
+                  max: 50,
+                  default: 5,
+                  component: 'InputNumber'
                 }
               }
             },
@@ -1562,7 +1646,7 @@ export default class SystemConfig extends ConfigBase {
               fields: {
                 enabled: { type: 'boolean', label: '启用注入', default: true, component: 'Switch' },
                 root: { type: 'string', label: 'Prompt 注入根目录', description: '留空=data/ai-workspace/{defaultId}', default: '', component: 'Input' },
-                streams: {
+                workflows: {
                   type: 'array',
                   label: '仅对这些工作流/入口注入',
                   description: '留空=全部；可填 chat、tools、v3 等',
@@ -1591,14 +1675,14 @@ export default class SystemConfig extends ConfigBase {
               label: 'Crawl 配置',
               description: 'web_fetch / web_search / browser MCP',
               component: 'SubForm',
-              fields: AISTREAM_CRAWL_FIELDS
+              fields: AI_WORKFLOW_CRAWL_FIELDS
             },
             tools: {
               type: 'object',
               label: 'Tools 配置',
               description: 'tools 工作流文件与命令工具限额',
               component: 'SubForm',
-              fields: AISTREAM_TOOLS_FIELDS
+              fields: AI_WORKFLOW_TOOLS_FIELDS
             }
           }
         }
@@ -2365,7 +2449,7 @@ export default class SystemConfig extends ConfigBase {
     const configMeta = this.configFiles[name];
     if (!configMeta) throw new Error(`未知的配置: ${name}`);
     const instance = new ConfigBase(configMeta);
-    if (name === 'aistream') {
+    if (name === 'ai-workflow') {
       instance.prepareValidate = (data) => this._refreshDynamicSchema(data);
     }
     return instance;
@@ -2429,22 +2513,22 @@ export default class SystemConfig extends ConfigBase {
   }
 
   /**
-   * 动态刷新 aistream LLM Provider schema
+   * 动态刷新 ai-workflow LLM Provider schema
    * @param {object} [validateSnapshot] - 待校验/写入的配置快照
    */
   _refreshDynamicSchema(validateSnapshot = null) {
     try {
-      const aistreamSchema = this.configFiles?.aistream?.schema?.fields;
-      if (!aistreamSchema) return;
+      const aiWorkflowSchema = this.configFiles?.['ai-workflow']?.schema?.fields;
+      if (!aiWorkflowSchema) return;
 
-      const snap = validateSnapshot || getAistreamConfigOptional();
-      this._refreshAistreamLlmProviderEnum(aistreamSchema.llm?.fields, snap);
+      const snap = validateSnapshot || getAiWorkflowConfigOptional();
+      this._refreshAiWorkflowLlmProviderEnum(aiWorkflowSchema.llm?.fields, snap);
     } catch (e) {
       Bot.makeLog('error', `[SystemConfig] 刷新动态 schema 失败: ${e.message}`, 'SystemConfig');
     }
   }
 
-  _refreshAistreamLlmProviderEnum(llmFields, snap) {
+  _refreshAiWorkflowLlmProviderEnum(llmFields, snap) {
     if (!llmFields?.Provider) return;
 
     let providers = [];

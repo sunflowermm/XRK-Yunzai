@@ -14,7 +14,9 @@ import {
   normalizeWorkspaceId,
   ensureAgentWorkspaceSync,
   seedWorkspaceFromBundle
-} from '../../../lib/utils/agent-workspace-paths.js';
+} from '../../../lib/utils/agent-workspace-paths.js'
+
+export { getConfiguredDefaultWorkspaceId }
 
 const BUILTIN_PROJECT = {
   id: 'project',
@@ -178,8 +180,8 @@ export function parseRequestWorkspace(body = {}) {
   };
 }
 
-export function buildAistreamCfgForAgentRoot(aistreamCfg = {}, agentRootAbs) {
-  if (!agentRootAbs) return aistreamCfg || {};
+export function buildAiWorkflowCfgForAgentRoot(aiWorkflowCfg = {}, agentRootAbs) {
+  if (!agentRootAbs) return aiWorkflowCfg || {};
   const projectRoot = getProjectRoot();
   let rel = '';
   try {
@@ -189,20 +191,20 @@ export function buildAistreamCfgForAgentRoot(aistreamCfg = {}, agentRootAbs) {
     rel = agentRootAbs;
   }
   return {
-    ...aistreamCfg,
+    ...aiWorkflowCfg,
     agentWorkspace: {
-      ...(aistreamCfg?.agentWorkspace || {}),
+      ...(aiWorkflowCfg?.agentWorkspace || {}),
       root: rel
     }
   };
 }
 
-export function applyRequestWorkspaceToStreams(StreamLoader, fileWorkspaceAbs) {
-  if (!fileWorkspaceAbs || !StreamLoader?.getStream) return () => {};
+export function applyRequestWorkspaceToWorkflows(AiWorkflowLoader, fileWorkspaceAbs) {
+  if (!fileWorkspaceAbs || !AiWorkflowLoader?.getWorkflow) return () => {};
 
   const snapshots = [];
   for (const name of ['tools', 'desktop', 'memory']) {
-    const stream = StreamLoader.getStream(name);
+    const stream = AiWorkflowLoader.getWorkflow(name);
     if (!stream) continue;
     snapshots.push({
       stream,

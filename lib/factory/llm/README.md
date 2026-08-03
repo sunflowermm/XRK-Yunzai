@@ -26,7 +26,7 @@
 
 - YAML：`data/server_bots/*_llm.yaml`，统一 **`providers: []`**；每条 `key` 供 `aistream.llm.Provider` 引用
 - 默认模板：`config/default_config/*_llm.yaml`
-- 默认 Provider：`getAistreamConfigOptional().llm` 的 `Provider` / `provider` 字段
+- 默认 Provider：`getAiWorkflowConfigOptional().llm` 的 `Provider` / `provider` 字段
 - 对外封装：`cfg.getLLMConfig(name)`（去掉内部 `_clientClass`）
 
 ## 常用 API

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { assembleChatLlmMessages } from '../../lib/aistream/chat-pipeline.js';
+import { assembleChatLlmMessages } from '../../lib/ai-workflow/chat-pipeline.js';
 
 describe('chat-pipeline', () => {
   it('assembleChatLlmMessages 串联 buildChatContext / merge / enhanced', async () => {

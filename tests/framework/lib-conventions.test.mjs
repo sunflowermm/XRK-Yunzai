@@ -60,8 +60,8 @@ describe('lib 底层约定', () => {
     assert.ok(!/constructor\([^)]*\)[\s\S]{0,120}this\._mysInfo/.test(text));
   });
 
-  it('StreamLoader.cleanupAll 停止监视', () => {
-    const text = fs.readFileSync(path.join(libRoot, 'aistream', 'loader.js'), 'utf8');
+  it('AiWorkflowLoader.cleanupAll 停止监视', () => {
+    const text = fs.readFileSync(path.join(libRoot, 'ai-workflow', 'loader.js'), 'utf8');
     const block = text.slice(text.indexOf('async cleanupAll'), text.indexOf('async cleanupAll') + 400);
     assert.match(block, /await this\.watch\(false\)/);
   });
@@ -91,7 +91,7 @@ describe('lib 底层约定', () => {
       'http/loader.js',
       'listener/loader.js',
       'commonconfig/loader.js',
-      'aistream/loader.js',
+      'ai-workflow/loader.js',
     ];
     for (const rel of loaders) {
       const text = fs.readFileSync(path.join(libRoot, rel), 'utf8');
@@ -104,7 +104,7 @@ describe('lib 底层约定', () => {
       'http/loader.js',
       'listener/loader.js',
       'commonconfig/loader.js',
-      'aistream/loader.js',
+      'ai-workflow/loader.js',
     ];
     for (const rel of loaders) {
       const text = fs.readFileSync(path.join(libRoot, rel), 'utf8');

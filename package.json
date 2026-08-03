@@ -64,6 +64,7 @@
     "test": "node --test tests/framework/*.test.mjs",
     "test:fast": "node --test tests/framework/*.test.mjs",
     "validate:skills": "node scripts/validate-skills.mjs",
+    "build:www": "node scripts/build-www-static.mjs",
     "setup:browsers": "node -e \"import { installPlaywrightChromium } from './lib/utils/browser-bootstrap.js'; await installPlaywrightChromium();\""
   },
   "imports": {

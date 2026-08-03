@@ -1,6 +1,6 @@
 ---
 name: xrk-framework-tests
-description: 运行或维护 XRK-Yunzai 框架基准测试、配置三件套、system-plugin 模块数量断言。增删内置 HTTP/stream/plugin 时使用。
+description: 运行或维护 XRK-Yunzai 框架基准测试、配置三件套、system-plugin 模块数量断言。增删内置 HTTP/workflow/plugin 时使用。
 ---
 
 # 框架参数测试
@@ -34,8 +34,8 @@ description: 运行或维护 XRK-Yunzai 框架基准测试、配置三件套、s
 |------|------|
 | `config-alignment.test.mjs` | 默认 yaml + system schema + 无 asr/tts yaml |
 | `config-constants.test.mjs` | 工厂后缀、路径解析 |
-| `module-inventory.test.mjs` | system-plugin 五类目录数量、无 stream/device |
-| `plugin-dir-scanner.test.mjs` | 仅扫 `stream/` |
+| `module-inventory.test.mjs` | system-plugin 五类目录数量、无 workflow/device |
+| `plugin-dir-scanner.test.mjs` | 仅扫 `workflow/` |
 | `lib-conventions.test.mjs` | `lib/` 无 fs 直连、无 ASR/TTS、关闭链与类字段约定 |
 | `doc-consistency.test.mjs` | 关键文档无 streams/ASR/TTS 残留 |
 

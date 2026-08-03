@@ -13,7 +13,7 @@
 - **AI 助手入口**：`plugin/ai.js` 根据 `data/ai/config.yaml` 触发聊天、合并工作流，并处理白名单与冷却。
 - **通用能力**：HTTP API（插件列表、MCP、设备、文件等）、事件监听（消息、连接、请求、通知）、进群/退群/撤回/邀请等小功能。
 
-工作流由全局 `Bot.StreamLoader` 从各插件的 `stream/` 目录扫描并加载；AI 助手只负责“何时触发、用哪个流、传什么人设”。
+工作流由全局 `Bot.AiWorkflowLoader` 从各插件的 `workflow/` 目录扫描并加载；AI 助手只负责“何时触发、用哪个流、传什么人设”。
 
 ---
 
@@ -27,7 +27,7 @@ plugins/system-plugin/
 │   ├── QBQBot.js
 │   ├── GSUIDCORE.js
 │   └── ComWeChat.js
-├── stream/            # AI 工作流（MCP 工具在此注册）
+├── workflow/          # AI 工作流（MCP 工具在此注册）
 │   ├── chat.js        # 聊天 + 群管/互动/表情/消息
 │   ├── memory.js      # 长期记忆
 │   ├── tools.js       # 读写/搜索/执行（read/grep/write/run）
@@ -35,7 +35,7 @@ plugins/system-plugin/
 │   ├── desktop.js     # 桌面/系统（精简版，无浏览器自动化）
 │   ├── web.js         # Web 抓取与搜索（web_fetch / web_search）
 │   └── browser.js     # Playwright 受控浏览器
-│   # 设备接入见 http/device.js（Event WS），非 stream 工作流
+│   # 设备接入见 http/device.js（Event WS），非 workflow 工作流
 ├── plugin/             # 消息/请求级插件
 │   ├── ai.js          # XRK-AI 助手（入口，调 chat/chat-merged）
 │   ├── recallReply.js # 撤回回复
@@ -102,7 +102,7 @@ LLM 配置文件由 `create-llm-factory-config` 生成（含 openai / anthropic 
 
 ### 3.2 工作流（stream）
 
-工作流继承 `lib/aistream/aistream.js` 的 `AIStream`，在 `init()` 里调用 `registerMCPTool()` 注册工具。`StreamLoader` 会扫描所有 `plugins/<插件名>/stream/*.js` 并加载，再将各流注册的 MCP 工具汇总到统一的 MCP 服务。
+工作流继承 `lib/ai-workflow/ai-workflow.js` 的 `AiWorkflow`，在 `init()` 里调用 `registerMCPTool()` 注册工具。`AiWorkflowLoader` 会扫描所有 `plugins/<插件名>/workflow/*.js` 并加载，再将各流注册的 MCP 工具汇总到统一的 MCP 服务。
 
 | 工作流      | 说明与主要工具 |
 |-------------|----------------|
@@ -120,8 +120,8 @@ LLM 配置文件由 `create-llm-factory-config` 生成（含 openai / anthropic 
 
 - **ai.js（XRK-AI 助手）**  
   - 监听 `message`，根据 `data/ai/config.yaml` 判断是否触发（白名单群/用户、@ 或前缀、冷却与概率）。  
-  - 触发后取 `chat` 或合并流 `chat-merged`，经 `StreamLoader.executeStream` 执行（并发限制 + 统一 ALS）。  
-  - 若配置了 `mergeStreams`，会在 `init` 时调用 `StreamLoader.mergeStreams({ name: 'chat-merged', main: 'chat', secondary: mergeStreams, prefixSecondary: true })`。
+  - 触发后取 `chat` 或合并流 `chat-merged`，经 `AiWorkflowLoader.executeWorkflow` 执行（并发限制 + 统一 ALS）。  
+  - 若配置了 `mergeWorkflows`，会在 `init` 时调用 `AiWorkflowLoader.mergeWorkflows({ name: 'chat-merged', main: 'chat', secondary: mergeWorkflows, prefixSecondary: true })`。
 
 - **recallReply.js**：回复撤回（如 `#撤回`），仅主人。  
 - **invite.js**：处理 `request.group.invite`，主人邀请自动同意并私聊回复。  
@@ -151,9 +151,9 @@ LLM 配置文件由 `create-llm-factory-config` 生成（含 openai / anthropic 
 ### 3.6 通用配置（commonconfig）
 
 - **ConfigManager**（ConfigLoader）仅扫描各插件目录 **plugins/&lt;插件名&gt;/commonconfig/** 下的 `.js` 文件；加载后通过 **配置管理 API**（`http/config.js`，路由前缀 `/api/config/:name/`）暴露读写。
-- **system.js**：系统级子配置（bot、other、server、device、aistream 等），对应 `data/server_bots/{port}/` 或 `config/default_config/` 下各 yaml；loader 对 system-plugin 的 system 做特殊映射，**键名为 `system`**。
+- **system.js**：系统级子配置（bot、other、server、device、ai-workflow 等），对应 `data/server_bots/{port}/` 或 `config/default_config/` 下各 yaml；loader 对 system-plugin 的 system 做特殊映射，**键名为 `system`**。
 - **ai_config.js**：AI 助手配置，对应 **data/ai/config.yaml**，**键名为 `system-plugin_ai_config`**（插件名_文件名）。用户可通过 `GET /api/config/system-plugin_ai_config/read`、`POST /api/config/system-plugin_ai_config/write` 等接口或前端配置页编辑，与 `plugin/ai.js` 读取的为同一文件。
-- 其余为 LLM 等工厂配置（OpenAI、Volc、小蜜、Gemini 等），被 aistream 等引用。
+- 其余为 LLM 等工厂配置（OpenAI、Volc、小蜜、Gemini 等），被 ai-workflow 等引用。
 
 ---
 
@@ -171,7 +171,7 @@ LLM 配置文件由 `create-llm-factory-config` 生成（含 openai / anthropic 
 | `users`        | 白名单用户 ID 列表，私聊仅这些用户可触发。 |
 | `cooldown`     | 群内随机触发冷却（秒）。 |
 | `chance`       | 群内随机触发概率（0～1）。 |
-| `mergeStreams` | 要合并到 chat 的副工作流名称列表，如 `['memory','tools']`；存在则使用合并流 `chat-merged`。 |
+| `mergeWorkflows` | 要合并到 chat 的副工作流名称列表，如 `['memory','tools']`；存在则使用合并流 `chat-merged`。 |
 
 示例：
 
@@ -182,7 +182,7 @@ groups: []
 users: []
 cooldown: 300
 chance: 0.1
-mergeStreams:
+mergeWorkflows:
   - memory
   - tools
   - database
@@ -192,13 +192,13 @@ mergeStreams:
 
 1. **@ 机器人** 或 **消息以 prefix 开头**：在白名单群/用户内即触发。  
 2. **群内未 @、无前缀**：在白名单群内且通过冷却与概率（`cooldown`、`chance`）则随机触发。  
-3. 使用流：若配置了 `mergeStreams` 则用 `chat-merged`，否则用 `chat`。  
+3. 使用流：若配置了 `mergeWorkflows` 则用 `chat-merged`，否则用 `chat`。  
 4. 调用 `stream.process(e, { content, text, persona, isGlobalTrigger })`；内容会做回复上下文、@ 转文本等处理。
 
 ### 4.3 合并流（chat-merged）
 
-- 由 `StreamLoader.mergeStreams()` 在 AI 助手 `init` 时注册。  
-- 主工作流：`chat`；副工作流：配置中的 `mergeStreams`。  
+- 由 `AiWorkflowLoader.mergeWorkflows()` 在 AI 助手 `init` 时注册。  
+- 主工作流：`chat`；副工作流：配置中的 `mergeWorkflows`。  
 - 合并后 AI 在一次对话中可同时使用 chat 的回复/群管/表情与 memory、tools、database 等工具，无需切换流。
 
 ### 4.4 AI 配置的编辑方式（commonconfig）
@@ -206,7 +206,7 @@ mergeStreams:
 - **commonconfig/ai_config.js** 将 `data/ai/config.yaml` 注册到 **ConfigManager**，键名为 **system-plugin_ai_config**。  
 - 用户可通过 **配置管理 API** 读写，与 `plugin/ai.js` 使用同一文件，无需手改 YAML：
   - **GET /api/config/system-plugin_ai_config/read**：读取当前配置。  
-  - **POST /api/config/system-plugin_ai_config/write**：写入完整配置（body：`{ data: { persona, prefix, groups, users, cooldown, chance, mergeStreams } }`）。  
+  - **POST /api/config/system-plugin_ai_config/write**：写入完整配置（body：`{ data: { persona, prefix, groups, users, cooldown, chance, mergeWorkflows } }`）。  
   - 其他与通用配置 API 一致：`GET /api/config/system-plugin_ai_config/structure`，`POST .../validate`、`.../backup` 等。  
 - 支持通过前端配置页（若项目提供）对 AI 助手进行表单化编辑。
 
@@ -214,8 +214,8 @@ mergeStreams:
 
 ## 五、扩展与注意
 
-1. **新增工作流**：在 `plugins/<某插件>/stream/` 下新增 `xxx.js`，导出继承 `AIStream` 的类，实现 `init()` 并在其中 `registerMCPTool()`。StreamLoader 会自动扫描并加载。  
-2. **合并到聊天**：在 `data/ai/config.yaml` 的 `mergeStreams` 中加上工作流名称即可（如 `desktop`、`memory`），前提是 AI 助手 init 时已调用 `mergeStreams`。  
+1. **新增工作流**：在 `plugins/<某插件>/workflow/` 下新增 `xxx.js`，导出继承 `AiWorkflow` 的类，实现 `init()` 并在其中 `registerMCPTool()`。AiWorkflowLoader 会自动扫描并加载。  
+2. **合并到聊天**：在 `data/ai/config.yaml` 的 `mergeWorkflows` 中加上工作流名称即可（如 `desktop`、`memory`），前提是 AI 助手 init 时已调用 `mergeWorkflows`。  
 3. **适配器**：新端实现与 OneBotv11 类似的接口（事件上报、`sendMsg`、`sendApi` 等），并 `Bot.adapter.push(实例)`。  
 4. **表情包资源**：chat 工作流从 `resources/aiimages/{分类}/` 读取图片；运行 `node scripts/import-qq-emojis.mjs` 可从 NTQQ 缓存与 Downloads 两处导入（同 GIF 按文件名 hash 去重，后者覆盖前者）。分类与 NapCat 贴表情 ID 见 `lib/utils/emotion-categories.js`。
 5. **文档与仓库**：本文档仅描述 system-plugin 自带的能力与结构。框架底层文档见项目根 **`docs/`** 与 **`docs/overview/DEVELOPER_HUB.md`**（核心对象、插件/工作流基类、适配器、配置等）。
@@ -233,4 +233,4 @@ mergeStreams:
 | **events**  | 统一事件入口（message、connect 等）。 |
 | **commonconfig** | 通用配置（含 system、**ai_config**、LLM 等）；system-plugin_ai_config 对应 data/ai/config.yaml，可经 API 编辑。 |
 
-通过 `data/ai/config.yaml` 配置人设、白名单、冷却、概率与 `mergeStreams`，即可控制“谁在哪些群/私聊里、以何种方式触发 AI”以及“聊天时能用哪些工作流的工具”；该文件可通过 **/api/config/system-plugin_ai_config/read、write** 或前端配置页编辑。
+通过 `data/ai/config.yaml` 配置人设、白名单、冷却、概率与 `mergeWorkflows`，即可控制“谁在哪些群/私聊里、以何种方式触发 AI”以及“聊天时能用哪些工作流的工具”；该文件可通过 **/api/config/system-plugin_ai_config/read、write** 或前端配置页编辑。

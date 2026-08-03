@@ -26,7 +26,7 @@ flowchart TB
 
     subgraph Plugins["🔌 插件与工作流"]
         PluginBase["plugin 基类<br/>lib/plugins/plugin.js"]
-        WorkflowBase["AIStream 基类<br/>lib/aistream/aistream.js"]
+        WorkflowBase["AIStream 基类<br/>lib/ai-workflow/aistream.js"]
         WorkflowManager["WorkflowManager"]
         MemorySystem["MemorySystem"]
     end
@@ -112,9 +112,9 @@ export default class MyPlugin extends plugin {
 ### 3️⃣ 创建工作流
 
 ```javascript
-import AIStream from '../../lib/aistream/aistream.js';
+import AiWorkflow from '../../lib/ai-workflow/aistream.js';
 
-export default class MyWorkflow extends AIStream {
+export default class MyWorkflow extends AiWorkflow {
   constructor() {
     super({
       name: 'my-workflow',
@@ -129,7 +129,7 @@ export default class MyWorkflow extends AIStream {
 ```
 
 - 📝 继承 `AIStream`，实现 `buildSystemPrompt` 与 `buildChatContext`
-- 🌐 **推荐方式**：在插件目录下创建 `stream/` 子目录（如 `plugins/myplugin/stream/workflow.js`）
+- 🌐 **推荐方式**：在插件目录下创建 `workflow/` 子目录（如 `plugins/myplugin/workflow/workflow.js`）
 - 🔧 通过 `registerFunction` 暴露插件可调用的指令
 - 🧠 若需记忆摘要等，使用 `MemorySystem` 与 `buildMemorySummary`，或在子类中重写 `buildEnhancedContext`
 - 📖 详见 [`WORKFLOW_BASE_CLASS.md`](../WORKFLOW_BASE_CLASS.md)

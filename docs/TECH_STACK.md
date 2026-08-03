@@ -60,7 +60,7 @@ Redis 连接策略：
 
 | 组件 | 说明 |
 |------|------|
-| `lib/aistream/aistream.js` | AI 工作流基架，封装 Chat Completion、功能解析、上下文增强。 |
+| `lib/ai-workflow/aistream.js` | AI 工作流基架，封装 Chat Completion、功能解析、上下文增强。 |
 | Memory System | Redis ZSet + JSON 存储长短期记忆，按场景隔离。 |
 | Workflow Manager | 注册/串行/并行执行工作流，带超时控制。 |
 | `node-fetch` | 统一对外 HTTP 请求，支持 Abort 超时。 |
@@ -76,7 +76,7 @@ Redis 连接策略：
 | 目录 | 说明 |
 |------|------|
 | `lib/plugins/plugin.js` | 插件运行时：上下文、工作流调用、热重载钩子。 |
-| `plugins/<插件根>/stream/` | 插件内工作流（chat、memory、tools 等）；设备走 `http/device.js`。 |
+| `plugins/<插件根>/workflow/` | 插件内工作流（chat、memory、tools 等）；设备走 `http/device.js`。 |
 | `plugins/<插件根>/http/` | 插件内 REST/SSE/WS 路由。 |
 | `plugins/<插件根>/adapter/` | 协议适配器（如 system-plugin 下 OneBotv11、ComWeChat）。 |
 

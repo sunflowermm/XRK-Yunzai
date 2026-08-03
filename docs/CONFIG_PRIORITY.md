@@ -4,11 +4,11 @@
 
 与 **单次 LLM 请求**相关的字段，在 `AIStream.resolveLLMConfig(apiConfig)` 中按 **字段** 选择来源（不是整对象一层层覆盖）。同一字段的常见优先级为：
 
-**`apiConfig`（含 `execute` 第三参数）> `this.config` > `LLMFactory.getProviderConfig(provider)` > `getAistreamConfigOptional().llm`**（`aistream.yaml`：`Provider`、`timeout`、`temperature`、`maxTokens`、`retry` 等）；超时兜底 **`global.maxTimeout`**
+**`apiConfig`（含 `execute` 第三参数）> `this.config` > `LLMFactory.getProviderConfig(provider)` > `getAiWorkflowConfigOptional().llm`**（`ai-workflow.yaml`：`Provider`、`timeout`、`temperature`、`maxTokens`、`retry` 等）；超时兜底 **`global.maxTimeout`**
 
 其中 `provider` 本身由 `apiConfig.provider` → `this.config.provider` → `aistream.llm.Provider` → `LLMFactory.resolveProvider({})` 解析。
 
-基类 **`execute`**（`lib/aistream/aistream.js`）对 LLM 的调用为 **`callAI(messages, userConfig)`**：只把传入的第三参数当作 **`apiConfig`**；**不会**把 `cfg.aistream` 整对象与 `cfg.getLLMConfig` 在 `execute` 里再拼进一个「大 finalConfig」后交给 `callAI`。全局与提供商配置是在 **`resolveLLMConfig`** 内部按字段读入的。
+基类 **`execute`**（`lib/ai-workflow/aistream.js`）对 LLM 的调用为 **`callAI(messages, userConfig)`**：只把传入的第三参数当作 **`apiConfig`**；**不会**把 `cfg.aiWorkflow` 整对象与 `cfg.getLLMConfig` 在 `execute` 里再拼进一个「大 finalConfig」后交给 `callAI`。全局与提供商配置是在 **`resolveLLMConfig`** 内部按字段读入的。
 
 ## 构造函数 `config`
 
@@ -32,7 +32,7 @@
 ## 示例
 
 ```javascript
-const chatStream = Bot.StreamLoader.getStream('chat');
+const chatStream = Bot.AiWorkflowLoader.getStream('chat');
 await chatStream.execute(e, e.msg, {
   provider: 'openai',
   model: 'gpt-4o-mini',
@@ -42,7 +42,7 @@ await chatStream.execute(e, e.msg, {
 
 ## 相关
 
-- 实现：`lib/aistream/aistream.js` 中 `resolveLLMConfig`、`callAI`。
-- 配置读取：`getAistreamConfigOptional()`（`lib/utils/aistream-config.js`）。
+- 实现：`lib/ai-workflow/aistream.js` 中 `resolveLLMConfig`、`callAI`。
+- 配置读取：`getAiWorkflowConfigOptional()`（`lib/utils/ai-workflow-config.js`）。
 - 工厂：`docs/FACTORY.md`；`cfg.getLLMConfig(provider)` 封装自 `LLMFactory.getProviderConfig`。
 - MCP / aistream 全量说明：`docs/reference/AISTREAM_AND_MCP.md`。

@@ -29,7 +29,7 @@ description: 开发或审计 XRK-Yunzai 底层基类、加载器、工厂与工�
 | 加载器 | `lib/*/loader.js` | 扫描 `plugins/<插件根>/` 子目录 |
 | 基类 | `lib/plugins/plugin.js` 等 | 业务扩展点 |
 | 工厂 | `lib/factory/llm/LLMFactory.js` + `factory-registry.js` | LLM `providers[]` |
-| aistream 读 | `getAistreamConfigOptional()`（`lib/utils/aistream-config.js`） | `lib/` 内 `cfg?.aistream` |
+| aistream 读 | `getAiWorkflowConfigOptional()`（`lib/utils/ai-workflow-config.js`） | `lib/` 内 `cfg?.aistream` |
 | 工具 | `lib/utils/` | FileUtils、ObjectUtils、HotReloadBase、**BaseTools**、path-guards、input-validator |
 
 **业务只改 `plugins/`；改 `lib/` 仅限基类、加载器、工具。**
@@ -40,7 +40,7 @@ description: 开发或审计 XRK-Yunzai 底层基类、加载器、工厂与工�
 |--------|------|--------|----------|
 | 插件 | `lib/plugins/plugin.js` | `lib/plugins/loader.js` | `plugins/**` |
 | HTTP | `lib/http/http.js` | `lib/http/loader.js` | `plugins/<名>/http/*.js` |
-| 工作流 | `lib/aistream/aistream.js` | `lib/aistream/loader.js` | `plugins/<名>/stream/` |
+| 工作流 | `lib/ai-workflow/aistream.js` | `lib/ai-workflow/loader.js` | `plugins/<名>/workflow/` |
 | 事件 | `lib/listener/listener.js` | `lib/listener/loader.js` | `plugins/<名>/events/` |
 | 配置 | `lib/commonconfig/commonconfig.js` | `lib/commonconfig/loader.js` | `plugins/system-plugin/commonconfig/` |
 | 渲染器 | `lib/renderer/Renderer.js` | `lib/renderer/loader.js` | `renderers/`、`plugins/*/renderer/` |
@@ -65,7 +65,7 @@ import BotUtil from '../../lib/util.js';
 
 1. plugins 是否直连 `fs.*Sync`
 2. constructor 是否误建 `Map`/缓存
-3. 工作流是否仅放在 `stream/`
+3. 工作流是否仅放在 `workflow/`
 4. 工厂是否仅 LLM（无 ASR/TTS）
 5. 文档与 `pnpm test` 基准一致
 6. Loader `watch(false)` 是否经 `HotReloadBase.closeWatcher(s)`；debounce 是否用 `WATCH_DEBOUNCE_MS`
@@ -75,7 +75,7 @@ import BotUtil from '../../lib/util.js';
 | Loader | 单例导出 | 停止监视 | 资源释放 |
 |--------|----------|----------|----------|
 | ApiLoader | `http/loader.js` | `watch(false)` | — |
-| StreamLoader | `aistream/loader.js` | `watch(false)` | `cleanupAll()` |
+| StreamLoader | `ai-workflow/loader.js` | `watch(false)` | `cleanupAll()` |
 | ConfigLoader | `commonconfig/loader.js` | `watch(false)` | — |
 | ListenerLoader | `listener/loader.js` | `watch(false)` | — |
 | PluginsLoader | `plugins/loader.js` | `destroy()` | `destroy()` |
@@ -84,7 +84,7 @@ import BotUtil from '../../lib/util.js';
 
 ## 常见陷阱
 
-- `PluginDirScanner.listStreamDirs()` **不**扫描 `streams/`
+- `PluginDirScanner.listWorkflowDirs()` **不**扫描 `streams/`
 - `EventListener` 模式，非 AGT `EventListenerBase + init()`
 - 增删 system-plugin 内置模块未更新 `tests/helpers/system-plugin-baseline.mjs`
 - `Bot.closeServer()` 须经 `_shutdownLoaders()` 释放 Loader 与 `cfg`

@@ -25,7 +25,7 @@
 
 ## 工作流基类 (AIStream)
 
-**路径**: `lib/aistream/aistream.js`
+**路径**: `lib/ai-workflow/aistream.js`
 
 所有AI工作流的基类，提供统一的AI调用、记忆系统、功能管理等能力。
 
@@ -36,7 +36,7 @@
 - **推理调优**: 支持多轮推理和响应润色
 - **参数优先级**: execute传入 > 构造函数 > aistream配置/LLM提供商配置 > 默认值
 
-**使用**：继承 `AIStream`，在构造函数中 `super({ name, description, version?, ... })`，实现 `buildSystemPrompt(context)` 与 `buildChatContext(e, question)`。工作流放 `plugins/<插件根>/stream/*.js`。
+**使用**：继承 `AIStream`，在构造函数中 `super({ name, description, version?, ... })`，实现 `buildSystemPrompt(context)` 与 `buildChatContext(e, question)`。工作流放 `plugins/<插件根>/workflow/*.js`。
 
 ### 详细文档
 
@@ -212,7 +212,7 @@ graph TB
 
 | 基类 | 路径 | 用途 |
 |------|------|------|
-| AIStream | `lib/aistream/aistream.js` | AI工作流基类 |
+| AIStream | `lib/ai-workflow/aistream.js` | AI工作流基类 |
 | Plugin | `lib/plugins/plugin.js` | 插件基类 |
 | HttpApi | `lib/http/http.js` | HTTP API基类 |
 | EventListener | `lib/listener/listener.js` | 事件监听基类 |

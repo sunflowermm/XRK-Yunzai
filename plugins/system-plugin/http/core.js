@@ -345,6 +345,22 @@ export default {
   routes: [
     {
       method: 'GET',
+      path: '/api/system/auth-mode',
+      handler: async (req, res, Bot) => {
+        const enabled = cfg.server?.auth?.apiKey?.enabled !== false;
+        const hasKey = Boolean(Bot?.apiKey);
+        res.json({
+          success: true,
+          data: {
+            apiKeyEnabled: enabled,
+            requiresKey: enabled && hasKey,
+          },
+        });
+      },
+    },
+
+    {
+      method: 'GET',
       path: '/api/system/status',
       handler: async (req, res, Bot) => {
         try {
@@ -444,7 +460,7 @@ export default {
 
           let workflows = { stats: {}, items: [], total: 0 };
           try {
-            const allStreams = Bot.StreamLoader?.getAllStreams?.() ?? [];
+            const allStreams = Bot.AiWorkflowLoader?.getAllStreams?.() ?? [];
             const enabledStreams = allStreams.filter(s => s.config && s.config.enabled !== false);
             workflows = {
               stats: {

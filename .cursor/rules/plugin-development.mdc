@@ -23,8 +23,8 @@ alwaysApply: false
 ## 工作流
 
 - 优先 `this.callWorkflow(name, params, { e })`、`callWorkflows`、`executeWorkflow`。
-- 低层：`this.getStream(name)` → `stream.execute(e, question, config)`。
-- 定义在 `plugins/<插件名>/stream/*.js`（仅 `stream/`，非 `streams/`）。
+- 低层：`this.getWorkflow(name)` → `workflow.execute(e, question, config)`。
+- 定义在 `plugins/<插件名>/workflow/*.js`（仅 `workflow/`，非 `streams/`）。
 
 ## 资源释放
 

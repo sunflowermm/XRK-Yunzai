@@ -28,14 +28,15 @@ if (!process.execArgv.includes('--expose-gc')) {
   process.exit(result.status ?? (result.signal ? 128 + 1 : 1));
 }
 
-function createBootstrapLogger(logFile, useConsole = true) {
+function createBootstrapLogger(logFile, silent = false) {
   const colors = { INFO: '\x1b[36m', SUCCESS: '\x1b[32m', WARNING: '\x1b[33m', ERROR: '\x1b[31m', RESET: '\x1b[0m' };
   async function write(message, level = 'INFO') {
     const line = `[${new Date().toISOString()}] [${level}] ${message}\n`;
     try {
       await FileUtils.appendFile(logFile, line, 'utf8');
     } catch {}
-    if (useConsole) {
+    // 对齐 AGT：silent 时仍打出 WARNING/ERROR/SUCCESS，避免缺依赖时控制台无感
+    if (!silent || level === 'ERROR' || level === 'SUCCESS' || level === 'WARNING') {
       console.log(`${colors[level] || ''}${message}${colors.RESET}`);
     }
   }
@@ -55,6 +56,8 @@ async function validateEnvironment() {
   await Promise.all(BASE_DIRS.map(dir => FileUtils.ensureDir(resolveProjectPath(dir.replace(/^\.\//, ''))).catch(() => {})));
 }
 
+const DEPS_READY_MARKER = '.xrk-deps-ready';
+
 class DependencyManager {
   constructor(logger) {
     this.logger = logger;
@@ -66,19 +69,39 @@ class DependencyManager {
     return JSON.parse(content);
   }
 
-  async getMissingDependencies(depNames, nodeModulesPath) {
-    const results = await Promise.all(
-      depNames.map(async dep => {
-        const st = await FileUtils.stat(path.join(nodeModulesPath, dep));
-        return st?.isDirectory() === true;
-      })
-    );
-    return depNames.filter((_, i) => !results[i]);
+  /** 对齐 AGT：目录/符号链接 + package.json；scoped 包按段拼接 */
+  isPackageInstalled(depName, nodeModulesPath) {
+    const segments = String(depName).split('/').filter(Boolean);
+    const pkgJson = path.join(nodeModulesPath, ...segments, 'package.json');
+    return FileUtils.existsSync(pkgJson);
   }
 
-  async installDependencies(missingDeps, cwd = projectRoot) {
+  getMissingDependencies(depNames, nodeModulesPath) {
+    if (!FileUtils.existsSync(nodeModulesPath)) return [...depNames];
+    return depNames.filter((dep) => !this.isPackageInstalled(dep, nodeModulesPath));
+  }
+
+  depsReadyMarkerPath(nodeModulesPath) {
+    return path.join(nodeModulesPath, DEPS_READY_MARKER);
+  }
+
+  isDepsInstallComplete(nodeModulesPath) {
+    return FileUtils.existsSync(this.depsReadyMarkerPath(nodeModulesPath));
+  }
+
+  async markDepsInstallComplete(nodeModulesPath) {
+    await FileUtils.ensureDir(nodeModulesPath);
+    await FileUtils.writeFile(this.depsReadyMarkerPath(nodeModulesPath), `${Date.now()}\n`, 'utf8');
+  }
+
+  async installDependencies(missingDeps, cwd = projectRoot, { resume = false } = {}) {
     const prefix = cwd !== projectRoot ? `[${path.basename(cwd)}] ` : '';
-    await this.logger.warning(`${prefix}发现 ${missingDeps.length} 个缺失依赖，使用 pnpm 安装...`);
+    if (resume) {
+      await this.logger.warning(`${prefix}上次依赖安装未完成（可能因 Ctrl+C 中断），重新执行 pnpm install...`);
+    } else {
+      await this.logger.warning(`${prefix}发现 ${missingDeps.length} 个缺失依赖，使用 pnpm 安装...`);
+      await this.logger.log(`${prefix}缺失: ${missingDeps.slice(0, 12).join(', ')}${missingDeps.length > 12 ? '…' : ''}`);
+    }
     await this.logger.log(`${prefix}正在安装依赖，若出现 DEP0190 警告可忽略，请稍候...`);
     const registries = [
       process.env.npm_config_registry,
@@ -122,16 +145,21 @@ class DependencyManager {
       }
       throw new Error(`依赖安装失败: ${err.message}`);
     }
+    await this.markDepsInstallComplete(path.join(cwd, 'node_modules'));
     await this.logger.success(`${prefix}依赖安装完成`);
   }
 
   async checkAndInstall(packageJsonPath, nodeModulesPath) {
     const pkg = await this.parsePackageJson(packageJsonPath);
+    const packageRoot = path.dirname(packageJsonPath);
     const depNames = Object.keys({ ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) });
     if (depNames.length === 0) return;
-    const missing = await this.getMissingDependencies(depNames, nodeModulesPath);
+    const missing = this.getMissingDependencies(depNames, nodeModulesPath);
+    const complete = this.isDepsInstallComplete(nodeModulesPath);
     if (missing.length > 0) {
-      await this.installDependencies(missing, path.dirname(packageJsonPath));
+      await this.installDependencies(missing, packageRoot);
+    } else if (!complete) {
+      await this.installDependencies(depNames, packageRoot, { resume: true });
     }
   }
 

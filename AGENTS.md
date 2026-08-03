@@ -15,9 +15,9 @@ XRK-Yunzai 是基于 Node.js 24+ 的多平台 Agent 机器人框架：Bot、插�
 | [docs/base-classes.md](docs/base-classes.md) | 基类短契约 |
 
 - **工具**：`FileUtils`、`ObjectUtils`、`getServerConfigPath`
-- `lib/` 内读 aistream：`getAistreamConfigOptional()`（见 [reference/AISTREAM_AND_MCP.md](docs/reference/AISTREAM_AND_MCP.md)）
+- `lib/` 内读 aistream：`getAiWorkflowConfigOptional()`（见 [reference/AISTREAM_AND_MCP.md](docs/reference/AISTREAM_AND_MCP.md)）
 - **路径**：`data/server_bots/<port>/`、`config/default_config/`
-- **工作流**：仅 `plugins/<名>/stream/`（不扫 `streams/`）
+- **工作流**：仅 `plugins/<名>/workflow/`（不扫 `streams/`）
 
 ## 验证
 

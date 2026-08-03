@@ -1,0 +1,15 @@
+{
+  "id": "xrk",
+  "name": "XRK-Yunzai 控制台",
+  "enabled": false,
+  "serve": "static",
+  "staticRoot": "dist",
+  "build": { "command": "pnpm", "args": ["build"] },
+  "_note": "挂载不 build。启动过程 Bootstrap 按 stale 编（或 pnpm run build:www）。跳过：XRK_SKIP_WWW_BUILD=1。开发 HMR：enabled=true + serve=proxy。",
+  "command": "pnpm",
+  "args": ["dev"],
+  "port": 5177,
+  "proxy": { "mount": "/xrk" },
+  "env": { "BROWSER": "none" },
+  "autoRestart": true
+}
