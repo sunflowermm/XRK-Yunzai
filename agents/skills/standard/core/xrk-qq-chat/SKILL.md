@@ -11,7 +11,7 @@ description: QQ/群聊 Agent：NapCat 能力、回复、发文件、记忆与刷
 
 | MCP | NapCat 分类 / API |
 |-----|-------------------|
-| reply | 文字消息：`send_msg`（`\|`、`[回复:ID]`、`[at:QQ]`） |
+| reply | 文字消息：`send_msg`。群聊@优先 `atSender=true` / `at="QQ"`；亦可 content 内 `[at:QQ]`；`\|`、`[回复:ID]` |
 | emotion | 内置表情包图（resources/aiimages） |
 | poke | 核心 `send_poke` |
 | relayPrivate | 私聊传话：`pickFriend` → `send_msg`（`user_id`） |
@@ -39,6 +39,17 @@ description: QQ/群聊 Agent：NapCat 能力、回复、发文件、记忆与刷
 | recall | `delete_msg` + `get_msg` |
 
 底层桥接：`OneBotv11` 适配器的 `e.group` / `e.bot.sendApi`。
+
+## 群聊 @（给模型用的简单写法）
+
+优先用 **reply 工具参数**（不要手写 CQ，也不要 `@昵称`）：
+
+```text
+reply({ content: "这样对不对？", atSender: true })
+reply({ content: "你们看这个", at: "123456789,987654321" })
+```
+
+仍兼容正文标记：`[at:123456789]你好`。误写的 `[CQ:at,qq=…]` 会自动收成 `[at:…]`。
 
 ## 私聊传话（relayPrivate*）
 

@@ -28,8 +28,11 @@ import { MemorySystem } from '../../../lib/ai-workflow/memory.js';
 import {
   buildOutboundSegments,
   contentHasGroupAt,
+  collectReplyAtQqs,
   EMOTION_TYPES,
+  normalizeReplyAtMarkers,
   parseImageContentMark,
+  prependReplyAtMarkers,
   PROTOCOL_MARKER_RE,
   replyContentForbidden,
   resolveOutgoingMessage,
@@ -640,12 +643,20 @@ export default class ChatStream extends AiWorkflow {
 
     this.registerMCPTool('reply', {
       description:
-        '发文字消息（用户可见）。默认普通发言、不引用。仅要挂引用气泡时：content 写 [回复:消息ID] 或填 messageId。| 分句；群聊 [at:数字QQ]。禁止 @QQ/@昵称。发表情包用 emotion，发图用 send_image。',
+        '发文字到当前会话。群聊要@人：优先 atSender=true（@刚才说话的人），或 at="QQ号"；也可在 content 写 [at:QQ]。禁止手写 @昵称 / [CQ:at]。默认不引用；要引用气泡时写 [回复:消息ID] 或填 messageId。| 分句。表情用 emotion，图用 send_image。',
       inputSchema: {
         type: 'object',
         properties: {
           messageId: { type: 'number', description: '仅在要引用某条消息时填写；省略则不引用' },
-          content: { type: 'string', description: '正文（必填）。普通说话不要写 [回复:…]' }
+          content: { type: 'string', description: '正文（必填）。普通说话不要写 [回复:…]；不要手写 @昵称' },
+          atSender: {
+            type: 'boolean',
+            description: '群聊：true=@当前这条消息的发送者（最常用，不用记 QQ）',
+          },
+          at: {
+            type: 'string',
+            description: '群聊：要@的 QQ，多个用逗号分隔，如 "123456,789012"',
+          },
         },
         required: ['content']
       },
@@ -653,8 +664,12 @@ export default class ChatStream extends AiWorkflow {
         const e = context.e;
         if (!e?.reply) return { success: false, error: '当前环境无法发送消息' };
         return this._wrapHandler(async () => {
+          const content = prependReplyAtMarkers(
+            String(args.content ?? ''),
+            collectReplyAtQqs(args, e),
+          );
           return this._sendUserVisibleText(e, {
-            content: args.content,
+            content,
             messageId: args.messageId
           }, context);
         });
@@ -2632,7 +2647,7 @@ export default class ChatStream extends AiWorkflow {
       persona,
       '',
       '## 对用户说话（assistant 正文群里不可见）',
-      '- **reply**：当前会话文字。默认不引用；要对某条挂引用气泡时写 `[回复:消息ID]` 或填 messageId。`|` 分句 · 群聊 `[at:数字QQ]`',
+      '- **reply**：当前会话文字。默认不引用。群聊@人：`atSender=true`（@刚才说话的人）或 `at="QQ"`；也可 content 里写 `[at:QQ]`。要引用气泡才写 `[回复:消息ID]` / messageId。`|` 分句',
       '- **emotion** / **send_image**：当前会话发表情包或图片',
       '- **setGroupAvatar**：工作区内图片路径设为当前群头像（可先 saveMessageAsset）',
       '- **relayPrivate** / **relayPrivateImage** / **relayPrivateFile** / **relayPrivateEmotion**：私聊传话；目标须为机器人好友（可先 getFriendList）；须等 relay 成功后再 reply，失败时勿声称已发出',
@@ -2640,7 +2655,7 @@ export default class ChatStream extends AiWorkflow {
       '- **加好友**：机器人不能主动加别人；用户加机器人后，主人可用 **getFriendRequests** + **handleFriendRequest** 同意/拒绝',
       '- 配置 `autoFriend=1` 时会自动同意好友申请；可疑申请用 **handleDoubtFriendRequest**',
       '- 工具回执会说明已发出内容；用户已能看到后不要重复发送。',
-      '- 禁止 `@QQ`/`@昵称`。有 `[当前消息]` 时只答它；全局旁观时闲聊即可，想接哪句接哪句。',
+      '- 禁止手写 `@昵称` / `[CQ:at]`。有 `[当前消息]` 时只答它；全局旁观时闲聊即可，想接哪句接哪句。',
       '',
       '## 记录',
       '- `昵称(QQ)[ID:xxx]` → 可写 `[回复:xxx]` / saveMessageAsset；日常接话可不引用',
@@ -3111,9 +3126,9 @@ export default class ChatStream extends AiWorkflow {
       `\\[(${EMOTION_TYPES.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\]`,
       'g'
     );
-    return String(text ?? '')
+    // 保留 [at:QQ] / 规范化后的 at，交给 _processAndSendTextProtocol 转 segment；勿剥掉
+    return normalizeReplyAtMarkers(String(text ?? ''))
       .replace(emotionRe, '')
-      .replace(/\[at:\d{5,10}\]/gi, '')
       .replace(/\s+/g, ' ')
       .trim();
   }
