@@ -3271,14 +3271,18 @@ export default class ChatStream extends AiWorkflow {
       }
     }
 
-    return runWithWorkflowRequestContext({ e, turnState: createUserVisibleTurnState() }, async () => {
-      try {
-        return await runTurn();
-      } catch (error) {
-        Bot.makeLog('error', `[ChatStream] execute 失败: ${error.message}`, 'ChatStream');
-        return null;
+    // 保留外层 ALS 字段（尤其 toolStreamNames / remote-mcp.*），只补 turnState
+    return runWithWorkflowRequestContext(
+      { ...(existing || {}), e, turnState: createUserVisibleTurnState() },
+      async () => {
+        try {
+          return await runTurn();
+        } catch (error) {
+          Bot.makeLog('error', `[ChatStream] execute 失败: ${error.message}`, 'ChatStream');
+          return null;
+        }
       }
-    });
+    );
   }
 
   /**
