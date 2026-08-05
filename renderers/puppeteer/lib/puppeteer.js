@@ -58,9 +58,61 @@ export default class PuppeteerRenderer extends Renderer {
     }
 
     this.healthCheckTimer = null;
+    this._restarting = false;
+    this.browserInitWaitMs = config.browserInitWaitMax ?? rendererCfg.browserInitWaitMax ?? 60000;
+    this.browserOpTimeoutMs = config.browserOpTimeout ?? rendererCfg.browserOpTimeout ?? 8000;
 
     process.on("exit", () => this.cleanup());
     // 不在此处注册 SIGINT/SIGTERM，由 lib/config/loader.js 统一处理；进程退出时 exit 事件会触发 cleanup
+  }
+
+  isFatalBrowserError(err) {
+    return /timeout|timed out|disconnected|Target closed|Session closed|Protocol error|Browser closed|Navigation failed|net::ERR/i.test(
+      String(err?.message || err || "")
+    );
+  }
+
+  async withTimeout(promise, ms, label = "operation") {
+    let timer;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  detachBrowser() {
+    const browser = this.browser;
+    this.browser = null;
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer);
+      this.healthCheckTimer = null;
+    }
+    return browser;
+  }
+
+  async safeCloseBrowser(browser, closeTimeoutMs = this.browserOpTimeoutMs) {
+    if (!browser) return;
+    try {
+      await this.withTimeout(
+        (async () => {
+          try {
+            for (const page of await browser.pages()) await page.close().catch(() => {});
+          } catch {}
+          await browser.close().catch(() => {});
+        })(),
+        closeTimeoutMs,
+        "browser close"
+      );
+    } catch {
+      try { browser.disconnect?.(); } catch {}
+      try { browser.process?.()?.kill?.("SIGKILL"); } catch {}
+    }
   }
 
   normalizeScreenshotData(data = {}) {
@@ -346,16 +398,20 @@ export default class PuppeteerRenderer extends Renderer {
   }
 
   async connectToExisting(browserWSEndpoint, retries = 0) {
+    let browser = null;
     try {
-      const browser = await puppeteer.connect({
+      browser = await puppeteer.connect({
         browserWSEndpoint,
         defaultViewport: null,
+        protocolTimeout: this.puppeteerTimeout,
       });
       const page = await browser.newPage();
-      await page.goto("about:blank", { timeout: 5000 });
+      page.setDefaultTimeout(5000);
+      await page.goto("about:blank", { timeout: 5000, waitUntil: "domcontentloaded" });
       await page.close();
       return browser;
     } catch (e) {
+      if (browser) await this.safeCloseBrowser(browser, 3000);
       if (retries < this.maxRetries - 1) {
         await new Promise(r => setTimeout(r, this.retryDelay * Math.pow(2, retries)));
         return this.connectToExisting(browserWSEndpoint, retries + 1);
@@ -369,21 +425,25 @@ export default class PuppeteerRenderer extends Renderer {
   async browserInit() {
     if (this.browser) {
       try {
-        if (!this.browser.isConnected()) throw new Error("disconnected");
-        await this.browser.version();
+        await this.withTimeout((async () => {
+          if (!this.browser.isConnected()) throw new Error("disconnected");
+          await this.browser.version();
+        })(), this.browserOpTimeoutMs, "browser health");
         return this.browser;
       } catch (e) {
         BotUtil.makeLog("warn", `Existing browser invalid: ${e.message}`, "PuppeteerRenderer");
-        this.browser = null;
+        const stale = this.detachBrowser();
         if (this.browserMacKey) await redis.del(this.browserMacKey).catch(() => {});
+        await this.safeCloseBrowser(stale);
       }
     }
     if (this.lock) {
-      const deadline = Date.now() + (this.config.browserInitWaitMax ?? 60000);
+      const deadline = Date.now() + this.browserInitWaitMs;
       while (this.lock && !this.browser && Date.now() < deadline) await new Promise(r => setTimeout(r, 200));
       if (this.browser) return this.browser;
       if (this.lock) {
-        BotUtil.makeLog("warn", "Browser init wait timeout, screenshot skipped", "PuppeteerRenderer");
+        BotUtil.makeLog("warn", "Browser init wait timeout, clearing stuck lock", "PuppeteerRenderer");
+        this.lock = false;
         return false;
       }
     }
@@ -414,7 +474,13 @@ export default class PuppeteerRenderer extends Renderer {
 
       if (!this.browser) {
         const { wsEndpoint: _ws, ignoreHTTPSErrors: _https, ...launchOpts } = this.config;
-        this.browser = await puppeteer.launch(launchOpts).catch(err => {
+        launchOpts.protocolTimeout = launchOpts.protocolTimeout ?? this.puppeteerTimeout;
+        launchOpts.timeout = launchOpts.timeout ?? this.puppeteerTimeout;
+        this.browser = await this.withTimeout(
+          puppeteer.launch(launchOpts),
+          this.puppeteerTimeout,
+          "browser launch"
+        ).catch(err => {
           BotUtil.makeLog("error", `Failed to start Chromium: ${err.message}`, "PuppeteerRenderer");
           
           if (err.message.includes("Could not find Chromium") || /Executable doesn't exist|Failed to launch/i.test(err.message)) {
@@ -450,7 +516,7 @@ export default class PuppeteerRenderer extends Renderer {
       this.browser.on("disconnected", () => {
         BotUtil.makeLog("warn", "Chromium instance disconnected, restarting...", "PuppeteerRenderer");
         this.browser = null;
-        this.restart(true);
+        void this.restart(true);
       });
 
       this.startHealthCheck();
@@ -468,7 +534,7 @@ export default class PuppeteerRenderer extends Renderer {
     if (this.healthCheckTimer) return;
 
     this.healthCheckTimer = setInterval(async () => {
-      if (!this.browser || this.shoting.length > 0 || this.shotingUser.length > 0) return;
+      if (!this.browser || this._restarting || this.shoting.length > 0 || this.shotingUser.length > 0) return;
 
       if (this.idleRestartMs > 0 && Date.now() - this.lastActivityAt > this.idleRestartMs) {
         BotUtil.makeLog("info", "Chromium idle timeout, restarting...", "PuppeteerRenderer");
@@ -477,8 +543,10 @@ export default class PuppeteerRenderer extends Renderer {
       }
 
       try {
-        if (!this.browser.isConnected()) throw new Error("disconnected");
-        await this.browser.version();
+        await this.withTimeout((async () => {
+          if (!this.browser.isConnected()) throw new Error("disconnected");
+          await this.browser.version();
+        })(), this.browserOpTimeoutMs, "health check");
       } catch (e) {
         BotUtil.makeLog("warn", `Health check failed: ${e.message}, restarting...`, "PuppeteerRenderer");
         await this.restart(true);
@@ -566,7 +634,9 @@ export default class PuppeteerRenderer extends Renderer {
       const start = Date.now();
 
       try {
-        page = await this.browser.newPage();
+        page = await this.withTimeout(this.browser.newPage(), this.browserOpTimeoutMs, "newPage");
+        page.setDefaultTimeout(this.puppeteerTimeout);
+        page.setDefaultNavigationTimeout(this.puppeteerTimeout);
         await this.setupRequestRoute(page, d, name);
 
         await page.setViewport({
@@ -609,8 +679,8 @@ export default class PuppeteerRenderer extends Renderer {
         if (ret.length > 0) this.lastActivityAt = Date.now();
       } catch (error) {
         BotUtil.makeLog("error", `[${name}] Screenshot failed: ${error.message}`, "PuppeteerRenderer");
-        if (/timeout|timed out|disconnected|Target closed/i.test(error.message)) {
-          setTimeout(() => this.restart(true), 500);
+        if (this.isFatalBrowserError(error)) {
+          void this.restart(true);
         }
         ret = [];
       } finally {
@@ -619,8 +689,6 @@ export default class PuppeteerRenderer extends Renderer {
           await page.close().catch(() => {});
         }
       }
-
-      releaseSlot();
 
       if (this.renderNum % this.restartNum === 0 && this.renderNum > 0 && this.shoting.length === 0 && this.shotingUser.length === 0) {
         BotUtil.makeLog("info", `Completed ${this.renderNum} screenshots, restarting browser...`, "PuppeteerRenderer");
@@ -639,59 +707,54 @@ export default class PuppeteerRenderer extends Renderer {
   }
 
   async restart(force = false) {
-    if (!this.browser || this.lock) return;
-    if (!force && (this.renderNum % this.restartNum !== 0 || this.shoting.length > 0 || this.shotingUser.length > 0)) return;
+    if (this._restarting) return;
+    if (!force) {
+      if (!this.browser || this.lock) return;
+      if (this.renderNum % this.restartNum !== 0 || this.shoting.length > 0 || this.shotingUser.length > 0) return;
+    } else if (!this.browser && !this.lock) {
+      if (this.browserMacKey) await redis.del(this.browserMacKey).catch(() => {});
+      return;
+    }
 
+    this._restarting = true;
     BotUtil.makeLog("warn", `Puppeteer Chromium ${force ? "forced" : "scheduled"} restart...`, "PuppeteerRenderer");
 
+    let currentEndpoint = null;
     try {
-      const currentEndpoint = this.browser.wsEndpoint();
-      try {
-        for (const page of await this.browser.pages()) await page.close().catch(() => {});
-      } catch (_) {}
-      await this.browser.close().catch(err => 
-        BotUtil.makeLog("error", `Failed to close browser: ${err.message}`, "PuppeteerRenderer")
-      );
-      this.browser = null;
+      currentEndpoint = this.browser?.wsEndpoint?.() ?? null;
+    } catch {}
 
-      if (this.browserMacKey) {
+    const browser = this.detachBrowser();
+    this.renderNum = 0;
+    this.lastActivityAt = Date.now();
+    if (force) this.lock = false;
+
+    try {
+      await this.safeCloseBrowser(browser);
+
+      if (this.browserMacKey && currentEndpoint) {
         const storedEndpoint = await redis.get(this.browserMacKey).catch(() => null);
         if (storedEndpoint === currentEndpoint) {
           await redis.del(this.browserMacKey).catch(() => {});
         }
+      } else if (this.browserMacKey && !currentEndpoint) {
+        await redis.del(this.browserMacKey).catch(() => {});
       }
 
-      this.renderNum = 0;
-      this.lastActivityAt = Date.now();
-
-      if (this.healthCheckTimer) {
-        clearInterval(this.healthCheckTimer);
-        this.healthCheckTimer = null;
-      }
-
-      global.gc();
-      
+      global.gc?.();
       BotUtil.makeLog("info", "Browser restart completed", "PuppeteerRenderer");
     } catch (err) {
       BotUtil.makeLog("error", `Restart failed: ${err.message}`, "PuppeteerRenderer");
+    } finally {
+      this._restarting = false;
     }
 
     return true;
   }
 
   async cleanup() {
-    if (this.healthCheckTimer) {
-      clearInterval(this.healthCheckTimer);
-      this.healthCheckTimer = null;
-    }
-
-    if (this.browser) {
-      try {
-        for (const page of await this.browser.pages()) await page.close().catch(() => {});
-      } catch (_) {}
-      await this.browser.close().catch(() => {});
-      this.browser = null;
-    }
+    const browser = this.detachBrowser();
+    await this.safeCloseBrowser(browser);
 
     if (this.browserMacKey) {
       await redis.del(this.browserMacKey).catch(() => {});
