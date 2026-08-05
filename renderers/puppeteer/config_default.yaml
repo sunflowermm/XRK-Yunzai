@@ -7,7 +7,6 @@ healthCheckInterval: 120000
 idleRestartMs: 14400000
 maxRetries: 3
 retryDelay: 2000
-memoryThreshold: 1024
 maxConcurrent: 3
 waitUntil: domcontentloaded
 waitImages: true

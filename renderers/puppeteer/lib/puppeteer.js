@@ -7,6 +7,7 @@ import BotUtil from "../../../lib/util.js";
 import { FileUtils } from "../../../lib/utils/file-utils.js";
 import { cropTopAndBottom } from "../../../lib/renderer/crop.js";
 import { toBuffer, toFileUrl, isScreenshotClip, toStringList } from "../../../lib/renderer/screenshot-utils.js";
+import { isFatalBrowserError, withTimeout, safeCloseBrowser } from "../../../lib/renderer/browser-lifecycle.js";
 import { resolveProjectPath } from "../../../lib/config/config-constants.js";
 import { resolveChromiumExecutable } from "../../../lib/utils/system-browser.js";
 
@@ -30,7 +31,6 @@ export default class PuppeteerRenderer extends Renderer {
     this.restartNum = config.restartNum ?? rendererCfg.restartNum ?? 100;
     this.renderNum = 0;
     this.puppeteerTimeout = config.puppeteerTimeout ?? rendererCfg.puppeteerTimeout ?? 120000;
-    this.memoryThreshold = config.memoryThreshold ?? rendererCfg.memoryThreshold ?? 1024;
     this.maxConcurrent = config.maxConcurrent ?? rendererCfg.maxConcurrent ?? 3;
     this.healthCheckInterval = config.healthCheckInterval ?? rendererCfg.healthCheckInterval ?? 120000;
     this.idleRestartMs = config.idleRestartMs ?? rendererCfg.idleRestartMs ?? 14400000;
@@ -63,27 +63,6 @@ export default class PuppeteerRenderer extends Renderer {
     this.browserOpTimeoutMs = config.browserOpTimeout ?? rendererCfg.browserOpTimeout ?? 8000;
 
     process.on("exit", () => this.cleanup());
-    // 不在此处注册 SIGINT/SIGTERM，由 lib/config/loader.js 统一处理；进程退出时 exit 事件会触发 cleanup
-  }
-
-  isFatalBrowserError(err) {
-    return /timeout|timed out|disconnected|Target closed|Session closed|Protocol error|Browser closed|Navigation failed|net::ERR/i.test(
-      String(err?.message || err || "")
-    );
-  }
-
-  async withTimeout(promise, ms, label = "operation") {
-    let timer;
-    try {
-      return await Promise.race([
-        promise,
-        new Promise((_, reject) => {
-          timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-        }),
-      ]);
-    } finally {
-      clearTimeout(timer);
-    }
   }
 
   detachBrowser() {
@@ -94,25 +73,6 @@ export default class PuppeteerRenderer extends Renderer {
       this.healthCheckTimer = null;
     }
     return browser;
-  }
-
-  async safeCloseBrowser(browser, closeTimeoutMs = this.browserOpTimeoutMs) {
-    if (!browser) return;
-    try {
-      await this.withTimeout(
-        (async () => {
-          try {
-            for (const page of await browser.pages()) await page.close().catch(() => {});
-          } catch {}
-          await browser.close().catch(() => {});
-        })(),
-        closeTimeoutMs,
-        "browser close"
-      );
-    } catch {
-      try { browser.disconnect?.(); } catch {}
-      try { browser.process?.()?.kill?.("SIGKILL"); } catch {}
-    }
   }
 
   normalizeScreenshotData(data = {}) {
@@ -411,7 +371,7 @@ export default class PuppeteerRenderer extends Renderer {
       await page.close();
       return browser;
     } catch (e) {
-      if (browser) await this.safeCloseBrowser(browser, 3000);
+      if (browser) await safeCloseBrowser(browser, 3000);
       if (retries < this.maxRetries - 1) {
         await new Promise(r => setTimeout(r, this.retryDelay * Math.pow(2, retries)));
         return this.connectToExisting(browserWSEndpoint, retries + 1);
@@ -425,7 +385,7 @@ export default class PuppeteerRenderer extends Renderer {
   async browserInit() {
     if (this.browser) {
       try {
-        await this.withTimeout((async () => {
+        await withTimeout((async () => {
           if (!this.browser.isConnected()) throw new Error("disconnected");
           await this.browser.version();
         })(), this.browserOpTimeoutMs, "browser health");
@@ -434,7 +394,7 @@ export default class PuppeteerRenderer extends Renderer {
         BotUtil.makeLog("warn", `Existing browser invalid: ${e.message}`, "PuppeteerRenderer");
         const stale = this.detachBrowser();
         if (this.browserMacKey) await redis.del(this.browserMacKey).catch(() => {});
-        await this.safeCloseBrowser(stale);
+        await safeCloseBrowser(stale, this.browserOpTimeoutMs);
       }
     }
     if (this.lock) {
@@ -476,7 +436,7 @@ export default class PuppeteerRenderer extends Renderer {
         const { wsEndpoint: _ws, ignoreHTTPSErrors: _https, ...launchOpts } = this.config;
         launchOpts.protocolTimeout = launchOpts.protocolTimeout ?? this.puppeteerTimeout;
         launchOpts.timeout = launchOpts.timeout ?? this.puppeteerTimeout;
-        this.browser = await this.withTimeout(
+        this.browser = await withTimeout(
           puppeteer.launch(launchOpts),
           this.puppeteerTimeout,
           "browser launch"
@@ -543,7 +503,7 @@ export default class PuppeteerRenderer extends Renderer {
       }
 
       try {
-        await this.withTimeout((async () => {
+        await withTimeout((async () => {
           if (!this.browser.isConnected()) throw new Error("disconnected");
           await this.browser.version();
         })(), this.browserOpTimeoutMs, "health check");
@@ -634,7 +594,7 @@ export default class PuppeteerRenderer extends Renderer {
       const start = Date.now();
 
       try {
-        page = await this.withTimeout(this.browser.newPage(), this.browserOpTimeoutMs, "newPage");
+        page = await withTimeout(this.browser.newPage(), this.browserOpTimeoutMs, "newPage");
         page.setDefaultTimeout(this.puppeteerTimeout);
         page.setDefaultNavigationTimeout(this.puppeteerTimeout);
         await this.setupRequestRoute(page, d, name);
@@ -679,7 +639,7 @@ export default class PuppeteerRenderer extends Renderer {
         if (ret.length > 0) this.lastActivityAt = Date.now();
       } catch (error) {
         BotUtil.makeLog("error", `[${name}] Screenshot failed: ${error.message}`, "PuppeteerRenderer");
-        if (this.isFatalBrowserError(error)) {
+        if (isFatalBrowserError(error)) {
           void this.restart(true);
         }
         ret = [];
@@ -730,7 +690,7 @@ export default class PuppeteerRenderer extends Renderer {
     if (force) this.lock = false;
 
     try {
-      await this.safeCloseBrowser(browser);
+      await safeCloseBrowser(browser, this.browserOpTimeoutMs);
 
       if (this.browserMacKey && currentEndpoint) {
         const storedEndpoint = await redis.get(this.browserMacKey).catch(() => null);
@@ -754,7 +714,7 @@ export default class PuppeteerRenderer extends Renderer {
 
   async cleanup() {
     const browser = this.detachBrowser();
-    await this.safeCloseBrowser(browser);
+    await safeCloseBrowser(browser, this.browserOpTimeoutMs);
 
     if (this.browserMacKey) {
       await redis.del(this.browserMacKey).catch(() => {});

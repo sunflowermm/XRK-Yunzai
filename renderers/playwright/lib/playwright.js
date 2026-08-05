@@ -7,6 +7,7 @@ import BotUtil from "../../../lib/util.js";
 import { FileUtils } from "../../../lib/utils/file-utils.js";
 import { cropTopAndBottom } from "../../../lib/renderer/crop.js";
 import { toBuffer, toFileUrl } from "../../../lib/renderer/screenshot-utils.js";
+import { isFatalBrowserError, withTimeout, safeCloseBrowser } from "../../../lib/renderer/browser-lifecycle.js";
 import { resolveProjectPath } from "../../../lib/config/config-constants.js";
 import { buildPlaywrightLaunchOptions } from "../../../lib/utils/system-browser.js";
 
@@ -22,7 +23,6 @@ export default class PlaywrightRenderer extends Renderer {
     this.lock = false;
     this.shoting = [];
     this.shotingUser = [];
-    this.isClosing = false;
     this.mac = "";
     this.browserMacKey = null;
 
@@ -35,9 +35,11 @@ export default class PlaywrightRenderer extends Renderer {
     this.healthCheckInterval = config.healthCheckInterval ?? rendererCfg.healthCheckInterval ?? 120000;
     this.maxRetries = config.maxRetries ?? rendererCfg.maxRetries ?? 3;
     this.retryDelay = config.retryDelay ?? rendererCfg.retryDelay ?? 2000;
-    this.memoryThreshold = config.memoryThreshold ?? rendererCfg.memoryThreshold ?? 1024;
     this.maxConcurrent = config.maxConcurrent ?? rendererCfg.maxConcurrent ?? 3;
     this._fileCache = new Map();
+    this._restarting = false;
+    this.browserInitWaitMs = config.browserInitWaitMax ?? rendererCfg.browserInitWaitMax ?? 60000;
+    this.browserOpTimeoutMs = config.browserOpTimeout ?? rendererCfg.browserOpTimeout ?? 8000;
 
     this.config = {
       ...buildPlaywrightLaunchOptions({
@@ -68,7 +70,16 @@ export default class PlaywrightRenderer extends Renderer {
     this.healthCheckTimer = null;
 
     process.on("exit", () => this.cleanup());
-    // 不在此处注册 SIGINT/SIGTERM，由 lib/config/loader.js 统一处理；进程退出时 exit 事件会触发 cleanup
+  }
+
+  detachBrowser() {
+    const browser = this.browser;
+    this.browser = null;
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer);
+      this.healthCheckTimer = null;
+    }
+    return browser;
   }
 
   /** 将 cfg 默认值与调用参数合并，保持 data 优先级最高 */
@@ -155,13 +166,9 @@ export default class PlaywrightRenderer extends Renderer {
   readCacheFile(filePath) {
     const abs = path.isAbsolute(filePath) ? filePath : path.resolve(resolveProjectPath(), filePath);
     if (this._fileCache.has(abs)) return this._fileCache.get(abs);
-    try {
-      const buf = fs.readFileSync(abs);
-      this._fileCache.set(abs, buf);
-      return buf;
-    } catch {
-      return null;
-    }
+    const buf = FileUtils.readFileSync(abs, null);
+    if (buf) this._fileCache.set(abs, buf);
+    return buf;
   }
 
   /** 计算要拦截的资源类型 */
@@ -187,8 +194,9 @@ export default class PlaywrightRenderer extends Renderer {
   }
 
   async connectToExisting(wsEndpoint, retries = 0) {
+    let browser = null;
     try {
-      const browser = await playwright[this.browserType].connect(wsEndpoint, { timeout: 10000 });
+      browser = await playwright[this.browserType].connect(wsEndpoint, { timeout: 10000 });
       const context = await browser.newContext();
       const page = await context.newPage();
       await page.goto("about:blank", { timeout: 5000 });
@@ -196,6 +204,7 @@ export default class PlaywrightRenderer extends Renderer {
       await context.close();
       return browser;
     } catch (e) {
+      if (browser) await safeCloseBrowser(browser, 3000);
       if (retries < this.maxRetries - 1) {
         await new Promise(r => setTimeout(r, this.retryDelay * Math.pow(2, retries)));
         return this.connectToExisting(wsEndpoint, retries + 1);
@@ -209,19 +218,27 @@ export default class PlaywrightRenderer extends Renderer {
   async browserInit() {
     if (this.browser) {
       try {
-        this.browser.contexts();
+        await withTimeout((async () => {
+          if (typeof this.browser.isConnected === "function" && !this.browser.isConnected()) {
+            throw new Error("disconnected");
+          }
+          this.browser.contexts();
+        })(), this.browserOpTimeoutMs, "browser health");
         return this.browser;
       } catch (e) {
         BotUtil.makeLog("warn", `Existing browser invalid: ${e.message}`, "PlaywrightRenderer");
-        this.browser = null;
+        const stale = this.detachBrowser();
+        if (this.browserMacKey) await redis.del(this.browserMacKey).catch(() => {});
+        await safeCloseBrowser(stale, this.browserOpTimeoutMs);
       }
     }
     if (this.lock) {
-      const deadline = Date.now() + (this.config.browserInitWaitMax ?? 60000);
+      const deadline = Date.now() + this.browserInitWaitMs;
       while (this.lock && !this.browser && Date.now() < deadline) await new Promise(r => setTimeout(r, 200));
       if (this.browser) return this.browser;
       if (this.lock) {
-        BotUtil.makeLog("warn", "Browser init wait timeout, screenshot skipped", "PlaywrightRenderer");
+        BotUtil.makeLog("warn", "Browser init wait timeout, clearing stuck lock", "PlaywrightRenderer");
+        this.lock = false;
         return false;
       }
     }
@@ -252,7 +269,14 @@ export default class PlaywrightRenderer extends Renderer {
       if (!this.browser) {
         BotUtil.makeLog("info", `Launching new ${this.browserType} instance...`, "PlaywrightRenderer");
         const { wsEndpoint: _ws, ...launchOpts } = this.config;
-        this.browser = await playwright[this.browserType].launch(launchOpts);
+        this.browser = await withTimeout(
+          playwright[this.browserType].launch(launchOpts),
+          this.playwrightTimeout,
+          "browser launch"
+        ).catch((err) => {
+          BotUtil.makeLog("error", `Failed to start ${this.browserType}: ${err.message}`, "PlaywrightRenderer");
+          return null;
+        });
 
         if (this.browser) {
           BotUtil.makeLog("info", `Playwright ${this.browserType} started successfully`, "PlaywrightRenderer");
@@ -273,11 +297,11 @@ export default class PlaywrightRenderer extends Renderer {
         return false;
       }
 
-      this.browser.on("disconnected", async () => {
+      this.browser.on("disconnected", () => {
         BotUtil.makeLog("warn", `${this.browserType} disconnected, restarting...`, "PlaywrightRenderer");
         this.browser = null;
-        if (this.browserMacKey) await redis.del(this.browserMacKey).catch(() => {});
-        if (!this.isClosing) await this.restart(true);
+        if (this.browserMacKey) void redis.del(this.browserMacKey).catch(() => {});
+        void this.restart(true);
       });
 
       this.startHealthCheck();
@@ -301,9 +325,14 @@ export default class PlaywrightRenderer extends Renderer {
   startHealthCheck() {
     if (this.healthCheckTimer) return;
     this.healthCheckTimer = setInterval(async () => {
-      if (!this.browser || this.shoting.length > 0 || this.shotingUser.length > 0 || this.isClosing) return;
+      if (!this.browser || this._restarting || this.shoting.length > 0 || this.shotingUser.length > 0) return;
       try {
-        this.browser.contexts();
+        await withTimeout((async () => {
+          if (typeof this.browser.isConnected === "function" && !this.browser.isConnected()) {
+            throw new Error("disconnected");
+          }
+          this.browser.contexts();
+        })(), this.browserOpTimeoutMs, "health check");
       } catch (e) {
         BotUtil.makeLog("warn", `Health check failed: ${e.message}, restarting...`, "PlaywrightRenderer");
         await this.restart(true);
@@ -392,8 +421,14 @@ export default class PlaywrightRenderer extends Renderer {
           deviceScaleFactor: d.deviceScaleFactor ?? this.contextOptions.deviceScaleFactor,
           ignoreHTTPSErrors: d.ignoreHTTPSErrors ?? this.contextOptions.ignoreHTTPSErrors,
         };
-        context = await this.browser.newContext(contextOptions);
-        page = await context.newPage();
+        context = await withTimeout(
+          this.browser.newContext(contextOptions),
+          this.browserOpTimeoutMs,
+          "newContext"
+        );
+        page = await withTimeout(context.newPage(), this.browserOpTimeoutMs, "newPage");
+        page.setDefaultTimeout(this.playwrightTimeout);
+        page.setDefaultNavigationTimeout(this.playwrightTimeout);
 
         const blockTypes = this.getBlockResourceTypes(d);
         const rewriteRules = this.getResourceRewriteRules(d);
@@ -523,13 +558,14 @@ export default class PlaywrightRenderer extends Renderer {
         }
       } catch (error) {
         BotUtil.makeLog("error", `[${name}] Screenshot failed: ${error.message}`, "PlaywrightRenderer");
+        if (isFatalBrowserError(error)) {
+          void this.restart(true);
+        }
         ret = [];
       } finally {
         if (page) await page.close({ runBeforeUnload: false }).catch(() => {});
         if (context) await context.close().catch(() => {});
       }
-
-      releaseSlot();
 
       if (this.renderNum % this.restartNum === 0 && this.renderNum > 0 && this.shoting.length === 0 && this.shotingUser.length === 0) {
         BotUtil.makeLog("info", `Completed ${this.renderNum} screenshots, restarting browser...`, "PlaywrightRenderer");
@@ -548,56 +584,51 @@ export default class PlaywrightRenderer extends Renderer {
   }
 
   async restart(force = false) {
-    if (!this.browser || this.lock || this.isClosing) return;
-    if (!force && (this.renderNum % this.restartNum !== 0 || this.shoting.length > 0 || this.shotingUser.length > 0)) return;
+    if (this._restarting) return;
+    if (!force) {
+      if (!this.browser || this.lock) return;
+      if (this.renderNum % this.restartNum !== 0 || this.shoting.length > 0 || this.shotingUser.length > 0) return;
+    } else if (!this.browser && !this.lock) {
+      if (this.browserMacKey) await redis.del(this.browserMacKey).catch(() => {});
+      return;
+    }
 
+    this._restarting = true;
     BotUtil.makeLog("warn", `${this.browserType} ${force ? "forced" : "scheduled"} restart...`, "PlaywrightRenderer");
-    this.isClosing = true;
+
+    let currentEndpoint = null;
+    try {
+      currentEndpoint = this.browser?.wsEndpoint?.() ?? null;
+    } catch {}
+
+    const browser = this.detachBrowser();
+    this.renderNum = 0;
+    if (force) this.lock = false;
 
     try {
-      try {
-        for (const ctx of this.browser.contexts()) await ctx.close().catch(() => {});
-      } catch (_) {}
-      await this.browser.close().catch(() => {});
-      this.browser = null;
-
+      await safeCloseBrowser(browser, this.browserOpTimeoutMs);
       if (this.browserMacKey) {
-        await redis.del(this.browserMacKey).catch(() => {});
+        if (!currentEndpoint) {
+          await redis.del(this.browserMacKey).catch(() => {});
+        } else {
+          const stored = await redis.get(this.browserMacKey).catch(() => null);
+          if (stored === currentEndpoint) await redis.del(this.browserMacKey).catch(() => {});
+        }
       }
-
-      this.renderNum = 0;
-
-      if (this.healthCheckTimer) {
-        clearInterval(this.healthCheckTimer);
-        this.healthCheckTimer = null;
-      }
-
-      global.gc();
-
+      global.gc?.();
       BotUtil.makeLog("info", `${this.browserType} restart completed`, "PlaywrightRenderer");
     } catch (err) {
       BotUtil.makeLog("error", `Restart failed: ${err.message}`, "PlaywrightRenderer");
     } finally {
-      this.isClosing = false;
+      this._restarting = false;
     }
 
     return true;
   }
 
   async cleanup() {
-    this.isClosing = true;
-    if (this.healthCheckTimer) {
-      clearInterval(this.healthCheckTimer);
-      this.healthCheckTimer = null;
-    }
-    if (this.browser) {
-      try {
-        for (const ctx of this.browser.contexts()) await ctx.close().catch(() => {});
-      } catch (_) {}
-      await this.browser.close().catch(() => {});
-      this.browser = null;
-    }
-
+    const browser = this.detachBrowser();
+    await safeCloseBrowser(browser, this.browserOpTimeoutMs);
     if (this.browserMacKey) {
       await redis.del(this.browserMacKey).catch(() => {});
     }
